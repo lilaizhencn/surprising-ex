@@ -1,0 +1,2191 @@
+{
+  "scope": "Real PostgreSQL + four independent business contexts + deterministic Core; no live Aeron/Gateway network capacity claim",
+  "performance_acceptance": "invalid: global paging and CPU throttling",
+  "runs": {
+    "teams-1000": {
+      "teams": 1000,
+      "clients_per_team": 50,
+      "users": 53596,
+      "fee_facts": 12000,
+      "warmup_receipts": 59,
+      "containers": 4,
+      "first_drain": {
+        "seconds": 121.071907226,
+        "status": {
+          "fees": 12000,
+          "groups": 0,
+          "pending": 0,
+          "unknown": 410,
+          "rejected": 0,
+          "locks": 0
+        }
+      },
+      "recovery": {
+        "seconds": 2.045827689,
+        "status": {
+          "fees": 12000,
+          "groups": 0,
+          "pending": 0,
+          "unknown": 0,
+          "rejected": 0,
+          "locks": 0
+        }
+      },
+      "snapshot_pending_users": 390,
+      "source_batches": {
+        "samples": 289,
+        "p50.0_ms": 256.279223,
+        "p90.0_ms": 282.572541,
+        "p95.0_ms": 294.031501,
+        "p99.0_ms": 331.330899,
+        "p99.9_ms": 402.042972,
+        "max_ms": 402.042972
+      },
+      "money_calls": {
+        "samples": 8923,
+        "p50.0_ms": 1.561369,
+        "p90.0_ms": 216.037612,
+        "p95.0_ms": 294.153436,
+        "p99.0_ms": 377.609952,
+        "p99.9_ms": 496.612343,
+        "max_ms": 569.635407
+      },
+      "accounting_cpu_ms": 6744.156,
+      "accounting_allocated_bytes": 331389792,
+      "busy_product_claims": 511,
+      "peak_active_connections": 8,
+      "peak_total_connections": 11,
+      "peak_pool_waiters": 0,
+      "peak_database_lock_waiters": 2,
+      "money_difference": 0,
+      "cross_team_allocations": 0,
+      "duplicate_actual_debits": 0,
+      "duplicate_actual_credits": 0,
+      "funds_requests_including_retries": 65564,
+      "latency_samples_lost": 0,
+      "resources": {
+        "run": "teams-1000",
+        "pid": 12937,
+        "exit_code": 0,
+        "elapsed_seconds": 171.6699979640107,
+        "teams": 1000,
+        "clients_per_team": 50,
+        "jfr": false,
+        "start_utc": "2026-10-29T01:56:43.123164+00:00",
+        "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                    26926.\nPages active:                                1232308.\nPages inactive:                              1211465.\nPages speculative:                             19521.\nPages throttled:                                   0.\nPages wired down:                             961473.\nPages purgeable:                                6807.\n\"Translation faults\":                     6426241450.\nPages copy-on-write:                       201702321.\nPages zero filled:                        4814000754.\nPages reactivated:                         133828858.\nPages purged:                                 949460.\nFile-backed pages:                            922773.\nAnonymous pages:                             1540521.\nPages stored in compressor:                  2534427.\nPages occupied by compressor:                 741586.\nDecompressions:                             61333748.\nCompressions:                               95150548.\nPageins:                                    57831114.\nPageouts:                                     990752.\nSwapins:                                    55559030.\nSwapouts:                                   58880926.",
+        "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   362033.\nPages active:                                1009641.\nPages inactive:                              1128316.\nPages speculative:                             18144.\nPages throttled:                                   0.\nPages wired down:                             888282.\nPages purgeable:                               27703.\n\"Translation faults\":                     6447455978.\nPages copy-on-write:                       202335446.\nPages zero filled:                        4830433520.\nPages reactivated:                         134790943.\nPages purged:                                 950044.\nFile-backed pages:                            871522.\nAnonymous pages:                             1284579.\nPages stored in compressor:                  2967544.\nPages occupied by compressor:                 786734.\nDecompressions:                             61844992.\nCompressions:                               96153257.\nPageins:                                    57905601.\nPageouts:                                    1011543.\nSwapins:                                    55573561.\nSwapouts:                                   59037645.",
+        "samples": [
+          {
+            "seconds": 0.012408137001330033,
+            "rss_kib_and_process_cpu_percent": "2096   0.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:43 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 2.039958691006177,
+            "rss_kib_and_process_cpu_percent": "138088 164.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 4.07630382401112,
+            "rss_kib_and_process_cpu_percent": "168388   0.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:47 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 6.105618094006786,
+            "rss_kib_and_process_cpu_percent": "168360   0.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:49 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 8.15154994900513,
+            "rss_kib_and_process_cpu_percent": "168164   0.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:51 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 10.184865295013878,
+            "rss_kib_and_process_cpu_percent": "169272  16.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:53 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 12.221724608010845,
+            "rss_kib_and_process_cpu_percent": "169628   0.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:55 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 14.257249114001752,
+            "rss_kib_and_process_cpu_percent": "320876 185.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:57 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 16.306765860004816,
+            "rss_kib_and_process_cpu_percent": "502312 1381.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:56:59 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 18.34424894800759,
+            "rss_kib_and_process_cpu_percent": "507876 1215.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:01 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 20.386634840004263,
+            "rss_kib_and_process_cpu_percent": "512616 1194.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:03 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 22.42437090400199,
+            "rss_kib_and_process_cpu_percent": "519420 975.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:05 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 24.47353510800167,
+            "rss_kib_and_process_cpu_percent": "524212 1197.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:07 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 26.51358675400843,
+            "rss_kib_and_process_cpu_percent": "528236 976.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:09 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 28.555895746001625,
+            "rss_kib_and_process_cpu_percent": "531912 1330.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:11 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 30.595534791005775,
+            "rss_kib_and_process_cpu_percent": "533956 935.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 32.634612698006094,
+            "rss_kib_and_process_cpu_percent": "540076 1323.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 34.67341263400158,
+            "rss_kib_and_process_cpu_percent": "544636 1427.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:17 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 36.71284939801262,
+            "rss_kib_and_process_cpu_percent": "549136 1017.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:19 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 38.75547032400209,
+            "rss_kib_and_process_cpu_percent": "555580 1319.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:21 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 40.79619355300383,
+            "rss_kib_and_process_cpu_percent": "632132 834.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:23 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 42.84733497300476,
+            "rss_kib_and_process_cpu_percent": "743620 835.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 44.88711619201058,
+            "rss_kib_and_process_cpu_percent": "708984 913.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:28 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 46.93262898401008,
+            "rss_kib_and_process_cpu_percent": "708332 1096.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:30 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 48.973531720999745,
+            "rss_kib_and_process_cpu_percent": "719432 965.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:32 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 51.02031364600407,
+            "rss_kib_and_process_cpu_percent": "720244 1053.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:34 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 53.06114334400627,
+            "rss_kib_and_process_cpu_percent": "720396 990.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:36 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 55.10183097900881,
+            "rss_kib_and_process_cpu_percent": "719992 973.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:38 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 57.142834572005086,
+            "rss_kib_and_process_cpu_percent": "734848 974.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:40 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 59.186670435010456,
+            "rss_kib_and_process_cpu_percent": "730112 765.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:42 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 61.23510404700937,
+            "rss_kib_and_process_cpu_percent": "730872 1183.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:44 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 63.27389388700249,
+            "rss_kib_and_process_cpu_percent": "729952 779.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:46 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 65.32345286700001,
+            "rss_kib_and_process_cpu_percent": "730616 982.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:48 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 67.36836582999968,
+            "rss_kib_and_process_cpu_percent": "595000 846.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:50 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 69.41571051500796,
+            "rss_kib_and_process_cpu_percent": "594964 992.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:52 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 95"
+          },
+          {
+            "seconds": 71.47319727200374,
+            "rss_kib_and_process_cpu_percent": "595608 805.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:54 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 91"
+          },
+          {
+            "seconds": 73.52768575400114,
+            "rss_kib_and_process_cpu_percent": "591352 750.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 75.57119152700761,
+            "rss_kib_and_process_cpu_percent": "584232 790.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:57:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 77.6181081780087,
+            "rss_kib_and_process_cpu_percent": "584628 827.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 79.66161323200504,
+            "rss_kib_and_process_cpu_percent": "586656 1122.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:02 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 81"
+          },
+          {
+            "seconds": 81.7022698810033,
+            "rss_kib_and_process_cpu_percent": "590996 788.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:04 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 83.7480093040067,
+            "rss_kib_and_process_cpu_percent": "591040 899.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:06 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 85.79154193100112,
+            "rss_kib_and_process_cpu_percent": "591204 726.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:08 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 87.83982031300548,
+            "rss_kib_and_process_cpu_percent": "591696 824.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:11 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 89.88696688100754,
+            "rss_kib_and_process_cpu_percent": "591704 846.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 91.93095542301307,
+            "rss_kib_and_process_cpu_percent": "591784 949.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 93.979021681007,
+            "rss_kib_and_process_cpu_percent": "591672 1128.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:17 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 96.02159798399953,
+            "rss_kib_and_process_cpu_percent": "591988 1130.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:19 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 98.07687659600924,
+            "rss_kib_and_process_cpu_percent": "592400 923.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:21 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 100.12722891601152,
+            "rss_kib_and_process_cpu_percent": "592396 1059.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:23 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 102.17119565200119,
+            "rss_kib_and_process_cpu_percent": "592052 1170.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:25 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 104.21270284900675,
+            "rss_kib_and_process_cpu_percent": "592128 1076.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:27 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 106.2535938630026,
+            "rss_kib_and_process_cpu_percent": "592324 1115.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:29 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 108.29735388900735,
+            "rss_kib_and_process_cpu_percent": "592364 1059.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:31 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 110.33950069300772,
+            "rss_kib_and_process_cpu_percent": "592564 1209.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:33 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 112.3834480150108,
+            "rss_kib_and_process_cpu_percent": "593544 1055.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:35 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 114.42695969300985,
+            "rss_kib_and_process_cpu_percent": "599536 984.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:37 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 116.47434262200841,
+            "rss_kib_and_process_cpu_percent": "605544 1027.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:39 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 118.51811530601117,
+            "rss_kib_and_process_cpu_percent": "665304 904.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:41 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 120.56328022399975,
+            "rss_kib_and_process_cpu_percent": "665368 802.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:43 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 122.62233182700584,
+            "rss_kib_and_process_cpu_percent": "665464 1029.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 124.66810563200852,
+            "rss_kib_and_process_cpu_percent": "665560 825.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:47 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 126.71334987900627,
+            "rss_kib_and_process_cpu_percent": "665944 865.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:49 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 128.75731780000206,
+            "rss_kib_and_process_cpu_percent": "665904 875.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:51 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 130.80493902201124,
+            "rss_kib_and_process_cpu_percent": "666316 980.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:53 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 132.8452970090002,
+            "rss_kib_and_process_cpu_percent": "666428 681.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 134.89341305701237,
+            "rss_kib_and_process_cpu_percent": "666340 1112.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:58:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 136.93463364201307,
+            "rss_kib_and_process_cpu_percent": "666464 889.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 138.9846402980038,
+            "rss_kib_and_process_cpu_percent": "666604 1196.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:02 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 141.02400988001318,
+            "rss_kib_and_process_cpu_percent": "666748 1019.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:04 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 143.06810289800342,
+            "rss_kib_and_process_cpu_percent": "666888 1114.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:06 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 145.11035073800304,
+            "rss_kib_and_process_cpu_percent": "667064 1077.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:08 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 147.1522258400073,
+            "rss_kib_and_process_cpu_percent": "670064 1316.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:10 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 149.19316888900357,
+            "rss_kib_and_process_cpu_percent": "681192 1207.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:12 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 151.23210580801242,
+            "rss_kib_and_process_cpu_percent": "686768 1131.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:14 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 153.2723543230095,
+            "rss_kib_and_process_cpu_percent": "686912 1204.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:16 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 155.31197239299945,
+            "rss_kib_and_process_cpu_percent": "687140 1096.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:18 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 157.35208989700186,
+            "rss_kib_and_process_cpu_percent": "687268 1203.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:20 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 159.3961649890116,
+            "rss_kib_and_process_cpu_percent": "687412 905.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:22 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 161.44876451400341,
+            "rss_kib_and_process_cpu_percent": "687396 1148.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:24 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 163.495755654003,
+            "rss_kib_and_process_cpu_percent": "708040 1205.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 165.53676699200878,
+            "rss_kib_and_process_cpu_percent": "868840 1236.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:28 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 167.58284892000665,
+            "rss_kib_and_process_cpu_percent": "885924 1248.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:30 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 169.62616922800953,
+            "rss_kib_and_process_cpu_percent": "903760 1199.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 09:59:32 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          }
+        ],
+        "command": "java --enable-native-access=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms256m -Xmx2g -cp <current gateway test/main/dependencies> com.surprising.affiliate.AffiliateTeamWorkload 1000 50 <result.json> 1200",
+        "end_utc": "2026-10-29T01:59:34.793162+00:00",
+        "time_note": "Initial runner mislabeled end as start; start approximately derived from elapsed. Relative samples unchanged.",
+        "vm_delta_pages": {
+          "Swapins": 14531,
+          "Swapouts": 156719,
+          "Pageins": 74487,
+          "Pageouts": 20791
+        }
+      }
+    },
+    "teams-10000": {
+      "teams": 10000,
+      "clients_per_team": 5,
+      "users": 83596,
+      "fee_facts": 20000,
+      "active_products_per_team": 1,
+      "selected_product": "SPOT",
+      "actual_core_stats": {
+        "SPOT": {
+          "actual_debits": 44420,
+          "actual_credits": 44420,
+          "commands": 170617
+        },
+        "LINEAR_PERPETUAL": {
+          "actual_debits": 0,
+          "actual_credits": 0,
+          "commands": 2
+        },
+        "INVERSE_PERPETUAL": {
+          "actual_debits": 0,
+          "actual_credits": 0,
+          "commands": 2
+        },
+        "LINEAR_DELIVERY": {
+          "actual_debits": 0,
+          "actual_credits": 0,
+          "commands": 2
+        },
+        "INVERSE_DELIVERY": {
+          "actual_debits": 0,
+          "actual_credits": 0,
+          "commands": 2
+        },
+        "OPTION": {
+          "actual_debits": 0,
+          "actual_credits": 0,
+          "commands": 2
+        }
+      },
+      "paid_payouts": 44420,
+      "warmup_receipts": 1,
+      "containers": 4,
+      "first_drain": {
+        "seconds": 226.888143308,
+        "status": {
+          "fees": 20000,
+          "groups": 0,
+          "pending": 0,
+          "unknown": 802,
+          "rejected": 0,
+          "locks": 0
+        }
+      },
+      "recovery": {
+        "seconds": 3.07880672,
+        "status": {
+          "fees": 20000,
+          "groups": 0,
+          "pending": 0,
+          "unknown": 0,
+          "rejected": 0,
+          "locks": 0
+        }
+      },
+      "snapshot_pending_users": 600,
+      "source_batches": {
+        "samples": 429,
+        "p50.0_ms": 254.666968,
+        "p90.0_ms": 291.660921,
+        "p95.0_ms": 319.458843,
+        "p99.0_ms": 352.926812,
+        "p99.9_ms": 397.10888,
+        "max_ms": 397.10888
+      },
+      "money_calls": {
+        "samples": 27610,
+        "p50.0_ms": 1.049374,
+        "p90.0_ms": 110.862227,
+        "p95.0_ms": 212.715571,
+        "p99.0_ms": 348.216908,
+        "p99.9_ms": 492.970764,
+        "max_ms": 799.887063
+      },
+      "accounting_cpu_ms": 27715.13,
+      "accounting_allocated_bytes": 878542592,
+      "busy_product_claims": 143333,
+      "peak_active_connections": 8,
+      "peak_total_connections": 15,
+      "peak_pool_waiters": 0,
+      "peak_database_lock_waiters": 1,
+      "money_difference": 0,
+      "cross_team_allocations": 0,
+      "duplicate_actual_debits": 0,
+      "duplicate_actual_credits": 0,
+      "funds_requests_including_retries": 137284,
+      "latency_samples_lost": 0,
+      "resources": {
+        "run": "teams-10000",
+        "pid": 25944,
+        "exit_code": 0,
+        "elapsed_seconds": 290.33164642700285,
+        "teams": 10000,
+        "clients_per_team": 5,
+        "jfr": false,
+        "selected_product": "SPOT",
+        "start_utc": "2026-10-29T02:06:56.906314+00:00",
+        "end_utc": "2026-10-29T02:11:47.172204+00:00",
+        "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                    85476.\nPages active:                                1213817.\nPages inactive:                              1143429.\nPages speculative:                             69531.\nPages throttled:                                   0.\nPages wired down:                             873001.\nPages purgeable:                                4885.\n\"Translation faults\":                     6516352114.\nPages copy-on-write:                       203819002.\nPages zero filled:                        4880270916.\nPages reactivated:                         135580708.\nPages purged:                                 980752.\nFile-backed pages:                           1130195.\nAnonymous pages:                             1296582.\nPages stored in compressor:                  3002070.\nPages occupied by compressor:                 807925.\nDecompressions:                             62379167.\nCompressions:                               96793250.\nPageins:                                    58573040.\nPageouts:                                    1017248.\nSwapins:                                    55635822.\nSwapouts:                                   59091980.",
+        "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   480602.\nPages active:                                1079295.\nPages inactive:                              1102616.\nPages speculative:                             18999.\nPages throttled:                                   0.\nPages wired down:                             978275.\nPages purgeable:                               55464.\n\"Translation faults\":                     6561317950.\nPages copy-on-write:                       204927575.\nPages zero filled:                        4911810004.\nPages reactivated:                         137146927.\nPages purged:                                 983116.\nFile-backed pages:                            958241.\nAnonymous pages:                             1242669.\nPages stored in compressor:                  3023819.\nPages occupied by compressor:                 533732.\nDecompressions:                             63163659.\nCompressions:                               97803555.\nPageins:                                    59001529.\nPageouts:                                    1040822.\nSwapins:                                    55771617.\nSwapouts:                                   59522845.",
+        "samples": [
+          {
+            "seconds": 0.008056947990553454,
+            "rss_kib_and_process_cpu_percent": "1952   0.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:06:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 2.031691801996203,
+            "rss_kib_and_process_cpu_percent": "178288 270.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:06:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 4.060375740999007,
+            "rss_kib_and_process_cpu_percent": "178288   0.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 6.0964010679890634,
+            "rss_kib_and_process_cpu_percent": "178204   0.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:03 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 8.124030851991847,
+            "rss_kib_and_process_cpu_percent": "178136   0.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:05 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 10.151923919998808,
+            "rss_kib_and_process_cpu_percent": "178092   0.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:07 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 12.184909297997365,
+            "rss_kib_and_process_cpu_percent": "178092   0.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:09 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 14.2195002429944,
+            "rss_kib_and_process_cpu_percent": "178904   0.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:11 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 16.24441628799832,
+            "rss_kib_and_process_cpu_percent": "237276  89.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 18.280283353989944,
+            "rss_kib_and_process_cpu_percent": "519188 946.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 20.32979985899874,
+            "rss_kib_and_process_cpu_percent": "526024 873.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:17 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 22.3798088140029,
+            "rss_kib_and_process_cpu_percent": "534164 819.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:19 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 24.429796925993287,
+            "rss_kib_and_process_cpu_percent": "540528 876.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:21 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 26.470697226002812,
+            "rss_kib_and_process_cpu_percent": "544404 792.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:23 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 28.517311410003458,
+            "rss_kib_and_process_cpu_percent": "550628 728.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:25 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 30.565120656989166,
+            "rss_kib_and_process_cpu_percent": "555348 795.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:27 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 81"
+          },
+          {
+            "seconds": 32.60688727699744,
+            "rss_kib_and_process_cpu_percent": "562432 908.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:29 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 34.6474857180001,
+            "rss_kib_and_process_cpu_percent": "570696 763.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:31 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 36.69221979699796,
+            "rss_kib_and_process_cpu_percent": "580416 951.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:33 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 38.73356429800333,
+            "rss_kib_and_process_cpu_percent": "587664 879.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:35 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 40.783419243001845,
+            "rss_kib_and_process_cpu_percent": "597872 993.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:37 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 42.82980000998941,
+            "rss_kib_and_process_cpu_percent": "604328 922.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:39 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 44.86907558199891,
+            "rss_kib_and_process_cpu_percent": "753116 847.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:41 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 46.92980310200073,
+            "rss_kib_and_process_cpu_percent": "818956 792.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:43 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 48.97979960399971,
+            "rss_kib_and_process_cpu_percent": "786300 1106.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 51.02980989299249,
+            "rss_kib_and_process_cpu_percent": "787752 815.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:47 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 53.079804157998296,
+            "rss_kib_and_process_cpu_percent": "791360 819.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:50 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 55.12981773799402,
+            "rss_kib_and_process_cpu_percent": "811480 884.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:52 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 81"
+          },
+          {
+            "seconds": 57.179806934000226,
+            "rss_kib_and_process_cpu_percent": "820164 921.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:54 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 59.22993923300237,
+            "rss_kib_and_process_cpu_percent": "805388 820.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 61.27980648099037,
+            "rss_kib_and_process_cpu_percent": "805780 1116.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:07:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 63.31940945298993,
+            "rss_kib_and_process_cpu_percent": "821936 938.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 65.36075412499486,
+            "rss_kib_and_process_cpu_percent": "805968 1136.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:02 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 67.39928517899534,
+            "rss_kib_and_process_cpu_percent": "804892 838.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:04 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 69.44080911199853,
+            "rss_kib_and_process_cpu_percent": "804872 985.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:06 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 71.4871375829971,
+            "rss_kib_and_process_cpu_percent": "790684 762.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:08 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 73.53236928199476,
+            "rss_kib_and_process_cpu_percent": "777624 774.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:10 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 75.5798012430023,
+            "rss_kib_and_process_cpu_percent": "688196 654.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:12 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 77.62981138098985,
+            "rss_kib_and_process_cpu_percent": "682916 884.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:14 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 91"
+          },
+          {
+            "seconds": 79.67664563198923,
+            "rss_kib_and_process_cpu_percent": "665892 770.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:16 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 81.72693872600212,
+            "rss_kib_and_process_cpu_percent": "598808 644.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:18 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 83.78139532699424,
+            "rss_kib_and_process_cpu_percent": "596352 782.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:20 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 85.82298343499133,
+            "rss_kib_and_process_cpu_percent": "596768 484.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:22 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 87.86968268899363,
+            "rss_kib_and_process_cpu_percent": "598428 865.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:24 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 89.91381868699682,
+            "rss_kib_and_process_cpu_percent": "598316 750.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 91.96069515398995,
+            "rss_kib_and_process_cpu_percent": "594492 949.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:28 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 94.00196633698943,
+            "rss_kib_and_process_cpu_percent": "594004 1157.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:30 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 96.04432816899498,
+            "rss_kib_and_process_cpu_percent": "594216 830.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:32 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 98.09428496100008,
+            "rss_kib_and_process_cpu_percent": "594288 1043.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:35 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 100.13717431398982,
+            "rss_kib_and_process_cpu_percent": "623640 869.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:37 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 81"
+          },
+          {
+            "seconds": 102.1852748139936,
+            "rss_kib_and_process_cpu_percent": "623692 820.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:39 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 104.23330566300137,
+            "rss_kib_and_process_cpu_percent": "617324 875.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:41 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 106.28065088100266,
+            "rss_kib_and_process_cpu_percent": "609412 850.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:43 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 108.32980647298973,
+            "rss_kib_and_process_cpu_percent": "610044 1048.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 110.37336797299213,
+            "rss_kib_and_process_cpu_percent": "610016 619.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:47 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 112.42155517499486,
+            "rss_kib_and_process_cpu_percent": "609860 1053.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:49 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 114.46625157899689,
+            "rss_kib_and_process_cpu_percent": "610288 815.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:51 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 116.50906119799765,
+            "rss_kib_and_process_cpu_percent": "612116 1091.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:53 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 118.55121134099318,
+            "rss_kib_and_process_cpu_percent": "611856 523.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:55 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 120.59828031600046,
+            "rss_kib_and_process_cpu_percent": "611936 948.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:57 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 122.6447388779925,
+            "rss_kib_and_process_cpu_percent": "600020 1001.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:08:59 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 124.6911098589917,
+            "rss_kib_and_process_cpu_percent": "600476 818.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:01 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 126.74375607799448,
+            "rss_kib_and_process_cpu_percent": "600552 779.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:03 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 128.78893972399237,
+            "rss_kib_and_process_cpu_percent": "599860 903.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:05 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 130.83864669999457,
+            "rss_kib_and_process_cpu_percent": "599308 680.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:07 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 132.8862649369985,
+            "rss_kib_and_process_cpu_percent": "602536 764.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:09 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 134.94348582699604,
+            "rss_kib_and_process_cpu_percent": "601252 774.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:11 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 136.98856827999407,
+            "rss_kib_and_process_cpu_percent": "611604 776.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 139.0325074709981,
+            "rss_kib_and_process_cpu_percent": "625796 908.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 141.0798033149913,
+            "rss_kib_and_process_cpu_percent": "628848 980.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:18 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 143.12173081899527,
+            "rss_kib_and_process_cpu_percent": "628964 1032.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:20 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 145.16297671099892,
+            "rss_kib_and_process_cpu_percent": "629036 740.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:22 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 147.2065313839994,
+            "rss_kib_and_process_cpu_percent": "629108 949.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:24 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 149.2506515319983,
+            "rss_kib_and_process_cpu_percent": "631488 762.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 151.3001602680015,
+            "rss_kib_and_process_cpu_percent": "631672 1037.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:28 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 153.34821218698926,
+            "rss_kib_and_process_cpu_percent": "631772 753.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:30 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 155.3957417979982,
+            "rss_kib_and_process_cpu_percent": "631876 1010.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:32 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 157.43774061099975,
+            "rss_kib_and_process_cpu_percent": "649716 849.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:34 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 159.48867327299376,
+            "rss_kib_and_process_cpu_percent": "679308 853.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:36 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 161.5339802649978,
+            "rss_kib_and_process_cpu_percent": "679412 1041.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:38 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 163.57992503399146,
+            "rss_kib_and_process_cpu_percent": "679452 607.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:40 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 165.66905481400318,
+            "rss_kib_and_process_cpu_percent": "549728 913.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:42 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 167.71739737299504,
+            "rss_kib_and_process_cpu_percent": "549872 750.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:44 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 169.76366043600137,
+            "rss_kib_and_process_cpu_percent": "549800 900.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:46 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 171.8186566450022,
+            "rss_kib_and_process_cpu_percent": "549936 816.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:48 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 173.85986079799477,
+            "rss_kib_and_process_cpu_percent": "550076 1100.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:50 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 175.9011161189992,
+            "rss_kib_and_process_cpu_percent": "550196 723.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:52 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 177.9415902089968,
+            "rss_kib_and_process_cpu_percent": "550640 1188.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:54 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 179.98258680599974,
+            "rss_kib_and_process_cpu_percent": "550776 960.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 182.02223528600007,
+            "rss_kib_and_process_cpu_percent": "550960 1067.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:09:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 184.06103866000194,
+            "rss_kib_and_process_cpu_percent": "551380 1142.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:01 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 186.1012995429919,
+            "rss_kib_and_process_cpu_percent": "553348 1106.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:03 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 188.14076313200349,
+            "rss_kib_and_process_cpu_percent": "553520 1152.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:05 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 190.18583924599807,
+            "rss_kib_and_process_cpu_percent": "553732 1216.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:07 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 192.22980186899076,
+            "rss_kib_and_process_cpu_percent": "553820 1175.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:09 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 194.27082485599385,
+            "rss_kib_and_process_cpu_percent": "553932 1069.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:11 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 196.31224388300325,
+            "rss_kib_and_process_cpu_percent": "550708 1058.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 198.3643845399929,
+            "rss_kib_and_process_cpu_percent": "551132 776.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 200.406631869002,
+            "rss_kib_and_process_cpu_percent": "557392 1088.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:17 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 202.44492686199374,
+            "rss_kib_and_process_cpu_percent": "568356 919.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:19 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 204.4860448870022,
+            "rss_kib_and_process_cpu_percent": "621628 879.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:21 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 206.5312297979981,
+            "rss_kib_and_process_cpu_percent": "621632 917.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:23 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 208.57282216699969,
+            "rss_kib_and_process_cpu_percent": "621632 566.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:25 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 210.61974799798918,
+            "rss_kib_and_process_cpu_percent": "621632 485.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:27 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 212.66853634399013,
+            "rss_kib_and_process_cpu_percent": "621632 583.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:29 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 214.7155529629963,
+            "rss_kib_and_process_cpu_percent": "621640 402.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:31 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 216.76581534399884,
+            "rss_kib_and_process_cpu_percent": "621640 562.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:33 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 218.81461599899922,
+            "rss_kib_and_process_cpu_percent": "621640 531.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:35 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 220.86423255699628,
+            "rss_kib_and_process_cpu_percent": "621676 461.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:37 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 222.90891131600074,
+            "rss_kib_and_process_cpu_percent": "621728 563.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:39 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 224.95552081699134,
+            "rss_kib_and_process_cpu_percent": "621756 509.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:41 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 227.00077519699698,
+            "rss_kib_and_process_cpu_percent": "621800 463.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:43 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 229.04747532999318,
+            "rss_kib_and_process_cpu_percent": "621952 872.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 231.0920220019907,
+            "rss_kib_and_process_cpu_percent": "622104 1213.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:48 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 233.13637599399954,
+            "rss_kib_and_process_cpu_percent": "622240 763.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:50 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 235.1812469909928,
+            "rss_kib_and_process_cpu_percent": "622404 1208.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:52 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 237.2218446140032,
+            "rss_kib_and_process_cpu_percent": "622620 979.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:54 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 239.26345383698936,
+            "rss_kib_and_process_cpu_percent": "622808 1278.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 241.3017433770001,
+            "rss_kib_and_process_cpu_percent": "622980 1250.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:10:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 243.33903189899866,
+            "rss_kib_and_process_cpu_percent": "623424 1253.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 245.382551770992,
+            "rss_kib_and_process_cpu_percent": "623596 1301.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:02 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 81"
+          },
+          {
+            "seconds": 247.42275581500144,
+            "rss_kib_and_process_cpu_percent": "623796 1041.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:04 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 249.48643864999758,
+            "rss_kib_and_process_cpu_percent": "624696 1203.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:06 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 251.52980897799716,
+            "rss_kib_and_process_cpu_percent": "628852 861.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:08 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 253.57094732800033,
+            "rss_kib_and_process_cpu_percent": "620460 1206.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:10 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 255.61564682799508,
+            "rss_kib_and_process_cpu_percent": "621792 1062.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:12 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 257.65895007499785,
+            "rss_kib_and_process_cpu_percent": "621956 1270.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:14 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 259.6964756899979,
+            "rss_kib_and_process_cpu_percent": "621976 947.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:16 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 261.73923262899916,
+            "rss_kib_and_process_cpu_percent": "621980 1203.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:18 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 263.7851085529983,
+            "rss_kib_and_process_cpu_percent": "621980 1190.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:20 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 265.82980396799394,
+            "rss_kib_and_process_cpu_percent": "622032 923.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:22 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 267.87120038000285,
+            "rss_kib_and_process_cpu_percent": "622340 1196.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:24 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 269.91686969400325,
+            "rss_kib_and_process_cpu_percent": "620688 1107.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 271.9566908269917,
+            "rss_kib_and_process_cpu_percent": "620688 973.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:28 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 273.99668151699007,
+            "rss_kib_and_process_cpu_percent": "660360 630.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:30 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 276.0354452640022,
+            "rss_kib_and_process_cpu_percent": "812812 1175.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:32 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 81"
+          },
+          {
+            "seconds": 278.0811276280001,
+            "rss_kib_and_process_cpu_percent": "792176 935.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:34 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 280.12979928900313,
+            "rss_kib_and_process_cpu_percent": "791948 1189.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:37 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 282.1707077780011,
+            "rss_kib_and_process_cpu_percent": "915812 665.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:39 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 284.2180734959984,
+            "rss_kib_and_process_cpu_percent": "1130340 814.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:41 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 286.2597621390014,
+            "rss_kib_and_process_cpu_percent": "1125900 1307.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:43 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 288.30132021399913,
+            "rss_kib_and_process_cpu_percent": "1134688 736.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:11:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          }
+        ],
+        "command": "java --enable-native-access=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms256m -Xmx2g -cp <current gateway test/main/dependencies> com.surprising.affiliate.AffiliateTeamWorkload 10000 5 <result.json> 1200 SPOT",
+        "vm_delta_pages": {
+          "Swapins": 135795,
+          "Swapouts": 430865,
+          "Pageins": 428489,
+          "Pageouts": 23574
+        }
+      }
+    },
+    "teams-1000-jfr": {
+      "teams": 1000,
+      "clients_per_team": 50,
+      "users": 53596,
+      "fee_facts": 12000,
+      "active_products_per_team": 6,
+      "selected_product": "ALL_SIX",
+      "actual_core_stats": {
+        "SPOT": {
+          "commands": 14605,
+          "actual_debits": 3711,
+          "actual_credits": 3711
+        },
+        "LINEAR_PERPETUAL": {
+          "commands": 14586,
+          "actual_debits": 3705,
+          "actual_credits": 3705
+        },
+        "INVERSE_PERPETUAL": {
+          "commands": 14577,
+          "actual_debits": 3702,
+          "actual_credits": 3702
+        },
+        "LINEAR_DELIVERY": {
+          "commands": 14667,
+          "actual_debits": 3731,
+          "actual_credits": 3731
+        },
+        "INVERSE_DELIVERY": {
+          "commands": 14831,
+          "actual_debits": 3785,
+          "actual_credits": 3785
+        },
+        "OPTION": {
+          "commands": 14865,
+          "actual_debits": 3797,
+          "actual_credits": 3797
+        }
+      },
+      "paid_payouts": 22431,
+      "warmup_receipts": 39,
+      "containers": 4,
+      "first_drain": {
+        "seconds": 194.559914881,
+        "status": {
+          "fees": 12000,
+          "groups": 0,
+          "pending": 0,
+          "unknown": 450,
+          "rejected": 0,
+          "locks": 0
+        }
+      },
+      "recovery": {
+        "seconds": 5.788887175,
+        "status": {
+          "fees": 12000,
+          "groups": 0,
+          "pending": 0,
+          "unknown": 0,
+          "rejected": 0,
+          "locks": 0
+        }
+      },
+      "snapshot_pending_users": 390,
+      "source_batches": {
+        "samples": 614,
+        "p50.0_ms": 263.038422,
+        "p90.0_ms": 304.392717,
+        "p95.0_ms": 326.088283,
+        "p99.0_ms": 570.670306,
+        "p99.9_ms": 1091.236776,
+        "max_ms": 1091.236776
+      },
+      "money_calls": {
+        "samples": 5259,
+        "p50.0_ms": 130.480456,
+        "p90.0_ms": 348.665013,
+        "p95.0_ms": 395.662493,
+        "p99.0_ms": 541.925674,
+        "p99.9_ms": 716.290958,
+        "max_ms": 840.064575
+      },
+      "accounting_cpu_ms": 7881.166,
+      "accounting_allocated_bytes": 358660624,
+      "busy_product_claims": 3189,
+      "peak_active_connections": 8,
+      "peak_total_connections": 16,
+      "peak_pool_waiters": 0,
+      "peak_database_lock_waiters": 1,
+      "money_difference": 0,
+      "cross_team_allocations": 0,
+      "duplicate_actual_debits": 0,
+      "duplicate_actual_credits": 0,
+      "funds_requests_including_retries": 68133,
+      "latency_samples_lost": 0,
+      "resources": {
+        "run": "teams-1000-jfr",
+        "pid": 40138,
+        "exit_code": 0,
+        "elapsed_seconds": 298.5999493900017,
+        "teams": 1000,
+        "clients_per_team": 50,
+        "jfr": true,
+        "selected_product": null,
+        "start_utc": "2026-10-29T02:17:09.699645+00:00",
+        "end_utc": "2026-10-29T02:22:08.297339+00:00",
+        "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                    35951.\nPages active:                                1217571.\nPages inactive:                              1120333.\nPages speculative:                             96073.\nPages throttled:                                   0.\nPages wired down:                            1114746.\nPages purgeable:                                5045.\n\"Translation faults\":                     6619027056.\nPages copy-on-write:                       206834014.\nPages zero filled:                        4946984574.\nPages reactivated:                         139808240.\nPages purged:                                1000059.\nFile-backed pages:                           1018032.\nAnonymous pages:                             1415945.\nPages stored in compressor:                  3912015.\nPages occupied by compressor:                 608667.\nDecompressions:                             64233601.\nCompressions:                              100053541.\nPageins:                                    60477872.\nPageouts:                                    1086643.\nSwapins:                                    56135254.\nSwapouts:                                   60176820.",
+        "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   239365.\nPages active:                                1155999.\nPages inactive:                              1162134.\nPages speculative:                             17495.\nPages throttled:                                   0.\nPages wired down:                            1145785.\nPages purgeable:                                9355.\n\"Translation faults\":                     6668073256.\nPages copy-on-write:                       208371335.\nPages zero filled:                        4976143979.\nPages reactivated:                         140758769.\nPages purged:                                1003384.\nFile-backed pages:                            944670.\nAnonymous pages:                             1390958.\nPages stored in compressor:                  3632105.\nPages occupied by compressor:                 472250.\nDecompressions:                             65242971.\nCompressions:                              100844864.\nPageins:                                    61253875.\nPageouts:                                    1101820.\nSwapins:                                    56399866.\nSwapouts:                                   60449909.",
+        "samples": [
+          {
+            "seconds": 0.02352797299681697,
+            "rss_kib_and_process_cpu_percent": "384   0.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:09 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 2.0654564349970315,
+            "rss_kib_and_process_cpu_percent": "150788 123.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:11 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 4.106293645003461,
+            "rss_kib_and_process_cpu_percent": "180080   7.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 6.144332188996486,
+            "rss_kib_and_process_cpu_percent": "180044   0.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 8.183133900005487,
+            "rss_kib_and_process_cpu_percent": "179936   0.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:17 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 10.223089138002251,
+            "rss_kib_and_process_cpu_percent": "179940   0.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:19 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 12.26652226599981,
+            "rss_kib_and_process_cpu_percent": "180544   1.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:22 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 14.307482536998577,
+            "rss_kib_and_process_cpu_percent": "183920  14.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:24 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 16.349073869001586,
+            "rss_kib_and_process_cpu_percent": "536364 636.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 18.389468035995378,
+            "rss_kib_and_process_cpu_percent": "537584 456.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:28 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 20.431964910996612,
+            "rss_kib_and_process_cpu_percent": "540000 633.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:30 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 22.475938853996922,
+            "rss_kib_and_process_cpu_percent": "540776 480.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:32 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 24.52118723100284,
+            "rss_kib_and_process_cpu_percent": "537996 655.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:34 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 26.561820818998967,
+            "rss_kib_and_process_cpu_percent": "535476 554.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:36 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 28.602004173997557,
+            "rss_kib_and_process_cpu_percent": "535932 654.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:38 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 95"
+          },
+          {
+            "seconds": 30.653263359999983,
+            "rss_kib_and_process_cpu_percent": "526704 566.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:40 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 32.70293976399989,
+            "rss_kib_and_process_cpu_percent": "386424 466.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:42 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 34.74303080000391,
+            "rss_kib_and_process_cpu_percent": "349740 696.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:44 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 36.78334741599974,
+            "rss_kib_and_process_cpu_percent": "266240 545.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:46 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 38.829095884997514,
+            "rss_kib_and_process_cpu_percent": "267048 663.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:48 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 40.881705530991894,
+            "rss_kib_and_process_cpu_percent": "267552 489.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:50 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 42.926502267000615,
+            "rss_kib_and_process_cpu_percent": "268028 562.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:52 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 44.96543259300233,
+            "rss_kib_and_process_cpu_percent": "268400 681.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:54 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 47.006813514992245,
+            "rss_kib_and_process_cpu_percent": "269100 689.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 49.0544172039954,
+            "rss_kib_and_process_cpu_percent": "269444 596.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:17:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 51.09163969299698,
+            "rss_kib_and_process_cpu_percent": "269848 477.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 53.13125285500428,
+            "rss_kib_and_process_cpu_percent": "270016 460.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:02 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 55.17098140899907,
+            "rss_kib_and_process_cpu_percent": "270216 384.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:04 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 57.21543488600582,
+            "rss_kib_and_process_cpu_percent": "270408 486.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:06 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 59.25243540899828,
+            "rss_kib_and_process_cpu_percent": "282548 816.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:08 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 61.295148802993936,
+            "rss_kib_and_process_cpu_percent": "279708 1258.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:11 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 63.33137228200212,
+            "rss_kib_and_process_cpu_percent": "286344 1291.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 65.37250234700332,
+            "rss_kib_and_process_cpu_percent": "294308 1354.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 67.40866583600291,
+            "rss_kib_and_process_cpu_percent": "297776 1370.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:17 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 69.44611011599773,
+            "rss_kib_and_process_cpu_percent": "302120 996.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:19 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100"
+          },
+          {
+            "seconds": 71.48891325500153,
+            "rss_kib_and_process_cpu_percent": "308696 1314.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:21 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 73.5271492049942,
+            "rss_kib_and_process_cpu_percent": "314312 1253.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:23 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 75.5676690179971,
+            "rss_kib_and_process_cpu_percent": "316116 1333.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:25 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 77.60842027400213,
+            "rss_kib_and_process_cpu_percent": "320640 1396.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:27 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 79.64966532499238,
+            "rss_kib_and_process_cpu_percent": "355244 1108.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:29 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 81.69249811899499,
+            "rss_kib_and_process_cpu_percent": "641604 1003.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:31 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 83.73659630700422,
+            "rss_kib_and_process_cpu_percent": "632292 1033.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:33 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 85.77760241199576,
+            "rss_kib_and_process_cpu_percent": "634064 795.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:35 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 97"
+          },
+          {
+            "seconds": 87.82500523199269,
+            "rss_kib_and_process_cpu_percent": "638972 948.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:37 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 95"
+          },
+          {
+            "seconds": 89.87202780299413,
+            "rss_kib_and_process_cpu_percent": "705704 1168.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:39 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 91.91544134200376,
+            "rss_kib_and_process_cpu_percent": "705456 1115.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:41 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 93"
+          },
+          {
+            "seconds": 93.95532928500324,
+            "rss_kib_and_process_cpu_percent": "705388 825.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:43 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 91"
+          },
+          {
+            "seconds": 96.00063126000168,
+            "rss_kib_and_process_cpu_percent": "705588 1069.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 98.04080803599209,
+            "rss_kib_and_process_cpu_percent": "705576 1061.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:47 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 89"
+          },
+          {
+            "seconds": 100.08195283199893,
+            "rss_kib_and_process_cpu_percent": "706256 992.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:49 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 87"
+          },
+          {
+            "seconds": 102.12391445500543,
+            "rss_kib_and_process_cpu_percent": "706140 1081.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:51 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 104.16544017200067,
+            "rss_kib_and_process_cpu_percent": "708724 1130.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:53 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 85"
+          },
+          {
+            "seconds": 106.21116463199724,
+            "rss_kib_and_process_cpu_percent": "708580 1010.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:55 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 83"
+          },
+          {
+            "seconds": 108.25168997199216,
+            "rss_kib_and_process_cpu_percent": "708768 1044.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:18:57 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 81"
+          },
+          {
+            "seconds": 110.2931832089962,
+            "rss_kib_and_process_cpu_percent": "711052 1088.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 112.33991471899208,
+            "rss_kib_and_process_cpu_percent": "713740 1047.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:02 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 79"
+          },
+          {
+            "seconds": 114.3789930990024,
+            "rss_kib_and_process_cpu_percent": "713824 1120.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:04 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 77"
+          },
+          {
+            "seconds": 116.42004198899667,
+            "rss_kib_and_process_cpu_percent": "720144 905.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:06 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 118.46544481399178,
+            "rss_kib_and_process_cpu_percent": "715804 1021.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:08 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 120.50490018200071,
+            "rss_kib_and_process_cpu_percent": "741156 1026.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:10 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 122.54492822400061,
+            "rss_kib_and_process_cpu_percent": "737568 968.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:12 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 124.58438868699886,
+            "rss_kib_and_process_cpu_percent": "737752 1148.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:14 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 126.62331947899656,
+            "rss_kib_and_process_cpu_percent": "738320 1121.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:16 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 128.6684156590054,
+            "rss_kib_and_process_cpu_percent": "744024 1183.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:18 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 130.71544485900085,
+            "rss_kib_and_process_cpu_percent": "739584 1275.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:20 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 132.7593028639967,
+            "rss_kib_and_process_cpu_percent": "739716 868.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:22 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 134.80839100599405,
+            "rss_kib_and_process_cpu_percent": "740240 1212.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:24 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 136.8534398060001,
+            "rss_kib_and_process_cpu_percent": "740296 493.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 138.89970687800087,
+            "rss_kib_and_process_cpu_percent": "739960 695.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:28 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 140.95157423899218,
+            "rss_kib_and_process_cpu_percent": "739952 774.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:30 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 142.99322995099647,
+            "rss_kib_and_process_cpu_percent": "740008 772.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:32 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 145.03743767199921,
+            "rss_kib_and_process_cpu_percent": "744120 746.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:34 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 147.0855630540027,
+            "rss_kib_and_process_cpu_percent": "744216 728.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:36 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 149.12881837699388,
+            "rss_kib_and_process_cpu_percent": "744276 809.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:38 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 151.17281245499908,
+            "rss_kib_and_process_cpu_percent": "744360 594.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:40 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 153.22282614800497,
+            "rss_kib_and_process_cpu_percent": "744428 892.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:42 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 155.2698561760044,
+            "rss_kib_and_process_cpu_percent": "744504 737.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 157.32298080599867,
+            "rss_kib_and_process_cpu_percent": "744528 630.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:47 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 159.3680002649926,
+            "rss_kib_and_process_cpu_percent": "744908 847.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:49 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 161.41544526700454,
+            "rss_kib_and_process_cpu_percent": "744812 731.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:51 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 163.4770533550036,
+            "rss_kib_and_process_cpu_percent": "745048 746.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:53 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 165.518669372992,
+            "rss_kib_and_process_cpu_percent": "610604 554.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:55 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 167.5668050259992,
+            "rss_kib_and_process_cpu_percent": "619972 488.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:57 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 169.61545720600407,
+            "rss_kib_and_process_cpu_percent": "620020 429.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:19:59 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 171.66000703300233,
+            "rss_kib_and_process_cpu_percent": "620384 522.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:01 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 173.707115023004,
+            "rss_kib_and_process_cpu_percent": "620408 496.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:03 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 175.76998902999912,
+            "rss_kib_and_process_cpu_percent": "620436 493.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:05 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 177.81700401699345,
+            "rss_kib_and_process_cpu_percent": "620540 487.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:07 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 179.86570144200232,
+            "rss_kib_and_process_cpu_percent": "620652 542.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:09 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 181.91556436699466,
+            "rss_kib_and_process_cpu_percent": "620996 496.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:11 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 183.96545072899607,
+            "rss_kib_and_process_cpu_percent": "621032 461.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 186.01735133200418,
+            "rss_kib_and_process_cpu_percent": "621148 513.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 188.06900465399667,
+            "rss_kib_and_process_cpu_percent": "621164 462.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:17 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 190.11631539900554,
+            "rss_kib_and_process_cpu_percent": "621200 417.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:19 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 192.16731801000424,
+            "rss_kib_and_process_cpu_percent": "621228 479.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:21 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 194.2161735760019,
+            "rss_kib_and_process_cpu_percent": "621200 459.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:23 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 196.26656179199927,
+            "rss_kib_and_process_cpu_percent": "621224 475.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 198.3158468420006,
+            "rss_kib_and_process_cpu_percent": "621252 591.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:28 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 200.36546338899643,
+            "rss_kib_and_process_cpu_percent": "621400 452.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:30 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 202.41545392699481,
+            "rss_kib_and_process_cpu_percent": "621444 469.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:32 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 204.46545506900293,
+            "rss_kib_and_process_cpu_percent": "621516 814.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:34 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 206.51545282399456,
+            "rss_kib_and_process_cpu_percent": "621716 616.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:36 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 208.5600853740034,
+            "rss_kib_and_process_cpu_percent": "621800 847.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:38 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 210.60304996999912,
+            "rss_kib_and_process_cpu_percent": "621644 740.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:40 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 212.6467796950019,
+            "rss_kib_and_process_cpu_percent": "621996 750.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:42 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 214.69478723499924,
+            "rss_kib_and_process_cpu_percent": "622220 809.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:44 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 216.73716071399394,
+            "rss_kib_and_process_cpu_percent": "622420 812.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:46 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 218.78239040200424,
+            "rss_kib_and_process_cpu_percent": "622732 913.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:48 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 220.82509646700055,
+            "rss_kib_and_process_cpu_percent": "623400 751.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:50 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 222.86582705099136,
+            "rss_kib_and_process_cpu_percent": "623628 788.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:52 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 224.90826130799542,
+            "rss_kib_and_process_cpu_percent": "623704 769.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:54 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 226.95071513899893,
+            "rss_kib_and_process_cpu_percent": "624636 867.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 228.9943051320006,
+            "rss_kib_and_process_cpu_percent": "624748 692.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:20:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 231.0357961539994,
+            "rss_kib_and_process_cpu_percent": "633192 922.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 75"
+          },
+          {
+            "seconds": 233.08144143900427,
+            "rss_kib_and_process_cpu_percent": "632212 855.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:02 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 235.12699544300267,
+            "rss_kib_and_process_cpu_percent": "632364 814.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:04 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 237.17336182399595,
+            "rss_kib_and_process_cpu_percent": "636664 815.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:06 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 239.21597810499952,
+            "rss_kib_and_process_cpu_percent": "642976 810.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:08 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 241.2603243140038,
+            "rss_kib_and_process_cpu_percent": "648828 789.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:10 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 243.30295655799273,
+            "rss_kib_and_process_cpu_percent": "653392 732.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:13 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 245.35320731200045,
+            "rss_kib_and_process_cpu_percent": "653408 897.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:15 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 247.39681752400065,
+            "rss_kib_and_process_cpu_percent": "653488 689.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:17 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 249.43950056900212,
+            "rss_kib_and_process_cpu_percent": "653628 809.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:19 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 251.4808166760049,
+            "rss_kib_and_process_cpu_percent": "653760 850.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:21 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 253.52358054999786,
+            "rss_kib_and_process_cpu_percent": "653880 889.8",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:23 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 255.56895647599595,
+            "rss_kib_and_process_cpu_percent": "653988 885.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:25 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 257.61545228399336,
+            "rss_kib_and_process_cpu_percent": "654056 745.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:27 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 259.65594549100206,
+            "rss_kib_and_process_cpu_percent": "654200 793.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:29 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 261.6990730700054,
+            "rss_kib_and_process_cpu_percent": "654276 689.1",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:31 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 263.7457344979921,
+            "rss_kib_and_process_cpu_percent": "654380 735.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:33 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 265.8048953629914,
+            "rss_kib_and_process_cpu_percent": "654484 813.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:35 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 267.84949276500265,
+            "rss_kib_and_process_cpu_percent": "654428 753.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:37 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 72"
+          },
+          {
+            "seconds": 269.90294222200464,
+            "rss_kib_and_process_cpu_percent": "654508 819.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:39 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 271.94732020099764,
+            "rss_kib_and_process_cpu_percent": "654528 606.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:41 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 273.99381375500525,
+            "rss_kib_and_process_cpu_percent": "654604 680.6",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:43 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 276.03837733399996,
+            "rss_kib_and_process_cpu_percent": "656696 841.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:45 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 278.08195200200134,
+            "rss_kib_and_process_cpu_percent": "682460 629.3",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:47 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 280.1278181709931,
+            "rss_kib_and_process_cpu_percent": "794292 755.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:49 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 70"
+          },
+          {
+            "seconds": 282.18059197900584,
+            "rss_kib_and_process_cpu_percent": "813536 624.0",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:51 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          },
+          {
+            "seconds": 284.2339838350017,
+            "rss_kib_and_process_cpu_percent": "888988 681.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:53 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 66"
+          },
+          {
+            "seconds": 286.2947257009946,
+            "rss_kib_and_process_cpu_percent": "856096 527.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:56 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 66"
+          },
+          {
+            "seconds": 288.3472141450038,
+            "rss_kib_and_process_cpu_percent": "903320 689.7",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:21:58 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 66"
+          },
+          {
+            "seconds": 290.3965822589962,
+            "rss_kib_and_process_cpu_percent": "936476 528.4",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:22:00 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 66"
+          },
+          {
+            "seconds": 292.44942774099763,
+            "rss_kib_and_process_cpu_percent": "875080 550.9",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:22:02 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 66"
+          },
+          {
+            "seconds": 294.49621141600073,
+            "rss_kib_and_process_cpu_percent": "869280 669.5",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:22:04 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 66"
+          },
+          {
+            "seconds": 296.5452593480004,
+            "rss_kib_and_process_cpu_percent": "891016 137.2",
+            "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-29 10:22:06 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 68"
+          }
+        ],
+        "command": "java --enable-native-access=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms256m -Xmx2g JFR profile maxsize64m -cp <current gateway test/main/dependencies> com.surprising.affiliate.AffiliateTeamWorkload 1000 50 <result.json> 1200",
+        "vm_delta_pages": {
+          "Swapins": 264612,
+          "Swapouts": 273089,
+          "Pageins": 776003,
+          "Pageouts": 15177
+        }
+      }
+    }
+  }
+}

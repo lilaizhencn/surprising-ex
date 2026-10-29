@@ -84,3 +84,7 @@ mvn -pl surprising-gateway -am test \
 `AffiliateTeamWorkload` 只编译、未执行；[原计划](plan.md) 中规模与采样部分不代表实测结果。
 本轮没有重新验证 Web、运营后台或 App 交互，也未以此记录宣称完整前端验收通过。
 IDEA 后续检查按用户要求停止，没有修改 IDE 或全局 SDK 配置。
+
+## 补充：多团队实际运行与后台联动
+
+上文记录的是 10:28 的编译/IDE 验收范围。另一组流程已实际执行 1000 队六产品、10000 队同产品、JFR、资金快照恢复与后台真实接口交互，当前标准 Maven 相关回归为 139 项、0 failures/errors、2 条条件跳过。运行规模、原始摘要、换页/限频限制和未测项见[多团队补充报告](MULTI_TEAM_VALIDATION.md)。

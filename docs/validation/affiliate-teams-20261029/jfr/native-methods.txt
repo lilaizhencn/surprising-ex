@@ -1,0 +1,26 @@
+
+                                     Waiting or Executing Native Methods
+
+Method                                                                                                Samples
+----------------------------------------------------------------------------------------------------- -------
+sun.nio.ch.Net.poll(FileDescriptor, int, long)                                                          5,530
+org.rocksdb.RocksDB.get(long, byte[], int, int)                                                           221
+jdk.internal.misc.Unsafe.park(boolean, long)                                                              172
+jdk.internal.loader.NativeLibraries.load(NativeLibraries$NativeLibraryImpl, String, boolean, boolean)      89
+org.rocksdb.RocksDB.open(long, String)                                                                     79
+org.rocksdb.RocksDB.put(long, long, byte[], int, int, byte[], int, int)                                    47
+sun.nio.ch.SocketDispatcher.write0(FileDescriptor, long, int)                                              47
+sun.nio.ch.SocketDispatcher.read0(FileDescriptor, long, int)                                               41
+org.rocksdb.RocksDB.closeDatabase(long)                                                                    40
+java.io.RandomAccessFile.readBytes0(byte[], int, int)                                                      39
+java.util.zip.Inflater.inflateBytesBytes(long, byte[], int, int, byte[], int, int)                          8
+java.lang.Object.wait0(long)                                                                                6
+sun.nio.ch.UnixFileDispatcherImpl.write0(FileDescriptor, long, int)                                         4
+java.io.FileInputStream.readBytes(byte[], int, int)                                                         3
+java.io.UnixFileSystem.getBooleanAttributes0(File)                                                          2
+java.io.FileOutputStream.writeBytes(byte[], int, int, boolean)                                              2
+java.net.Inet6AddressImpl.lookupAllHostAddr(String, int)                                                    1
+org.rocksdb.RocksIterator.next0Jni(long)                                                                    1
+java.lang.System.currentTimeMillis()                                                                        1
+jdk.jfr.internal.JVM.getStackTraceId(int, long)                                                             1
+jdk.internal.loader.NativeLibrary.findEntry0(long, String)                                                  1

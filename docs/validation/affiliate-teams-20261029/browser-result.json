@@ -1,0 +1,36 @@
+{
+  "before": [
+    {
+      "productLine": "SPOT",
+      "clusterPosition": "0",
+      "orderId": "0",
+      "readClusterPosition": "576",
+      "readOrderId": "1",
+      "deferredCount": "2",
+      "oldestDeferredAt": "2026-10-27T02:33:42.024Z",
+      "checkedAt": "2026-10-29T02:33:42.967Z",
+      "error": "存在隔离待核算费用，确认游标保留；首笔日志 64，订单 1，来源 UID 10512；团队路径超过本机安全处理上限，整笔核算已暂停，未截断分账；修复后后台按原身份重试"
+    }
+  ],
+  "after": [
+    {
+      "productLine": "SPOT",
+      "clusterPosition": "576",
+      "orderId": "1",
+      "readClusterPosition": "576",
+      "readOrderId": "1",
+      "deferredCount": "0",
+      "oldestDeferredAt": null,
+      "checkedAt": "2026-10-29T02:39:27.616Z",
+      "error": null
+    }
+  ],
+  "viewports": [
+    "1440x1000",
+    "390x844"
+  ],
+  "refreshRecovered": true,
+  "pageOverflow": false,
+  "pageErrors": [],
+  "backend": "real Spring MVC AffiliateAdminController and PostgreSQL repositories; authentication is a test principal; only the fixture repair control is test-specific"
+}

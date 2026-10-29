@@ -1,0 +1,90 @@
+Current standard reactor test, exit 0
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 12.14 s -- in com.surprising.aeron.service.core.MaintenanceIntegrationTest
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 29.06 s -- in com.surprising.affiliate.AffiliatePostgresTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.affiliate.CommissionAllocationTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 36.18 s -- in com.surprising.affiliate.AffiliateSafetyPostgresTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.475 s -- in com.surprising.affiliate.AffiliateResourceTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.742 s -- in com.surprising.affiliate.AffiliateHttpTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 19.12 s -- in com.surprising.affiliate.AffiliateTeamIsolationPostgresTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.181 s -- in com.surprising.affiliate.CommittedPayoutTransferTest
+[WARNING] Tests run: 2, Failures: 0, Errors: 0, Skipped: 2, Time elapsed: 0.001 s -- in com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest
+[INFO] Tests run: 23, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.924 s -- in com.surprising.gateway.provider.auth.AuthServiceTest
+[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 17.92 s -- in com.surprising.gateway.provider.auth.AuthPagePostgresTest
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 11.26 s -- in com.surprising.gateway.provider.auth.AuthInputBoundaryPostgresTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.905 s -- in com.surprising.gateway.provider.auth.AuditLogPagePostgresTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.677 s -- in com.surprising.gateway.provider.product.MultiProductMoneyIntegrationTest
+[INFO] Tests run: 139, Failures: 0, Errors: 0, Skipped: 2
+[INFO] Surprising Parent .................................. SUCCESS [  0.435 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  0.827 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.080 s]
+[INFO] surprising-aeron-client ............................ SUCCESS [  0.066 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [ 18.128 s]
+[INFO] surprising-trading-api ............................. SUCCESS [  0.054 s]
+[INFO] surprising-account-api ............................. SUCCESS [  0.043 s]
+[INFO] surprising-price-api ............................... SUCCESS [  0.028 s]
+[INFO] surprising-price-consumer .......................... SUCCESS [  0.102 s]
+[INFO] surprising-realtime-api ............................ SUCCESS [  0.121 s]
+[INFO] surprising-derivatives-lifecycle-api ............... SUCCESS [  0.449 s]
+[INFO] surprising-gateway ................................. SUCCESS [02:31 min]
+[INFO] BUILD SUCCESS
+[INFO] Total time:  02:52 min
+[INFO] Finished at: 2026-10-29T10:51:29+08:00
+
+Expected red: unhealthy team used to stop healthy same-product fees
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 2.744 s <<< FAILURE! -- in com.surprising.affiliate.AffiliateTeamIsolationPostgresTest
+  "java.lang.IllegalStateException: 团队路径超过本机安全处理上限，整笔核算已暂停，未截断分账
+  "java.lang.IllegalStateException: 团队路径超过本机安全处理上限，整笔核算已暂停，未截断分账
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+
+Expected red: late eligible fees used to wait another cycle
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 4.425 s <<< FAILURE! -- in com.surprising.affiliate.AffiliateTeamIsolationPostgresTest
+expected: 2L
+ but was: 1L
+expected: 2L
+ but was: 1L
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+
+Gateway main package, exit 0; this command skipped tests
+[INFO] BUILD SUCCESS
+[INFO] Total time:  17.674 s
+[INFO] Finished at: 2026-10-29T09:51:01+08:00
+
+Admin final checks after source formatting: all commands exit 0
+$ npm run lint
+$ npm run test
+(pass) admin approval execution > invalid financial values fail before creating an approval or issuing a request [0.49ms]
+(pass) a failed report or ledger cannot erase independently read balances [1.17ms]
+(pass) private admin requests > a rejected refreshed token fails without an endless refresh loop [0.79ms]
+(pass) refresh failure classification > transient refresh status 503 preserves the session and never repeats a write [0.61ms]
+(pass) refresh failure classification > transient refresh status 500 preserves the session and never repeats a write [0.45ms]
+(pass) refresh failure classification > transient refresh status 429 preserves the session and never repeats a write [0.46ms]
+(pass) refresh failure classification > a network refresh failure preserves the session [0.43ms]
+(pass) refresh failure classification > confirmed refresh rejection 401 clears this session [0.64ms]
+(pass) refresh failure classification > confirmed refresh rejection 403 clears this session [0.46ms]
+(pass) refresh failure classification > an unexpected refresh identity cannot replace the logged-in user [0.60ms]
+(pass) malformed announcement metadata and duplicate pages fail closed [0.30ms]
+ 144 pass
+ 0 fail
+Ran 144 tests across 16 files. [740.00ms]
+$ npm run build
+
+> surprising-admin-web@0.1.0 build
+> tsc -b && vite build
+
+✓ built in 594ms
+
+Final lint/build after restoring unrelated table formatting: exit 0
+$ npm run lint
+
+> surprising-admin-web@0.1.0 lint
+> tsc -b --pretty false
+
+
+$ npm run build
+
+> surprising-admin-web@0.1.0 build
+> tsc -b && vite build
+
+✓ built in 591ms

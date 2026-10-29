@@ -1,0 +1,23 @@
+$ java -version
+openjdk version "27" 2026-09-15
+OpenJDK Runtime Environment Corretto-27.0.0.33.1 (build 27+33-FR)
+OpenJDK 64-Bit Server VM Corretto-27.0.0.33.1 (build 27+33-FR, mixed mode, sharing)
+
+$ mvn -version
+Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)
+Maven home: /usr/local/Cellar/maven/3.9.16/libexec
+Java version: 27, vendor: Amazon.com Inc., runtime: /Users/atomex/.sdkman/candidates/java/27.0.0-amzn
+Default locale: zh_US_#Hans, platform encoding: UTF-8
+OS name: "mac os x", version: "26.7.2", arch: "x86_64", family: "mac"
+
+$ psql -V
+psql (PostgreSQL) 18.4 (Homebrew)
+
+$ sysctl -n machdep.cpu.brand_string hw.memsize hw.logicalcpu
+Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
+17179869184
+16
+
+$ df -h .
+Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on
+/dev/disk1s2   932Gi   729Gi   179Gi    81%    5.1M  1.9G    0%   /System/Volumes/Data

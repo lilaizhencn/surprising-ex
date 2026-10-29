@@ -1,0 +1,30 @@
+
+                                           Java Methods that Execute the Most
+
+Method                                                                                                  Samples Percent
+------------------------------------------------------------------------------------------------------- ------- -------
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.run(TradingCpuAffinity)                      26,050  58.85%
+com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline.runMatching()                       14,402  32.54%
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.peekMatcherSettlement()                       2,547   5.75%
+com.surprising.aeron.service.replay.CommittedTradeReplay.apply(byte[], long, long)                          396   0.89%
+com.surprising.aeron.service.account.ControlLaneDispatcher.completedMask()                                  364   0.82%
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.ready(Object)                                   129   0.29%
+com.surprising.aeron.bootstrap.account.AccountLaneLifecycle.assertHealthy()                                  73   0.16%
+com.surprising.aeron.service.order.DirectCommandSlot.lambda$new$0()                                          52   0.12%
+com.surprising.aeron.service.core.change.LaneCommitEvent.completedLaneMask()                                 21   0.05%
+com.surprising.aeron.service.snapshot.CoreSnapshotLifecycle.pollSnapshotSections(long, long, long)           14   0.03%
+org.agrona.concurrent.OneToOneConcurrentArrayQueue.poll()                                                     9   0.02%
+com.surprising.aeron.service.core.TradingCoreRuntime.acquireOwnerLaneAccess(String)                           7   0.02%
+jdk.internal.misc.Unsafe.park(boolean, long)                                                                  6   0.01%
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker$MatcherSettlementRing.peek()                      5   0.01%
+org.postgresql.core.v3.SimpleParameterList.getV3Length(int)                                                   4   0.01%
+java.util.zip.ZipFile$Source.getEntryPos(String, boolean, ZipCoder)                                           4   0.01%
+com.surprising.aeron.service.core.TradingAccountRuntime.assertOwner()                                         4   0.01%
+com.surprising.aeron.service.order.DirectCommandSlot.poll()                                                   3   0.01%
+java.util.TreeMap.fixAfterInsertion(TreeMap$Entry)                                                            3   0.01%
+org.postgresql.core.v3.QueryExecutorImpl.sendBind(SimpleQuery, SimpleParameterList, Portal, boolean)          2   0.00%
+java.util.HashMap.resize()                                                                                    2   0.00%
+org.postgresql.jdbc.PgStatement.executeInternal(CachedQuery, ParameterList, int)                              2   0.00%
+java.lang.System$1.createOrGetClassLoaderValueMap(ClassLoader)                                                2   0.00%
+java.util.HashMap.getNode(Object)                                                                             2   0.00%
+java.lang.ThreadLocal.get(Thread)                                                                             2   0.00%

@@ -1,0 +1,10 @@
+{
+  "sha256": "c1e816f75ad3885c5061d1de82ffe8dc69b5f714b0d628fd1219d9c2294c5199",
+  "bytes": 7170185,
+  "settings": "profile",
+  "maxsize": "64m",
+  "dumponexit": true,
+  "data_loss_events": 0,
+  "raw_recording": "removed after archive",
+  "window": "whole process, includes fixture/warmup/snapshot/audit"
+}

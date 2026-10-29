@@ -1,0 +1,35 @@
+const {chromium}=await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
+import fs from 'node:fs/promises';
+const output=new URL('.',import.meta.url).pathname;
+const headers={Authorization:'Bearer local-team-qa'};
+const endpoint='http://127.0.0.1:19096/api/v1/admin/affiliate';
+const before=await (await fetch(endpoint,{headers})).json();
+if(before.sources[0].deferredCount!=='2'||before.sources[0].clusterPosition===before.sources[0].readClusterPosition)throw Error('real pending source fixture missing');
+const browser=await chromium.launch({channel:'chrome',headless:true});
+const errors=[];
+try {
+ const context=await browser.newContext({viewport:{width:1440,height:1000}});
+ await context.addInitScript(()=>localStorage.setItem('surprising-admin.session',JSON.stringify({accessToken:'local-team-qa',refreshToken:'fixture-only',accessTokenExpiresAt:'2099-01-01T00:00:00Z',refreshTokenExpiresAt:'2099-01-01T00:00:00Z',user:{userId:'9',username:'team-qa',status:'NORMAL',roles:['ADMIN'],createdAt:'2026-10-20T00:00:00Z'}})));
+ const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:5414/#/affiliate');
+ await page.getByRole('heading',{name:'邀请返佣与 KOL',exact:true}).waitFor();
+ await page.getByRole('columnheader',{name:'隔离待核算笔数',exact:true}).waitFor();
+ await page.getByRole('columnheader',{name:'连续确认日志位置',exact:true}).waitFor();
+ await page.screenshot({path:`${output}/admin-pending-desktop.png`,fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:`${output}/admin-pending-mobile.png`,fullPage:true});
+ if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('mobile page overflow');
+ const repair=await fetch('http://127.0.0.1:19096/__qa/recover',{method:'POST'});if(!repair.ok)throw Error('fixture repair failed');
+ const refreshed=page.waitForResponse(r=>r.url().startsWith(endpoint)&&r.request().method()==='GET');
+ await page.getByRole('button',{name:'刷新',exact:true}).click();
+ const response=await refreshed,after=await response.json();
+ if(after.sources[0].deferredCount!=='0'||after.sources[0].clusterPosition!==after.sources[0].readClusterPosition)throw Error('confirmed checkpoint did not catch up');
+ await page.getByText('首笔日志',{exact:false}).waitFor({state:'hidden'});
+ await page.screenshot({path:`${output}/admin-recovered-mobile.png`,fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});
+ await page.screenshot({path:`${output}/admin-recovered-desktop.png`,fullPage:true});
+ if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('desktop page overflow');
+ if(errors.length)throw Error(errors.join(';'));
+ await fs.writeFile(`${output}/browser-result.json`,JSON.stringify({before:before.sources,after:after.sources,viewports:['1440x1000','390x844'],refreshRecovered:true,pageOverflow:false,pageErrors:errors,backend:'real Spring MVC AffiliateAdminController and PostgreSQL repositories; authentication is a test principal; only the fixture repair control is test-specific'},null,2));
+ console.log('Actual controller/database progress and recovery UI passed');
+} finally {await browser.close();}

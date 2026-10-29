@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-29T03:15:21.667167+00:00",
+  "head": "0ce0862f1da54663ae7cca54006d6a8fa43c2349",
+  "note": "affiliate source unchanged since passing standard reactor; unrelated concurrent open-platform edits excluded",
+  "sha256": {
+    "deployment/migrations/20261029-affiliate-team-isolation.sql": "701dfb8a384deb2fb4c9d60a3bf805781913114cbfc0bb7ae8e0112f9c3386b4",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/config/AffiliateDatabase.java": "354c8c75a60d47372ed56207632badbdcc5aaddd017dbaa72f9764506dcc84ab",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/config/AffiliateProperties.java": "65d0c5a29ba02a2a5803e0fef1236941a2745b831685b08f8d66349b64970a96",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/config/AffiliateScheduling.java": "ac1d4610e5e178ba35d995b807c15eac1065ea62293961cdc92a5b4a0eb382a6",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/controller/AffiliateAdminController.java": "7b5455778f12adf26c3369e98c37c03f971a70d45b2479063fce61fc9e5843b3",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/controller/AffiliateController.java": "ebf26c55ea3332d5b1cb6f3fbced0e7a3f5c605fae4c83d3ce79953f4c0f0768",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/controller/AffiliateErrors.java": "49bbf84f564d03ef02c7036766b365319a2cf902dfd70c2298f61549d3514b6c",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/model/AffiliateModels.java": "b38a1a363c4c3c1a563a819a5d65d5b5ee8e640cee3c9f25d53b0e794a3ff0e5",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/model/AffiliateRelationshipException.java": "e6773742baaa647d501fcbca363f73fd049b872cb646997aef085ca6ed0c48ba",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/repository/AffiliateFeeSourceRepository.java": "1675973c201d313c297e2cd7682de2477676df86b451768d98451958ed1a5f61",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/repository/AffiliateLedgerRepository.java": "34a0416cef524ecceeb002fc54c4ff13e38322e558d82af1990d1a6e0c3a2fb3",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/repository/AffiliateRepository.java": "696c20f83a10f362a70fb02366adb75d4e4055be3a8de76e6ed66c1b5e647dfe",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/service/AffiliateAccrualService.java": "9eed99dda256b797b21b59ae6f3821af906b8c9dd076230f6f87cbaf5a654d48",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/service/AffiliateQueryService.java": "428bdf224d946bfb45fe0391daf0391b31af03eb958c1c413073a65a58faf662",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/service/AffiliateService.java": "28d241b21149e1d55dc454712c0c5732374b27dc2f5909b665eb8ae7ae025dd0",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/service/AffiliateSettlementService.java": "61a3d60bb4eaaa245b485433b5e6c51e1692ea905159adeab83832bbf88ce13f",
+    "surprising-gateway/src/main/java/com/surprising/affiliate/service/CommissionAllocation.java": "9cc78d5a02268adeec9495ed290279782f2d234830a8cac8deb66ec1e2170b7f",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/AffiliateHttpTest.java": "d266ffc659743240a26cb00d55bbc9fe22c70b8e46e13e0a527c3bb8b9963e28",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/AffiliatePostgresTest.java": "bd0ae07a7286208431d1c142482f7876c9f2415543d9dc73acfe15f75291eb08",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/AffiliateResourceTest.java": "49c53ababef45f8efe0207bc6e6911790eafe7d79e2d1781791feadf3c5e061c",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/AffiliateSafetyPostgresTest.java": "d33de68137f4c008e6359743d402f259f8b1cd3a7abff3740fad4c2fdc20c6fd",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/AffiliateScaleProbe.java": "06b4b0022074a60df9a1fe018a8c5d37b6cbc0d2056e8a768f174b10490cd031",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/AffiliateTeamIsolationPostgresTest.java": "171225d0db80327f9219d494390746d5b5ff108fe08df2deffd08455a00ef117",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/AffiliateTeamWorkload.java": "3223c00057513cf642b01ca5600b72beeffa544f916f65fee54213e201fd299c",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/CommissionAllocationTest.java": "fcfe93740940a93f509de321f42cd4fd994d69df45d5d9f15bb54a084ebf905c",
+    "surprising-gateway/src/test/java/com/surprising/affiliate/CommittedPayoutTransferTest.java": "7cf08137702f33467edf48a600298565a308ea77cae413f853aaac10075add55"
+  }
+}

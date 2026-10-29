@@ -769,3 +769,30 @@ JFR 64MiB 上限、profile、dumponexit=true，前后 DataLoss=0。summary/view�
 真实 PG 用例验证 4096 层 + 10000 名宽分支成员、损坏成环/历史重叠/超限拒绝、原游标完整恢复、整批舍入状态回滚、分页、并发产品隔离、有界结算、int64、租约 fencing、未知退避及不可变金额。新累计下拨回归先证实旧实现 20/0/0 失败，最终为 8/6/6，合计不变。Gateway/依赖主源构建通过；返佣与相关认证 123 项专项 0 failures/errors、2 个专用数据库条件跳过。完整 Gateway test 仍被三个既有 Core 旧 API 测试的编译错误阻塞，未修改它们掩盖失败。
 
 完整命令、SQL 计划、HTTP/浏览器错误恢复、迁移及未测范围见[报告](docs/validation/affiliate-safety-20261028/README.md)。没有发布生产。摘要归档后清理独立数据库、Vite、浏览器、原始 JFR 和临时工具，实际状态见[cleanup.json](docs/validation/affiliate-safety-20261028/cleanup.json)。
+
+
+## 2026-10-29 Gateway 多团队并发与资金恢复（affiliate-teams-20261029）
+
+执行前锁定[计划](docs/validation/affiliate-teams-20261029/plan.md)，当前 master、本轮待提交源码，HotSpot Corretto JDK 27 / Maven 3.9.16 / PostgreSQL 18.4。实际业务实现随后由工作区并行提交 `0ce0862f1` 保留；不回跑旧版本。1000 队 × 50 客户 × 六产品，另测 10000 队 × 5 客户 × 单 SPOT，每队一名客户产生两条实际费用夹具，其余客户为背景资料。四个独立 Spring/Hikari 业务容器、八个固定工作线程，共享真实 PG；六个确定性 Core 回放副本各有固定所有者线程，不包含真实 Aeron 网络/Archive。
+
+**部分验证；资金、隔离与恢复通过，速度验收无效。** 全系统换页且 CPU_Speed_Limit 最低 70/70/66，不能宣称生产容量或加速。委托、成交对、撤改单、全业务/分片清算 TPS、Aeron WAL 报文吞吐和物理带宽本轮均未测。批次积极排空而非生产调度节奏，预先装载费用，不能把运行总数除时间当线上 TPS。
+
+| 数据库/资金指标 | 1000 队六产品 | 10000 队单产品 | 1000 队 JFR |
+| --- | ---: | ---: | ---: |
+| 总账号 | 53596 | 83596 | 53596 |
+| 费用事实全部核算 | 12000 | 20000 | 12000 |
+| 首轮 UNKNOWN → 恢复后 | 410 → 0 | 802 → 0 | 450 → 0 |
+| 最终待准备组 / PENDING / UNKNOWN | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| 实际跨团队分账 / 重复扣入款 / 产品资产资金差额 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| 核算批次 p50 / p90 / p99 / max，ms，诊断 | 256.279 / 282.573 / 331.331 / 402.043 | 254.667 / 291.661 / 352.927 / 397.109 | 263.038 / 304.393 / 570.670 / 1091.237 |
+| JVM 采样峰值 RSS，MiB，含六回放 Core | 882.6 | 1108.1 | 914.5 |
+
+准确命令、p95/p99.9、CPU、分配/线程与连接锁采样见[报告](docs/validation/affiliate-teams-20261029/MULTI_TEAM_VALIDATION.md)及 metrics.json。万队 SPOT 实际 Core 170617 指令、现金扣入各 44420 次，与 PAID 单数相等；包含重试的请求 137284 次不能当成真实扣款数。按每个受益人、产品、资产逐一比较初始与最终真实组合快照，恢复前后状态完全一致。
+
+修复可判定关系异常拖住健康团队的问题：完整费用持久隔离后推进接收游标，连续确认游标保留在最早未解决费用之前，队列满明确背压。隔离重试有独立事务/时间/行数预算；没有按团队创建线程。另修复一个产品先完成自动周期后，其他产品迟到旧成熟费用被延后一天；保存已关闭周期截止点，同一结算组内不提前选中新周期费用。历史比例、不可变金额与原资金身份保持。
+
+独立 JFR profile/maxsize64m/dumponexit=true，整进程约 296 秒，DataLoss=0；[归档](docs/validation/affiliate-teams-20261029/jfr)保留 summary/view/配置/SHA256。Java CPU 样本主要为 Core Lane/Matcher 工作循环，不能据此认定返佣数据库或 Core 业务饱和；GC view 含夹具、snapshot 和审计，最长观测暂停 96.9ms，不换算稳态 GC 占比。Contention view 无事件不等于无竞争。分配有真实正计数，未声称 0 B/op；未采精确 native、缓存行、物理 I/O 或长稳泄漏。
+
+标准 reactor 相关 139 项执行，137 通过、2 专用 PRIMARY_AUTH 条件跳过，0 failures/errors；其中返佣 55 项全部通过。Gateway 既有 Core 测试编译阻塞已由并行提交解决。后台 lint、144 项测试、build 与真实控制器/PG 桌面窄屏刷新恢复通过。不是全仓测试或全产品 UI 验收。已有库需停写后执行 `20261029-affiliate-team-isolation.sql` 并统一后端版本，本轮没有生产发布。
+
+正式容量需无换页/限频环境、单真实 Aeron 成员/单 Matcher/in-flight256 及网络/Archive 链路，另补完整 Gateway 进程、混合流和长稳。归档后本轮独立数据库、QA/Vite、原始 JFR 与临时工具按 [cleanup.json](docs/validation/affiliate-teams-20261029/cleanup.json) 记录清理；不清理并行任务资源。

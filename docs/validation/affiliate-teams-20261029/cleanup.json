@@ -1,0 +1,16 @@
+{
+  "at_utc": "2026-10-29T03:16:23.763915+00:00",
+  "database": "surprising_affiliate_teams_20261029",
+  "database_exists": false,
+  "database_had_active_connections_before_drop": false,
+  "qa_19096_listening": false,
+  "vite_5414_listening": false,
+  "owned_vite_pid_stopped": 57762,
+  "temporary_directory": "/tmp/surprising-affiliate-teams-20261029",
+  "temporary_directory_exists": false,
+  "raw_jfr_removed_after_hash_and_views": true,
+  "temporary_qa_classes_removed": [],
+  "unrelated_workspace_resources_touched": false,
+  "production_deployed": false,
+  "note": "Only this task’s own database, Vite, temporary tooling, raw JFR and generated QA classes were removed. Other threads’ databases/files, including untracked .codegraph, were preserved."
+}
