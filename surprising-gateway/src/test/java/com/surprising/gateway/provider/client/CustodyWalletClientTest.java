@@ -23,6 +23,24 @@ import tools.jackson.databind.ObjectMapper;
 
 class CustodyWalletClientTest {
 
+    @Test
+    void historyRequiresTheExactAuthenticatedUserSubject() {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getCustodyWallet().setEnabled(true);
+        properties.getCustodyWallet().setBaseUrl("https://wallet.example.test");
+        properties.getCustodyWallet().setApiKey("test-key");
+        properties.getCustodyWallet().setApiSecret("test-only-secret");
+        RestTemplate rest = mock(RestTemplate.class);
+        Map<String, Object> own = Map.of("subject", "user:42", "amount", "1");
+        when(rest.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
+                any(ParameterizedTypeReference.class))).thenReturn(ResponseEntity.ok(List.of(
+                        own, Map.of("subject", "user:420", "amount", "99"), Map.of("amount", "5"))));
+        CustodyWalletClient client = new CustodyWalletClient(properties, rest, new ObjectMapper());
+
+        assertThat(client.deposits(42L, "ETH", "USDT", 50)).containsExactly(own);
+        assertThat(client.withdrawals(42L, "ETH", "USDT", 50)).containsExactly(own);
+    }
+
     private final CustodyWalletClient client = new CustodyWalletClient(
             new GatewayProperties(), mock(RestTemplate.class), new ObjectMapper());
 
@@ -109,13 +127,14 @@ class CustodyWalletClientTest {
         properties.getCustodyWallet().setApiKey("wallet-key");
         properties.getCustodyWallet().setApiSecret("wallet-secret");
         RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
-                .thenReturn(ResponseEntity.status(409).body(Map.of("error", "duplicate")));
         CustodyWalletClient unknownClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
-
-        assertThatThrownBy(() -> unknownClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
-                .isInstanceOf(IllegalStateException.class)
-                .isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
+        for (int status : List.of(401, 403, 409, 429)) {
+            when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
+                    .thenReturn(ResponseEntity.status(status).body(Map.of("error", "ambiguous")));
+            assertThatThrownBy(() -> unknownClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
+        }
     }
 
     @Test

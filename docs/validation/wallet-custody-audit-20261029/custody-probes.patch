@@ -1,0 +1,46 @@
+--- a/wallet-api/src/test/java/com/surprising/wallet/custody/CustodyWithdrawalCreationIntegrationTest.java
++++ b/wallet-api/src/test/java/com/surprising/wallet/custody/CustodyWithdrawalCreationIntegrationTest.java
+@@ -113,0 +114,43 @@
++    // Audit probes: a passing assertion reproduces the stated behavior, not security completion.
++    @Test void auditCommittedWithdrawalCanBeRejectedOnSameKeyRetryAfterReorgDeficit() {
++        var original=create("127.0.0.1");
++        String hash="0x"+"ab".repeat(32);
++        jdbc.update("update withdrawal_order set status='SENT',tx_hash=? where tenant_id=?",hash,tenant);
++        long depositId=jdbc.queryForObject("""
++                insert into deposit_record(tenant_id,chain,asset_symbol,tx_hash,to_address,amount,
++                    block_height,account_id) values (?,'ETH','ETH','audit-reorg-deposit',?,1,1,'withdraw-account') returning id
++                """,Long.class,tenant,address);
++        new CustodyReorgDeficitRepository(jdbc).open(tenant,custodyId,depositId,"ETH","ETH",
++                "withdraw-account",BigDecimal.ONE,BigDecimal.ONE);
++        var error=assertThrows(IllegalStateException.class,()->create("127.0.0.1"));
++        var response=new com.surprising.wallet.exception.CustodyExceptionHandler().state(error);
++        assertEquals(409,response.getStatusCode().value());
++        assertEquals("INVALID_STATE",((Map<?,?>)response.getBody().get("error")).get("code"));
++        assertEquals(1,count("withdrawal_order"));assertEquals(1,count("custody_withdrawal"));
++        assertEquals(original.id(),jdbc.queryForObject("select id from custody_withdrawal where tenant_id=?",UUID.class,tenant));
++        assertEquals("SENT",jdbc.queryForObject("select status from withdrawal_order where tenant_id=?",String.class,tenant));
++        assertEquals(0,BigDecimal.ONE.compareTo(balance("locked_balance")));
++    }
++    @Test void auditExpiredCacheRetainsPermanentUniqueConstraintButCannotReplayResponse() {
++        create("127.0.0.1");
++        jdbc.update("update custody_idempotency_key set expires_at=now()-interval '1 day' where tenant_id=?",tenant);
++        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->create("127.0.0.1"));
++        assertEquals(1,count("withdrawal_order"));assertEquals(1,count("custody_withdrawal"));
++        assertEquals(0,new BigDecimal("4").compareTo(balance("available_balance")));
++        assertEquals(0,BigDecimal.ONE.compareTo(balance("locked_balance")));
++    }
++    @Test void auditPrefixSearchMatchesAnotherExchangeUser() {
++        jdbc.update("update custody_address set subject='user:420' where id=?",custodyId);
++        assertTrue(new CustodyAddressRepository(jdbc).findHistorySearchIds(tenant,"ETH","user:42").contains(custodyId));
++    }
++    @Test void auditGatewaySubjectSearchDoesNotReturnOwnersWithdrawal() {
++        create("127.0.0.1");
++        jdbc.update("update custody_address set subject='user:42' where id=?",custodyId);
++        var query=new CustodyTransactionQueryService(new CustodyDepositRepository(jdbc),new CustodyWithdrawalRepository(jdbc),
++                new CustodyAddressRepository(jdbc),new WithdrawalOrderRepository(jdbc));
++        var principal=CustodyTestSupport.tenantAdmin(tenant);
++        assertEquals(1,query.withdrawals(principal,"ETH","ETH","","",50,0).size());
++        assertEquals("user:42",query.withdrawals(principal,"ETH","ETH","","",50,0).getFirst().subject());
++        assertTrue(query.withdrawals(principal,"ETH","ETH","","user:42",50,0).isEmpty());
++    }
++

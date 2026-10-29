@@ -126,8 +126,8 @@ public class CustodyWalletClient {
                 "search", subject(userId),
                 "limit", Integer.toString(Math.max(1, Math.min(limit, 200))),
                 "offset", "0"));
-        return exchange(HttpMethod.GET, API_PREFIX + "/deposits" + query, null,
-                new ParameterizedTypeReference<>() {}, null);
+        return ownedHistory(userId, exchange(HttpMethod.GET, API_PREFIX + "/deposits" + query, null,
+                new ParameterizedTypeReference<>() {}, null));
     }
 
     public List<Map<String, Object>> withdrawals(long userId, String chain, String asset, int limit) {
@@ -137,8 +137,15 @@ public class CustodyWalletClient {
                 "search", subject(userId),
                 "limit", Integer.toString(Math.max(1, Math.min(limit, 200))),
                 "offset", "0"));
-        return exchange(HttpMethod.GET, API_PREFIX + "/withdrawals" + query, null,
-                new ParameterizedTypeReference<>() {}, null);
+        return ownedHistory(userId, exchange(HttpMethod.GET, API_PREFIX + "/withdrawals" + query, null,
+                new ParameterizedTypeReference<>() {}, null));
+    }
+
+    private List<Map<String, Object>> ownedHistory(long userId, List<Map<String, Object>> rows) {
+        if (rows == null) throw new IllegalStateException("custody wallet history is unavailable");
+        String owner = subject(userId);
+        // Custody's search parameter is a fuzzy tenant search, not a user ownership boundary.
+        return rows.stream().filter(row -> row != null && owner.equals(row.get("subject"))).toList();
     }
 
     public List<Map<String, Object>> withdrawalsByExternalReference(String externalReference,

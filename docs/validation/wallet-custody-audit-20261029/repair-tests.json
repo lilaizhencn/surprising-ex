@@ -1,0 +1,108 @@
+{
+  "fixes-red": {
+    "classes": [
+      {
+        "tests": "1",
+        "failures": "1",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "2.850",
+        "class": "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest"
+      },
+      {
+        "tests": "1",
+        "failures": "1",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.667",
+        "class": "com.surprising.gateway.provider.client.CustodyWalletClientTest"
+      }
+    ],
+    "tests": 2,
+    "failures": 2,
+    "errors": 0,
+    "skipped": 0
+  },
+  "fixes-green": {
+    "classes": [
+      {
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "1.771",
+        "class": "com.surprising.gateway.provider.controller.CustodyWalletControllerTest"
+      },
+      {
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.465",
+        "class": "com.surprising.gateway.provider.service.WalletFundingServiceTest"
+      },
+      {
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.351",
+        "class": "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest"
+      },
+      {
+        "tests": "13",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.257",
+        "class": "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest"
+      },
+      {
+        "tests": "11",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.260",
+        "class": "com.surprising.gateway.provider.client.CustodyWalletClientTest"
+      }
+    ],
+    "tests": 43,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "wallet-probes": {
+    "classes": [
+      {
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "18.86",
+        "class": "com.surprising.wallet.custody.CustodyWithdrawalCreationIntegrationTest"
+      }
+    ],
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "meaning": "Audit probe success validates the documented observed behavior, not complete security."
+  },
+  "remaining-unsafe-behavior-probes": {
+    "classes": [
+      {
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "2.126",
+        "class": "com.surprising.gateway.provider.service.WalletAuditProbeTest"
+      }
+    ],
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "meaning": "Audit probe success validates the documented observed behavior, not complete security."
+  }
+}

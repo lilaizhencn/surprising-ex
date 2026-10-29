@@ -1,0 +1,86 @@
+[
+  {
+    "repo": "gateway",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalService.java",
+    "sha256BeforeFix": "9778d68af21472cb7967d7ea2ff7dca29ee85222097cb554458226c28f6f7009",
+    "sha256AfterFix": "9778d68af21472cb7967d7ea2ff7dca29ee85222097cb554458226c28f6f7009"
+  },
+  {
+    "repo": "gateway",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalStateService.java",
+    "sha256BeforeFix": "958150bc22c4935d2a8d9aef6e41f6aad25c560e42176fc8d6fc7f57fd42108a",
+    "sha256AfterFix": "958150bc22c4935d2a8d9aef6e41f6aad25c560e42176fc8d6fc7f57fd42108a"
+  },
+  {
+    "repo": "gateway",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationService.java",
+    "sha256BeforeFix": "aab398e3858dd3eb7456a7cdff16b4916bd0e6dad784c1b612be814993ec04a0",
+    "sha256AfterFix": "aab398e3858dd3eb7456a7cdff16b4916bd0e6dad784c1b612be814993ec04a0"
+  },
+  {
+    "repo": "gateway",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWalletWebhookService.java",
+    "sha256BeforeFix": "06bfc60b9db48db4923f8e9beae4311f71549cb3e65f12c05728fc97cb1a8d94",
+    "sha256AfterFix": "efdc444af7d92fe539674b75246384327bb0fdf9c6e9f01d4ff4986d7e036955"
+  },
+  {
+    "repo": "gateway",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/client/CustodyWalletClient.java",
+    "sha256BeforeFix": "dd5abb6efadfb622847cde53a35f0e65308eeda6ebdd30ac457897a5b6bbd667",
+    "sha256AfterFix": "b53976942358c2c73593431303e2603b76ecd63aa9e0c74e92f03edefcf60988"
+  },
+  {
+    "repo": "gateway",
+    "path": "surprising-gateway/src/main/java/com/surprising/asset/service/AssetConfigurationService.java",
+    "sha256BeforeFix": "98ee5a7a481554be1a8a7af20b77701b19ebf02602328e4094786dffb1d13a82",
+    "sha256AfterFix": "98ee5a7a481554be1a8a7af20b77701b19ebf02602328e4094786dffb1d13a82"
+  },
+  {
+    "repo": "custody",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyWithdrawalService.java",
+    "sha256BeforeFix": "1c5d4eeb7186de25b2580ae5abb66a68038202c3953f544555a3e037169a2d17",
+    "sha256AfterFix": "1c5d4eeb7186de25b2580ae5abb66a68038202c3953f544555a3e037169a2d17"
+  },
+  {
+    "repo": "custody",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyWithdrawalExecutionService.java",
+    "sha256BeforeFix": "0e61ecc79156fdecd38b9354809eac7076c246a599a95162319a715ac454d936",
+    "sha256AfterFix": "0e61ecc79156fdecd38b9354809eac7076c246a599a95162319a715ac454d936"
+  },
+  {
+    "repo": "custody",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyGasAccountingService.java",
+    "sha256BeforeFix": "79dffc91d449a2ee1f408e48ea7e5d4e2b8a0fbc6074649865b8cf0f89ff869a",
+    "sha256AfterFix": "79dffc91d449a2ee1f408e48ea7e5d4e2b8a0fbc6074649865b8cf0f89ff869a"
+  },
+  {
+    "repo": "custody",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyTransactionQueryService.java",
+    "sha256BeforeFix": "ec64350674bafc2310d8c1366dc94facdabbf61710edb1d7de707bd27cb0fbd3",
+    "sha256AfterFix": "ec64350674bafc2310d8c1366dc94facdabbf61710edb1d7de707bd27cb0fbd3"
+  },
+  {
+    "repo": "custody",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/WithdrawalSettlementService.java",
+    "sha256BeforeFix": "e60fe7d86a7e28ca3e03e47cd41bc47747c078a863f635c50688a3b587bf163b",
+    "sha256AfterFix": "e60fe7d86a7e28ca3e03e47cd41bc47747c078a863f635c50688a3b587bf163b"
+  },
+  {
+    "repo": "custody",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/UtxoBroadcastService.java",
+    "sha256BeforeFix": "30f292a740bd39784509d1d674780c8da48c4c93dc9f13d33d3f52ee9eefe317",
+    "sha256AfterFix": "30f292a740bd39784509d1d674780c8da48c4c93dc9f13d33d3f52ee9eefe317"
+  },
+  {
+    "repo": "custody",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/chain/evm/EvmAccountTransactionService.java",
+    "sha256BeforeFix": "d0176af8d373692576f6112aa3846e2ee159b42607ae2edefd9adcd46b2126a4",
+    "sha256AfterFix": "d0176af8d373692576f6112aa3846e2ee159b42607ae2edefd9adcd46b2126a4"
+  },
+  {
+    "repo": "custody",
+    "path": "resources/docs/db/surprising-wallet-init-pgsql.sql",
+    "sha256BeforeFix": "eaabd3b33626844b16b725b00c328cf462b3eaa007a67536dfd366491b1acd5d",
+    "sha256AfterFix": "eaabd3b33626844b16b725b00c328cf462b3eaa007a67536dfd366491b1acd5d"
+  }
+]

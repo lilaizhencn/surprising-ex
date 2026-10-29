@@ -36,6 +36,23 @@ class CustodyWalletWebhookServiceTest {
     }
 
     @Test
+    void preservesNumericDepositAmountBeforeConvertingToAccountingUnits() {
+        byte[] body = ("{\"id\":\"precision-event\",\"type\":\"DEPOSIT.CONFIRMED\",\"data\":{" +
+                "\"subject\":\"user:42\",\"asset\":\"USDT\",\"availableAmount\":100000000000.000001}}")
+                .getBytes(StandardCharsets.UTF_8);
+        long timestamp = Instant.now().getEpochSecond();
+        when(repository.claim(eq("precision-event"), eq("DEPOSIT.CONFIRMED"), any(), any()))
+                .thenReturn(CustodyWalletWebhookRepository.ClaimResult.CLAIMED);
+        when(assets.amountUnits("USDT", "100000000000.000001")).thenReturn(100_000_000_000_000_001L);
+
+        service.handle("precision-event", "DEPOSIT.CONFIRMED", Long.toString(timestamp),
+                service.signature("webhook-secret", "precision-event", "DEPOSIT.CONFIRMED", timestamp, body), body);
+
+        verify(spotAccountClient).adjustBalance(42L, "USDT", 100_000_000_000_000_001L,
+                "custody-wallet:precision-event:deposit.confirmed", "custody wallet DEPOSIT.CONFIRMED");
+    }
+
+    @Test
     void verifiesSignatureAndPostsConfirmedDepositToSpotAccount() {
         byte[] body = ("{\"id\":\"event-1\",\"type\":\"DEPOSIT.CONFIRMED\",\"data\":{"+
                 "\"subject\":\"user:42\",\"asset\":\"USDT\",\"availableAmount\":\"1.25\"}}")

@@ -1,0 +1,119 @@
+package com.surprising.gateway.provider.service;
+
+import com.surprising.asset.model.AssetConfiguration;
+import com.surprising.asset.repository.*;
+import com.surprising.asset.service.AssetConfigurationService;
+import com.surprising.gateway.provider.client.*;
+import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.gateway.provider.model.CustodyWithdrawalModels.*;
+import com.surprising.gateway.provider.repository.*;
+import java.math.BigDecimal;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.*;
+import org.springframework.web.client.RestTemplate;
+import tools.jackson.databind.ObjectMapper;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/** Audit probes assert the observed defect, not the desired safe behavior. */
+class WalletAuditProbeTest {
+    @Test void configuredFeeIsNotChargedOrDeductedFromOnChainAmount() {
+        var f = new Fixture();
+        when(f.networks.list(1)).thenReturn(List.of(new AssetConfiguration.Network(1,1,"ETH","Ethereum", "token",false,6,true,true,
+                BigDecimal.ONE,BigDecimal.TEN,new BigDecimal("2.5"),12,1,Instant.now())));
+        f.service.submit(42,"audit-key-one", f.request());
+        verify(f.spot).adjustBalance(eq(42L),eq("USDT"),eq(-25_000_000L),any(),any());
+        var payload = ArgumentCaptor.forClass(Map.class);
+        verify(f.wallet).createWithdrawal(eq(42L),payload.capture(),any());
+        assertThat(payload.getValue().get("amount")).isEqualTo("25");
+        verify(f.networks,never()).list(anyInt());
+    }
+    @Test void disabledNetworkAndBelowMinimumAmountStillReachCustody() {
+        var f = new Fixture();
+        when(f.networks.list(1)).thenReturn(List.of(new AssetConfiguration.Network(1,1,"ETH","Ethereum", "token",false,6,false,false,
+                BigDecimal.ONE,new BigDecimal("100"),BigDecimal.ONE,12,1,Instant.now())));
+        assertThat(f.service.submit(42,"audit-key-two",f.request()).status()).isEqualTo("SUBMITTED");
+        verify(f.wallet).createWithdrawal(eq(42L),any(),any());
+    }
+    @Test void timeoutThenRejectionRestoresExchangeFundsDespiteAnAcceptedCustodyPayment() {
+        var f = new Fixture();
+        var payments = new AtomicInteger(); var calls = new AtomicInteger();
+        when(f.wallet.createWithdrawal(eq(42L),any(),any())).thenAnswer(call -> {
+            if(calls.incrementAndGet()==1) { payments.incrementAndGet(); throw new IllegalStateException("response lost after custody committed"); }
+            throw new CustodyWalletClient.CustodyWalletRejectedException("reorg deficit on retry",409,"{\"error\":{\"code\":\"INVALID_STATE\"}}",null);
+        });
+        when(f.states.recordAdminRetry(eq(f.id),anyLong(),any(),any())).thenReturn(f.record("BROADCAST_UNKNOWN"));
+        when(f.states.markRefundPending(eq(f.id),any(),any())).thenReturn(f.record("REFUND_PENDING"));
+        assertThatThrownBy(()->f.service.submit(42,"audit-key-three",f.request())).isInstanceOf(CustodyWithdrawalService.WithdrawalUnknownException.class);
+        assertThatThrownBy(()->f.service.retry(f.id,99,"admin","retry timeout")).isInstanceOf(CustodyWithdrawalService.WithdrawalRejectedException.class);
+        assertThat(payments).hasValue(1);
+        verify(f.spot).adjustBalance(eq(42L),eq("USDT"),eq(25_000_000L),contains(":refund"),any());
+        verify(f.states).markRefunded(eq(f.id),any(),any());
+    }
+    @Test void unchangedUserRequestGetsDifferentIdempotencyHashWhenValuationMoves() {
+        var f = new Fixture();
+        when(f.assetRepo.byAccountingCode("ETH")).thenReturn(Optional.of(new AssetConfiguration.Asset(2,"ETH","Ether","",100_000_000,true,true,0,Instant.now())));
+        when(f.valuation.toUsdt(eq("ETH"),any())).thenReturn(new BigDecimal("2500"),new BigDecimal("2501"));
+        when(f.states.createOrGet(any())).thenReturn(new CreateResult(f.record("PENDING_APPROVAL"),true));
+        var request=new CustodyWithdrawalService.WithdrawalRequest(f.address,"ETH","ETH","0xrecipient","1",null);
+        f.service.submit(42,"audit-key-four",request); f.service.submit(42,"audit-key-four",request);
+        var intents=ArgumentCaptor.forClass(CreateRequest.class);
+        verify(f.states,times(2)).createOrGet(intents.capture());
+        assertThat(intents.getAllValues().get(0).requestHash()).isNotEqualTo(intents.getAllValues().get(1).requestHash());
+    }
+    @Test void gatewayReturnsAnotherCustomersDepositFromFuzzyCustodySearch() {
+        var props=new GatewayProperties();props.getCustodyWallet().setEnabled(true);props.getCustodyWallet().setBaseUrl("https://wallet.example.test");
+        props.getCustodyWallet().setApiKey("test-key");props.getCustodyWallet().setApiSecret("test-only");
+        var rest=mock(RestTemplate.class);
+        when(rest.exchange(any(URI.class),eq(HttpMethod.GET),any(HttpEntity.class),any(ParameterizedTypeReference.class)))
+                .thenReturn(ResponseEntity.ok(List.of(Map.of("subject","user:42","amount","1"),Map.of("subject","user:420","amount","99"))));
+        var client=new CustodyWalletClient(props,rest,new ObjectMapper());
+        assertThat(client.deposits(42,"ETH","USDT",50)).anyMatch(row->"user:420".equals(row.get("subject")));
+    }
+    @Test void numericCustodyWebhookRoundsAValidAccountingUnitBeforeCrediting() {
+        var f=new Fixture(); f.props.getCustodyWallet().setEnabled(true); f.props.getCustodyWallet().setWebhookSecret("test-only");
+        var events=mock(CustodyWalletWebhookRepository.class);
+        when(events.claim(any(),any(),any(),any())).thenReturn(CustodyWalletWebhookRepository.ClaimResult.CLAIMED);
+        var webhook=new CustodyWalletWebhookService(f.props,events,f.service,f.spot,new ObjectMapper(),f.assets);
+        var body="{\"id\":\"audit-event\",\"type\":\"DEPOSIT.CONFIRMED\",\"data\":{\"subject\":\"user:42\",\"asset\":\"USDT\",\"availableAmount\":100000000000.000001}}".getBytes(StandardCharsets.UTF_8);
+        long now=Instant.now().getEpochSecond();
+        webhook.handle("audit-event","DEPOSIT.CONFIRMED",Long.toString(now),webhook.signature("test-only","audit-event","DEPOSIT.CONFIRMED",now,body),body);
+        verify(f.spot).adjustBalance(eq(42L),eq("USDT"),eq(100_000_000_000_000_000L),any(),any());
+        assertThat(new BigDecimal("100000000000.000001").movePointRight(6).longValueExact()).isEqualTo(100_000_000_000_000_001L);
+    }
+    private static final class Fixture {
+        final UUID id=UUID.randomUUID(), address=UUID.randomUUID();
+        final GatewayProperties props=new GatewayProperties();
+        final AssetNetworkRepository networks=mock(AssetNetworkRepository.class);
+        final AssetRepository assetRepo=mock(AssetRepository.class);
+        final CustodyWithdrawalRepository repo=mock(CustodyWithdrawalRepository.class);
+        final CustodyWithdrawalStateService states=mock(CustodyWithdrawalStateService.class);
+        final CustodyWalletClient wallet=mock(CustodyWalletClient.class);
+        final SpotAccountClient spot=mock(SpotAccountClient.class);
+        final WithdrawalValuationClient valuation=mock(WithdrawalValuationClient.class);
+        final AssetConfigurationService assets;
+        final CustodyWithdrawalService service;
+        Fixture() {
+            when(assetRepo.byAccountingCode("USDT")).thenReturn(Optional.of(new AssetConfiguration.Asset(1,"USDT","Tether","",1_000_000,true,true,0,Instant.now())));
+            assets=new AssetConfigurationService(assetRepo,networks,mock(AssetConfigurationChangeRepository.class),new ObjectMapper());
+            when(valuation.toUsdt(eq("USDT"),any())).thenReturn(new BigDecimal("25"));
+            when(states.createOrGet(any())).thenReturn(new CreateResult(record("PROCESSING"),true));
+            when(states.markDebited(eq(id),any())).thenReturn(record("DEBITED"));
+            when(states.markSubmitted(eq(id),any(),any())).thenReturn(record("SUBMITTED"));
+            when(wallet.createWithdrawal(eq(42L),any(),any())).thenReturn(Map.of("id","custody-one","externalReference","audit-external"));
+            var refund=new CustodyWithdrawalRefundService(states,spot);
+            var reconcile=new CustodyWithdrawalReconciliationService(repo,states,wallet,refund,new ObjectMapper());
+            service=new CustodyWithdrawalService(props,repo,states,wallet,spot,valuation,refund,reconcile,new ObjectMapper(),assets);
+        }
+        CustodyWithdrawalService.WithdrawalRequest request() { return new CustodyWithdrawalService.WithdrawalRequest(address,"ETH","USDT","0xrecipient","25",null); }
+        WithdrawalRecord record(String status) { return new WithdrawalRecord(id,42,"audit-idempotency","hash","ETH","USDT",address,"0xrecipient","25",25_000_000,new BigDecimal("25"),"audit-external","audit-debit","{}",status,null,null,null,null,Instant.now(),Instant.now(),null,null,null,null,null); }
+    }
+}

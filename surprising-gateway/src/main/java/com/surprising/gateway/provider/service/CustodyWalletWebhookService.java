@@ -15,6 +15,7 @@ import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.DeserializationFeature;
 
 @Service
 public class CustodyWalletWebhookService {
@@ -162,7 +163,8 @@ public class CustodyWalletWebhookService {
 
     private Map<String, Object> readEvent(byte[] body) {
         try {
-            Map<String, Object> event = objectMapper.readValue(body, Map.class);
+            Map<String, Object> event = objectMapper.readerFor(Map.class)
+                    .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(body);
             if (event == null) {
                 throw new IllegalArgumentException("wallet webhook body must be a JSON object");
             }

@@ -1,0 +1,186 @@
+{
+  "gateway-baseline": {
+    "classes": [
+      {
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "4.261",
+        "class": "com.surprising.gateway.provider.controller.CustodyWalletControllerTest"
+      },
+      {
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "1.105",
+        "class": "com.surprising.gateway.provider.service.WalletFundingServiceTest"
+      },
+      {
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.764",
+        "class": "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest"
+      },
+      {
+        "tests": "13",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.743",
+        "class": "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest"
+      },
+      {
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.757",
+        "class": "com.surprising.gateway.provider.client.CustodyWalletClientTest"
+      }
+    ],
+    "tests": 41,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "gateway-probes-final": {
+    "classes": [
+      {
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "5.557",
+        "class": "com.surprising.gateway.provider.service.WalletAuditProbeTest"
+      }
+    ],
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "wallet-baseline": {
+    "classes": [
+      {
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "29.81",
+        "class": "com.surprising.wallet.custody.CustodyTenantIsolationIntegrationTest"
+      },
+      {
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "40.15",
+        "class": "com.surprising.wallet.custody.CustodyDepositProjectionIntegrationTest"
+      },
+      {
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "14.57",
+        "class": "com.surprising.wallet.custody.CustodyWithdrawalCreationIntegrationTest"
+      },
+      {
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "352.5",
+        "class": "com.surprising.wallet.custody.CustodyWithdrawalProjectionIntegrationTest"
+      },
+      {
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "21.94",
+        "class": "com.surprising.wallet.custody.EvmUnknownAttemptRecoveryIntegrationTest"
+      },
+      {
+        "tests": "11",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "51.69",
+        "class": "com.surprising.wallet.custody.UtxoSigningPipelineIntegrationTest"
+      },
+      {
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "16.45",
+        "class": "com.surprising.wallet.custody.AccountSequenceReservationIntegrationTest"
+      },
+      {
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "17.74",
+        "class": "com.surprising.wallet.custody.WithdrawalSettlementIntegrationTest"
+      },
+      {
+        "tests": "14",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "49.63",
+        "class": "com.surprising.wallet.custody.CustodyGasAccountingIntegrationTest"
+      },
+      {
+        "tests": "14",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "55.03",
+        "class": "com.surprising.wallet.custody.CustodySecurityIntegrationTest"
+      },
+      {
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "17.93",
+        "class": "com.surprising.wallet.custody.UtxoSigningSubmissionIntegrationTest"
+      },
+      {
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "13.99",
+        "class": "com.surprising.wallet.custody.EvmNonceReservationIntegrationTest"
+      },
+      {
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "6.783",
+        "class": "com.surprising.wallet.service.AccountChainWorkflowServiceTest"
+      },
+      {
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "seconds": "0.330",
+        "class": "com.surprising.wallet.service.TransactionQueueSafetyTest"
+      }
+    ],
+    "tests": 106,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

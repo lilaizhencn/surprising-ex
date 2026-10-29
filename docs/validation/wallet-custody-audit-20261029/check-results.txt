@@ -1,0 +1,70 @@
+gateway-baseline
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.261 s -- in com.surprising.gateway.provider.controller.CustodyWalletControllerTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.105 s -- in com.surprising.gateway.provider.service.WalletFundingServiceTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.764 s -- in com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.743 s -- in com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest
+[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.757 s -- in com.surprising.gateway.provider.client.CustodyWalletClientTest
+[INFO] Tests run: 41, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  02:51 min
+[INFO] Finished at: 2026-10-29T22:47:17+08:00
+
+gateway-probes-final
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.557 s -- in com.surprising.gateway.provider.service.WalletAuditProbeTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  01:20 min
+[INFO] Finished at: 2026-10-29T23:06:31+08:00
+
+wallet-baseline
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 29.81 s -- in com.surprising.wallet.custody.CustodyTenantIsolationIntegrationTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 40.15 s -- in com.surprising.wallet.custody.CustodyDepositProjectionIntegrationTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 14.57 s -- in com.surprising.wallet.custody.CustodyWithdrawalCreationIntegrationTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 352.5 s -- in com.surprising.wallet.custody.CustodyWithdrawalProjectionIntegrationTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 21.94 s -- in com.surprising.wallet.custody.EvmUnknownAttemptRecoveryIntegrationTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 51.69 s -- in com.surprising.wallet.custody.UtxoSigningPipelineIntegrationTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 16.45 s -- in com.surprising.wallet.custody.AccountSequenceReservationIntegrationTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 17.74 s -- in com.surprising.wallet.custody.WithdrawalSettlementIntegrationTest
+[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 49.63 s -- in com.surprising.wallet.custody.CustodyGasAccountingIntegrationTest
+[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 55.03 s -- in com.surprising.wallet.custody.CustodySecurityIntegrationTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 17.93 s -- in com.surprising.wallet.custody.UtxoSigningSubmissionIntegrationTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 13.99 s -- in com.surprising.wallet.custody.EvmNonceReservationIntegrationTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.783 s -- in com.surprising.wallet.service.AccountChainWorkflowServiceTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.330 s -- in com.surprising.wallet.service.TransactionQueueSafetyTest
+[INFO] Tests run: 106, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  16:28 min
+[INFO] Finished at: 2026-10-29T23:05:46+08:00
+
+fixes-red
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 2.850 s <<< FAILURE! -- in com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.667 s <<< FAILURE! -- in com.surprising.gateway.provider.client.CustodyWalletClientTest
+[ERROR] Tests run: 2, Failures: 2, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+[INFO] Total time:  01:06 min
+[INFO] Finished at: 2026-10-29T23:09:57+08:00
+
+fixes-green-final
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.771 s -- in com.surprising.gateway.provider.controller.CustodyWalletControllerTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.465 s -- in com.surprising.gateway.provider.service.WalletFundingServiceTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.351 s -- in com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.257 s -- in com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.260 s -- in com.surprising.gateway.provider.client.CustodyWalletClientTest
+[INFO] Tests run: 43, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  54.643 s
+[INFO] Finished at: 2026-10-29T23:38:37+08:00
+
+wallet-probes-final
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 18.86 s -- in com.surprising.wallet.custody.CustodyWithdrawalCreationIntegrationTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  48.291 s
+[INFO] Finished at: 2026-10-29T23:36:31+08:00
+
+remaining-probes-final
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.126 s -- in com.surprising.gateway.provider.service.WalletAuditProbeTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  48.095 s
+[INFO] Finished at: 2026-10-29T23:36:32+08:00
