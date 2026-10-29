@@ -1,0 +1,205 @@
+[
+  {
+    "name": "com.surprising.gateway.provider.auth.ApiKeyManagementPostgresTest",
+    "tests": "19",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.websocket.provider.handler.ClientWebSocketHandlerTest",
+    "tests": "8",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.websocket.provider.handler.WebSocketApiKeyAuthenticationTest",
+    "tests": "7",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.controller.ReadViewHttpErrorsTest",
+    "tests": "1",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.realtime.api.ValkeyReadViewIntegrationTest",
+    "tests": "28",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.service.GatewayRequestLimitsRedisTest",
+    "tests": "8",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.websocket.provider.handler.WebSocketLimitsRedisTest",
+    "tests": "6",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.realtime.api.ValkeyScriptPipelineTest",
+    "tests": "3",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.aeron.service.core.MaintenanceIntegrationTest",
+    "tests": "38",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.config.GatewayCorsConfigTest",
+    "tests": "1",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest",
+    "tests": "21",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.controller.GatewayRuntimeTest",
+    "tests": "6",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.AuthServiceTest",
+    "tests": "26",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.OpenPlatformBrowserQaTest",
+    "tests": "1",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTaskTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.aeron.service.core.CoreMaintenanceTest",
+    "tests": "17",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.websocket.provider.service.WebSocketSessionAuthorizationTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.controller.AuthClientMetadataBoundaryTest",
+    "tests": "6",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.GatewayApiKeyServiceTest",
+    "tests": "8",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.config.GatewayLimitPropertiesTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.ApiKeyHttpBoundaryTest",
+    "tests": "14",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.product.MultiProductMoneyIntegrationTest",
+    "tests": "1",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.ApiKeyOrderPermissionTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.websocket.provider.config.WebSocketServerConfigurationTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.controller.RuntimeProductsHttpTest",
+    "tests": "3",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.controller.GatewayLimitHttpTest",
+    "tests": "11",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.controller.GatewayProxyControllerTest",
+    "tests": "40",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest",
+    "tests": "3",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+    "tests": "8",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  }
+]

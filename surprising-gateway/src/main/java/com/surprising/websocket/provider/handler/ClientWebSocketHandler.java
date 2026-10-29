@@ -1,7 +1,7 @@
 package com.surprising.websocket.provider.handler;
 
 import com.surprising.websocket.provider.service.RealtimeWebSocketBridge;
-import com.surprising.websocket.provider.service.WebSocketJwtAuthenticator;
+import com.surprising.websocket.provider.service.WebSocketAuthenticator;
 import com.surprising.websocket.provider.service.SubscriptionRegistry;
 import com.surprising.websocket.provider.session.ClientConnection;
 
@@ -30,26 +30,53 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final SubscriptionRegistry registry;
     private final WebSocketProperties properties;
-    private final WebSocketJwtAuthenticator jwtAuthenticator;
+    private final WebSocketAuthenticator authenticator;
     private final com.surprising.gateway.provider.product.GatewayProductServices products;
+    private final com.surprising.gateway.provider.service.GatewayRequestLimits limits;
 
     public ClientWebSocketHandler(ObjectMapper objectMapper,
                                   SubscriptionRegistry registry,
                                   WebSocketProperties properties,
-                                  WebSocketJwtAuthenticator jwtAuthenticator,
-                                  com.surprising.gateway.provider.product.GatewayProductServices products) {
+                                  WebSocketAuthenticator authenticator,
+                                  com.surprising.gateway.provider.product.GatewayProductServices products,
+                                  com.surprising.gateway.provider.service.GatewayRequestLimits limits) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.properties = properties;
-        this.jwtAuthenticator = jwtAuthenticator;
+        this.authenticator = authenticator;
         this.products = products;
+        this.limits = limits;
     }
 
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) {
-        registry.add(new ClientConnection(session, null,
-                properties.getSession().getOutboundQueueCapacity(),
-                properties.getSession().getSendTimeout()));
+    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+        AutoCloseable admission;
+        try { admission = limits.admitSocket(); }
+        catch (com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection limited) {
+            session.close(CloseStatus.SERVICE_OVERLOAD.withReason(limited.reason().name()));
+            return;
+        }
+        String ip = (String) session.getAttributes().get(ClientConnection.CLIENT_IP);
+        try {
+            limits.checkNewSocket(ip);
+            long deadline = limits.renewSocket(ip, null, session.getId());
+            var connection = new ClientConnection(session, null,
+                    properties.getSession().getOutboundQueueCapacity(), properties.getSession().getSendTimeout());
+            connection.renewLimits(deadline);
+            registry.add(connection);
+            connection.onClosed(() -> {
+                try { registry.remove(session.getId()); }
+                finally {
+                    try { limits.releaseSocket(ip, connection.authenticatedUserId(), session.getId()); }
+                    finally { try { admission.close(); } catch (Exception failure) { throw new IllegalStateException(failure); } }
+                }
+            });
+        } catch (RuntimeException failure) {
+            limits.releaseSocket(ip, null, session.getId());
+            admission.close();
+            session.close(CloseStatus.SERVICE_OVERLOAD.withReason(failure instanceof com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection
+                    ? failure.getMessage() : "websocket admission unavailable"));
+        }
     }
 
     @Override
@@ -57,25 +84,60 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         ClientConnection connection = connection(session);
         String operation="";
         try {
+            limits.checkSocketMessage(connection);
             var envelope=objectMapper.readTree(message.getPayload());
             if(!envelope.isObject()) throw new IllegalArgumentException("invalid websocket command");
             operation=envelope.path("op").asString("");
             if(operation.startsWith("c2c.")) {
+                if (connection.apiKey() != null) throw new IllegalArgumentException("API key sessions do not support C2C commands");
                 if(c2c==null) throw new IllegalArgumentException("C2C is not available");
                 c2c.handle(connection,objectMapper.treeToValue(envelope,com.surprising.gateway.c2c.websocket.C2cChatRealtime.Command.class));
+                connection.admittedMessage();
+                return;
+            }
+            if ("authenticateApiKey".equalsIgnoreCase(operation)) {
+                limits.checkSocketAuthentication(connection.clientIp());
+                var proof = objectMapper.treeToValue(envelope, ApiKeyProof.class);
+                if (proof.id() != null && proof.id().length() > 64) throw new IllegalArgumentException("websocket id is too long");
+                var challenge = connection.apiChallenge();
+                long user = authenticator.authenticateApiKey(proof.apiKey(), connection.clientIp(),
+                        proof.timestamp(), proof.signature(), challenge.challenge());
+                synchronized (connection) {
+                    try {
+                        connection.renewLimits(limits.renewSocket(connection.clientIp(), user, connection.id()));
+                        connection.authenticateApiKey(user, proof.apiKey(), challenge);
+                    } catch (RuntimeException failure) {
+                        limits.releaseSocket(connection.clientIp(), user, connection.id());
+                        connection.close(CloseStatus.SERVICE_OVERLOAD.withReason(failure instanceof com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection rejected
+                                ? rejected.reason().name() : "websocket authorization unavailable"));
+                        throw failure;
+                    }
+                }
+                connection.send(objectMapper.writeValueAsString(WsServerMessage.authenticated(proof.id(), user)));
+                connection.admittedMessage();
                 return;
             }
             WsClientCommand command = objectMapper.treeToValue(envelope, WsClientCommand.class);
             String op = command.op() == null ? "" : command.op().trim().toLowerCase();
             log.debug("ws.command.start session={} op={}", session.getId(), op);
             switch (op) {
+                case "apichallenge" -> connection.send(objectMapper.writeValueAsString(new WsServerMessage(
+                        "apiChallenge", command.id(), null, null, null, null, null,
+                        connection.issueApiChallenge(), null, java.time.Instant.now())));
                 case "authenticate" -> authenticate(connection, command);
                 case "subscribe" -> subscribe(connection, command);
                 case "unsubscribe" -> unsubscribe(connection, command);
                 case "ping" -> connection.send(objectMapper.writeValueAsString(WsServerMessage.pong(command.id())));
                 default -> throw new IllegalArgumentException("unsupported websocket op: " + command.op());
             }
+            connection.admittedMessage();
             log.debug("ws.command.end session={} op={} result=OK", session.getId(), op);
+        } catch (com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection limited) {
+            connection.send(objectMapper.writeValueAsString(new WsServerMessage("error", null, null, null, null, null, null,
+                    java.util.Map.of("code", limited.reason().name(), "retryAfterSeconds", limited.retryAfterSeconds()),
+                    limited.reason().name(), java.time.Instant.now())));
+            if (limited.reason() != com.surprising.gateway.provider.service.GatewayRequestLimits.Reason.RATE_LIMITED || connection.rejectLimit())
+                connection.close(CloseStatus.SERVICE_OVERLOAD.withReason(limited.reason().name()));
         } catch (Exception ex) {
             logFailure("ws.command.failed", session.getId(), ex);
             if(operation.startsWith("c2c.")) {
@@ -86,6 +148,8 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    private record ApiKeyProof(String op, String id, String apiKey, long timestamp, String signature) {}
+
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         if(c2c!=null)c2c.closed(session.getId());
@@ -94,8 +158,11 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     private void subscribe(ClientConnection connection, WsClientCommand command) {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
-        if(topic.userId()!=null && jwtAuthenticator.authenticate(connection.accessToken())!=topic.userId())
-            throw new IllegalArgumentException("websocket identity mismatch");
+        if (topic.userId() != null) {
+            long verified = connection.apiKey() == null ? authenticator.authenticate(connection.accessToken())
+                    : authenticator.apiKeyUser(connection.apiKey(), connection.clientIp());
+            if (verified != topic.userId()) throw new IllegalArgumentException("websocket identity mismatch");
+        }
         products.requireEnabled(topic.productLine());
         if (topic.channel() == com.surprising.websocket.api.model.WsChannel.OPEN_INTEREST) {
             if (topic.productLine() == com.surprising.product.api.ProductLine.SPOT)
@@ -111,9 +178,22 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void authenticate(ClientConnection connection, WsClientCommand command) {
-        var principal = jwtAuthenticator.principal(command.token());
+        limits.checkSocketAuthentication(connection.clientIp());
+        var principal = authenticator.principal(command.token());
         long userId = principal.userId();
-        connection.authenticate(userId, command.token(), principal.expiresAt());
+        synchronized (connection) {
+            try {
+                if (connection.authenticatedUserId() != null && connection.authenticatedUserId() != userId)
+                    throw new IllegalArgumentException("websocket session is already authenticated");
+                connection.renewLimits(limits.renewSocket(connection.clientIp(), userId, connection.id()));
+                connection.authenticate(userId, command.token(), principal.expiresAt());
+            } catch (RuntimeException failure) {
+                limits.releaseSocket(connection.clientIp(), userId, connection.id());
+                connection.close(CloseStatus.SERVICE_OVERLOAD.withReason(failure instanceof com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection rejected
+                        ? rejected.reason().name() : "websocket authorization unavailable"));
+                throw failure;
+            }
+        }
         connection.send(objectMapper.writeValueAsString(WsServerMessage.authenticated(command.id(), userId)));
     }
 

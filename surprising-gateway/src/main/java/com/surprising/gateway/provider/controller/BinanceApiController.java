@@ -38,6 +38,11 @@ import tools.jackson.databind.ObjectMapper;
 
 @RestController
 public class BinanceApiController {
+    private static final java.util.Set<String> MARKET_PATHS = java.util.Set.of("/ping", "/time", "/exchangeInfo", "/depth",
+            "/account", "/account/status", "/openOrders", "/allOrders", "/order", "/ticker/bookTicker");
+    private static final java.util.Set<String> ACCOUNT_PATHS = java.util.Set.of("/sapi/v1/account/status", "/sapi/v1/asset/transfer",
+            "/sapi/v1/capital/deposit/address", "/sapi/v1/capital/deposit/hisrec", "/sapi/v1/capital/config/getall",
+            "/sapi/v1/capital/withdraw/history", "/sapi/v1/capital/withdraw/apply");
 
     private final ApiKeyRequestBinding apiKeyRequests;
     private final GatewayProperties properties;
@@ -79,6 +84,18 @@ public class BinanceApiController {
             return error(HttpStatus.NOT_FOUND, -1003, "Binance-compatible API is disabled");
         }
         String path = request.getRequestURI();
+        boolean supported = ACCOUNT_PATHS.contains(path);
+        for (String prefix : java.util.List.of("/api/v3", "/fapi/v1", "/dapi/v1", "/eapi/v1"))
+            if (path.startsWith(prefix + "/") && MARKET_PATHS.contains(path.substring(prefix.length()))) supported = true;
+        if (!supported) return error(HttpStatus.NOT_FOUND, -1003, "unsupported compatible endpoint");
+        String method = request.getMethod();
+        boolean orderEndpoint = path.endsWith("/order");
+        boolean writeEndpoint = path.endsWith("/asset/transfer") || path.endsWith("/capital/withdraw/apply");
+        boolean methodAllowed;
+        if (orderEndpoint) methodAllowed = java.util.Set.of("GET", "POST", "DELETE").contains(method);
+        else if (writeEndpoint) methodAllowed = "POST".equals(method);
+        else methodAllowed = "GET".equals(method);
+        if (!methodAllowed) return error(HttpStatus.METHOD_NOT_ALLOWED, -1100, "HTTP method is not supported for this endpoint");
         try {
             if (path.endsWith("/ping")) {
                 return json(HttpStatus.OK, Map.of());
@@ -310,7 +327,7 @@ public class BinanceApiController {
     private ResponseEntity<byte[]> order(HttpServletRequest request, byte[] body) {
         String method = request.getMethod().toUpperCase(Locale.ROOT);
         Map<String, Object> params = parameters(request, body);
-        long userId = authenticate(request, "GET".equals(method) || "DELETE".equals(method) ? "READ" : "TRADE", body);
+        long userId = authenticate(request, "GET".equals(method) ? "READ" : "TRADE", body);
         String symbol = required(params, "symbol");
         String instrumentId = properties.getBinanceApi().backendInstrumentId(symbol, productLine(request));
         if ("POST".equals(method)) {
@@ -338,7 +355,8 @@ public class BinanceApiController {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("userId", userId);
             payload.put("orderId", longParameter(params, "orderId"));
-            return transformOrder(proxy("trading", "/cancel", request, jsonBytes(payload), userId, null), symbol,
+            return transformOrder(gatewayProxyService.proxyCompat("trading", "/cancel", null, HttpMethod.POST,
+                    request, jsonBytes(payload), userId), symbol,
                     properties.getBinanceApi().scale(symbol));
         }
         String orderId = first(params, "orderId");
@@ -483,6 +501,8 @@ public class BinanceApiController {
     private long authenticate(HttpServletRequest request, String permission, byte[] body) {
         String apiKey = request.getHeader("X-MBX-APIKEY");
         if (apiKey != null && !apiKey.isBlank()) {
+            String bearer = request.getHeader(HttpHeaders.AUTHORIZATION);
+            if (bearer != null && !bearer.isBlank()) throw new IllegalArgumentException("choose bearer or API key authentication");
             try { return apiKeyService.authenticate(apiKeyRequests.bind(request, body), permission); }
             catch (ApiKeyAccessBlockedException ex) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
@@ -500,10 +520,16 @@ public class BinanceApiController {
 
     private Map<String, Object> parameters(HttpServletRequest request, byte[] body) {
         Map<String, Object> result = new LinkedHashMap<>();
-        request.getParameterMap().forEach((key, values) -> {
-            if (values != null && values.length > 0) result.put(key, values[0]);
-        });
-        if (result.isEmpty() && body != null && body.length > 0) result.putAll(readMap(body));
+        if (body != null && body.length > 0 && new String(body, StandardCharsets.UTF_8).stripLeading().startsWith("{")) {
+            request.getParameterMap().forEach((key, values) -> {
+                if (values != null && values.length > 0) result.put(key, values[0]);
+            });
+            readMap(body).forEach(result::putIfAbsent);
+        } else {
+            apiKeyRequests.formParameters(request, body).forEach((key, values) -> {
+                if (!values.isEmpty()) result.put(key, values.getFirst());
+            });
+        }
         return result;
     }
 

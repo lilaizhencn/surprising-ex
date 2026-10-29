@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth.model;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.List;
@@ -17,7 +18,9 @@ public final class ApiKeyModels {
     public record RevokeApiKeyRequest(@NotBlank String apiKey) {
     }
 
-    public record UpdateApiKeyRequest(@NotBlank String apiKey, List<String> ipAllowlist) {
+    public record UpdateApiKeyRequest(@NotBlank String apiKey,
+                                      @NotBlank @Size(max = 80) String label,
+                                      @NotNull List<String> permissions, @NotNull List<String> ipAllowlist) {
     }
     public record CreatedApiKey(ApiKeyView apiKey, String secret) {
     }

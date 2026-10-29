@@ -17,7 +17,7 @@ import java.util.List;
 class GatewayApiKeyServiceTest {
 
     private final GatewayApiKeyService service = new GatewayApiKeyService(
-            null, null, new TotpService(new GatewayProperties()), null);
+            null, null, new TotpService(new GatewayProperties()), null, new com.surprising.gateway.provider.config.GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
 
     @Test
     void removesOnlySignatureFromBinanceCanonicalQuery() {
@@ -67,8 +67,9 @@ class GatewayApiKeyServiceTest {
                 "coin", new String[]{"USDT"},
                 "amount", new String[]{"1.25"},
                 "signature", new String[]{"ignored"},
-                "timestamp", new String[]{"123"})))
-                .isEqualTo("POST\n/sapi/v1/capital/withdraw/apply\namount=1.25&coin=USDT&timestamp=123");
+                "timestamp", new String[]{"123"}), null))
+                .isEqualTo("POST\n/sapi/v1/capital/withdraw/apply\namount=1.25&coin=USDT&timestamp=123\n"
+                        + "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     }
 
     @Test

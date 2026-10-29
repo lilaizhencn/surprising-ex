@@ -14,8 +14,15 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 @Component
 public class AuthClientMetadataBinding implements CurrentAuthClient {
     private final ClientIpResolver clientIpResolver;
-    public AuthClientMetadataBinding(GatewayProperties properties) {
+    private final com.surprising.gateway.provider.service.GatewayRequestLimits limits;
+    private final com.surprising.gateway.provider.controller.GatewayLimitRequestBinding limitRequests;
+    private static final String CHARGED = AuthClientMetadataBinding.class.getName() + ".charged";
+    public AuthClientMetadataBinding(GatewayProperties properties,
+            com.surprising.gateway.provider.service.GatewayRequestLimits limits,
+            com.surprising.gateway.provider.controller.GatewayLimitRequestBinding limitRequests) {
         clientIpResolver = new ClientIpResolver(properties);
+        this.limits = limits;
+        this.limitRequests = limitRequests;
     }
 
     public AuthClientMetadata bind(HttpServletRequest request) {
@@ -28,6 +35,28 @@ public class AuthClientMetadataBinding implements CurrentAuthClient {
         if (!(attributes instanceof ServletRequestAttributes servlet)) return null;
         // Bearer鉴权原来只检查请求IP；不得在此新增设备格式检查或改变权限判断顺序。
         return new AuthClientMetadata(null, truncate(clientIpResolver.resolve(servlet.getRequest()),80), null);
+    }
+
+    @Override public void authenticated(long userId, String apiKey) {
+        var attributes = RequestContextHolder.getRequestAttributes();
+        if (!(attributes instanceof ServletRequestAttributes servlet)) return;
+        var request = servlet.getRequest();
+        if (request.getAttribute(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.ACTIVE) == null) return;
+        Object charged = request.getAttribute(CHARGED);
+        if (charged != null) {
+            if (!charged.equals(userId)) throw new IllegalStateException("request authentication identity changed");
+            return;
+        }
+        var policy = limitRequests.bind(request);
+        limits.checkUser(userId, apiKey, policy.group(), policy.product(), policy.cost());
+        request.setAttribute(CHARGED, userId);
+    }
+
+    @Override public void loginAttempt(String identifier) {
+        var attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof ServletRequestAttributes servlet
+                && servlet.getRequest().getAttribute(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.ACTIVE) != null)
+            limits.checkLoginAccount(identifier);
     }
 
     private static String userAgent(HttpServletRequest request) {

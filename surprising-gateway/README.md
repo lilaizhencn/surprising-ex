@@ -631,3 +631,43 @@ HTTP `*InternalController` 和 `gateway.provider.local.*LocalRoutes` 共用 `con
 第三十轮倒计时SET稳定命令身份包含真实时长，同毫秒修改时长或禁用不会复用原意图身份，相同完整命令重试保持稳定；Core指纹、认领版本、精确截止及快照格式不变。全撤索引删除只有测试使用的Map查询转发重载，现有测试直接使用原lookup入口。相关12模块干净`mvn -pl surprising-gateway -am -DskipTests clean test-compile`通过（35.400秒）；首次编译两处遗漏调用已修正，同毫秒及重试场景源码仅编译未运行。
 
 第三十二轮风险扫描全局冷/热记录各删除9项Lane摘要，现各16组件；Lane实际估值与恢复仍保存原12项进度。交易快照v54删除风险扫描字段5/7至14，旧格式不读；精确批次续扫契约、命令版本及公开接口不变。状态哈希覆盖完整Lane进度和预算轮转。17个相关模块干净`-am -DskipTests clean test-compile`通过（61.789秒），未执行测试、服务、资金或恢复场景。
+
+
+## 开放平台与统一限流（2026-10-29）
+
+Web 顶部及移动菜单的“开放平台”进入公开 `/developers` 文档；`/api` 管理自己的 Key。原生 REST 覆盖六产品线，兼容接口只开放已实现的路径与方法。Key 创建/编辑/撤销保留安全验证；编辑原子替换名称、权限、IP 白名单。TRADE/WITHDRAW 必须绑定非空 IP/CIDR，禁止 `/0`；已有不满足要求的写 Key 也会被拒绝，需修改设置。Secret 只在创建响应出现，以加密密文持久化。
+
+原生私有 REST：`X-API-Key`，查询携带 `timestamp`、可选 `recvWindow`（默认 5000，范围 1–60000 毫秒）、`signature`。签名文本为 `METHOD\n/path\n排序后的表单编码查询（不含 signature）\n实际正文 SHA-256 十六进制摘要`。Secret 直接使用 UTF-8 文本做 HMAC-SHA256，不做 Base64 解码；产品参数放入签名查询。方法、路径、查询和正文均受签名约束。兼容协议继续使用 `X-MBX-APIKEY` 和原始 query+form 拼接签名。认证后的身份为唯一来源；不能混用 Bearer/Key、伪造 X-User-Id、跨用户划转或调用管理员写操作。撤单需要 TRADE，内部转换为原有 POST 撤单命令。
+
+私有 WS 在同一 `/ws/v1` 连接依次发送 `apiChallenge` 和 `authenticateApiKey`；证明为 `HMAC(Secret, "WS\n/ws/v1\n" + challenge + "\n" + apiKey + "\n" + timestamp)`。挑战 60 秒有效且只能用一次，证明时间窗 5 秒，Key 会话 15 分钟；每 20 秒 ping 续租。原 JWT authenticate/token 协议保留。Key、IP、权限与账户状态会定期复查，失效关闭 1008；限流/容量/存储故障按 1013 及 retryAfterSeconds 处理，使用有上限且带抖动的退避后重新认证和订阅。订阅传 instrumentId，而不是 symbol；深度快照/增量与私有版本恢复语义不变。
+
+限流发生在业务接纳之前：HTTP Filter 先做本机并发和真实 IP 控制；有效鉴权后只扣一次用户/Key/产品额度。多个 Gateway 复用现有 Valkey，Lua 原子校验全部账户桶，任何桶不足均不扣其他桶；同用户 Key、Bearer、原生与兼容入口共用用户预算。配额 key 使用同用户 hash tag，具有完整补充期 TTL。显式批次按条目扣费，limit/depth 查询按每 50 条向上取整计费；全撤独立限制为作业。撤单/回执各保留独立并发及操作桶，但仍受公共 IP 限制。Core 中没有增加限流 I/O、计数器或阶段。
+
+默认策略见 `GatewayLimitProperties`，配置前缀 `surprising.gateway.limits`。每条规则包含 rate（每 period 补充额度）、burst（桶容量）和 period（默认 1s，支持毫秒到天且完整补充不得超过一天）；配置在启动时绑定并校验，不支持运行时修改。
+
+```yaml
+surprising:
+  gateway:
+    limits:
+      ip: { rate: 300, burst: 600 }
+      login-account: { rate: 5, burst: 5, period: 1m }
+      user:
+        order: { rate: 30, burst: 60 }
+      api-key:
+        order: { rate: 15, burst: 30 }
+      product:
+        order: { rate: 20, burst: 40 }
+      concurrent-requests: 256
+      concurrent-cancels: 64
+      concurrent-receipts: 64
+      sockets-per-ip: 20
+      sockets-per-user: 10
+      sockets-per-gateway: 2000
+      socket-lease-seconds: 60
+```
+
+HTTP 额度耗尽返回 429 和 Retry-After；批次自身超过桶容量返回 400/REQUEST_EXCEEDS_RATE_BURST，须减小请求；本机并发耗尽为 503/GATEWAY_BUSY；Valkey 故障为 503/RATE_LIMIT_STORAGE_UNAVAILABLE，不静默放行。WS 连接上限用有 TTL 的租约跨节点维护，节点实例 UUID 避免本地 session ID 碰撞；异常退出等待租约过期。每连接入站令牌桶有界，认证后的消息还共用用户/Key 配额。Web/App 展示服务端等待秒数，金融写操作不自动重试；回执查询被拒绝不能改变原命令的 UNKNOWN/PENDING 状态。
+
+部署入口见 `deployment/test-single-node/ex-api.nginx.conf`：Nginx 先限制 IP 请求/同时连接，Gateway 再进行业务维度限流。生产 Gateway 默认绑定 127.0.0.1，通过受控 Nginx 接入；如使用私网入口，显式设置 GATEWAY_BIND_ADDRESS 并限制网络访问。Nginx 清除可伪造的其他供应商 IP 头，真实 IP 仅信任明确配置的代理。REST CORS 使用 GATEWAY_CORS_ALLOWED_ORIGINS；新增站点也须同步 Nginx 错误响应允许的来源。WS 使用 SURPRISING_WS_ALLOWED_ORIGINS，空列表不会隐式放行所有来源。共享 Valkey 连接与命令超时默认 200ms，可通过 GATEWAY_VALKEY_CONNECT_TIMEOUT/TIMEOUT 调整。
+
+可执行 Node 示例与完整协议位于 Web `src/features/developers/`。本轮只做相关功能验证，未压测；默认额度不代表测得的承载能力。验收与局限见 [开放平台验证](../docs/validation/open-platform-20261029/plan.md)。

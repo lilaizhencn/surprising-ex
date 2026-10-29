@@ -2,7 +2,6 @@ package com.surprising.websocket.provider.config;
 
 import com.surprising.websocket.api.WebSocketApiPaths;
 import com.surprising.websocket.provider.handler.ClientWebSocketHandler;
-import java.util.List;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -14,30 +13,32 @@ public class WebSocketServerConfiguration implements WebSocketConfigurer {
 
     private final ClientWebSocketHandler handler;
     private final WebSocketProperties properties;
+    private final com.surprising.gateway.provider.auth.utils.ClientIpResolver addresses;
 
-    public WebSocketServerConfiguration(ClientWebSocketHandler handler, WebSocketProperties properties) {
+    public WebSocketServerConfiguration(ClientWebSocketHandler handler, WebSocketProperties properties,
+                                        com.surprising.gateway.provider.config.GatewayProperties gateway) {
         this.handler = handler;
         this.properties = properties;
+        this.addresses = new com.surprising.gateway.provider.auth.utils.ClientIpResolver(gateway);
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(handler, WebSocketApiPaths.WS_V1)
-                .setAllowedOriginPatterns(allowedOriginPatterns());
-    }
-
-    String[] allowedOriginPatterns() {
-        if (properties.getSecurity().getAllowedOrigins() == null
-                || properties.getSecurity().getAllowedOrigins().isEmpty()) {
-            return new String[]{"*"};
-        }
-        List<String> origins = properties.getSecurity().getAllowedOrigins().stream()
-                .filter(origin -> origin != null && !origin.isBlank())
-                .map(String::trim)
-                .toList();
-        if (origins.isEmpty()) {
-            return new String[]{"*"};
-        }
-        return origins.toArray(String[]::new);
+                .addInterceptors(new org.springframework.web.socket.server.HandshakeInterceptor() {
+                    @Override public boolean beforeHandshake(org.springframework.http.server.ServerHttpRequest request,
+                            org.springframework.http.server.ServerHttpResponse response,
+                            org.springframework.web.socket.WebSocketHandler handler, java.util.Map<String, Object> attributes) {
+                        if (!(request instanceof org.springframework.http.server.ServletServerHttpRequest servlet)) return false;
+                        String ip = addresses.resolve(servlet.getServletRequest());
+                        if (ip == null || ip.isBlank()) return false;
+                        attributes.put(com.surprising.websocket.provider.session.ClientConnection.CLIENT_IP, ip);
+                        return true;
+                    }
+                    @Override public void afterHandshake(org.springframework.http.server.ServerHttpRequest request,
+                            org.springframework.http.server.ServerHttpResponse response,
+                            org.springframework.web.socket.WebSocketHandler handler, Exception exception) {}
+                })
+                .setAllowedOriginPatterns(properties.getSecurity().getAllowedOrigins().toArray(String[]::new));
     }
 }

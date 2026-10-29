@@ -8,6 +8,10 @@ import java.util.Locale;
 /** API签名原文字节编码，不读取请求或验证业务权限。 */
 public final class ApiSignatureFormats {
     private ApiSignatureFormats() {}
+
+    public static String websocketRequest(String challenge, String apiKey, long timestamp) {
+        return "WS\n/ws/v1\n" + challenge + "\n" + apiKey + "\n" + timestamp;
+    }
     public static String canonicalQuery(String queryString) {
         if (queryString == null || queryString.isBlank()) {
             return "";
@@ -22,8 +26,12 @@ public final class ApiSignatureFormats {
                 .orElse("");
     }
 
-    public static String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap) {
-        return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + canonicalParameters(parameterMap);
+    public static String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap, byte[] body) {
+        try {
+            String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(body == null ? new byte[0] : body));
+            return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + canonicalParameters(parameterMap) + "\n" + hash;
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
 
     public static String canonicalParameters(java.util.Map<String, String[]> parameterMap) {

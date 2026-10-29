@@ -19,7 +19,6 @@ import java.util.Set;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -30,32 +29,27 @@ public class GatewayApiKeyService {
     private final TotpService totpService;
     private final SensitiveActionVerificationService verificationService;
     private final ClientIpResolver clientIpResolver;
+    private final com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient;
     private final SecureRandom random = new SecureRandom();
 
-    @Autowired
     public GatewayApiKeyService(GatewayApiKeyRepository repository,
                                 AuthService authService,
                                 TotpService totpService,
                                 SensitiveActionVerificationService verificationService,
-                                com.surprising.gateway.provider.config.GatewayProperties properties) {
+                                com.surprising.gateway.provider.config.GatewayProperties properties,
+                                com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient) {
         this.repository = repository;
         this.authService = authService;
         this.totpService = totpService;
         this.verificationService = verificationService;
         this.clientIpResolver = new ClientIpResolver(properties);
-    }
-
-    public GatewayApiKeyService(GatewayApiKeyRepository repository,
-                                AuthService authService,
-                                TotpService totpService,
-                                SensitiveActionVerificationService verificationService) {
-        this(repository, authService, totpService, verificationService,
-                new com.surprising.gateway.provider.config.GatewayProperties());
+        this.currentClient = currentClient;
     }
 
     public CreatedApiKey create(String authorization, String label, String permissions,
                                 String ipAllowlist,
                                 String emailCode, String totpCode, String requestIp) {
+        requireWriteIp(permissions, ipAllowlist);
         JwtPrincipal principal = authService.authenticateBearer(authorization);
         requireSecurity(principal.userId(), emailCode, totpCode);
         String apiKey = "sx_" + randomToken(24);
@@ -80,27 +74,21 @@ public class GatewayApiKeyService {
         }
     }
 
-    public void updateIpAllowlist(String authorization, String apiKey, String ipAllowlist,
+    public void update(String authorization, String apiKey, String label, String permissions, String ipAllowlist,
                                   String emailCode, String totpCode, String requestIp) {
+        requireWriteIp(permissions, ipAllowlist);
         JwtPrincipal principal = authService.authenticateBearer(authorization);
         requireSecurity(principal.userId(), emailCode, totpCode);
-        if (!repository.updateIpAllowlist(principal.userId(), apiKey,
-                ipAllowlist)) {
+        if (!repository.update(principal.userId(), apiKey, label, permissions, ipAllowlist)) {
             throw new IllegalArgumentException("active api key not found");
         }
     }
 
     public long authenticate(ApiKeyAuthenticationRequest request, String requiredPermission) {
-        GatewayApiKeyRepository.ApiKeyRecord record = repository.active(request.apiKey())
-                .orElseThrow(() -> new IllegalArgumentException("invalid api key"));
-        try {
-            authService.requireIpAccessAllowed(record.userId(), request.ipAddress());
-        } catch (IllegalStateException ex) {
-            throw new ApiKeyAccessBlockedException(ex.getMessage(), ex);
-        }
-        requireIpAllowlist(record.ipAllowlist(), request.ipAddress());
-        requirePermission(record.permissions(), requiredPermission);
-        if (Math.abs(System.currentTimeMillis() - request.timestamp()) > Math.min(request.recvWindow(), 60_000L)) {
+        var record = requireAccess(request.apiKey(), request.ipAddress(), requiredPermission);
+        long now = System.currentTimeMillis();
+        long window = request.recvWindow();
+        if (window < 1 || window > 60_000 || request.timestamp() < now - window || request.timestamp() > now + window) {
             throw new IllegalArgumentException("request timestamp is outside recvWindow");
         }
         String expected = sign(totpService.decryptSecret(record.secretCiphertext()), request.canonical());
@@ -108,8 +96,27 @@ public class GatewayApiKeyService {
                 request.signature().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8))) {
             throw new IllegalArgumentException("invalid api signature");
         }
+        currentClient.authenticated(record.userId(), record.apiKey());
         repository.markUsed(record.apiKeyId(), Instant.now());
         return record.userId();
+    }
+
+    /** Recheck the stored key and current account/IP/scopes; an established socket does not retain grants. */
+    public long requireWebSocketAccess(String apiKey, String ipAddress) {
+        return requireAccess(apiKey, ipAddress, "READ").userId();
+    }
+
+    private GatewayApiKeyRepository.ApiKeyRecord requireAccess(String apiKey, String ipAddress, String permission) {
+        var record = repository.active(apiKey).orElseThrow(() -> new IllegalArgumentException("invalid api key"));
+        try {
+            authService.requireApiKeyAccess(record.userId(), ipAddress, permission);
+            requireIpAllowlist(record.ipAllowlist(), ipAddress);
+            requirePermission(record.permissions(), permission);
+            requireWriteIp(record.permissions(), record.ipAllowlist());
+        } catch (IllegalStateException | IllegalArgumentException ex) {
+            throw new ApiKeyAccessBlockedException(ex.getMessage(), ex);
+        }
+        return record;
     }
 
     public String sign(String secret, String canonicalQuery) {
@@ -147,6 +154,22 @@ public class GatewayApiKeyService {
         if (remoteAddress == null || remoteAddress.isBlank()
                 || !clientIpResolver.isAllowed(remoteAddress, splitIpAllowlist(value))) {
             throw new IllegalArgumentException("api key IP address is not allowed");
+        }
+    }
+
+    private static void requireWriteIp(String permissions, String ipAllowlist) {
+        var scopes = Set.of(permissions.split(","));
+        if ((scopes.contains("TRADE") || scopes.contains("WITHDRAW"))
+                && (ipAllowlist == null || ipAllowlist.isBlank())) {
+            throw new IllegalArgumentException("IP allowlist is required for TRADE or WITHDRAW permission");
+        }
+        if (scopes.contains("TRADE") || scopes.contains("WITHDRAW")) {
+            for (String rule : ipAllowlist.split(",")) {
+                int slash = rule.indexOf('/');
+                if (slash >= 0 && Integer.parseInt(rule.substring(slash + 1)) == 0) {
+                    throw new IllegalArgumentException("TRADE or WITHDRAW permission cannot use an unrestricted CIDR range");
+                }
+            }
         }
     }
 

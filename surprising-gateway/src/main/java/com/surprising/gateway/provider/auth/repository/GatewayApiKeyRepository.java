@@ -56,12 +56,12 @@ public class GatewayApiKeyRepository {
                 """, Timestamp.from(now), userId, apiKey) == 1;
     }
 
-    public boolean updateIpAllowlist(long userId, String apiKey, String ipAllowlist) {
+    public boolean update(long userId, String apiKey, String label, String permissions, String ipAllowlist) {
         return jdbcTemplate.update("""
                 UPDATE gateway_api_keys
-                   SET ip_allowlist = ?
+                   SET label = ?, permissions = ?, ip_allowlist = ?
                  WHERE user_id = ? AND api_key = ? AND status = 'ACTIVE'
-                """, ipAllowlist, userId, apiKey) == 1;
+                """, label, permissions, ipAllowlist, userId, apiKey) == 1;
     }
 
     public void markUsed(UUID apiKeyId, Instant now) {

@@ -6,6 +6,10 @@ import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
+import java.net.URLDecoder;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -18,20 +22,68 @@ public final class ApiKeyRequestBinding {
     public ApiKeyRequestBinding(GatewayProperties properties) { addresses = new ClientIpResolver(properties); }
 
     public ApiKeyAuthenticationRequest bind(HttpServletRequest request, byte[] body) {
-        String apiKey = request.getHeader("X-MBX-APIKEY");
+        return bind(request, body, false);
+    }
+
+    public ApiKeyAuthenticationRequest bindNative(HttpServletRequest request, byte[] body) {
+        return bind(request, body, true);
+    }
+
+    private ApiKeyAuthenticationRequest bind(HttpServletRequest request, byte[] body, boolean nativeApi) {
+        String apiKey = request.getHeader(nativeApi ? "X-API-Key" : "X-MBX-APIKEY");
         if (apiKey == null || !apiKey.matches("sx_[A-Za-z0-9_-]{20,80}")) {
             throw new IllegalArgumentException("api key is invalid");
         }
-        long timestamp = parseLong(request.getParameter("timestamp"), "timestamp");
-        long recvWindow = request.getParameter("recvWindow") == null ? 5_000L
-                : parseLong(request.getParameter("recvWindow"), "recvWindow");
+        var parameters = formParameters(request, nativeApi ? null : body);
+        long timestamp = parseLong(single(parameters, "timestamp"), "timestamp");
+        String window = single(parameters, "recvWindow");
+        long recvWindow = window == null ? 5_000L : parseLong(window, "recvWindow");
         if (recvWindow < 1L || recvWindow > 60_000L) {
             throw new IllegalArgumentException("request timestamp is outside recvWindow");
         }
-        String signature = request.getParameter("signature");
+        String signature = single(parameters, "signature");
         if (signature == null || signature.isBlank()) throw new IllegalArgumentException("signature is required");
-        return new ApiKeyAuthenticationRequest(apiKey, addresses.resolve(request), timestamp, recvWindow,
-                signature, canonicalQuery(request, body));
+        String canonical;
+        if (nativeApi) {
+            var query = new LinkedHashMap<String, String[]>();
+            parameters.forEach((name, values) -> query.put(name, values.toArray(String[]::new)));
+            canonical = ApiSignatureFormats.canonicalRequest(request.getMethod(), request.getRequestURI(), query, body);
+        } else canonical = canonicalQuery(request, body);
+        return new ApiKeyAuthenticationRequest(apiKey, addresses.resolve(request), timestamp, recvWindow, signature, canonical);
+    }
+
+    /** Read the supplied bytes: Servlet form parsing may already be exhausted by @RequestBody. */
+    public Map<String, List<String>> formParameters(HttpServletRequest request, byte[] body) {
+        var parameters = new LinkedHashMap<String, List<String>>();
+        addForm(parameters, request.getQueryString());
+        if (body != null && body.length > 0) {
+            String text = new String(body, StandardCharsets.UTF_8);
+            if (text.stripLeading().startsWith("{")) {
+                throw new IllegalArgumentException("signed API requests require query or form parameters");
+            }
+            addForm(parameters, text);
+        }
+        if (parameters.isEmpty()) request.getParameterMap().forEach((key, values) ->
+                parameters.put(key, values == null ? List.of() : List.of(values)));
+        return parameters;
+    }
+
+    private static void addForm(Map<String, List<String>> parameters, String form) {
+        if (form == null || form.isBlank()) return;
+        for (String field : form.split("&")) {
+            if (field.isEmpty()) continue;
+            int separator = field.indexOf('=');
+            String key = URLDecoder.decode(separator < 0 ? field : field.substring(0, separator), StandardCharsets.UTF_8);
+            String value = URLDecoder.decode(separator < 0 ? "" : field.substring(separator + 1), StandardCharsets.UTF_8);
+            parameters.computeIfAbsent(key, ignored -> new ArrayList<>()).add(value);
+        }
+    }
+
+    private static String single(Map<String, List<String>> parameters, String name) {
+        var values = parameters.get(name);
+        if (values == null) return null;
+        if (values.size() != 1) throw new IllegalArgumentException(name + " must occur exactly once");
+        return values.getFirst();
     }
 
     private static long parseLong(String value, String field) {

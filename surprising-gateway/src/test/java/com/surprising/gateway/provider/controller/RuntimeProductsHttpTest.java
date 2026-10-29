@@ -38,7 +38,7 @@ class RuntimeProductsHttpTest {
         when(products.local(ProductLine.SPOT)).thenReturn(local);
         when(selection.resolve(any(), any(), anyBoolean())).thenReturn(ProductLine.SPOT);
         when(auth.authenticateBearer(null)).thenThrow(new IllegalArgumentException("bearer token required"));
-        var controller = new GatewayProxyController(properties, new RestTemplate(), auth, null,
+        var controller = new GatewayProxyController(properties, new RestTemplate(), auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class), null,
                 json, null, null, products, local, selection);
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .addFilters(new com.surprising.gateway.provider.interceptor.ProductRequestBodyFilter(),

@@ -1,0 +1,21 @@
+{
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome": [
+    "Google Chrome 156.0.8078.48"
+  ],
+  "flutter": [
+    "Flutter 3.44.4 • channel stable • https://github.com/flutter/flutter.git",
+    "Framework • revision ad70ec4617 (4 months ago) • 2026-06-24 11:07:06 -0700",
+    "Engine • hash 700aebeca4c0e610f109a3979ee3e71b69d666bc (revision a10d8ac38d) (4 months ago) • 2026-06-23 23:09:55.000Z"
+  ],
+  "node": [
+    "v22.23.1"
+  ],
+  "ios-key-light.png": [
+    1206,
+    2622
+  ],
+  "android-key-light.png": [
+    1080,
+    2400
+  ]
+}

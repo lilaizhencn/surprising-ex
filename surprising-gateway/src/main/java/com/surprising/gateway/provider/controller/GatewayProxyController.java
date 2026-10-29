@@ -66,6 +66,8 @@ public class GatewayProxyController {
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
     private final AuthService authService;
+    private final com.surprising.gateway.provider.auth.service.GatewayApiKeyService apiKeys;
+    private final com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding apiKeyRequests;
     private final AdminApprovalService adminOperations;
     private final ObjectMapper objectMapper;
     private final ProductTransferCoordinator productTransferCoordinator;
@@ -75,6 +77,7 @@ public class GatewayProxyController {
     public GatewayProxyController(GatewayProperties properties,
                                RestTemplate restTemplate,
                                AuthService authService,
+                               com.surprising.gateway.provider.auth.service.GatewayApiKeyService apiKeys,
                                AdminApprovalService adminOperations,
                                ObjectMapper objectMapper,
                                ProductTransferCoordinator productTransferCoordinator,
@@ -88,6 +91,8 @@ public class GatewayProxyController {
         this.properties = properties;
         this.restTemplate = restTemplate;
         this.authService = authService;
+        this.apiKeys = apiKeys;
+        this.apiKeyRequests = new com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding(properties);
         this.adminOperations = adminOperations;
         this.objectMapper = java.util.Objects.requireNonNull(objectMapper, "objectMapper");
         this.productTransferCoordinator = productTransferCoordinator;
@@ -99,6 +104,9 @@ public class GatewayProxyController {
         return Map.of("productLines", products.enabled(), "disabledProductLines", products.disabled());
     }
 
+    @GetMapping("/api/v1/time")
+    public Map<String, Long> time() { return Map.of("serverTime", System.currentTimeMillis()); }
+
     @RequestMapping(path = {GATEWAY_PREFIX + "/{service}", GATEWAY_PREFIX + "/{service}/**",
             ADMIN_GATEWAY_PREFIX + "/{service}", ADMIN_GATEWAY_PREFIX + "/{service}/**"})
     public ResponseEntity<byte[]> proxy(@PathVariable String service,
@@ -106,10 +114,11 @@ public class GatewayProxyController {
                                         HttpServletRequest request,
                                         @RequestBody(required = false) byte[] body) {
         long startedNanos = System.nanoTime();
+        if (body != null) request.setAttribute(com.surprising.gateway.provider.interceptor.ProductRequestBodyFilter.BODY, body);
         boolean adminRequest = isAdminRequest(request);
         GatewayProperties.BackendRoute route = !adminRequest && method == HttpMethod.POST && isProductTransferRequest(service, request)
                 ? route(service, false) : resolveRoute(service, adminRequest, request, body);
-        GatewayIdentity identity = adminRequest ? enforceAdminIdentity(request) : enforceIdentity(route, request);
+        GatewayIdentity identity = adminRequest ? enforceAdminIdentity(request) : enforceIdentity(service, route, request, body);
         if (adminRequest) {
             enforceAdminPermission(service, method, identity);
         }
@@ -153,7 +162,7 @@ public class GatewayProxyController {
         GatewayProperties.BackendRoute route = method == HttpMethod.POST && "account".equalsIgnoreCase(service) && "/transfers".equals(targetSuffix)
                 ? route(service, false) : resolveRoute(service, false, request, body);
         GatewayIdentity identity = authenticatedUserId == null
-                ? enforceIdentity(route, request)
+                ? enforceIdentity(service, route, request, body)
                 : userIdentity(Long.toString(authenticatedUserId));
         enforceUserStatusRestrictions(service, method, request, identity);
         if (method == HttpMethod.POST && "account".equalsIgnoreCase(service)
@@ -185,6 +194,9 @@ public class GatewayProxyController {
         }
         try {
             var input = transferRequest(body);
+            if (request.getHeader("X-API-Key") != null && input.recipientUserId() != null
+                    && input.recipientUserId() != Long.parseLong(identity.userId()))
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "API key transfers must remain within the same user");
             var amount = transferAmount(input);
             if (productTransferSecurityService != null) {
                 productTransferSecurityService.requireIfNeeded(Long.parseLong(identity.userId()), amount,
@@ -418,11 +430,31 @@ public class GatewayProxyController {
         return resolved;
     }
 
-    private GatewayIdentity enforceIdentity(GatewayProperties.BackendRoute route, HttpServletRequest request) {
+    private GatewayIdentity enforceIdentity(String service, GatewayProperties.BackendRoute route, HttpServletRequest request, byte[] body) {
         if (!route.isPrivateRoute() || !properties.getSecurity().isRequireIdentityForPrivateRoutes()) {
             return null;
         }
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
+        String apiKey = request.getHeader("X-API-Key");
+        if (apiKey != null && !apiKey.isBlank()) {
+            if (authorization != null && !authorization.isBlank())
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "choose bearer or API key authentication");
+            String permission;
+            if (isReadMethod(HttpMethod.valueOf(request.getMethod()))) permission = "READ";
+            else if (service.equals("trading") || service.equals("trading-trigger")
+                    || (service.equals("account") && (request.getRequestURI().endsWith("/transfers")
+                    || request.getRequestURI().endsWith("/position-mode")
+                    || request.getRequestURI().endsWith("/position-margin-adjustments")))) permission = "TRADE";
+            else throw new ResponseStatusException(HttpStatus.FORBIDDEN, "API key writes are not supported for this endpoint");
+            try {
+                long user = apiKeys.authenticate(apiKeyRequests.bindNative(request, body), permission);
+                return userIdentity(Long.toString(user));
+            } catch (com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException blocked) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, blocked.getMessage(), blocked);
+            } catch (IllegalArgumentException invalid) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, invalid.getMessage(), invalid);
+            }
+        }
         if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
             if (authService == null) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,

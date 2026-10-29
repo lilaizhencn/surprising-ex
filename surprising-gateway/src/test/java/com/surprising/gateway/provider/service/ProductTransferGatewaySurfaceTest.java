@@ -46,7 +46,7 @@ class ProductTransferGatewaySurfaceTest {
         var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(java.util.List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
         when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
-        GatewayProxyController proxy = new GatewayProxyController(properties(), new RestTemplate(), userAuthService(),
+        GatewayProxyController proxy = new GatewayProxyController(properties(), new RestTemplate(), userAuthService(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class),
                 null, new ObjectMapper(), new ProductTransferCoordinator(accountClient), null,
                 products, local, new com.surprising.gateway.provider.product.GatewayProductSelection(products, new ObjectMapper()));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest(
@@ -77,7 +77,7 @@ class ProductTransferGatewaySurfaceTest {
         var local=mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
         var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
-        var proxy=new GatewayProxyController(properties(),new RestTemplate(),userAuthService(),null,new ObjectMapper(),
+        var proxy=new GatewayProxyController(properties(),new RestTemplate(),userAuthService(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class),null,new ObjectMapper(),
                 coordinator,security,products,local,new com.surprising.gateway.provider.product.GatewayProductSelection(products,new ObjectMapper()));
         var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
                 proxy).build();
@@ -185,7 +185,7 @@ class ProductTransferGatewaySurfaceTest {
         var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         var local=mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
         var json=new ObjectMapper();
-        return new GatewayProxyController(properties(),new RestTemplate(),auth,null,json,coordinator,security,
+        return new GatewayProxyController(properties(),new RestTemplate(),auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class),null,json,coordinator,security,
                 products,local,new com.surprising.gateway.provider.product.GatewayProductSelection(products,json));
     }
 

@@ -564,7 +564,7 @@ class GatewayProxyControllerTest {
         var selectorProducts = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(selectorProducts.enabled()).thenReturn(properties.getRoutes().values().stream().anyMatch(GatewayProperties.BackendRoute::hasProductRoutes)
                 ? java.util.List.of(ProductLine.values()) : java.util.List.of(ProductLine.LINEAR_PERPETUAL));
-        return new GatewayProxyController(properties, rest, auth, new com.surprising.gateway.provider.auth.service.AdminApprovalService(auth, audit, null, properties) {
+        return new GatewayProxyController(properties, rest, auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class), new com.surprising.gateway.provider.auth.service.AdminApprovalService(auth, audit, null, properties) {
                     @Override public void consumeGatewayApproval(long id, long requester, String service, String method,
                             String path, String query, String hash, Instant now) {
                         if (approval == null) throw new AssertionError("approval capture is missing");

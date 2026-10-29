@@ -26,14 +26,14 @@ class ApiKeyHttpBoundaryTest {
     GatewayApiKeyRepository repository=mock(GatewayApiKeyRepository.class);
     AuthService auth=mock(AuthService.class);
     TotpService totp=new TotpService(properties);
-    GatewayApiKeyService service=new GatewayApiKeyService(repository,auth,totp,null,properties);
+    GatewayApiKeyService service=new GatewayApiKeyService(repository,auth,totp,null,properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
 
     @Test
     void blockedIpMapsToOriginal403WithoutMarkingTheKeyUsed() {
         var request=request();
         when(repository.active(apiKey)).thenReturn(Optional.of(record()));
         doThrow(new IllegalStateException("device or IP is blocked for this account"))
-                .when(auth).requireIpAccessAllowed(42L,"203.0.113.7");
+                .when(auth).requireApiKeyAccess(42L,"203.0.113.7","READ");
         var response=controller(service).handle(request,null);
         assertThat(response.getStatusCode().value()).isEqualTo(403);
         assertThat(new String(response.getBody(),java.nio.charset.StandardCharsets.UTF_8)).contains("blocked", "-1000");
@@ -50,6 +50,7 @@ class ApiKeyHttpBoundaryTest {
             case "60001-window" -> request.setParameter("recvWindow","60001");
             default -> request.removeParameter("signature");
         }
+        request.setQueryString(null);
         assertThat(controller(business).handle(request,null).getStatusCode().value()).isEqualTo(400);
         verifyNoInteractions(business);
     }
@@ -69,7 +70,7 @@ class ApiKeyHttpBoundaryTest {
     @Test
     void rawEncodingDuplicateKeysAndQueryBodyConcatenationRemainSignedExactly() {
         var request=request();String query="timestamp="+System.currentTimeMillis()+"&symbol=BTC%2FUSDT&symbol=ETH%2fUSDT";
-        String body="side=BUY&note=a+b&signature=ignored";
+        String body="side=BUY&note=a+b";
         String canonical=query+"side=BUY&note=a+b";
         String signature=service.sign("secret",canonical);
         request.setQueryString(query+"&signature="+signature);request.setParameter("signature",signature);
@@ -78,6 +79,38 @@ class ApiKeyHttpBoundaryTest {
         when(repository.active(apiKey)).thenReturn(Optional.of(record()));
         assertThat(service.authenticate(input,"READ")).isEqualTo(42L);
         verify(repository).markUsed(any(),any());
+    }
+
+    @Test
+    void authenticatesFormOnlyRequestsAfterTheServletInputHasBeenConsumed() {
+        var request = new MockHttpServletRequest("POST", "/api/v3/order");
+        request.setRemoteAddr("203.0.113.7");
+        request.addHeader("X-MBX-APIKEY", apiKey);
+        String canonical = "symbol=BTCUSDT&timestamp=" + System.currentTimeMillis();
+        byte[] body = (canonical + "&signature=" + service.sign("secret", canonical))
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        when(repository.active(apiKey)).thenReturn(Optional.of(record()));
+        assertThat(service.authenticate(new ApiKeyRequestBinding(properties).bind(request, body), "READ")).isEqualTo(42L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"timestamp=1", "recvWindow=2&recvWindow=3", "signature=another"})
+    void ambiguousAuthenticationFieldsAreRejected(String body) {
+        assertThatThrownBy(() -> new ApiKeyRequestBinding(properties).bind(request(),
+                body.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("exactly once");
+    }
+
+    @Test
+    void theSpecificSubtractionOverflowTimestampIsRejected() {
+        when(repository.active(apiKey)).thenReturn(Optional.of(record()));
+        long timestamp = System.currentTimeMillis() + Long.MIN_VALUE;
+        String canonical = "timestamp=" + timestamp;
+        var input = new ApiKeyAuthenticationRequest(apiKey, "203.0.113.7", timestamp, 5000,
+                service.sign("secret", canonical), canonical);
+        assertThatThrownBy(() -> service.authenticate(input, "READ"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("outside recvWindow");
+        verify(repository, never()).markUsed(any(), any());
     }
 
     private GatewayApiKeyRepository.ApiKeyRecord record() {

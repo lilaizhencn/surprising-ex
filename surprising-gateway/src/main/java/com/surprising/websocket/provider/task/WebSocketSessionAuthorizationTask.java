@@ -32,7 +32,10 @@ public final class WebSocketSessionAuthorizationTask implements AutoCloseable {
     public void revalidateSessions() {
         if (checks.isShutdown()) return;
         long now = System.currentTimeMillis();
+        long monotonicNow = System.nanoTime();
         for (var connection : registry.connections()) {
+            if (connection.limitLeaseExpired(monotonicNow))
+                connection.close(CloseStatus.SERVICE_OVERLOAD.withReason("websocket limit lease expired"));
             // Expiry is enforced even if every database worker is currently blocked.
             if (connection.authorizationExpired(now))
                 connection.close(CloseStatus.POLICY_VIOLATION.withReason("websocket authorization expired"));

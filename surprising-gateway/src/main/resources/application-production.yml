@@ -1,3 +1,6 @@
+server:
+  address: ${GATEWAY_BIND_ADDRESS:127.0.0.1}
+
 spring:
   config:
     activate:
@@ -49,6 +52,7 @@ surprising:
         base-url: ${GATEWAY_KYC_VERIFF_BASE_URL:https://stationapi.veriff.com}
         callback-url: ${GATEWAY_KYC_VERIFF_CALLBACK_URL:}
     security:
+      cors-allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:https://ex.tokdou.com}
       require-identity-for-private-routes: true
       admin-ip-allowlist: ${GATEWAY_ADMIN_IP_ALLOWLIST}
       # Test deployment uses Nginx on the same host. Override only when proxy hops are remote.

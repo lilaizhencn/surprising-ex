@@ -110,6 +110,7 @@ public class AuthService {
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
     public AuthModels.LoginResult login(LoginRequest request, AuthClientMetadata httpRequest) {
         String identifier = request.identifier();
+        currentClient.loginAttempt(identifier);
         Instant now = Instant.now();
         GatewayUserRepository.UserCredential credential = credential(identifier).orElse(null);
         if (credential == null || !passwordHasher.matches(request.password(), credential.passwordHash())) {
@@ -215,6 +216,7 @@ public class AuthService {
         }
         AuthClientMetadata client = currentClient.current();
         if (client != null) requireAccessAllowed(user.userId(), null, client.ipAddress());
+        currentClient.authenticated(user.userId(), null);
         return new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(), principal.expiresAt(),
                 principal.sessionId());
     }
@@ -522,6 +524,13 @@ public class AuthService {
 
     public void requireIpAccessAllowed(long userId, String ipAddress) {
         requireAccessAllowed(userId, null, ipAddress);
+    }
+
+    public void requireApiKeyAccess(long userId, String ipAddress, String permission) {
+        var user = repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
+        if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
+        requireIpAccessAllowed(userId, ipAddress);
+        requireUserGatewayWrite(user.status(), "TRADE".equals(permission), "WITHDRAW".equals(permission));
     }
 
     public void recordSecurityChange(long userId, Instant now) {

@@ -68,7 +68,7 @@ class C2cBrowserQaTest {
         @Bean StandardServletMultipartResolver multipartResolver() {return new StandardServletMultipartResolver();}
         @Bean C2cChatRealtime realtime() {return new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),10);}
         @Bean SubscriptionRegistry registry() {return new SubscriptionRegistry(fixture.json,new WebSocketProperties());}
-        @Bean ClientWebSocketHandler handler() {return new ClientWebSocketHandler(fixture.json,registry(),new WebSocketProperties(),new WebSocketJwtAuthenticator(fixture.auth),fixture.products);}
+        @Bean ClientWebSocketHandler handler() {return new ClientWebSocketHandler(fixture.json,registry(),new WebSocketProperties(),new WebSocketAuthenticator(fixture.auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class)),fixture.products, disabledLimits());}
         @Override public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {registry.addHandler(handler(),"/ws/v1").setAllowedOriginPatterns("http://127.0.0.1:17173");}
     }
 
@@ -111,4 +111,10 @@ class C2cBrowserQaTest {
             try(var paths=Files.walk(runtime)) {for(var path:paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);}
         }
     }
+    private static com.surprising.gateway.provider.service.GatewayRequestLimits disabledLimits() {
+        var properties = new com.surprising.gateway.provider.config.GatewayLimitProperties();
+        properties.setEnabled(false);
+        return new com.surprising.gateway.provider.service.GatewayRequestLimits(null, properties, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+    }
+
 }

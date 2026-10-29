@@ -4,7 +4,7 @@ import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.websocket.provider.config.WebSocketAuthorizationConfiguration;
 import com.surprising.websocket.provider.config.WebSocketProperties;
 import com.surprising.websocket.provider.service.SubscriptionRegistry;
-import com.surprising.websocket.provider.service.WebSocketJwtAuthenticator;
+import com.surprising.websocket.provider.service.WebSocketAuthenticator;
 import com.surprising.websocket.provider.service.WebSocketSessionAuthorization;
 import com.surprising.websocket.provider.session.ClientConnection;
 import org.junit.jupiter.api.Test;
@@ -31,7 +31,7 @@ class WebSocketSessionAuthorizationTaskTest {
 
     @Test void oneSlowRevalidationDoesNotPreventAnotherSessionRenewingItsLease() throws Exception {
         var registry = mock(SubscriptionRegistry.class);
-        var authenticator = mock(WebSocketJwtAuthenticator.class);
+        var authenticator = mock(WebSocketAuthenticator.class);
         var slow = connection("slow");
         var healthy = connection("healthy");
         when(registry.connections()).thenReturn(List.of(slow, healthy));

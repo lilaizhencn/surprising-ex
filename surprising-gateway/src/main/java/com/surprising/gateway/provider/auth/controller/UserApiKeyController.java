@@ -65,14 +65,15 @@ public class UserApiKeyController {
     }
 
     @PatchMapping
-    public void updateIpAllowlist(
+    public void update(
             @RequestHeader("Authorization") String authorization,
             @RequestHeader(value = "X-Security-Email-Code", required = false) String emailCode,
             @RequestHeader(value = "X-Security-TOTP-Code", required = false) String totpCode,
             @Valid @RequestBody UpdateApiKeyRequest request,
             HttpServletRequest httpRequest) {
         try {
-            service.updateIpAllowlist(authorization, binding.requireApiKey(request.apiKey()), binding.normalizeIpAllowlist(request.ipAllowlist()), emailCode, totpCode,
+            service.update(authorization, binding.requireApiKey(request.apiKey()), binding.label(request.label()),
+                    binding.normalizePermissions(request.permissions()), binding.normalizeIpAllowlist(request.ipAllowlist()), emailCode, totpCode,
                     httpRequest.getRemoteAddr());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

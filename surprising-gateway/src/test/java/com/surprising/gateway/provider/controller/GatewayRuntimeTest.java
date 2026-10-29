@@ -15,7 +15,7 @@ class GatewayRuntimeTest {
     void exposesConfiguredProductLines(ProductLine product) {
         var local = mock(GatewayProductServices.class);
         when(local.enabled()).thenReturn(java.util.List.of(product));
-        var controller = new GatewayProxyController(null,null,null,null,new tools.jackson.databind.ObjectMapper(),null,null,local,
+        var controller = new GatewayProxyController(null,null,null, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class),null,new tools.jackson.databind.ObjectMapper(),null,null,local,
                 mock(com.surprising.gateway.provider.local.LocalBusinessApi.class),mock(com.surprising.gateway.provider.product.GatewayProductSelection.class));
         when(local.disabled()).thenReturn(java.util.List.of(ProductLine.values()).stream().filter(p -> p != product).toList());
         assertThat(controller.runtime().get("productLines")).containsExactly(product);

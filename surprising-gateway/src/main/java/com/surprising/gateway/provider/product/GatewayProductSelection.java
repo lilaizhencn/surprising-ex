@@ -13,6 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 /** 解析请求的产品归属；任何来源冲突都拒绝，不能用头覆盖正文或批量请求中的其他产品。 */
 @Component
 public final class GatewayProductSelection {
+    public static final String RESOLVED_PRODUCT = GatewayProductSelection.class.getName() + ".product";
     private static final List<String> SELECTORS = List.of("productLine", "product-line", "product_line",
             "accountType", "account-type", "account_type", "contractType", "contract-type", "contract_type");
     private final GatewayProductServices products;
@@ -52,6 +53,7 @@ public final class GatewayProductSelection {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, unavailable.getMessage(), unavailable);
             }
         }
+        if (product != null) request.setAttribute(RESOLVED_PRODUCT, product);
         return product;
     }
     private void collect(Set<ProductLine> selected, JsonNode node) {

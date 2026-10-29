@@ -1,7 +1,7 @@
 package com.surprising.websocket.provider.controller;
 
 import com.surprising.websocket.provider.service.RealtimeWebSocketBridge;
-import com.surprising.websocket.provider.service.WebSocketJwtAuthenticator;
+import com.surprising.websocket.provider.service.WebSocketAuthenticator;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.UserReadView;
@@ -14,9 +14,9 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/realtime")
 public final class RealtimeStateController {
     private final RealtimeWebSocketBridge bridge;
-    private final WebSocketJwtAuthenticator auth;
+    private final WebSocketAuthenticator auth;
 
-    public RealtimeStateController(RealtimeWebSocketBridge bridge, WebSocketJwtAuthenticator auth) {
+    public RealtimeStateController(RealtimeWebSocketBridge bridge, WebSocketAuthenticator auth) {
         this.bridge = bridge;
         this.auth = auth;
     }

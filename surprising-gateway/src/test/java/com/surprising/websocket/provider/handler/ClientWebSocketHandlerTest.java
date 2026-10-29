@@ -1,6 +1,6 @@
 package com.surprising.websocket.provider.handler;
 
-import com.surprising.websocket.provider.service.WebSocketJwtAuthenticator;
+import com.surprising.websocket.provider.service.WebSocketAuthenticator;
 import com.surprising.websocket.provider.service.SubscriptionRegistry;
 import com.surprising.websocket.provider.session.ClientConnection;
 
@@ -30,8 +30,8 @@ class ClientWebSocketHandlerTest {
     private final AuthService auth=mock(AuthService.class);
     private final C2cChatRealtime chat=mock(C2cChatRealtime.class);
     private final ClientWebSocketHandler handler=new ClientWebSocketHandler(json,registry,properties,
-            new WebSocketJwtAuthenticator(auth),mock(GatewayProductServices.class));
-    private final com.surprising.websocket.provider.service.WebSocketSessionAuthorization authorization = new com.surprising.websocket.provider.service.WebSocketSessionAuthorization(registry, new WebSocketJwtAuthenticator(auth), java.util.Optional.of(chat));
+            new WebSocketAuthenticator(auth, mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class)),mock(GatewayProductServices.class), disabledLimits());
+    private final com.surprising.websocket.provider.service.WebSocketSessionAuthorization authorization = new com.surprising.websocket.provider.service.WebSocketSessionAuthorization(registry, new WebSocketAuthenticator(auth, mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class)), java.util.Optional.of(chat));
     private final com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTask authorizationTask = new com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTask(registry, authorization, new com.surprising.websocket.provider.config.WebSocketAuthorizationConfiguration().websocketAuthorizationChecks(properties));
     private final List<String> frames=new CopyOnWriteArrayList<>();
     private final List<WebSocketSession> sessions=new ArrayList<>();
@@ -156,4 +156,10 @@ class ClientWebSocketHandlerTest {
         assertThat(frames.stream().noneMatch(s->s.contains("\"op\":\"error\""))).isTrue();
         verify(session,never()).close(any(CloseStatus.class));
     }
+    private static com.surprising.gateway.provider.service.GatewayRequestLimits disabledLimits() {
+        var properties = new com.surprising.gateway.provider.config.GatewayLimitProperties();
+        properties.setEnabled(false);
+        return new com.surprising.gateway.provider.service.GatewayRequestLimits(null, properties, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+    }
+
 }

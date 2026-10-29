@@ -1,0 +1,13 @@
+{
+  "temporaryCredentialsScan": "no temporary credentials in archive",
+  "resources": {
+    "vite17174": "stopped",
+    "vite17175": "stopped",
+    "nginx": "owned instance stopped",
+    "redis": "owned port 56562 stopped without persistence",
+    "ios": "owned simulator deleted",
+    "android": "owned emulator stopped and AVD deleted",
+    "postgres": "owned database dropped",
+    "temporaryDirectory": "removed including browser dependencies and local credentials"
+  }
+}

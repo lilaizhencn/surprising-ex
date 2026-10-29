@@ -29,7 +29,7 @@ class GatewayApiKeyAuthenticationIpTest {
         properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties);
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
         String apiKey = "sx_" + "a".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "10.8.0.0/16");
         when(repository.active(apiKey)).thenReturn(Optional.of(record));
@@ -44,14 +44,14 @@ class GatewayApiKeyAuthenticationIpTest {
         properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties);
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
         String apiKey = "sx_" + "b".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "10.8.0.0/16");
         when(repository.active(apiKey)).thenReturn(Optional.of(record));
         MockHttpServletRequest request = signedRequest(service, apiKey, "203.0.113.10", "10.8.2.3");
 
         assertThatThrownBy(() -> service.authenticate(new ApiKeyRequestBinding(properties).bind(request, null), "READ"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException.class)
                 .hasMessage("api key IP address is not allowed");
     }
 
@@ -60,7 +60,7 @@ class GatewayApiKeyAuthenticationIpTest {
         GatewayProperties properties = new GatewayProperties();
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties);
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
         String apiKey = "sx_" + "c".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "");
         when(repository.active(apiKey)).thenReturn(Optional.of(record));

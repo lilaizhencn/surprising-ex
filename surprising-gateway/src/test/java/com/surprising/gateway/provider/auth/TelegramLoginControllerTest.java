@@ -22,7 +22,7 @@ class TelegramLoginControllerTest {
         var service = mock(TelegramLoginService.class);
         when(service.callback("expired", "private-code", null))
                 .thenThrow(new IllegalArgumentException("private-code / database detail"));
-        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties()))).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)))).build();
         var response = mvc.perform(get("/api/v1/auth/telegram/callback")
                         .param("state", "expired").param("code", "private-code")
                         .accept(MediaType.TEXT_HTML))
@@ -39,7 +39,7 @@ class TelegramLoginControllerTest {
     void unavailableCallbackDoesNotRenderFrameworkErrorOrSensitiveException() throws Exception {
         var service = mock(TelegramLoginService.class);
         when(service.callback(null, null, null)).thenThrow(new IllegalStateException("private detail"));
-        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties()))).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)))).build();
         var response = mvc.perform(get("/api/v1/auth/telegram/callback").accept(MediaType.TEXT_HTML))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
@@ -51,7 +51,7 @@ class TelegramLoginControllerTest {
     void webCallbackDoesNotLaunchTheApp() throws Exception {
         var service = mock(TelegramLoginService.class);
         when(service.callback("state", "code", null)).thenReturn(new TelegramLoginService.Callback(true, null));
-        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties()))).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)))).build();
         var response = mvc.perform(get("/api/v1/auth/telegram/callback")
                         .param("state", "state").param("code", "code").accept(MediaType.TEXT_HTML))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -64,7 +64,7 @@ class TelegramLoginControllerTest {
         String link = "surprising://auth/telegram?flowId=" + state;
         when(service.callback(state, "private-code", null))
                 .thenReturn(new TelegramLoginService.Callback(true, link));
-        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties()))).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)))).build();
         var response = mvc.perform(get("/api/v1/auth/telegram/callback")
                         .param("state", state).param("code", "private-code").accept(MediaType.TEXT_HTML))
                 .andExpect(status().isOk()).andReturn().getResponse();
@@ -78,7 +78,7 @@ class TelegramLoginControllerTest {
     @Test
     void startDefaultsToWebAndOnlyExplicitMobileRequestSelectsAppReturn() throws Exception {
         var service = mock(TelegramLoginService.class);
-        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties()))).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service,new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)))).build();
         mvc.perform(post("/api/v1/auth/telegram/start").header("X-Device-Id", "device")
                 .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isOk());

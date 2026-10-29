@@ -59,7 +59,7 @@ class ApiKeyManagementPostgresTest {
                 .thenReturn(new JwtPrincipal(id, "user_" + id, "NORMAL", List.of("USER"), Instant.now().plusSeconds(300)));
         when(verification.verify(anyLong(), eq("SECURITY_SETTINGS"), any(), any(), any())).thenReturn(true);
         totp = new TotpService(properties);
-        service = new GatewayApiKeyService(new GatewayApiKeyRepository(jdbc), auth, totp, verification, properties);
+        service = new GatewayApiKeyService(new GatewayApiKeyRepository(jdbc), auth, totp, verification, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
         mvc = MockMvcBuilders.standaloneSetup(new UserApiKeyController(service, properties)).build();
     }
     @AfterEach void cleanup() { if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }
@@ -97,7 +97,8 @@ class ApiKeyManagementPostgresTest {
     @Test void onlyOwnerCanUpdateOrRevokeAndRevokedKeyCannotAuthenticate() throws Exception {
         JsonNode created = create(Map.of("label", "owner"));
         String key = created.get("apiKey").get("apiKey").asString();
-        byte[] update = json.writeValueAsBytes(Map.of("apiKey", key, "ipAllowlist", List.of("203.0.113.7")));
+        byte[] update = json.writeValueAsBytes(Map.of("apiKey", key, "label", "edited", "permissions", List.of("READ"),
+                "ipAllowlist", List.of("203.0.113.7")));
         mvc.perform(secure(patch(PATH), 8).content(update)).andExpect(status().isBadRequest());
         assertThat(jdbc.queryForObject("SELECT ip_allowlist FROM gateway_api_keys WHERE api_key=?", String.class, key)).isEmpty();
         mvc.perform(secure(patch(PATH), 7).content(update)).andExpect(status().isOk());
@@ -117,11 +118,42 @@ class ApiKeyManagementPostgresTest {
         String key = created.get("apiKey").get("apiKey").asString();
         when(verification.verify(anyLong(), any(), any(), any(), any())).thenReturn(false);
         var request = operation.equals("create") ? post(PATH) : operation.equals("patch") ? patch(PATH) : delete(PATH);
-        Object body = operation.equals("create") ? Map.of("label", "new") : Map.of("apiKey", key, "ipAllowlist", List.of("203.0.113.7"));
+        Object body = operation.equals("create") ? Map.of("label", "new") : Map.of("apiKey", key, "label", "keep", "permissions", List.of("READ"), "ipAllowlist", List.of("203.0.113.7"));
         mvc.perform(secure(request, 7).content(json.writeValueAsBytes(body))).andExpect(status().isBadRequest());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_api_keys", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT status FROM gateway_api_keys WHERE api_key=?", String.class, key)).isEqualTo("ACTIVE");
         assertThat(jdbc.queryForObject("SELECT ip_allowlist FROM gateway_api_keys WHERE api_key=?", String.class, key)).isEmpty();
+    }
+
+    @Test void editPersistsSettingsAndPermissionReductionAppliesToSubsequentSignedRequests() throws Exception {
+        JsonNode created = create(Map.of("label", "bot", "permissions", List.of("TRADE"),
+                "ipAllowlist", List.of("203.0.113.7")));
+        String key = created.get("apiKey").get("apiKey").asString();
+        String secret = created.get("secret").asString();
+        mvc.perform(secure(patch(PATH), 7).content(json.writeValueAsBytes(Map.of("apiKey", key,
+                "label", "read only", "permissions", List.of("READ"), "ipAllowlist", List.of("203.0.113.0/24")))))
+                .andExpect(status().isOk());
+        var stored = jdbc.queryForMap("SELECT label,permissions,ip_allowlist FROM gateway_api_keys WHERE api_key=?", key);
+        assertThat(stored).containsEntry("label", "read only").containsEntry("permissions", "READ")
+                .containsEntry("ip_allowlist", "203.0.113.0/24");
+        long timestamp = System.currentTimeMillis();
+        String canonical = "timestamp=" + timestamp;
+        var signed = new ApiKeyAuthenticationRequest(key, "203.0.113.7", timestamp, 5000,
+                service.sign(secret, canonical), canonical);
+        assertThat(service.authenticate(signed, "READ")).isEqualTo(7L);
+        assertThatThrownBy(() -> service.authenticate(signed, "TRADE"))
+                .isInstanceOf(com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException.class)
+                .hasMessageContaining("permission");
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"TRADE", "WITHDRAW"})
+    void writePermissionsRequireABoundedIpAllowlistBeforeSecurityVerification(String permission) throws Exception {
+        for (List<String> ips : List.of(List.<String>of(), List.of("0.0.0.0/0"), List.of("::/0"))) {
+            mvc.perform(secure(post(PATH), 7).content(json.writeValueAsBytes(Map.of("label", "unsafe",
+                    "permissions", List.of(permission), "ipAllowlist", ips)))).andExpect(status().isBadRequest());
+        }
+        verifyNoInteractions(auth, verification);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_api_keys", Integer.class)).isZero();
     }
 
     @ParameterizedTest @ValueSource(strings = {"blank-label", "long-label", "unsupported-permission", "null-permission", "hostname", "invalid-cidr", "blank-ip", "101-ips", "invalid-update-key", "invalid-revoke-key"})

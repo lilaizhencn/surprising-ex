@@ -102,7 +102,7 @@ class AuthPagePostgresTest {
                 mock(GatewayUserMfaRepository.class), sessions);
         var properties = new GatewayProperties();
         auth = spy(new AuthService(properties, persistence, mock(PasswordHasher.class), mock(JwtTokenService.class),
-                mock(EmailVerificationService.class), mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), () -> null, mock(com.surprising.affiliate.service.AffiliateService.class)));
+                mock(EmailVerificationService.class), mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class)));
         doReturn(new JwtPrincipal(7, "owner", "NORMAL", List.of("USER"), TIME.plusSeconds(3600)))
                 .when(auth).authenticateBearer("Bearer user");
         doReturn(new JwtPrincipal(99, "admin", "NORMAL", List.of("SUPER_ADMIN"), TIME.plusSeconds(3600)))

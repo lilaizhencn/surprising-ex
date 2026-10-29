@@ -320,6 +320,10 @@ public class GatewayProperties implements EnvironmentAware {
     @Getter
     public static class Security {
         @Setter
+        private List<String> corsAllowedOrigins = List.of("http://localhost:5173", "http://127.0.0.1:5173",
+                "http://localhost:5174", "http://127.0.0.1:5174", "http://localhost:4173", "http://127.0.0.1:4173",
+                "https://ex.tokdou.com");
+        @Setter
         private String userIdHeader = "X-User-Id";
         @Setter
         private boolean requireIdentityForPrivateRoutes = true;

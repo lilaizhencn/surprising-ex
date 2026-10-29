@@ -89,7 +89,7 @@ class PrimaryAuthenticationDatabaseTest {
         var jwt = mock(JwtTokenService.class);
         var verification = mock(LoginVerificationService.class);
         var auth = new AuthService(properties, persistence, mock(PasswordHasher.class), jwt,
-                mock(EmailVerificationService.class), verification, mock(GatewayUserAccessBlockRepository.class), new AuthClientMetadataBinding(properties), mock(com.surprising.affiliate.service.AffiliateService.class));
+                mock(EmailVerificationService.class), verification, mock(GatewayUserAccessBlockRepository.class), new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), mock(com.surprising.affiliate.service.AffiliateService.class));
         when(persistence.user(1)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
                 1, null, null, "NORMAL", List.of("USER"), Instant.now())));
         when(persistence.credential(1)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
@@ -100,13 +100,13 @@ class PrimaryAuthenticationDatabaseTest {
                 .thenAnswer(i -> sessions.save(i.getArgument(0), i.getArgument(1), i.getArgument(2),
                         i.getArgument(3), i.getArgument(4), i.getArgument(5), i.getArgument(6), i.getArgument(7)));
         var http = new MockHttpServletRequest();
-        var loggedIn = (AuthModels.AuthResponse) auth.loginTelegram(1, new AuthClientMetadataBinding(properties).bind(http));
+        var loggedIn = (AuthModels.AuthResponse) auth.loginTelegram(1, new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(http));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE authenticated_at IS NOT NULL", Long.class))
                 .isEqualTo(1);
         Instant original = Instant.parse("2026-10-20T00:00:00Z");
         jdbc.update("UPDATE gateway_refresh_sessions SET authenticated_at=? WHERE authenticated_at IS NOT NULL", Timestamp.from(original));
-        var refreshed = auth.refresh(new AuthModels.RefreshRequest(loggedIn.refreshToken()), new AuthClientMetadataBinding(properties).bind(http));
-        auth.refresh(new AuthModels.RefreshRequest(refreshed.refreshToken()), new AuthClientMetadataBinding(properties).bind(http));
+        var refreshed = auth.refresh(new AuthModels.RefreshRequest(loggedIn.refreshToken()), new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(http));
+        auth.refresh(new AuthModels.RefreshRequest(refreshed.refreshToken()), new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(http));
         var times = jdbc.query("SELECT authenticated_at FROM gateway_refresh_sessions WHERE authenticated_at IS NOT NULL",
                 (rs, n) -> rs.getTimestamp(1).toInstant());
         assertThat(times).hasSize(3).containsOnly(original);

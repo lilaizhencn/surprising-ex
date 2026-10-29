@@ -2,6 +2,10 @@ server:
   port: 9094
 
 spring:
+  data:
+    redis:
+      connect-timeout: ${GATEWAY_VALKEY_CONNECT_TIMEOUT:200ms}
+      timeout: ${GATEWAY_VALKEY_TIMEOUT:200ms}
   jackson:
     deserialization:
       accept-float-as-int: false

@@ -17,7 +17,7 @@ import static org.mockito.Mockito.*;
 class WebSocketSessionAuthorizationTest {
     @Test void socketCloseCleansRoutesWhileItsAuthorizationCallIsStillBlocked() throws Exception {
         var registry = new SubscriptionRegistry(new tools.jackson.databind.ObjectMapper(), new com.surprising.websocket.provider.config.WebSocketProperties());
-        var authenticator = mock(WebSocketJwtAuthenticator.class);
+        var authenticator = mock(WebSocketAuthenticator.class);
         var session = mock(WebSocketSession.class);
         when(session.getId()).thenReturn("blocked-authorization");
         when(session.isOpen()).thenReturn(true);
@@ -51,7 +51,7 @@ class WebSocketSessionAuthorizationTest {
 
     @Test void oldSlowValidationFailureCannotRevokeARotatedToken() throws Exception {
         var registry = mock(SubscriptionRegistry.class);
-        var authenticator = mock(WebSocketJwtAuthenticator.class);
+        var authenticator = mock(WebSocketAuthenticator.class);
         var session = mock(WebSocketSession.class);
         when(session.getId()).thenReturn("rotation");
         when(session.isOpen()).thenReturn(true);
