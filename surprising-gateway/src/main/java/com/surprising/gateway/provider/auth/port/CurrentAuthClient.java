@@ -7,4 +7,6 @@ public interface CurrentAuthClient {
     AuthClientMetadata current();
     void authenticated(long userId, String apiKey);
     void loginAttempt(String identifier);
+    com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal cachedBearer(String authorization);
+    void cacheBearer(String authorization, com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal);
 }

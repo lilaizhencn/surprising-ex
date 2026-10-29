@@ -160,8 +160,8 @@ class AdminPermissionFilterTest {
         var response = new MockHttpServletResponse();
         var filter = new AdminPermissionFilter(auth);
         filter.doFilter(request, response, new MockFilterChain());
-        assertThat(response.getStatus()).isEqualTo(200);
-        verify(auth).requireAdminPermission("Bearer scoped-admin", permission);
+        assertThat(response.getStatus()).isEqualTo(permission.startsWith("admin.unmapped.") ? 403 : 200);
+        if (!permission.startsWith("admin.unmapped.")) verify(auth).requireAdminPermission("Bearer scoped-admin", permission);
     }
 
     @Test

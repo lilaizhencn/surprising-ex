@@ -42,6 +42,7 @@ class ClientWebSocketHandlerTest {
     @AfterEach void cleanup() {authorizationTask.close();for(var session:sessions)registry.remove(session.getId());}
     private WebSocketSession session() throws Exception {
         var session=mock(WebSocketSession.class);when(session.getId()).thenReturn(UUID.randomUUID().toString());when(session.isOpen()).thenReturn(true);
+        when(session.getAttributes()).thenReturn(new HashMap<>(Map.of(ClientConnection.CLIENT_IP,"203.0.113.7")));
         var headers=new HttpHeaders();headers.set("X-User-Id","99");when(session.getHandshakeHeaders()).thenReturn(headers);
         when(session.getUri()).thenReturn(URI.create("ws://localhost/ws/v1?userId=99"));
         doAnswer(call->{frames.add(((TextMessage)call.getArgument(0)).getPayload());return null;}).when(session).sendMessage(any());
@@ -52,6 +53,19 @@ class ClientWebSocketHandlerTest {
         long until=System.nanoTime()+2_000_000_000L;
         while(System.nanoTime()<until && frames.stream().noneMatch(s->s.contains(value)))Thread.sleep(10);
         assertThat(frames.stream().anyMatch(s->s.contains(value))).isTrue();
+    }
+    @Test void aBlockedJwtIpIsRejectedOnAuthenticationAndClosesAnExistingSession() throws Exception {
+        var session = session();
+        var connection = registry.connection(session.getId());
+        command(session, Map.of("op", "authenticate", "token", "qa-7"));
+        doThrow(new IllegalStateException("IP is blocked")).when(auth).requireIpAccessAllowed(7, connection.clientIp());
+        authorization.revalidate(connection);
+        verify(session, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        assertThat(connection.isOpen()).isFalse();
+        var second = session();
+        command(second, Map.of("op", "authenticate", "token", "qa-7"));
+        awaitFrame("IP is blocked");
+        assertThat(registry.connection(second.getId()).authenticatedUserId()).isNull();
     }
     @Test void handshakeHeadersAndQueryParametersNeverAuthenticateAUser() throws Exception {
         var session=session();assertThat(registry.connection(session.getId()).authenticatedUserId()).isNull();

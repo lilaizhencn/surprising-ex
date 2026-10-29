@@ -45,7 +45,7 @@ class AuthInputBoundaryPostgresTest {
         var source=new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
         jdbc=new JdbcTemplate(source);jdbc.execute("TRUNCATE gateway_users CASCADE");
         properties=new GatewayProperties();properties.getSecurity().setRequireEmailVerification(false);
-        userRows=new GatewayUserRepository(jdbc);passwords=new PasswordHasher();
+        userRows=new GatewayUserRepository(jdbc);passwords=new PasswordHasher(new com.surprising.gateway.provider.config.GatewayLimitProperties());
         context=new AnnotationConfigApplicationContext();context.register(Transactions.class);
         context.registerBean(DataSourceTransactionManager.class,()->new DataSourceTransactionManager(source));
         context.registerBean(AuthPersistenceService.class,()->new AuthPersistenceService(userRows,new GatewayRoleRepository(jdbc),new GatewayPermissionRepository(jdbc),new GatewayUserRoleRepository(jdbc),new GatewayRolePermissionRepository(jdbc),new GatewayLoginLogRepository(jdbc),new GatewayUserMfaRepository(jdbc),new GatewayRefreshSessionRepository(jdbc)));

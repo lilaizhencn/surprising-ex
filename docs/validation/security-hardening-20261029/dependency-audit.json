@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-10-29T09:28:43.497454+00:00",
+  "complete": true,
+  "scopes": [
+    {
+      "file": "surprising-gateway/target/bom.json",
+      "components": 171,
+      "excludedGroupPrefix": "com.surprising"
+    },
+    {
+      "file": "../surprising-ex-web/bun.lock",
+      "registryPackages": 418
+    },
+    {
+      "file": "../surprising-admin-web/pnpm-lock.yaml",
+      "registryPackages": 49
+    }
+  ],
+  "findings": []
+}

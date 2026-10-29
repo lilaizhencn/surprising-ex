@@ -111,7 +111,7 @@ final class C2cDatabaseFixture implements AutoCloseable {
     static C2cAttachments attachments(JdbcTemplate jdbc,C2cConversations conversations,C2cOrdersRepository orders,
                                       C2cPaymentAccounts payments,C2cR2Storage storage,org.springframework.transaction.PlatformTransactionManager transactions) {
         return new C2cAttachments(new C2cAttachmentRepository(jdbc),new com.surprising.gateway.c2c.repository.C2cMessageRepository(jdbc),
-                new GatewayUserRepository(jdbc),conversations,orders,payments,storage,transactions);
+                new GatewayUserRepository(jdbc),conversations,orders,payments,storage,transactions, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
     }
     static C2cMessages messages(JdbcTemplate jdbc,C2cConversations conversations,C2cAttachments attachments,ObjectMapper json) {
         return new C2cMessages(new com.surprising.gateway.c2c.repository.C2cMessageRepository(jdbc),

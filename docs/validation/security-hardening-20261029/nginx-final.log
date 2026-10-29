@@ -1,0 +1,34 @@
+[
+  {
+    "case": "local readiness status preserved",
+    "status": 503
+  },
+  {
+    "case": "non-loopback peer denied health",
+    "status": 403
+  },
+  {
+    "case": "ordinary request body limit",
+    "status": 413
+  },
+  {
+    "case": "internal routes not published",
+    "status": 404
+  },
+  {
+    "case": "encoded path rejected through proxy",
+    "status": 400
+  },
+  {
+    "case": "admin CSP and response headers",
+    "status": 200
+  },
+  {
+    "case": "429 handler supports credentialed browser CORS and Retry-After (forced single response)",
+    "status": 429
+  },
+  {
+    "case": "query authorization cookie absent from access/error logs",
+    "status": 401
+  }
+]

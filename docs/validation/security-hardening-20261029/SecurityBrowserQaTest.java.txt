@@ -1,0 +1,139 @@
+package com.surprising.gateway.provider.config;
+
+import static org.mockito.Mockito.*;
+import com.surprising.gateway.provider.auth.controller.*;
+import com.surprising.gateway.provider.auth.repository.*;
+import com.surprising.gateway.provider.auth.service.*;
+import com.surprising.gateway.provider.controller.*;
+import com.surprising.gateway.provider.interceptor.*;
+import com.surprising.gateway.provider.service.GatewayRequestLimits;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.websocket.provider.config.*;
+import com.surprising.websocket.provider.handler.ClientWebSocketHandler;
+import com.surprising.websocket.provider.service.*;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.nio.file.*;
+import java.time.*;
+import java.util.*;
+import org.apache.catalina.startup.Tomcat;
+import org.apache.tomcat.util.descriptor.web.*;
+import org.apache.tomcat.websocket.server.WsSci;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.context.annotation.*;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.*;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
+import org.springframework.web.filter.*;
+import org.springframework.web.servlet.DispatcherServlet;
+import org.springframework.web.servlet.config.annotation.EnableWebMvc;
+import org.springframework.web.socket.config.annotation.*;
+import tools.jackson.databind.ObjectMapper;
+
+/** Owned local browser/device fixture: production auth/security, real PostgreSQL sessions and Redis. No Core, wallet or email provider. */
+@EnabledIfEnvironmentVariable(named = "SECURITY_QA_DIR", matches = ".+/surprising-security\\.[A-Za-z0-9]+")
+class SecurityBrowserQaTest {
+    static final GatewayProperties properties = new GatewayProperties();
+    static final GatewayLimitProperties policies = new GatewayLimitProperties();
+    static StringRedisTemplate redis;
+    static final ObjectMapper json = new ObjectMapper();
+
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false) @EnableWebMvc @EnableWebSocket @EnableTransactionManagement
+    @ComponentScan(basePackageClasses = GatewayUserRepository.class)
+    @Import({GatewaySecurityConfiguration.class, GatewayCorsConfig.class, AdminPermissionFilter.class, AdminIpWhitelistFilter.class,
+            AuthController.class, BrowserSessionController.class, BrowserSessionResponse.class, AdminAuthController.class,
+            AuthClientMetadataBinding.class, AuthPersistenceService.class, AuthService.class, JwtTokenService.class, PasswordHasher.class,
+            GatewayLimitErrors.class, GatewayLimitRequestBinding.class, GatewayLimitFilter.class})
+    static class Configuration {
+        @Bean GatewayProperties properties() { return properties; }
+        @Bean GatewayLimitProperties policies() { return policies; }
+        @Bean WebSocketProperties websocket() { return new WebSocketProperties(); }
+        @Bean ObjectMapper json() { return json; }
+        @Bean DriverManagerDataSource source() { return new DriverManagerDataSource(System.getenv("SECURITY_QA_JDBC_URL"), "atomex", ""); }
+        @Bean JdbcTemplate jdbc(DriverManagerDataSource source) { return new JdbcTemplate(source); }
+        @Bean PlatformTransactionManager transactions(DriverManagerDataSource source) { return new DataSourceTransactionManager(source); }
+        @Bean GatewayRequestLimits limits() { return new GatewayRequestLimits(redis, policies, new SimpleMeterRegistry()); }
+        @Bean LoginVerificationService verification() { return mock(LoginVerificationService.class); }
+        @Bean EmailVerificationService email() { return mock(EmailVerificationService.class); }
+        @Bean PasswordResetService reset() { return mock(PasswordResetService.class); }
+        @Bean AdminApprovalService approvals() { return mock(AdminApprovalService.class); }
+        @Bean com.surprising.affiliate.service.AffiliateService affiliates() { return mock(com.surprising.affiliate.service.AffiliateService.class); }
+        @Bean Probes probes(AuthService auth) { return new Probes(auth); }
+        @Bean SubscriptionRegistry subscriptions(WebSocketProperties ws) { return new SubscriptionRegistry(json, ws); }
+        @Bean ClientWebSocketHandler sockets(SubscriptionRegistry registry, WebSocketProperties ws, AuthService auth, GatewayRequestLimits limits) {
+            return new ClientWebSocketHandler(json, registry, ws, new WebSocketAuthenticator(auth, mock(GatewayApiKeyService.class)), mock(GatewayProductServices.class), limits);
+        }
+        @Bean WebSocketConfigurer endpoints(ClientWebSocketHandler handler, WebSocketProperties ws) {
+            return registry -> new WebSocketServerConfiguration(handler, ws, properties).registerWebSocketHandlers(registry);
+        }
+
+    }
+    @RestController static class Probes {
+        final AuthService auth;
+        Probes(AuthService auth) { this.auth = auth; }
+        @GetMapping("/actuator/health/readiness") org.springframework.http.ResponseEntity<Map<String, String>> readiness() {
+            return org.springframework.http.ResponseEntity.status(503).body(Map.of("status", "DOWN"));
+        }
+        @GetMapping("/api/v1/auth/google/config") Map<String, Object> googleDisabled() {
+            return Map.of("enabled", false, "webClientId", "", "iosClientId", "", "androidEnabled", false, "iosEnabled", false);
+        }
+        @GetMapping("/api/v1/auth/telegram/config") Map<String, Boolean> telegramDisabled() { return Map.of("enabled", false); }
+        @GetMapping("/api/v1/time") Map<String, Long> time() { return Map.of("serverTime", System.currentTimeMillis()); }
+        @GetMapping("/api/v1/runtime") Map<String, Object> runtime() { return Map.of("productLines", List.of(), "disabledProductLines", List.of(com.surprising.product.api.ProductLine.values())); }
+        @GetMapping("/api/v1/security/mfa") Map<String, Object> mfa(@RequestHeader("Authorization") String token) { auth.authenticateBearer(token); return Map.of("enabled", false); }
+    }
+
+    @Test void serveUntilOwnedStopFile() throws Exception {
+        Path output = Path.of(System.getenv("SECURITY_QA_DIR")).toRealPath();
+        properties.getSecurity().setJwtSecret(UUID.randomUUID().toString() + UUID.randomUUID());
+        properties.getSecurity().setRequireEmailVerification(false); properties.getSecurity().setBrowserCookieSecure(false);
+        properties.getSecurity().setAdminBrowserAllowedOrigins(List.of("http://127.0.0.1:17444"));
+        properties.getSecurity().setAccessTokenTtl(Duration.ofSeconds(6)); properties.getSecurity().setAdminAccessTokenTtl(Duration.ofSeconds(5));
+        properties.getSecurity().setCorsAllowedOrigins(List.of("http://127.0.0.1:17443", "http://127.0.0.1:17444"));
+        policies.setNamespace("gateway:security-qa:" + UUID.randomUUID());
+        var factory = new LettuceConnectionFactory("127.0.0.1", Integer.parseInt(System.getenv("GATEWAY_LIMIT_TEST_REDIS_PORT")));
+        factory.afterPropertiesSet(); factory.start(); redis = new StringRedisTemplate(factory);
+        var tomcat = new Tomcat(); tomcat.setBaseDir(output.resolve("tomcat").toString()); tomcat.setPort(19085);
+        tomcat.getConnector().setProperty("address", "127.0.0.1");
+        var servlet = tomcat.addContext("", output.toString()); servlet.addServletContainerInitializer(new WsSci(), Set.of());
+        var web = new AnnotationConfigWebApplicationContext(); web.setServletContext(servlet.getServletContext());
+        web.register(Configuration.class); web.refresh();
+        var checks = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        try {
+            var users = web.getBean(AuthPersistenceService.class); var hasher = web.getBean(PasswordHasher.class); var now = Instant.now();
+            String password = "Security-" + UUID.randomUUID();
+            var user = users.createUser(null, "security-user-" + UUID.randomUUID() + "@example.test", hasher.hash(password), now); users.ensureDefaultRole(user.userId(), now);
+            var admin = users.createUser(null, "security-admin-" + UUID.randomUUID() + "@example.test", hasher.hash(password), now); users.ensureDefaultRole(admin.userId(), now);
+            users.replaceRoles(admin.userId(), List.of("SUPER_ADMIN"), now);
+            install(servlet, "context", new RequestContextFilter());
+            install(servlet, "limits", web.getBean(GatewayLimitFilter.class));
+            install(servlet, "security", new DelegatingFilterProxy("springSecurityFilterChain", web));
+            var dispatcher = Tomcat.addServlet(servlet, "mvc", new DispatcherServlet(web)); dispatcher.setLoadOnStartup(1); servlet.addServletMappingDecoded("/", "mvc");
+            tomcat.start();
+            var subscriptions = web.getBean(SubscriptionRegistry.class);
+            var limits = web.getBean(GatewayRequestLimits.class);
+            var authorization = new WebSocketSessionAuthorization(subscriptions, new WebSocketAuthenticator(web.getBean(AuthService.class), mock(GatewayApiKeyService.class)), Optional.empty());
+            checks.scheduleWithFixedDelay(() -> {
+                for (var connection : subscriptions.connections()) {
+                    if (connection.limitLeaseExpired(System.nanoTime())) connection.close(org.springframework.web.socket.CloseStatus.SERVICE_OVERLOAD);
+                    if (connection.authenticatedUserId() != null) authorization.revalidate(connection);
+                }
+            }, 1, 1, java.util.concurrent.TimeUnit.SECONDS);
+            var file = output.resolve("qa-runtime.json");
+            Files.writeString(file, json.writeValueAsString(Map.of("port", 19085, "userId", user.userId(), "adminId", admin.userId(), "password", password,
+                    "userEmail", user.email(), "adminEmail", admin.email())));
+            Files.setPosixFilePermissions(file, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            long deadline = System.nanoTime() + Duration.ofMinutes(40).toNanos();
+            while (!Files.exists(output.resolve("qa-done")) && System.nanoTime() < deadline) Thread.sleep(100);
+        } finally { checks.shutdownNow(); tomcat.stop(); tomcat.destroy(); web.close(); factory.destroy(); }
+    }
+    static void install(org.apache.catalina.Context context, String name, jakarta.servlet.Filter filter) {
+        var definition = new FilterDef(); definition.setFilterName(name); definition.setFilter(filter); definition.setAsyncSupported("true"); context.addFilterDef(definition);
+        var mapping = new FilterMap(); mapping.setFilterName(name); mapping.addURLPattern("/*"); context.addFilterMap(mapping);
+    }
+}

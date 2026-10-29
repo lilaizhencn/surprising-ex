@@ -17,7 +17,7 @@ import org.springframework.validation.annotation.Validated;
 @Getter
 @Setter
 public class GatewayLimitProperties {
-    public enum Group { READ, ORDER, CANCEL, CANCEL_ALL, RECEIPT, FUNDS, SECURITY, ADMIN, WEBSOCKET }
+    public enum Group { READ, ORDER, CANCEL, CANCEL_ALL, RECEIPT, FUNDS, SECURITY, ADMIN, WEBSOCKET, UPLOAD }
     public record Rule(@Min(1) @Max(1000000) int rate, @Min(1) @Max(1000000) int burst,
                        @NotNull @DefaultValue("1s") Duration period) {
         @org.springframework.boot.context.properties.bind.ConstructorBinding
@@ -36,6 +36,22 @@ public class GatewayLimitProperties {
     @Valid @NotNull private Rule ip = new Rule(300, 600);
     @Valid @NotNull private Rule loginIp = new Rule(1, 5);
     @Valid @NotNull private Rule loginAccount = new Rule(5, 5, Duration.ofMinutes(1));
+    @Valid @NotNull private Rule publicRequests = new Rule(2000, 4000);
+    @Valid @NotNull private Rule reservedRequests = new Rule(500, 1000);
+    @Valid @NotNull private Rule registrationIp = new Rule(5, 5, Duration.ofHours(1));
+    @Valid @NotNull private Rule refreshIp = new Rule(10, 20);
+    @Valid @NotNull private Rule verificationIp = new Rule(10, 10, Duration.ofMinutes(1));
+    @Valid @NotNull private Rule emailCooldown = new Rule(1, 1, Duration.ofMinutes(1));
+    @Valid @NotNull private Rule emailHourly = new Rule(5, 5, Duration.ofHours(1));
+    @Valid @NotNull private Rule emailDaily = new Rule(20, 20, Duration.ofDays(1));
+    @Valid @NotNull private Rule emailGlobal = new Rule(10000, 100, Duration.ofDays(1));
+    @Valid @NotNull private Rule uploadCount = new Rule(100, 100, Duration.ofDays(1));
+    @Valid @NotNull private Rule uploadKibibytes = new Rule(102400, 102400, Duration.ofDays(1));
+    @Valid @NotNull private Rule uploadGlobalKibibytes = new Rule(1000000, 1000000, Duration.ofDays(1));
+    @Valid @NotNull private Rule uploadVerification = new Rule(20, 5, Duration.ofMinutes(1));
+    @Valid @NotNull private Rule uploadGlobalVerification = new Rule(10, 20);
+    @Min(1) @Max(64) private int concurrentPasswordHashes = 4;
+    @Min(1) @Max(64) private int concurrentUploads = 4;
     @Valid @NotNull private Rule newWebSocket = new Rule(1, 10);
     @Valid @NotNull private Rule socketMessages = new Rule(10, 512);
     @Valid @NotNull private Rule socketAuthentication = new Rule(2, 20);
@@ -72,6 +88,7 @@ public class GatewayLimitProperties {
                 case SECURITY -> new Rule(2, 10);
                 case ADMIN -> new Rule(30, 60);
                 case WEBSOCKET -> new Rule(20, 512);
+                case UPLOAD -> new Rule(2, 5);
             };
             rules.put(group, key ? new Rule(Math.max(1, rule.rate() / 2), Math.max(1, rule.burst() / 2), rule.period()) : rule);
         }

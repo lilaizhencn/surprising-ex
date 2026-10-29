@@ -33,14 +33,17 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
+        if (permission.startsWith("admin.unmapped.")) {
+            GatewaySecurityErrors.write(response, 403, "ACCESS_DENIED"); return;
+        }
         try {
             authService.requireAdminPermission(request.getHeader(HttpHeaders.AUTHORIZATION), permission);
-            filterChain.doFilter(request, response);
         } catch (IllegalArgumentException ex) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, ex.getMessage());
+            GatewaySecurityErrors.write(response, 401, "UNAUTHENTICATED"); return;
         } catch (IllegalStateException ex) {
-            response.sendError(HttpServletResponse.SC_FORBIDDEN, ex.getMessage());
+            GatewaySecurityErrors.write(response, 403, "ACCESS_DENIED"); return;
         }
+        filterChain.doFilter(request, response);
     }
 
     String permissionCode(HttpServletRequest request) {

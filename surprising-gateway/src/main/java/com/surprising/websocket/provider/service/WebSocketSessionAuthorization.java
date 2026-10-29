@@ -34,7 +34,7 @@ public final class WebSocketSessionAuthorization {
             if (connection.authorizationExpired(System.currentTimeMillis()))
                 throw new IllegalArgumentException("websocket authorization expired");
             if (apiKey == null) {
-                var principal = authenticator.principal(token);
+                var principal = authenticator.principal(token, connection.clientIp());
                 if (!Objects.equals(connection.authenticatedUserId(), principal.userId()))
                     throw new IllegalArgumentException("websocket identity mismatch");
                 connection.renewAuthorization(token, principal.expiresAt());

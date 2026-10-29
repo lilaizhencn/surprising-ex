@@ -34,7 +34,8 @@ public class JwtTokenService {
     }
 
     public String createAccessToken(long userId, String username, List<String> roles, long sessionId, Instant now) {
-        Instant expiresAt = now.plus(properties.getSecurity().getAccessTokenTtl());
+        boolean admin = roles.stream().anyMatch(properties.getSecurity().getAdminRoles()::contains);
+        Instant expiresAt = now.plus(admin ? properties.getSecurity().getAdminAccessTokenTtl() : properties.getSecurity().getAccessTokenTtl());
         Map<String, Object> header = Map.of("alg", "HS256", "typ", "JWT");
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put("iss", properties.getSecurity().getIssuer());

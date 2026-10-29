@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-@SpringBootApplication(scanBasePackages = {
+@SpringBootApplication(exclude = org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration.class, scanBasePackages = {
         "com.surprising.gateway.provider", "com.surprising.gateway.c2c",
         "com.surprising.websocket.provider",
         "com.surprising.instrument.provider",

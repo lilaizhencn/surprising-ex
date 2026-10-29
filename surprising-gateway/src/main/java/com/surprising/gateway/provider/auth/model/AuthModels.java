@@ -105,7 +105,12 @@ public final class AuthModels {
             String refreshToken,
             Instant accessTokenExpiresAt,
             Instant refreshTokenExpiresAt,
-            boolean requiresEmailVerification) implements LoginResult {
+            boolean requiresEmailVerification,
+            boolean browserSession) implements LoginResult {
+        public AuthResponse(AuthenticatedUser user, String accessToken, String refreshToken,
+                            Instant accessTokenExpiresAt, Instant refreshTokenExpiresAt, boolean requiresEmailVerification) {
+            this(user, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, requiresEmailVerification, false);
+        }
         public AuthResponse(AuthenticatedUser user,
                             String accessToken,
                             String refreshToken,

@@ -33,11 +33,6 @@ public final class GatewayLimitFilter extends OncePerRequestFilter {
         this.cors = cors;
     }
 
-    @Override protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        return "GET".equals(request.getMethod()) && (path.equals("/actuator/health") || path.startsWith("/actuator/health/"));
-    }
-
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         AutoCloseable admission = null;
@@ -51,7 +46,10 @@ public final class GatewayLimitFilter extends OncePerRequestFilter {
         }
         try {
             admission = limits.admit(requests.group(request));
-            limits.checkIp(addresses.resolve(request), cost, requests.isLogin(request));
+            String ip = addresses.resolve(request);
+            String path = request.getRequestURI();
+            limits.checkIp(ip, cost, (path.equals("/api/v1/auth/login") || path.equals("/api/v1/auth/google/login") || path.equals("/api/v1/auth/google/challenge")));
+            limits.checkPublicRequest(ip, path, !java.util.List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod()), requests.group(request));
             request.setAttribute(GatewayLimitRequestBinding.ACTIVE, Boolean.TRUE);
             chain.doFilter(request, response);
         } catch (GatewayRequestLimits.Rejection rejection) {

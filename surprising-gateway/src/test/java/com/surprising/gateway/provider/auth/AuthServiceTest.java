@@ -311,6 +311,43 @@ class AuthServiceTest {
     }
 
     @Test
+    void adminRefreshKeepsTheOriginalEightHourDeadline() {
+        Instant now = Instant.now(), original = now.minusSeconds(7 * 3600);
+        when(repository.refreshSession(any())).thenReturn(Optional.of(
+                new GatewayRefreshSessionRepository.RefreshSession(88L, 7L, now.plusSeconds(3600),
+                        null, null, null, original)));
+        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
+        when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
+        var client = new AuthClientMetadataBinding(new GatewayProperties(),
+                mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class),
+                mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class));
+
+        var response = service.refresh(new RefreshRequest("refresh-token"), client.bind(new MockHttpServletRequest()));
+
+        assertThat(response.refreshTokenExpiresAt()).isEqualTo(original.plusSeconds(8 * 3600));
+        assertThat(response.accessTokenExpiresAt()).isBetween(now.plusSeconds(299), Instant.now().plusSeconds(300));
+        verify(repository).saveRefreshSession(eq(7L), anyString(), eq(original.plusSeconds(8 * 3600)),
+                any(), any(), any(), any(), eq(original));
+    }
+
+    @Test
+    void adminCannotExtendARefreshSessionPastItsOriginalDeadline() {
+        Instant now = Instant.now(), original = now.minusSeconds(9 * 3600);
+        when(repository.refreshSession(any())).thenReturn(Optional.of(
+                new GatewayRefreshSessionRepository.RefreshSession(88L, 7L, now.plusSeconds(3600),
+                        null, null, null, original)));
+        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
+        when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
+        var client = new AuthClientMetadataBinding(new GatewayProperties(),
+                mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class),
+                mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class));
+
+        assertThatThrownBy(() -> service.refresh(new RefreshRequest("refresh-token"), client.bind(new MockHttpServletRequest())))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("session requires fresh authentication");
+        verifyNoInteractions(jwtTokenService);
+    }
+
+    @Test
     void refreshRejectsSessionConsumedByAnotherRequest() {
         Instant now = Instant.now();
         when(repository.refreshSession(any())).thenReturn(Optional.of(

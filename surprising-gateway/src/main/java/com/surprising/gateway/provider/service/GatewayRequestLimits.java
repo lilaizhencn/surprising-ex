@@ -24,22 +24,39 @@ public final class GatewayRequestLimits {
         local remaining={}
         local wait=0
         for i,key in ipairs(KEYS) do
-          local offset=(i-1)*4
+          local offset=(i-1)*5
           local rate=tonumber(ARGV[offset+1])
           local period=tonumber(ARGV[offset+4])
           local capacity=tonumber(ARGV[offset+2])*period
           local cost=tonumber(ARGV[offset+3])*period
-          local stored=redis.call('HMGET',key,'tokens','time')
+          local fixed=ARGV[offset+5]=='1'
+          local window=math.floor(now/period)
+          if fixed then capacity=rate*period end
+          local stored=redis.call('HMGET',key,'tokens','time','window')
           local tokens=capacity
-          if stored[1] then tokens=math.min(capacity,tonumber(stored[1])+math.min(math.max(0,now-tonumber(stored[2])),math.ceil(capacity/rate))*rate) end
+          if stored[1] then
+            if fixed then
+              if tonumber(stored[3])==window then tokens=tonumber(stored[1]) end
+            else tokens=math.min(capacity,tonumber(stored[1])+math.min(math.max(0,now-tonumber(stored[2])),math.ceil(capacity/rate))*rate) end
+          end
           remaining[i]=tokens-cost
-          if tokens<cost then wait=math.max(wait,math.ceil((cost-tokens)/rate)) end
+          if tokens<cost then
+            local delay=fixed and ((window+1)*period-now) or math.ceil((cost-tokens)/rate)
+            wait=math.max(wait,delay)
+          end
         end
         if wait>0 then return wait end
         for i,key in ipairs(KEYS) do
-          local offset=(i-1)*4
-          redis.call('HSET',key,'tokens',remaining[i],'time',now)
-          redis.call('PEXPIRE',key,math.ceil(tonumber(ARGV[offset+2])*tonumber(ARGV[offset+4])/tonumber(ARGV[offset+1]))+1000)
+          local offset=(i-1)*5
+          local period=tonumber(ARGV[offset+4])
+          if ARGV[offset+5]=='1' then
+            local window=math.floor(now/period)
+            redis.call('HSET',key,'tokens',remaining[i],'time',now,'window',window)
+            redis.call('PEXPIRE',key,(window+1)*period-now+1000)
+          else
+            redis.call('HSET',key,'tokens',remaining[i],'time',now)
+            redis.call('PEXPIRE',key,math.ceil(tonumber(ARGV[offset+2])*period/tonumber(ARGV[offset+1]))+1000)
+          end
         end
         return 0
         """, Long.class);
@@ -69,7 +86,9 @@ public final class GatewayRequestLimits {
         public long retryAfterSeconds() { return Math.max(1, (retryAfterMillis + 999) / 1000); }
     }
 
-    private record Charge(String key, Rule rule, int cost) {}
+    private record Charge(String key, Rule rule, int cost, boolean fixedWindow) {
+        Charge(String key, Rule rule, int cost) { this(key, rule, cost, false); }
+    }
     private final StringRedisTemplate redis;
     private final GatewayLimitProperties properties;
     private final MeterRegistry metrics;
@@ -77,6 +96,7 @@ public final class GatewayRequestLimits {
     private final Semaphore cancels;
     private final Semaphore receipts;
     private final Semaphore sockets;
+    private final Semaphore uploads;
     private final String instanceId = UUID.randomUUID().toString();
 
     public GatewayRequestLimits(StringRedisTemplate redis, GatewayLimitProperties properties, MeterRegistry metrics) {
@@ -85,6 +105,7 @@ public final class GatewayRequestLimits {
         cancels = new Semaphore(properties.getConcurrentCancels());
         receipts = new Semaphore(properties.getConcurrentReceipts());
         sockets = new Semaphore(properties.getSocketsPerGateway());
+        uploads = new Semaphore(properties.getConcurrentUploads());
     }
 
     public void checkIp(String ip, int cost, boolean login) {
@@ -104,6 +125,52 @@ public final class GatewayRequestLimits {
         } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
 
+    public void checkPublicRequest(String ip, String path, boolean write, Group group) {
+        String reserve = switch (group) { case CANCEL, CANCEL_ALL -> "cancel"; case RECEIPT -> "receipt"; default -> "requests"; };
+        Rule global = reserve.equals("requests") ? properties.getPublicRequests() : properties.getReservedRequests();
+        consume(List.of(new Charge(properties.getNamespace() + ":{public}:" + reserve, global, 1)), "PUBLIC");
+        if (!write) return;
+        Rule rule;
+        String operation;
+        if (path.equals("/api/v1/auth/register")) { rule = properties.getRegistrationIp(); operation = "REGISTER"; }
+        else if (path.equals("/api/v1/auth/refresh") || path.equals("/api/v1/auth/browser/refresh")) {
+            rule = properties.getRefreshIp(); operation = "REFRESH";
+        } else if (path.startsWith("/api/v1/auth/") && !path.equals("/api/v1/auth/login")
+                && !path.endsWith("/logout")) { rule = properties.getVerificationIp(); operation = "VERIFICATION"; }
+        else return;
+        consume(List.of(new Charge(properties.getNamespace() + ":{ip:" + ip + "}:" + operation, rule, 1)), operation);
+    }
+
+    /** One shared destination budget across all email purposes and all Gateway nodes. */
+    public void checkEmail(String recipient) {
+        String actor = properties.getNamespace() + ":{email}:";
+        String destination = digest(recipient.strip().toLowerCase(Locale.ROOT));
+        consume(List.of(new Charge(actor + destination + ":cooldown", properties.getEmailCooldown(), 1),
+                new Charge(actor + destination + ":hour", properties.getEmailHourly(), 1, true),
+                new Charge(actor + destination + ":day", properties.getEmailDaily(), 1, true),
+                new Charge(actor + "provider", properties.getEmailGlobal(), 1),
+                new Charge(actor + "provider:day", properties.getEmailGlobal(), 1, true)), "EMAIL");
+    }
+
+    public void checkUpload(long user, long bytes) {
+        int kibibytes = Math.toIntExact(Math.max(1, (bytes + 1023) / 1024));
+        String actor = properties.getNamespace() + ":{uploads}:";
+        consume(List.of(new Charge(actor + user + ":count", properties.getUploadCount(), 1, true),
+                new Charge(actor + user + ":kib", properties.getUploadKibibytes(), kibibytes, true),
+                new Charge(actor + "global-kib", properties.getUploadGlobalKibibytes(), kibibytes, true)), "UPLOAD");
+    }
+
+    public void checkUploadVerification(long user) {
+        String actor = properties.getNamespace() + ":{uploads}:";
+        consume(List.of(new Charge(actor + user + ":verify", properties.getUploadVerification(), 1),
+                new Charge(actor + "global-verify", properties.getUploadGlobalVerification(), 1)), "UPLOAD_VERIFY");
+    }
+
+    private static String digest(String value) {
+        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
+        catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+
     public void checkUser(long user, String apiKey, Group group, ProductLine product, int cost) {
         String actor = properties.getNamespace() + ":{user:" + user + "}:";
         var charges = new ArrayList<Charge>();
@@ -116,13 +183,13 @@ public final class GatewayRequestLimits {
 
     private void consume(List<Charge> charges, String group) {
         if (!properties.isEnabled()) return;
-        var keys = new ArrayList<String>(charges.size()); var args = new ArrayList<String>(charges.size() * 4);
+        var keys = new ArrayList<String>(charges.size()); var args = new ArrayList<String>(charges.size() * 5);
         for (var charge : charges) {
             if (charge.cost() < 1 || charge.cost() > charge.rule().burst())
                 throw new Rejection(Reason.REQUEST_EXCEEDS_RATE_BURST, group, 1000);
-            keys.add(charge.key() + ":p" + charge.rule().period().toMillis()); args.add(Integer.toString(charge.rule().rate()));
+            keys.add(charge.key() + (charge.fixedWindow() ? ":w" : ":p") + charge.rule().period().toMillis()); args.add(Integer.toString(charge.rule().rate()));
             args.add(Integer.toString(charge.rule().burst())); args.add(Integer.toString(charge.cost()));
-            args.add(Long.toString(charge.rule().period().toMillis()));
+            args.add(Long.toString(charge.rule().period().toMillis())); args.add(charge.fixedWindow() ? "1" : "0");
         }
         try {
             Long wait = redis.execute(CONSUME, keys, args.toArray());
@@ -139,6 +206,7 @@ public final class GatewayRequestLimits {
         Semaphore permits = switch (group) {
             case CANCEL, CANCEL_ALL -> cancels;
             case RECEIPT -> receipts;
+            case UPLOAD -> uploads;
             default -> requests;
         };
         if (!permits.tryAcquire()) throw new Rejection(Reason.GATEWAY_BUSY, group.name(), 1000);

@@ -43,12 +43,12 @@ class WebSocketSessionAuthorizationTaskTest {
         doAnswer(call -> { slowRenewed.countDown(); return null; }).when(slow).renewAuthorization(anyString(), any());
         var expiry = Instant.now().plusSeconds(60);
         var principal = new JwtPrincipal(7, "qa", "NORMAL", List.of("USER"), expiry);
-        when(authenticator.principal("slow")).thenAnswer(call -> {
+        when(authenticator.principal("slow", null)).thenAnswer(call -> {
             entered.countDown();
             assertThat(release.await(3, TimeUnit.SECONDS)).isTrue();
             return principal;
         });
-        when(authenticator.principal("healthy")).thenReturn(principal);
+        when(authenticator.principal("healthy", null)).thenReturn(principal);
         var authorization = new WebSocketSessionAuthorization(registry, authenticator, Optional.empty());
         var properties = new WebSocketProperties();
         properties.getSecurity().setAuthorizationWorkers(2);

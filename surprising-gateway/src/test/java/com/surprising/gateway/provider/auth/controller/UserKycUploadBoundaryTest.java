@@ -41,13 +41,16 @@ class UserKycUploadBoundaryTest {
                         call.getArgument(2), call.getArgument(3), call.getArgument(4), call.getArgument(5),
                         "UPLOADED", call.getArgument(7), null));
         var auth = auth();
-        var service = new KycDocumentService(repository,new KycDocumentStorageService(properties),properties,new ObjectMapper());
+        var service = new KycDocumentService(repository,new KycDocumentStorageService(properties),properties,new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         var mvc = MockMvcBuilders.standaloneSetup(new UserComplianceController(mock(ComplianceService.class),auth,service,properties)).build();
-        byte[] content = switch(extension) {
-            case "pdf" -> "%PDF-1.7".getBytes();
-            case "jpg" -> new byte[] {(byte)255,(byte)216,(byte)255,1};
-            default -> new byte[] {(byte)137,'P','N','G',13,10,26,10,1};
-        };
+        byte[] content;
+        if (extension.equals("pdf")) content = "%PDF-1.7".getBytes();
+        else {
+            var image = new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            var bytes = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(image, extension, bytes);
+            content = bytes.toByteArray();
+        }
         mvc.perform(multipart("/api/v1/compliance/kyc/documents")
                 .file(new MockMultipartFile("file","../../document."+extension,"application/octet-stream",content))
                 .param("documentType"," passport ").header("Authorization","Bearer user").header("X-User-Id","999"))
@@ -88,7 +91,7 @@ class UserKycUploadBoundaryTest {
         var storage=mock(KycDocumentStorageService.class);var failure=new IllegalStateException("database down");
         when(repository.insert(anyLong(),anyString(),anyString(),anyString(),anyLong(),anyString(),anyString(),any()))
                 .thenThrow(failure);
-        var service=new KycDocumentService(repository,storage,properties,new ObjectMapper());
+        var service=new KycDocumentService(repository,storage,properties,new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         byte[] bytes="%PDF-1.7".getBytes();
         var upload=new com.surprising.gateway.provider.model.KycDocumentUpload("PASSPORT",bytes,"application/pdf","document.pdf",".pdf");
         assertThatThrownBy(()->service.upload(7L,upload)).isSameAs(failure);

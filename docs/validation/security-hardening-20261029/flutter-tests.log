@@ -1,0 +1,23 @@
+00:00 +0: loading /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart
+00:00 +0: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +1: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +2: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +3: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +4: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +5: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +6: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +7: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +8: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:00 +9: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:01 +10: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:01 +11: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:01 +12: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:01 +13: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: idle connections send an application heartbeat and release it on close
+00:20 +14: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: quota errors retain retry delay and close with overload rather than invalidating credentials
+00:20 +15: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: server policy closure preserves close code for session recovery
+00:20 +16: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: rejects binary realtime payload before decoding
+00:20 +17: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: rejects ASCII realtime payload before decoding
+00:20 +18: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: rejects UTF-8 realtime payload before decoding
+00:20 +19: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: malformed authenticated/private user IDs are dropped before UI dispatch
+00:20 +20: /Users/atomex/Desktop/surprising/surprising-client/test/realtime_transport_lifecycle_test.dart: authentication without a supplied user binds private frames to the acknowledged owner
+00:20 +21: All tests passed!

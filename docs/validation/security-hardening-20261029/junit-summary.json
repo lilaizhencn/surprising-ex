@@ -1,0 +1,275 @@
+{
+  "suites": [
+    {
+      "suite": "com.surprising.aeron.service.core.CoreNativeSnapshotProductLineTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.core.ProductRecoveryLifecycleTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.core.RuntimeCommitRecoveryTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.core.SectionedCoreSnapshotCodecTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.core.SharedProductLineSnapshotContractTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.core.TradingStateSnapshotCodecTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.snapshot.state.CoreTransferSnapshotCodecTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.ApiKeyHttpBoundaryTest",
+      "module": "surprising-gateway",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.ApiKeyOrderPermissionTest",
+      "module": "surprising-gateway",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.AuthInputBoundaryPostgresTest",
+      "module": "surprising-gateway",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.AuthServiceTest",
+      "module": "surprising-gateway",
+      "tests": 28,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest",
+      "module": "surprising-gateway",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.GatewayApiKeyServiceTest",
+      "module": "surprising-gateway",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.KycEvidenceReferenceTest",
+      "module": "surprising-gateway",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.PasswordHasherTest",
+      "module": "surprising-gateway",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest",
+      "module": "surprising-gateway",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.controller.AuthClientMetadataBoundaryTest",
+      "module": "surprising-gateway",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.controller.BrowserCookieSecurityTest",
+      "module": "surprising-gateway",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.auth.controller.UserKycUploadBoundaryTest",
+      "module": "surprising-gateway",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.config.AdminPermissionFilterTest",
+      "module": "surprising-gateway",
+      "tests": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.config.CompressionCompatibilityTest",
+      "module": "surprising-gateway",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.config.GatewayInputLimitsTest",
+      "module": "surprising-gateway",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+      "module": "surprising-gateway",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.config.GatewaySecurityBoundaryTest",
+      "module": "surprising-gateway",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.controller.GatewayLimitHttpTest",
+      "module": "surprising-gateway",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.service.GatewayRequestLimitsRedisTest",
+      "module": "surprising-gateway",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.service.KycDocumentServiceTest",
+      "module": "surprising-gateway",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.service.UploadContentScannerTest",
+      "module": "surprising-gateway",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.websocket.provider.handler.ClientWebSocketHandlerTest",
+      "module": "surprising-gateway",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.websocket.provider.handler.WebSocketApiKeyAuthenticationTest",
+      "module": "surprising-gateway",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.websocket.provider.handler.WebSocketLimitsRedisTest",
+      "module": "surprising-gateway",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.websocket.provider.service.WebSocketSessionAuthorizationTest",
+      "module": "surprising-gateway",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTaskTest",
+      "module": "surprising-gateway",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "totals": {
+    "tests": 262,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "scope": "Latest per-class reports from targeted runs, including the corrected cookie assertion and admin lifetime cases; not the full test suite."
+}

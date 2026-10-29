@@ -1,0 +1,12 @@
+
+> surprising-ex-web@0.1.0 test
+> vitest run src/state/session.test.ts src/api/client.test.ts src/api/types.test.ts src/api/telegram.test.ts src/realtimeConnections.test.ts
+
+
+ RUN  v4.1.12 /Users/atomex/Desktop/surprising/surprising-ex-web
+
+
+ Test Files  5 passed (5)
+      Tests  72 passed (72)
+   Start at  17:22:31
+   Duration  1.78s (transform 1.40s, setup 0ms, import 2.62s, tests 868ms, environment 1ms)

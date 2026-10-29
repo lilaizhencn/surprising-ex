@@ -23,7 +23,7 @@ class WebSocketSessionAuthorizationTest {
         when(session.isOpen()).thenReturn(true);
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        when(authenticator.principal("old")).thenAnswer(call -> {
+        when(authenticator.principal("old", null)).thenAnswer(call -> {
             entered.countDown();
             assertThat(release.await(3, TimeUnit.SECONDS)).isTrue();
             throw new IllegalArgumentException("old session revoked");
@@ -57,7 +57,7 @@ class WebSocketSessionAuthorizationTest {
         when(session.isOpen()).thenReturn(true);
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        when(authenticator.principal("old")).thenAnswer(call -> {
+        when(authenticator.principal("old", null)).thenAnswer(call -> {
             entered.countDown();
             assertThat(release.await(2, TimeUnit.SECONDS)).isTrue();
             throw new IllegalArgumentException("old session revoked");

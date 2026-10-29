@@ -28,11 +28,11 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <spring-boot.version>4.1.2</spring-boot.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
-        <tomcat.version>11.0.21</tomcat.version>
         <hibernate-validator.version>9.1.0.Final</hibernate-validator.version>
-        <postgresql.version>42.7.11</postgresql.version>
         <spring-cloud.version>2025.1.4</spring-cloud.version>
-        <bouncycastle.version>1.82</bouncycastle.version>
+        <bouncycastle.version>1.86</bouncycastle.version>
+        <lz4-java.version>1.11.4</lz4-java.version>
+        <snappy-java.version>1.1.10.12</snappy-java.version>
         <exchange-core.version>0.5.18-emporia</exchange-core.version>
         <aeron.version>1.54.0</aeron.version>
         <hdrhistogram.version>2.2.2</hdrhistogram.version>
@@ -49,10 +49,16 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- Keep Kafka compression libraries on versions with the published decoder fixes. -->
             <dependency>
-                <groupId>org.postgresql</groupId>
-                <artifactId>postgresql</artifactId>
-                <version>${postgresql.version}</version>
+                <groupId>at.yawk.lz4</groupId>
+                <artifactId>lz4-java</artifactId>
+                <version>${lz4-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.xerial.snappy</groupId>
+                <artifactId>snappy-java</artifactId>
+                <version>${snappy-java.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.bouncycastle</groupId>

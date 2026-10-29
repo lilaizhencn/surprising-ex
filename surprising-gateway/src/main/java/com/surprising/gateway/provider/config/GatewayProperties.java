@@ -70,6 +70,17 @@ public class GatewayProperties implements EnvironmentAware {
         if (!configuredSecurity.isRequireIdentityForPrivateRoutes()) {
             failures.add("security.require-identity-for-private-routes must be true");
         }
+        if (configuredSecurity.getAdminBrowserAllowedOrigins() == null || configuredSecurity.getAdminBrowserAllowedOrigins().isEmpty())
+            failures.add("security.admin-browser-allowed-origins must not be empty");
+        else for (String origin : configuredSecurity.getAdminBrowserAllowedOrigins()) {
+            requireHttpsUrl(failures, "security.admin-browser-allowed-origins", origin);
+            if (origin.contains("*") || origin.endsWith("/")) failures.add("security.admin-browser-allowed-origins must contain exact origins");
+        }
+        if (!configuredSecurity.isBrowserCookieSecure()) failures.add("security.browser-cookie-secure must be true");
+        requireTokenTtl(failures, "security.access-token-ttl", configuredSecurity.getAccessTokenTtl(), Duration.ofMinutes(15));
+        requireTokenTtl(failures, "security.admin-access-token-ttl", configuredSecurity.getAdminAccessTokenTtl(), Duration.ofMinutes(5));
+        requireTokenTtl(failures, "security.refresh-token-ttl", configuredSecurity.getRefreshTokenTtl(), Duration.ofDays(30));
+        requireTokenTtl(failures, "security.admin-refresh-token-ttl", configuredSecurity.getAdminRefreshTokenTtl(), Duration.ofHours(8));
         if (!configuredSecurity.isRequireAdminMfa()) {
             failures.add("security.require-admin-mfa must be true");
         }
@@ -210,6 +221,11 @@ public class GatewayProperties implements EnvironmentAware {
 
     public void setBinanceApi(BinanceApi binanceApi) {
         this.binanceApi = binanceApi == null ? new BinanceApi() : binanceApi;
+    }
+
+    private static void requireTokenTtl(List<String> failures, String name, Duration ttl, Duration maximum) {
+        if (ttl == null || ttl.isNegative() || ttl.isZero() || ttl.compareTo(maximum) > 0)
+            failures.add(name + " must be positive and no longer than " + maximum);
     }
 
     public void setCustodyWallet(CustodyWallet custodyWallet) {
@@ -353,7 +369,15 @@ public class GatewayProperties implements EnvironmentAware {
         @Setter
         private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
         @Setter
-        private Duration accessTokenTtl = Duration.ofDays(7);
+        private Duration accessTokenTtl = Duration.ofMinutes(15);
+        @Setter
+        private Duration adminAccessTokenTtl = Duration.ofMinutes(5);
+        @Setter
+        private Duration adminRefreshTokenTtl = Duration.ofHours(8);
+        @Setter
+        private boolean browserCookieSecure = true;
+        @Setter
+        private List<String> adminBrowserAllowedOrigins = List.of("https://ex-api.tokdou.com");
         @Setter
         private Duration refreshTokenTtl = Duration.ofDays(30);
 

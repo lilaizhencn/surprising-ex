@@ -37,7 +37,7 @@ class KycDocumentServiceTest {
         GatewayProperties properties = filesystemProperties(tempDir);
         KycDocumentRepository repository = mock(KycDocumentRepository.class);
         KycDocumentStorageService storage = new KycDocumentStorageService(properties);
-        KycDocumentService service = new KycDocumentService(repository, storage, properties, new ObjectMapper());
+        KycDocumentService service = new KycDocumentService(repository, storage, properties, new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         byte[] pdf = "%PDF-1.7".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
         when(repository.insert(anyLong(), anyString(), anyString(), anyString(), anyLong(), anyString(), anyString(), any()))
                 .thenReturn(new KycDocument(10L, 7L, "PASSPORT", "passport.pdf", "application/pdf",
@@ -58,7 +58,7 @@ class KycDocumentServiceTest {
         GatewayProperties properties = filesystemProperties(tempDir);
         KycDocumentRepository repository = mock(KycDocumentRepository.class);
         KycDocumentService service = new KycDocumentService(
-                repository, new KycDocumentStorageService(properties), properties, new ObjectMapper());
+                repository, new KycDocumentStorageService(properties), properties, new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
 
         assertThatThrownBy(() -> controller(service, properties).uploadKycDocument("Bearer user", "PASSPORT",
                 new MockMultipartFile("file", "passport.png", "image/png", "%PDF-1.7".getBytes())))
@@ -73,7 +73,7 @@ class KycDocumentServiceTest {
         GatewayProperties properties = new GatewayProperties();
         KycDocumentRepository repository = mock(KycDocumentRepository.class);
         KycDocumentService service = new KycDocumentService(
-                repository, mock(KycDocumentStorageService.class), properties, new ObjectMapper());
+                repository, mock(KycDocumentStorageService.class), properties, new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         KycDocument document = new KycDocument(10L, 7L, "PASSPORT", "passport.pdf", "application/pdf",
                 8L, "a".repeat(64), "UPLOADED", Instant.now(), null);
         when(repository.findOwnedForSubmission(7L, List.of(10L))).thenReturn(List.of(document));
@@ -90,7 +90,7 @@ class KycDocumentServiceTest {
         GatewayProperties properties = new GatewayProperties();
         KycDocumentRepository repository = mock(KycDocumentRepository.class);
         KycDocumentService service = new KycDocumentService(
-                repository, mock(KycDocumentStorageService.class), properties, new ObjectMapper());
+                repository, mock(KycDocumentStorageService.class), properties, new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         List<KycDocument> documents = List.of(
                 document(10L, "PASSPORT"), document(11L, "ADDRESS_PROOF"));
         when(repository.findOwnedForSubmission(7L, List.of(10L, 11L))).thenReturn(documents);
@@ -109,7 +109,7 @@ class KycDocumentServiceTest {
         GatewayProperties properties = new GatewayProperties();
         KycDocumentRepository repository = mock(KycDocumentRepository.class);
         KycDocumentService service = new KycDocumentService(
-                repository, mock(KycDocumentStorageService.class), properties, new ObjectMapper());
+                repository, mock(KycDocumentStorageService.class), properties, new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         List<Long> ids = List.of(10L, 11L, 12L, 13L);
         when(repository.findOwnedForSubmission(7L, ids)).thenReturn(List.of(
                 document(10L, "PASSPORT"), document(11L, "ADDRESS_PROOF"),
@@ -122,7 +122,7 @@ class KycDocumentServiceTest {
     @Test
     void identityCardRequiresFrontBackAndHoldingPhoto() {
         KycDocumentRepository repository = mock();
-        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper());
+        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         List<Long> ids = List.of(10L, 11L, 12L, 13L);
         List<KycDocument> complete = List.of(document(10L, "ID_CARD_FRONT"), document(11L, "ID_CARD_BACK"),
                 document(12L, "ID_CARD_SELFIE"), document(13L, "ADDRESS_PROOF"));
@@ -136,7 +136,7 @@ class KycDocumentServiceTest {
     @Test
     void deletingDraftRequiresOwnershipAndUnsubmittedState() {
         KycDocumentRepository repository = mock();
-        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper());
+        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         assertThatThrownBy(() -> service.deleteDraft(8L, 10L)).isInstanceOf(KycDocumentNotFoundException.class);
         verify(repository, never()).deleteDraft(8L, 10L);
         when(repository.findForUser(7L, 10L)).thenReturn(document(10L, "PASSPORT"));
@@ -149,7 +149,7 @@ class KycDocumentServiceTest {
     @org.junit.jupiter.params.provider.ValueSource(strings = {"DRIVING_LICENSE", "RESIDENCE_PERMIT"})
     void cardDocumentsRequireBothSidesAndSeparateAddressEvidence(String type) {
         KycDocumentRepository repository = mock();
-        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper());
+        KycDocumentService service = new KycDocumentService(repository, mock(), new GatewayProperties(), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         List<Long> ids = List.of(10L, 11L);
         when(repository.findOwnedForSubmission(7L, ids)).thenReturn(List.of(document(10L, type + "_FRONT"), document(11L, type + "_BACK")));
         assertThat(service.requireSubmissionDocuments(7L, ids, type, "INDIVIDUAL", "BASIC", "NOT_REQUIRED")).hasSize(2);

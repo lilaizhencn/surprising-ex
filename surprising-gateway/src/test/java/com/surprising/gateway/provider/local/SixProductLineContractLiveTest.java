@@ -734,7 +734,7 @@ class SixProductLineContractLiveTest {
         String email = "qa-" + role + "-" + run + "@surprising.test";
         String password = "SixLine-QA-" + run + "!";
         Long id = jdbc.queryForObject("INSERT INTO gateway_users(email,password_hash,email_verified_at) VALUES (?,?,now()) RETURNING user_id", Long.class,
-                email, new PasswordHasher().hash(password));
+                email, new PasswordHasher(new com.surprising.gateway.provider.config.GatewayLimitProperties()).hash(password));
         jdbc.update("INSERT INTO gateway_user_roles(user_id,role_id) SELECT ?,role_id FROM gateway_roles WHERE role_code=?", id,
                 administrator ? "SUPER_ADMIN" : "USER");
         var auth = request("POST", "/api/v1/auth/login", json.writeValueAsString(Map.of("identifier", email, "password", password)), null, null, 200);

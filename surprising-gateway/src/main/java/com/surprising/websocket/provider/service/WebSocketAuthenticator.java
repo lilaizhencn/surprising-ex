@@ -12,11 +12,12 @@ public class WebSocketAuthenticator {
         this.auth=auth;
         this.keys=keys;
     }
-    public com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal(String token) {
+    public com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal(String token, String ip) {
         if(token==null || token.isBlank() || token.length()>4096) throw new IllegalArgumentException("missing websocket token");
-        return auth.authenticateBearer("Bearer "+token);
+        var principal = auth.authenticateBearer("Bearer "+token);
+        auth.requireIpAccessAllowed(principal.userId(), ip);
+        return principal;
     }
-    public long authenticate(String token) { return principal(token).userId(); }
 
     public long authenticateApiKey(String apiKey, String ip, long timestamp, String signature, String challenge) {
         if (apiKey == null || !apiKey.matches("sx_[A-Za-z0-9_-]{20,80}")

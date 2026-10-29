@@ -1,0 +1,40 @@
+import {chromium} from 'playwright';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const dir=process.env.SECURITY_QA_DIR;
+assert.ok(dir,'SECURITY_QA_DIR is required');
+const runtime=JSON.parse(fs.readFileSync(dir+'/qa-runtime.json','utf8'));
+const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+const context=await browser.newContext({viewport:{width:1440,height:900}});
+const report={browser:browser.version(),steps:[],pageErrors:[]};
+const step=(name,data={})=>{report.steps.push({name,...data});console.log(name,JSON.stringify(data));};
+const response=(page,path)=>page.waitForResponse(r=>new URL(r.url()).pathname===path&&r.request().method()==='POST');
+const cookie=async name=>(await context.cookies()).find(c=>c.name===name);
+const watch=page=>page.on('pageerror',error=>report.pageErrors.push(error.message));
+try{
+ const web=await context.newPage();watch(web);let refreshCount=0;web.on('response',r=>{if(new URL(r.url()).pathname==='/api/v1/auth/browser/refresh'&&r.request().method()==='POST')refreshCount++;});
+ await web.goto('http://127.0.0.1:17443/auth/login');await web.getByPlaceholder('Enter your email or phone').waitFor();
+ await web.getByPlaceholder('Enter your email or phone').fill(runtime.userEmail);await web.getByPlaceholder('Enter your password').fill(runtime.password);
+ let pending=response(web,'/api/v1/auth/login');await web.getByRole('button',{name:'Log In',exact:true}).click();let login=await pending;
+ assert.equal(login.status(),200);let data=await login.json();assert.equal(data.browserSession,true);assert.equal(data.refreshToken,null);assert.equal(Number(data.user.userId),runtime.userId);
+ await web.getByRole('button',{name:'Sign out',exact:true}).waitFor();let original=await cookie('surprising-web-refresh');assert.equal(original.httpOnly,true);assert.equal(original.sameSite,'Strict');
+ assert.equal(await web.evaluate(()=>localStorage.getItem('surprising-ex.session')),null);
+ assert.equal((await web.evaluate(()=>document.cookie)).includes('refresh'),false);step('web-login',{status:200,httpOnly:true,storageHasSession:false});
+ await web.waitForTimeout(6500);pending=response(web,'/api/v1/auth/browser/refresh');await web.getByRole('button',{name:'Security Center',exact:true}).click();await web.getByRole('link',{name:'Account security',exact:true}).click();let refreshed=await pending;assert.equal(refreshed.status(),200);assert.ok((await cookie('surprising-web-refresh')).value!==original.value,'refresh rotates the Web cookie');await web.waitForURL('**/security/account');await web.getByRole('button',{name:'Sign out',exact:true}).waitFor();step('web-scheduled-token-refresh',{status:200});
+ pending=response(web,'/api/v1/auth/browser/refresh');await web.reload();assert.equal((await pending).status(),200);await web.getByRole('button',{name:'Sign out',exact:true}).waitFor();assert.ok(await cookie('surprising-web-refresh')); assert.ok(refreshCount<=8,'short-token refresh must not spin');step('web-reload-restore',{status:200,refreshCount});
+ const admin=await context.newPage();watch(admin);await admin.goto('http://127.0.0.1:17444/admin/');await admin.getByRole('button',{name:'登录后台',exact:true}).waitFor();
+ await admin.locator('input').nth(0).fill(runtime.adminEmail);await admin.locator('input').nth(1).fill(runtime.password);
+ pending=response(admin,'/api/v1/auth/login');await admin.getByRole('button',{name:'登录后台',exact:true}).click();login=await pending;assert.equal(login.status(),200);await admin.getByRole('button',{name:'退出登录',exact:true}).waitFor();
+ assert.ok(await cookie('surprising-web-refresh'),'admin login preserves the independent Web cookie');assert.equal((await cookie('surprising-admin-refresh')).httpOnly,true);assert.equal(await admin.evaluate(()=>localStorage.getItem('surprising-admin.session')),null);step('admin-login-keeps-web-session',{status:200});
+ const adminCsrf=await admin.evaluate(async()=>fetch('/api/v1/auth/csrf',{credentials:'include',headers:{'X-Auth-Client':'admin'}}).then(r=>r.json()).then(x=>x.token));
+ const denied=await web.evaluate(async(token)=>{const r=await fetch('/api/v1/auth/browser/refresh',{method:'POST',credentials:'include',headers:{'X-Auth-Client':'admin','X-Auth-Transport':'cookie','X-XSRF-TOKEN':token}});return{status:r.status,body:await r.text()};},adminCsrf);
+ assert.equal(denied.status,403);assert.match(denied.body,/ADMIN_ORIGIN_DENIED/);step('web-origin-cannot-borrow-admin-cookie',{status:403});
+ const csrfRejected=await admin.evaluate(async()=>{const r=await fetch('/api/v1/auth/browser/logout',{method:'POST',credentials:'include',headers:{'X-Auth-Client':'admin'}});return r.status;});assert.equal(csrfRejected,403);step('missing-csrf-does-not-logout',{status:403});
+ await admin.waitForTimeout(5500);pending=response(admin,'/api/v1/auth/browser/refresh');await admin.getByRole('button',{name:'用户权限',exact:true}).click();assert.equal((await pending).status(),200);step('admin-expired-access-refresh',{status:200});
+ pending=response(admin,'/api/v1/auth/browser/refresh');await admin.reload();assert.equal((await pending).status(),200);await admin.getByRole('button',{name:'退出登录',exact:true}).waitFor();step('admin-reload-restore',{status:200});
+ for(const [name,page]of[['web',web],['admin',admin]]){await page.screenshot({path:dir+'/'+name+'-desktop.png'});await page.setViewportSize({width:390,height:900});await page.screenshot({path:dir+'/'+name+'-narrow.png'});const width=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,viewport:innerWidth}));assert.ok(width.scroll<=width.viewport+1,name+' horizontal overflow');step(name+'-layout',{viewport:'390x900',...width});}
+ await admin.setViewportSize({width:1440,height:900});pending=response(admin,'/api/v1/auth/browser/logout');await admin.getByRole('button',{name:'退出登录',exact:true}).click();assert.equal((await pending).status(),204);await admin.getByRole('button',{name:'登录后台',exact:true}).waitFor();assert.equal(await cookie('surprising-admin-refresh'),undefined);assert.ok(await cookie('surprising-web-refresh'));step('admin-logout-isolated',{status:204});
+ await web.getByRole('button',{name:'Open navigation',exact:true}).click();pending=response(web,'/api/v1/auth/browser/logout');await web.getByRole('button',{name:'Sign out',exact:true}).click();assert.equal((await pending).status(),204);assert.equal(await cookie('surprising-web-refresh'),undefined);step('web-logout',{status:204});
+ await web.reload();await web.waitForTimeout(500);assert.equal(await web.getByRole('button',{name:'Sign out',exact:true}).count(),0);step('logout-survives-reload');
+ assert.deepEqual(report.pageErrors,[]);report.passed=true;
+}finally{fs.writeFileSync(dir+'/browser-flows.json',JSON.stringify(report,null,2));await browser.close();}

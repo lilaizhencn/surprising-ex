@@ -32,11 +32,16 @@ public class C2cAttachments {
     private final C2cPaymentAccounts payments;
     private final C2cR2Storage storage;
     private final TransactionTemplate transactions;
+    private final com.surprising.gateway.provider.service.GatewayRequestLimits limits;
+    private final com.surprising.gateway.provider.service.UploadContentScanner scanner;
     public C2cAttachments(C2cAttachmentRepository attachments,C2cMessageRepository messages,GatewayUserRepository users,
                           C2cConversations conversations,C2cOrdersRepository orders,C2cPaymentAccounts payments,
-                          C2cR2Storage storage,PlatformTransactionManager transactions) {
+                          C2cR2Storage storage,PlatformTransactionManager transactions,
+                          com.surprising.gateway.provider.service.GatewayRequestLimits limits,
+                          com.surprising.gateway.provider.service.UploadContentScanner scanner) {
         this.attachments=attachments;this.messages=messages;this.users=users;this.conversations=conversations;
         this.orders=orders;this.payments=payments;this.storage=storage;this.transactions=new TransactionTemplate(transactions);
+        this.limits=limits;this.scanner=scanner;
     }
 
     public Map<String,Object> upload(long user,UUID id,String purpose,UUID order,UUID conversation,String name,String mime,byte[] bytes) {
@@ -64,9 +69,11 @@ public class C2cAttachments {
         if(value==null) throw new IllegalArgumentException("上传请求不存在");
         if(value.user()!=user) throw C2cProblem.forbidden("无权访问此文件");
         if("READY".equals(value.status())) return view(value);
+        limits.checkUploadVerification(user);
         byte[] bytes=storage.read(value.key());
         if(!matches(value,bytes)) throw C2cProblem.unavailable("文件核验未完成，请使用原上传请求查询结果");
         validateBytes(value.mime(),bytes,"PAYMENT_QR".equals(value.purpose()));
+        scanner.scan(bytes);
         attachments.markReady(id);
         return view(attachments.find(id).orElseThrow());
     }
@@ -84,6 +91,7 @@ public class C2cAttachments {
                 return previous;
             }
             scope(user,purpose,order,conversation);
+            limits.checkUpload(user,bytes);
             var usage=attachments.usage(user);
             if(usage.files()>=100 || usage.bytes()+bytes>104857600) throw new C2cProblem(C2cProblem.Reason.RATE_LIMITED,
                     "C2C_UPLOAD_LIMIT","文件上传已达限额");

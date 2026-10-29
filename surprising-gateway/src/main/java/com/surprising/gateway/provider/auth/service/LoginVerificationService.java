@@ -421,6 +421,9 @@ public class LoginVerificationService {
                                 + " 请勿向他人透露。");
             if (phoneCode != null)
                 sender.send("PHONE".equals(purpose) ? destination : user.phone(), phoneCode);
+        } catch (com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection limited) {
+            challenges.consume(hash);
+            throw limited;
         } catch (RuntimeException ex) {
             challenges.consume(hash);
             throw new VerificationFailure("LOGIN_CODE_DELIVERY_FAILED");

@@ -1,0 +1,55 @@
+
+> surprising-admin-web@0.1.0 build
+> tsc -b && vite build --base=/admin/ --outDir=/tmp/surprising-security.vVhty9/index-admin-dist
+
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 1841 modules transformed.
+
+(!) outDir /tmp/surprising-security.vVhty9/index-admin-dist is not inside project root and will not be emptied.
+Use --emptyOutDir to override.
+
+rendering chunks...
+computing gzip size...
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/index.html                                 0.50 kB │ gzip:  0.31 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/MarketsPage-Djc0zK5w.css            0.79 kB │ gzip:  0.36 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/SupportPage-CWgd2dvR.css            2.32 kB │ gzip:  0.76 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/WalletPage-DL9TUMWW.css             2.47 kB │ gzip:  0.78 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/C2cBusinessPage-b19h19TE.css        7.00 kB │ gzip:  1.64 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/index-hZf4GKsp.css                 27.96 kB │ gzip:  6.02 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/plus-G-UyfCVz.js                    0.14 kB │ gzip:  0.14 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/shield-check-DRuGjOKw.js            0.31 kB │ gzip:  0.24 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/queryOptions-BC7E1hgI.js            0.31 kB │ gzip:  0.16 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/formValues-uuIJZNaO.js              0.91 kB │ gzip:  0.58 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/products-D0sCKvM8.js                1.00 kB │ gzip:  0.39 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/securityReview-gvMeFDgU.js          2.73 kB │ gzip:  1.23 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/AuditPage-BT7u2pgk.js               3.21 kB │ gzip:  1.20 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/DashboardPage-BBJLQnXh.js           3.84 kB │ gzip:  1.81 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/ExportsPage-C5Yo2n2b.js             5.54 kB │ gzip:  2.03 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/RuntimeConfigPanel-DlB3eXP9.js      5.79 kB │ gzip:  2.64 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/LifecyclePage-B3PCqwBd.js           6.18 kB │ gzip:  2.40 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/SecurityPage-BevLF1DC.js            6.79 kB │ gzip:  2.83 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/ApprovalsPage-DdIM9qL1.js           6.80 kB │ gzip:  2.98 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/FundingInsurancePage-BW8R8e7I.js    6.83 kB │ gzip:  2.26 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/SystemPage-DWjy-GjS.js              7.08 kB │ gzip:  2.57 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/QueryTasksPage-DpeRX66L.js          7.31 kB │ gzip:  2.67 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/FeesPage-Duom9xWX.js                8.38 kB │ gzip:  2.91 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/AffiliatePage-CNkW2kAv.js           8.51 kB │ gzip:  3.68 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/AssetsPage-bKdI79-3.js              9.87 kB │ gzip:  3.03 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/RiskPage-BgZFC2t4.js               10.52 kB │ gzip:  3.03 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/UsersPage-CXDyWidm.js              10.61 kB │ gzip:  3.56 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/MarketMakerPage-rP2hPQYe.js        10.68 kB │ gzip:  4.05 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/OrdersPage-Nxou6-82.js             11.55 kB │ gzip:  3.87 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/AccountsPage-gWfmfhB3.js           15.84 kB │ gzip:  4.88 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/MaintenancePage-DOAzbgkX.js        15.89 kB │ gzip:  6.06 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/AlertsPage-1vlqTalC.js             17.69 kB │ gzip:  4.37 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/jsx-runtime-0N_urNlF.js            18.11 kB │ gzip:  7.27 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/SupportPage-Dvp9qMhy.js            20.83 kB │ gzip:  6.92 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/CompliancePage-xK5OLRsx.js         23.40 kB │ gzip:  7.27 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/AnnouncementsPage-BY--bb06.js      23.72 kB │ gzip:  7.41 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/WalletPage-Bj4q6JCl.js             28.57 kB │ gzip:  8.43 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/C2cBusinessPage-CKeR0MTs.js        43.45 kB │ gzip: 14.17 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/MarketsPage-CxeyKTOi.js            60.52 kB │ gzip: 18.00 kB
+../../../../../tmp/surprising-security.vVhty9/index-admin-dist/assets/index-B5JbxEg7.js                 232.99 kB │ gzip: 74.55 kB
+
+✓ built in 592ms

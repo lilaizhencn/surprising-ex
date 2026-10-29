@@ -1,0 +1,13 @@
+web-login {"status":200,"httpOnly":true,"storageHasSession":false}
+web-scheduled-token-refresh {"status":200}
+web-reload-restore {"status":200,"refreshCount":5}
+admin-login-keeps-web-session {"status":200}
+web-origin-cannot-borrow-admin-cookie {"status":403}
+missing-csrf-does-not-logout {"status":403}
+admin-expired-access-refresh {"status":200}
+admin-reload-restore {"status":200}
+web-layout {"viewport":390,"scroll":390}
+admin-layout {"viewport":390,"scroll":390}
+admin-logout-isolated {"status":204}
+web-logout {"status":204}
+logout-survives-reload {}

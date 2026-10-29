@@ -17,6 +17,22 @@ public class AuthClientMetadataBinding implements CurrentAuthClient {
     private final com.surprising.gateway.provider.service.GatewayRequestLimits limits;
     private final com.surprising.gateway.provider.controller.GatewayLimitRequestBinding limitRequests;
     private static final String CHARGED = AuthClientMetadataBinding.class.getName() + ".charged";
+    private static final String BEARER = AuthClientMetadataBinding.class.getName() + ".bearer";
+    private record VerifiedBearer(String authorization, com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal) {}
+
+    @Override public com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal cachedBearer(String authorization) {
+        var attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof ServletRequestAttributes servlet
+                && servlet.getRequest().getAttribute(BEARER) instanceof VerifiedBearer cached
+                && cached.authorization().equals(authorization)) return cached.principal();
+        return null;
+    }
+
+    @Override public void cacheBearer(String authorization, com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal) {
+        var attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof ServletRequestAttributes servlet)
+            servlet.getRequest().setAttribute(BEARER, new VerifiedBearer(authorization, principal));
+    }
     public AuthClientMetadataBinding(GatewayProperties properties,
             com.surprising.gateway.provider.service.GatewayRequestLimits limits,
             com.surprising.gateway.provider.controller.GatewayLimitRequestBinding limitRequests) {

@@ -15,7 +15,7 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
 class KycEvidenceReferenceTest {
     @Test void storesIdentityCardIssueAndExpiryDatesWithItsEvidence() {
-        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper());
+        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         var document = new KycDocument(1, 42, "ID_CARD_FRONT", "front.png", "image/png", 10,
                 "hash", "UPLOADED", Instant.now(), null);
 
@@ -45,7 +45,7 @@ class KycEvidenceReferenceTest {
                  {"type":"ADDRESS_PROOF","reference":"document:4","addressIssuedOn":"2026-10-01"}]
                 """;
         assertThatCode(() -> repository.submit(42, request, references, Instant.now())).doesNotThrowAnyException();
-        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper());
+        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         var invalid = new KycDocument(1, 42, "UNKNOWN", "unknown.png", "image/png", 10,
                 "hash", "UPLOADED", Instant.now(), null);
         assertThatThrownBy(() -> service.references(List.of(invalid)))
@@ -53,7 +53,7 @@ class KycEvidenceReferenceTest {
     }
 
     @Test void generatedEvidenceRejectsMoreThanTenDocuments() {
-        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper());
+        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
         var document = new KycDocument(1, 42, "PASSPORT", "passport.png", "image/png", 10,
                 "hash", "UPLOADED", Instant.now(), null);
         assertThatThrownBy(() -> service.references(java.util.Collections.nCopies(11, document)))

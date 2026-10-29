@@ -671,3 +671,7 @@ HTTP 额度耗尽返回 429 和 Retry-After；批次自身超过桶容量返回 
 部署入口见 `deployment/test-single-node/ex-api.nginx.conf`：Nginx 先限制 IP 请求/同时连接，Gateway 再进行业务维度限流。生产 Gateway 默认绑定 127.0.0.1，通过受控 Nginx 接入；如使用私网入口，显式设置 GATEWAY_BIND_ADDRESS 并限制网络访问。Nginx 清除可伪造的其他供应商 IP 头，真实 IP 仅信任明确配置的代理。REST CORS 使用 GATEWAY_CORS_ALLOWED_ORIGINS；新增站点也须同步 Nginx 错误响应允许的来源。WS 使用 SURPRISING_WS_ALLOWED_ORIGINS，空列表不会隐式放行所有来源。共享 Valkey 连接与命令超时默认 200ms，可通过 GATEWAY_VALKEY_CONNECT_TIMEOUT/TIMEOUT 调整。
 
 可执行 Node 示例与完整协议位于 Web `src/features/developers/`。本轮只做相关功能验证，未压测；默认额度不代表测得的承载能力。验收与局限见 [开放平台验证](../docs/validation/open-platform-20261029/plan.md)。
+
+## 安全入口与会话
+
+SecurityFilterChain 统一路径、权限和状态检查；Web/Admin 使用独立 HttpOnly Cookie 与 CSRF，App 保留显式令牌协议。新密码不做旧规则迁移。生产上传依赖私网 ClamAV，异常保持拒绝；防护策略、Nginx snippet 安装和未覆盖的基础设施工作见 [网关安全](../docs/gateway-security.md)。

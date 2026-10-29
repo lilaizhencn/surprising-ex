@@ -25,6 +25,7 @@ public final class GatewayLimitRequestBinding {
         boolean read = "GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method);
         if (read && (path.contains("/commands/") || path.contains("/cancellation"))) return Group.RECEIPT;
         if (path.startsWith("/api/v1/admin/")) return Group.ADMIN;
+        if (!read && (path.equals("/api/v1/compliance/kyc/documents") || path.startsWith("/api/v1/c2c/attachments/"))) return Group.UPLOAD;
         boolean trading = path.startsWith("/api/v3/") || path.startsWith("/fapi/") || path.startsWith("/dapi/")
                 || path.startsWith("/eapi/") || path.contains("/trading");
         if (!read && trading && (path.contains("cancel-open") || ("DELETE".equals(method) && path.endsWith("/openorders")))) return Group.CANCEL_ALL;

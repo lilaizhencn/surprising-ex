@@ -1,0 +1,63 @@
+{
+  "browser": "156.0.8078.48",
+  "steps": [
+    {
+      "name": "web-login",
+      "status": 200,
+      "httpOnly": true,
+      "storageHasSession": false
+    },
+    {
+      "name": "web-scheduled-token-refresh",
+      "status": 200
+    },
+    {
+      "name": "web-reload-restore",
+      "status": 200,
+      "refreshCount": 5
+    },
+    {
+      "name": "admin-login-keeps-web-session",
+      "status": 200
+    },
+    {
+      "name": "web-origin-cannot-borrow-admin-cookie",
+      "status": 403
+    },
+    {
+      "name": "missing-csrf-does-not-logout",
+      "status": 403
+    },
+    {
+      "name": "admin-expired-access-refresh",
+      "status": 200
+    },
+    {
+      "name": "admin-reload-restore",
+      "status": 200
+    },
+    {
+      "name": "web-layout",
+      "viewport": 390,
+      "scroll": 390
+    },
+    {
+      "name": "admin-layout",
+      "viewport": 390,
+      "scroll": 390
+    },
+    {
+      "name": "admin-logout-isolated",
+      "status": 204
+    },
+    {
+      "name": "web-logout",
+      "status": 204
+    },
+    {
+      "name": "logout-survives-reload"
+    }
+  ],
+  "pageErrors": [],
+  "passed": true
+}

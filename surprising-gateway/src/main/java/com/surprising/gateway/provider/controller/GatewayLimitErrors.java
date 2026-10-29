@@ -13,6 +13,12 @@ public class GatewayLimitErrors {
     @ExceptionHandler(Rejection.class)
     public ResponseEntity<Map<String, Object>> rejected(Rejection failure) { return response(failure); }
 
+    @ExceptionHandler(tools.jackson.core.exc.StreamConstraintsException.class)
+    public ResponseEntity<Map<String, Object>> oversizedJson() {
+        return ResponseEntity.badRequest().cacheControl(CacheControl.noStore())
+                .body(Map.of("code", "INVALID_REQUEST", "message", "Request JSON exceeds parser limits"));
+    }
+
     public static ResponseEntity<Map<String, Object>> response(Rejection failure) {
         HttpStatus status = switch (failure.reason()) {
             case RATE_LIMITED, WEBSOCKET_CONNECTION_LIMIT -> HttpStatus.TOO_MANY_REQUESTS;

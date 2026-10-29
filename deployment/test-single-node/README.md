@@ -17,6 +17,17 @@ Gateway、行情、衍生品后台和 Core 分别运行；funding 已并入衍�
 
 此测试部署的 Nginx 与 Gateway 同机，生产配置默认信任 `127.0.0.1` 和 `::1`，无需手动填写代理地址。若把 Gateway 放到独立云负载均衡之后，再通过 `GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST` 指定实际代理网段；只填写网关实际连接到的可信代理，不要设为全网。
 
+更新入口配置时同时安装两份安全 snippet，再检查配置：
+
+```bash
+install -d -m 0755 /etc/nginx/snippets
+install -m 0644 deployment/test-single-node/surprising-api-proxy.conf /etc/nginx/snippets/
+install -m 0644 deployment/test-single-node/surprising-admin-headers.conf /etc/nginx/snippets/
+nginx -t
+```
+
+生产 Gateway 默认启用 ClamAV 上传扫描，需通过私有地址配置扫描服务并更新病毒库；服务不可用时拒绝上传。浏览器必须使用 HTTPS，管理页面来源登记到 `security.admin-browser-allowed-origins`。部署前核对 [网关安全与部署](../../docs/gateway-security.md) 中的源站防绕过、可信代理和私有探针要求。
+
 Kafka 当前没有业务 topic。启动前应确认 broker 的自动建 topic 策略；若关闭了自动建 topic，需要按 `ProductTopicNames` 为 `LINEAR_PERPETUAL` 创建 topic，并额外创建全局 `surprising.instrument.events.v1`。不能把其他产品线的 topic 或 consumer group 混用过来。
 
 ## 构建与安装
@@ -90,10 +101,12 @@ systemctl status surprising-linear-perpetual --no-pager
 ```bash
 ./scripts/linear-perpetual-single-node.sh status
 curl -fsS http://127.0.0.1:9094/actuator/health/readiness
-curl -fsS https://ex-api.tokdou.com/healthz
+curl -fsS --resolve ex-api.tokdou.com:443:127.0.0.1 https://ex-api.tokdou.com/healthz
 ```
 
 Gateway 对外仍只走 9094；realtime 行情应用在内网 9095 提供 K 线 HTTP 查询，Core 的 21001–21005、实时 UDP 21010/21020/21030 只绑定本机/内网，不应暴露到公网。
+
+`/healthz` 仅接受入口服务器本机探测，并透传 Gateway readiness；外部监控通过受控私网或本机代理探测。不要把此路径重新开放为公网免限流入口。
 
 停止服务：
 

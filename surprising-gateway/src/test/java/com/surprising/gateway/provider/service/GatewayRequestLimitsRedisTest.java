@@ -136,4 +136,56 @@ class GatewayRequestLimitsRedisTest {
                 });
         first.checkLoginAccount("different@example.com");
     }
+
+    @Test void globalBudgetHasSeparateCancellationAndReceiptReserves() {
+        properties.setPublicRequests(new Rule(1, 1, Duration.ofHours(1)));
+        first.checkPublicRequest("203.0.113.1", "/api/v1/time", false, Group.READ);
+        assertThatThrownBy(() -> second.checkPublicRequest("203.0.113.2", "/api/v1/time", false, Group.READ))
+                .isInstanceOf(GatewayRequestLimits.Rejection.class);
+        second.checkPublicRequest("203.0.113.2", "/api/v1/gateway/trading/cancel", true, Group.CANCEL);
+        second.checkPublicRequest("203.0.113.2", "/api/v1/gateway/trading/commands/id", false, Group.RECEIPT);
+    }
+
+    @Test void emailBudgetsAreSharedAcrossNodesAndNeverStoreRawAddresses() {
+        first.checkEmail("Private.Person@example.test");
+        var before = redis.opsForHash().get(properties.getNamespace() + ":{email}:provider:p86400000", "tokens");
+        assertThatThrownBy(() -> second.checkEmail("private.person@EXAMPLE.TEST"))
+                .isInstanceOf(GatewayRequestLimits.Rejection.class);
+        assertThat(redis.opsForHash().get(properties.getNamespace() + ":{email}:provider:p86400000", "tokens")).isEqualTo(before);
+        second.checkEmail("other@example.test");
+        assertThat(redis.keys(properties.getNamespace() + "*")).allSatisfy(key -> {
+            assertThat(key).doesNotContain("@", "Private.Person", "private.person");
+            assertThat(redis.getExpire(key)).isBetween(1L, 86401L);
+        });
+    }
+
+    @Test void uploadsShareBytesAndCountBudgetsAndHaveIndependentAdmissionCapacity() throws Exception {
+        properties.setUploadKibibytes(new Rule(2, 2, Duration.ofDays(1)));
+        first.checkUpload(7, 1024); second.checkUpload(7, 1);
+        assertThatThrownBy(() -> first.checkUpload(7, 1)).isInstanceOf(GatewayRequestLimits.Rejection.class);
+        second.checkUpload(8, 1024);
+        properties.setConcurrentUploads(1);
+        var isolated = new GatewayRequestLimits(redis, properties, new SimpleMeterRegistry());
+        try (var upload = isolated.admit(Group.UPLOAD); var trading = isolated.admit(Group.ORDER)) {
+            assertThatThrownBy(() -> isolated.admit(Group.UPLOAD)).isInstanceOf(GatewayRequestLimits.Rejection.class);
+            try (var cancel = isolated.admit(Group.CANCEL); var receipt = isolated.admit(Group.RECEIPT)) { }
+        }
+        try (var upload = isolated.admit(Group.UPLOAD)) { }
+    }
+
+    @Test void registrationCannotConsumeTheRefreshAllowance() {
+        properties.setRegistrationIp(new Rule(1, 1, Duration.ofHours(1)));
+        first.checkPublicRequest("203.0.113.1", "/api/v1/auth/register", true, Group.SECURITY);
+        assertThatThrownBy(() -> second.checkPublicRequest("203.0.113.1", "/api/v1/auth/register", true, Group.SECURITY))
+                .isInstanceOf(GatewayRequestLimits.Rejection.class);
+        second.checkPublicRequest("203.0.113.1", "/api/v1/auth/browser/refresh", true, Group.SECURITY);
+    }
+    @Test void dailyEmailBudgetIsAHardUtcWindowRatherThanAnotherRefillingBucket() {
+        properties.setEmailCooldown(new Rule(100, 100, Duration.ofMillis(1)));
+        properties.setEmailHourly(new Rule(100, 100, Duration.ofHours(1)));
+        properties.setEmailDaily(new Rule(2, 2, Duration.ofDays(1)));
+        first.checkEmail("budget@example.test"); second.checkEmail("budget@example.test");
+        assertThatThrownBy(() -> first.checkEmail("budget@example.test")).isInstanceOf(GatewayRequestLimits.Rejection.class);
+        assertThat(redis.keys(properties.getNamespace() + ":{email}:*:day:w86400000")).hasSize(2);
+    }
 }

@@ -43,7 +43,7 @@ public class AdminIpWhitelistFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        response.sendError(HttpServletResponse.SC_FORBIDDEN, "admin ip is not allowed");
+        GatewaySecurityErrors.write(response, 403, "ADMIN_IP_DENIED");
     }
 
     boolean isAllowed(String clientIp, List<String> allowlist) {

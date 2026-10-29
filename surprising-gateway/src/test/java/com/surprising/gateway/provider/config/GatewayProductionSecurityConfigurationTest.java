@@ -19,6 +19,15 @@ import org.springframework.core.io.ClassPathResource;
 class GatewayProductionSecurityConfigurationTest {
 
     @Test
+    void productionRejectsInsecureBrowserCookiesAndExcessiveAccessLifetime() {
+        var properties = new GatewayProperties(); properties.setDeploymentProfile("production");
+        properties.getSecurity().setBrowserCookieSecure(false);
+        properties.getSecurity().setAccessTokenTtl(java.time.Duration.ofDays(7));
+        assertThatThrownBy(properties::validateProductionSecurityConfiguration).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("browser-cookie-secure").hasMessageContaining("access-token-ttl");
+    }
+
+    @Test
     void localProfileKeepsLocalDefaultsAvailableForDevelopment() {
         GatewayProperties properties = new GatewayProperties();
 

@@ -43,6 +43,21 @@ public final class KycDocumentFormats {
         throw new IllegalArgumentException("KYC document format is not supported");
     }
 
+    public static void validateImageDimensions(byte[] content, String contentType) {
+        if (!contentType.startsWith("image/")) return;
+        try (var input = javax.imageio.ImageIO.createImageInputStream(new java.io.ByteArrayInputStream(content))) {
+            var readers = javax.imageio.ImageIO.getImageReaders(input);
+            if (!readers.hasNext()) throw new IllegalArgumentException("invalid KYC image");
+            var reader = readers.next();
+            try {
+                reader.setInput(input);
+                int width = reader.getWidth(0), height = reader.getHeight(0);
+                if (width < 1 || height < 1 || width > 16000 || height > 16000 || (long) width * height > 40000000)
+                    throw new IllegalArgumentException("KYC image dimensions exceed limit");
+            } finally { reader.dispose(); }
+        } catch (java.io.IOException invalid) { throw new IllegalArgumentException("invalid KYC image"); }
+    }
+
     public static String extension(String contentType) {
         if (!CONTENT_TYPES.contains(contentType)) {
             throw new IllegalArgumentException("KYC document content type is not supported");

@@ -11,10 +11,12 @@ import org.springframework.stereotype.Component;
 public class ResendEmailMessageSender implements EmailMessageSender {
 
     private final GatewayProperties properties;
+    private final com.surprising.gateway.provider.service.GatewayRequestLimits limits;
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(3)).build();
 
-    public ResendEmailMessageSender(GatewayProperties properties) {
+    public ResendEmailMessageSender(GatewayProperties properties, com.surprising.gateway.provider.service.GatewayRequestLimits limits) {
         this.properties = properties;
+        this.limits = limits;
     }
 
     @Override
@@ -23,6 +25,7 @@ public class ResendEmailMessageSender implements EmailMessageSender {
         if (security.getResendApiKey().isBlank() || security.getResendFrom().isBlank()) {
             throw new IllegalStateException("resend email provider is not configured");
         }
+        limits.checkEmail(recipient);
         String payload = "{\"from\":\"" + escape(security.getResendFrom())
                 + "\",\"to\":[\"" + escape(recipient)
                 + "\"],\"subject\":\"" + escape(subject)

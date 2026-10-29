@@ -113,7 +113,8 @@ public class AuthService {
         currentClient.loginAttempt(identifier);
         Instant now = Instant.now();
         GatewayUserRepository.UserCredential credential = credential(identifier).orElse(null);
-        if (credential == null || !passwordHasher.matches(request.password(), credential.passwordHash())) {
+        boolean passwordMatches = passwordHasher.matches(request.password(), credential == null ? null : credential.passwordHash());
+        if (credential == null || !passwordMatches) {
             repository.loginLog(credential == null ? 0L : credential.userId(), "FAILED", "BAD_CREDENTIALS",
                     userAgent(httpRequest), ipAddress(httpRequest), now);
             throw new IllegalArgumentException("invalid identifier or password");
@@ -203,6 +204,15 @@ public class AuthService {
     }
 
     public JwtPrincipal authenticateBearer(String authorizationHeader) {
+        JwtPrincipal principal = verifyBearer(authorizationHeader);
+        currentClient.authenticated(principal.userId(), null);
+        return principal;
+    }
+
+    /** Security ingress verifies identity; the business adapter charges the resolved product/batch policy. */
+    public JwtPrincipal verifyBearer(String authorizationHeader) {
+        JwtPrincipal cached = currentClient.cachedBearer(authorizationHeader);
+        if (cached != null) return cached;
         String token = bearerToken(authorizationHeader);
         JwtPrincipal principal = jwtTokenService.verifyAccessToken(token);
         AuthenticatedUser user = repository.user(principal.userId())
@@ -216,9 +226,10 @@ public class AuthService {
         }
         AuthClientMetadata client = currentClient.current();
         if (client != null) requireAccessAllowed(user.userId(), null, client.ipAddress());
-        currentClient.authenticated(user.userId(), null);
-        return new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(), principal.expiresAt(),
+        JwtPrincipal verified = new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(), principal.expiresAt(),
                 principal.sessionId());
+        currentClient.cacheBearer(authorizationHeader, verified);
+        return verified;
     }
 
     public JwtPrincipal authenticateAdminBearer(String authorizationHeader) {
@@ -263,7 +274,7 @@ public class AuthService {
     }
 
     public AuthenticatedUser adminUser(String authorizationHeader, long userId) {
-        authenticateAdminBearer(authorizationHeader);
+        requireAdminPermission(authorizationHeader, "admin.users.read");
         return repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
     }
 
@@ -334,6 +345,7 @@ public class AuthService {
         }
         Instant now = Instant.now();
         repository.replaceRoles(userId, roles, now);
+        repository.revokeUserRefreshSessions(userId, now);
         return repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
     }
 
@@ -448,7 +460,10 @@ public class AuthService {
     private AuthResponse authResponse(AuthenticatedUser user, AuthClientMetadata request, Instant now,
                                       boolean requiresEmailVerification, Instant authenticatedAt) {
         String refreshToken = newRefreshToken();
-        Instant refreshExpiresAt = now.plus(properties.getSecurity().getRefreshTokenTtl());
+        boolean admin = user.roles().stream().anyMatch(properties.getSecurity().getAdminRoles()::contains);
+        var accessTtl = admin ? properties.getSecurity().getAdminAccessTokenTtl() : properties.getSecurity().getAccessTokenTtl();
+        Instant refreshExpiresAt = (admin ? authenticatedAt : now).plus(admin ? properties.getSecurity().getAdminRefreshTokenTtl() : properties.getSecurity().getRefreshTokenTtl());
+        if (!refreshExpiresAt.isAfter(now)) throw new IllegalArgumentException("session requires fresh authentication");
         String deviceId = deviceId(request);
         requireAccessAllowed(user.userId(), deviceId, ipAddress(request));
         long sessionId = repository.saveRefreshSession(user.userId(), hashRefreshToken(refreshToken), refreshExpiresAt,
@@ -457,7 +472,7 @@ public class AuthService {
                 ? jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), sessionId, now)
                 : jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), now);
         return new AuthResponse(user, accessToken, refreshToken,
-                now.plus(properties.getSecurity().getAccessTokenTtl()), refreshExpiresAt,
+                now.plus(accessTtl), refreshExpiresAt,
                 requiresEmailVerification);
     }
 

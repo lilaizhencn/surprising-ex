@@ -159,7 +159,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     private void subscribe(ClientConnection connection, WsClientCommand command) {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
         if (topic.userId() != null) {
-            long verified = connection.apiKey() == null ? authenticator.authenticate(connection.accessToken())
+            long verified = connection.apiKey() == null ? authenticator.principal(connection.accessToken(), connection.clientIp()).userId()
                     : authenticator.apiKeyUser(connection.apiKey(), connection.clientIp());
             if (verified != topic.userId()) throw new IllegalArgumentException("websocket identity mismatch");
         }
@@ -179,7 +179,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     private void authenticate(ClientConnection connection, WsClientCommand command) {
         limits.checkSocketAuthentication(connection.clientIp());
-        var principal = authenticator.principal(command.token());
+        var principal = authenticator.principal(command.token(), connection.clientIp());
         long userId = principal.userId();
         synchronized (connection) {
             try {

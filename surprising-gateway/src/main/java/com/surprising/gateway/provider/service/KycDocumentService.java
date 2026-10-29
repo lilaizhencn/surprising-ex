@@ -27,20 +27,26 @@ public class KycDocumentService {
     private final KycDocumentStorageService storage;
     private final GatewayProperties properties;
     private final ObjectMapper objectMapper;
+    private final GatewayRequestLimits limits;
+    private final UploadContentScanner scanner;
 
     public KycDocumentService(KycDocumentRepository repository,
                               KycDocumentStorageService storage,
                               GatewayProperties properties,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper, GatewayRequestLimits limits, UploadContentScanner scanner) {
         this.repository = repository;
         this.storage = storage;
         this.properties = properties;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.limits = limits; this.scanner = scanner;
     }
 
     public KycDocument upload(long userId, KycDocumentUpload upload) {
         if (userId <= 0) throw new IllegalArgumentException("user id must be positive");
         byte[] content = upload.content();
+        limits.checkUpload(userId, content.length);
+        com.surprising.gateway.provider.utils.KycDocumentFormats.validateImageDimensions(content, upload.contentType());
+        scanner.scan(content);
         String type = upload.documentType();
         String contentType = upload.contentType();
         String extension = upload.extension();

@@ -1,5 +1,15 @@
 server:
+  address: ${GATEWAY_BIND_ADDRESS:127.0.0.1}
   port: 9094
+  max-http-request-header-size: 16KB
+  tomcat:
+    connection-timeout: 10s
+    keep-alive-timeout: 20s
+    max-connections: 4096
+    accept-count: 128
+    max-http-form-post-size: 1MB
+    max-part-count: 8
+    max-parameter-count: 128
 
 spring:
   data:
@@ -146,6 +156,7 @@ surprising:
       symbol-aliases-json: ${GATEWAY_BINANCE_SYMBOL_ALIASES:{}}
       symbol-scales-json: ${GATEWAY_BINANCE_SYMBOL_SCALES:{}}
     security:
+      admin-browser-allowed-origins: ${GATEWAY_ADMIN_BROWSER_ALLOWED_ORIGINS:http://localhost:5174,http://127.0.0.1:5174,https://ex-api.tokdou.com}
       user-id-header: X-User-Id
       require-identity-for-private-routes: true
       admin-roles:
@@ -168,7 +179,10 @@ surprising:
       mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY:}
       issuer: surprising-ex-gateway
       jwt-secret: ${GATEWAY_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
-      access-token-ttl: 7d
+      access-token-ttl: 15m
+      admin-access-token-ttl: 5m
+      admin-refresh-token-ttl: 8h
+      browser-cookie-secure: ${GATEWAY_BROWSER_COOKIE_SECURE:true}
       refresh-token-ttl: 30d
     http-client:
       connect-timeout: 1s

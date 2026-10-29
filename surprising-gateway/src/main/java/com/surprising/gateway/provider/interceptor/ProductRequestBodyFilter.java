@@ -1,7 +1,5 @@
 package com.surprising.gateway.provider.interceptor;
 
-import com.surprising.gateway.provider.product.ProductInternalHandlerMapping;
-
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
 import java.io.*;
@@ -16,11 +14,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public final class ProductRequestBodyFilter extends OncePerRequestFilter {
     public static final String BODY = ProductRequestBodyFilter.class.getName() + ".body";
-    private static final int MAX_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_BYTES = 1024 * 1024;
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !(ProductInternalHandlerMapping.isProductEndpoint(request.getRequestURI())
-                    || (request.getRequestURI().startsWith("/api/") && request.getRequestURI().contains("batch")))
-                || !("POST".equals(request.getMethod()) || "PUT".equals(request.getMethod()) || "PATCH".equals(request.getMethod()));
+        String type = request.getContentType();
+        return java.util.List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod())
+                || (type != null && (type.startsWith("multipart/") || type.startsWith("application/x-www-form-urlencoded")));
     }
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                               FilterChain chain) throws ServletException, IOException {

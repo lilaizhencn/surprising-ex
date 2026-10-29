@@ -1,0 +1,22 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:surprising_client/src/api.dart';
+import 'package:surprising_client/src/models.dart';
+
+void main() {
+  test('native client restores an expired bearer through the real security chain', () async {
+    final runtime = jsonDecode(await File('${Platform.environment['SECURITY_QA_DIR']}/qa-runtime.json').readAsString()) as Map<String, dynamic>;
+    final api = ApiClient(AppConfig(gatewayBaseUrl: 'http://127.0.0.1:19085'));
+    addTearDown(api.dispose);
+    final initial = await api.login(username: runtime['userEmail'] as String, password: runtime['password'] as String);
+    api.setSession(initial);
+    String? renewed;
+    api.onSessionRefreshed = (session) async { renewed = session.accessToken; };
+    await Future<void>.delayed(const Duration(seconds: 7));
+    final result = await api.get('/api/v1/security/mfa');
+    expect(result['enabled'], false);
+    expect(renewed != null && renewed != initial.accessToken, true, reason: 'expired access must rotate through the explicit refresh body');
+    await expectLater(api.refresh(initial.refreshToken!), throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 401)));
+  });
+}
