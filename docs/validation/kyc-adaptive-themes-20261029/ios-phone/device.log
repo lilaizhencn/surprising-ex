@@ -1,0 +1,34 @@
+Running Xcode build...                                          
+Xcode build done.                                           98.5s
+VMServiceFlutterDriver: Connecting to Flutter application at http://127.0.0.1:64115/GJFnX0xhAhE=/
+VMServiceFlutterDriver: Isolate found with number: 4373602118723475
+VMServiceFlutterDriver: Isolate 4373602118723475 is runnable.
+VMServiceFlutterDriver: Isolate is paused at start.
+VMServiceFlutterDriver: Attempting to resume isolate
+flutter: 00:00 +0: native navigation and six distinct themes, large text and repeated transitions
+VMServiceFlutterDriver: Connected to Flutter application.
+flutter: NATIVE_CAPTURE_READY:theme-dark:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-theme-dark.ack
+VMServiceFlutterDriver: request_data message is taking a long time to complete...
+flutter: NATIVE_CAPTURE_READY:theme-light:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-theme-light.ack
+flutter: NATIVE_CAPTURE_READY:theme-ocean:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-theme-ocean.ack
+flutter: NATIVE_CAPTURE_READY:theme-forest:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-theme-forest.ack
+flutter: NATIVE_CAPTURE_READY:theme-dusk:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-theme-dusk.ack
+flutter: NATIVE_CAPTURE_READY:theme-sand:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-theme-sand.ack
+flutter: NATIVE_CAPTURE_READY:large-text-picker:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-large-text-picker.ack
+flutter: NATIVE_CAPTURE_READY:home-glass-navigation:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-home-glass-navigation.ack
+flutter: NATIVE_CAPTURE_READY:trade-keyboard:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-trade-keyboard.ack
+flutter: NATIVE_CAPTURE_READY:trade-layout:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-trade-layout.ack
+flutter: NATIVE_CAPTURE_READY:after-navigation-cycles:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-after-navigation-cycles.ack
+flutter: 00:34 +1: real HTTP KYC upload, rejection, correction, approval and expiry renewal
+flutter: KYC_IDENTITY:true:42:ClientLanguage.zhHans
+flutter: NATIVE_CAPTURE_READY:kyc-profile-entry:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-kyc-profile-entry.ack
+flutter: NATIVE_CAPTURE_READY:kyc-entry:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-kyc-entry.ack
+flutter: NATIVE_CAPTURE_READY:kyc-pending:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-kyc-pending.ack
+flutter: NATIVE_CAPTURE_READY:kyc-rejected:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-kyc-rejected.ack
+flutter: NATIVE_CAPTURE_READY:kyc-verified:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-kyc-verified.ack
+flutter: NATIVE_CAPTURE_READY:kyc-expired:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-kyc-expired.ack
+flutter: NATIVE_CAPTURE_READY:kyc-renewed:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-kyc-renewed.ack
+flutter: NATIVE_CAPTURE_READY:kyc-polling-after60s:/Users/atomex/Library/Developer/CoreSimulator/Devices/38113529-B12B-4EC0-91BC-8B442B2847BE/data/Containers/Data/Application/068CDDB0-8639-4EA5-A1E3-F67D4D9AFBD6/tmp/kyc-adaptive-kyc-polling-after60s.ack
+flutter: 02:01 +2: (tearDownAll)
+flutter: 02:01 +3: All tests passed!
+All tests passed.

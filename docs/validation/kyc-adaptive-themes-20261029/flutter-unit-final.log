@@ -1,0 +1,60 @@
+00:00 +0: loading /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart
+00:00 +0: /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart: pushed detail routes and return navigation stay outside a hinge
+00:06 +1: /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart: pushed detail routes and return navigation stay outside a hinge
+00:06 +2: /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart: pushed detail routes and return navigation stay outside a hinge
+00:06 +3: /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart: pushed detail routes and return navigation stay outside a hinge
+00:06 +4: /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart: pushed detail routes and return navigation stay outside a hinge
+00:06 +5: /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart: pushed detail routes and return navigation stay outside a hinge
+00:06 +6: /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart: pushed detail routes and return navigation stay outside a hinge
+00:06 +7: /Users/atomex/Desktop/surprising/surprising-client/test/adaptive_client_layout_test.dart: pushed detail routes and return navigation stay outside a hinge
+00:09 +8: /Users/atomex/Desktop/surprising/surprising-client/test/client_theme_test.dart: guests can choose a palette from personal settings and return home
+00:09 +9: /Users/atomex/Desktop/surprising/surprising-client/test/client_theme_test.dart: guests can choose a palette from personal settings and return home
+00:09 +10: /Users/atomex/Desktop/surprising/surprising-client/test/client_theme_test.dart: guests can choose a palette from personal settings and return home
+00:12 +11: /Users/atomex/Desktop/surprising/surprising-client/test/client_theme_test.dart: guests can choose a palette from personal settings and return home
+00:13 +12: /Users/atomex/Desktop/surprising/surprising-client/test/client_theme_test.dart: guests can choose a palette from personal settings and return home
+00:13 +13: /Users/atomex/Desktop/surprising/surprising-client/test/mobile_account_parity_test.dart: late history response cannot overwrite a new category or survive logout
+00:13 +14: /Users/atomex/Desktop/surprising/surprising-client/test/mobile_account_parity_test.dart: late history response cannot overwrite a new category or survive logout
+00:13 +15: /Users/atomex/Desktop/surprising/surprising-client/test/mobile_account_parity_test.dart: late history response cannot overwrite a new category or survive logout
+00:14 +16: /Users/atomex/Desktop/surprising/surprising-client/test/input_boundary_widgets_test.dart: invalid KYC document ID null cannot be saved or removed
+00:15 +17: /Users/atomex/Desktop/surprising/surprising-client/test/input_boundary_widgets_test.dart: invalid KYC document ID null cannot be saved or removed
+00:16 +18: /Users/atomex/Desktop/surprising/surprising-client/test/input_boundary_widgets_test.dart: invalid KYC document ID null cannot be saved or removed
+00:16 +19: /Users/atomex/Desktop/surprising/surprising-client/test/input_boundary_widgets_test.dart: invalid KYC document ID null cannot be saved or removed
+00:17 +20: /Users/atomex/Desktop/surprising/surprising-client/test/input_boundary_widgets_test.dart: invalid KYC document ID null cannot be saved or removed
+00:17 +21: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: overview counts shared funding and spot money once
+00:17 +22: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: overview counts shared funding and spot money once
+00:17 +23: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: overview counts shared funding and spot money once
+00:18 +24: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: overview counts shared funding and spot money once
+00:18 +25: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: overview counts shared funding and spot money once
+00:18 +26: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: overview counts shared funding and spot money once
+00:19 +27: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: overview counts shared funding and spot money once
+00:19 +28: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: overview counts shared funding and spot money once
+00:19 +29: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:19 +30: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:22 +31: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:22 +32: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:22 +33: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:22 +34: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:23 +35: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:23 +36: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:23 +37: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:23 +38: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:24 +39: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:24 +40: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:24 +41: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:24 +42: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:24 +43: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:24 +44: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:24 +45: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:25 +46: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:25 +47: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: fresh passwordless account binds a new contact without a password and still submits its code
+00:26 +48: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: security loads outside initState, preserves MFA when KYC fails, retries
+00:26 +49: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: security loads outside initState, preserves MFA when KYC fails, retries
+00:26 +50: /Users/atomex/Desktop/surprising/surprising-client/test/mobile_account_parity_test.dart: cancelling session revocation does not report a successful logout
+00:26 +51: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: expired primary authentication requests a new login before issuing a code
+00:26 +52: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: expired primary authentication requests a new login before issuing a code
+00:26 +53: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: expired primary authentication requests a new login before issuing a code
+00:27 +54: /Users/atomex/Desktop/surprising/surprising-client/test/account_display_test.dart: security late response cannot reveal an expired session
+00:27 +55: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: a late primary context cannot open a dialog after account logout
+00:27 +56: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: a late primary context cannot open a dialog after account logout
+00:27 +57: /Users/atomex/Desktop/surprising/surprising-client/test/passwordless_security_test.dart: a late primary context cannot open a dialog after account logout
+00:27 +58: All tests passed!

@@ -1,0 +1,12 @@
+psql:deployment/migrations/20261029-kyc-session-order.sql:2: NOTICE:  column "provider_event_at" of relation "gateway_user_kyc_profiles" already exists, skipping
+ALTER TABLE
+psql:deployment/migrations/20261029-kyc-session-order.sql:3: NOTICE:  column "provider_redirect_url" of relation "gateway_user_kyc_profiles" already exists, skipping
+ALTER TABLE
+COMMENT
+COMMENT
+psql:deployment/migrations/20261029-kyc-session-order.sql:2: NOTICE:  column "provider_event_at" of relation "gateway_user_kyc_profiles" already exists, skipping
+ALTER TABLE
+psql:deployment/migrations/20261029-kyc-session-order.sql:3: NOTICE:  column "provider_redirect_url" of relation "gateway_user_kyc_profiles" already exists, skipping
+ALTER TABLE
+COMMENT
+COMMENT

@@ -1,0 +1,188 @@
+
+> surprising-admin-web@0.1.0 test
+> bun test tests
+
+bun test v1.3.14 (d1632b29)
+
+tests/c2cBusiness.test.ts:
+(pass) C2C policy approval binds the original PUT body and administrator [39.23ms]
+(pass) unknown admin response is surfaced without another write [0.51ms]
+(pass) canceling approval cannot send a second request [0.99ms]
+(pass) business reads cannot run under another administrator [0.36ms]
+
+tests/formValues.test.ts:
+(pass) asset catalog input > accepts the real catalog code USDT [0.52ms]
+(pass) asset catalog input > accepts the real catalog code 1INCH [0.02ms]
+(pass) asset catalog input > accepts the real catalog code AB
+(pass) asset catalog input > accepts the real catalog code AAAAAAAAAAAAAAAAAAAA
+(pass) asset catalog input > normalizes the same uppercase code displayed by catalog forms [0.03ms]
+(pass) asset catalog input > rejects invalid catalog code  [0.11ms]
+(pass) asset catalog input > rejects invalid catalog code   [0.02ms]
+(pass) asset catalog input > rejects invalid catalog code A [0.01ms]
+(pass) asset catalog input > rejects invalid catalog code AAAAAAAAAAAAAAAAAAAAA
+(pass) asset catalog input > rejects invalid catalog code BTC-USDT
+(pass) asset catalog input > rejects invalid catalog code USDT_
+(pass) asset catalog input > rejects invalid catalog code US DT
+(pass) asset catalog input > rejects invalid catalog code 币种 [0.02ms]
+
+tests/affiliate.test.ts:
+(pass) received and confirmed checkpoints stay exact and distinct [2.64ms]
+(pass) missing deferred count is an invalid response rather than a fabricated zero [0.68ms]
+(pass) confirmation cannot exceed the received checkpoint [1.29ms]
+(pass) unresolved fees must carry their oldest source time [0.48ms]
+(pass) different product queues are preserved separately [0.89ms]
+
+tests/adminWrites.test.ts:
+(pass) admin approval execution > /balance-adjustments preserves the exact input through approval and execution [3.40ms]
+(pass) admin approval execution > /product-balance-adjustments preserves the exact input through approval and execution [0.51ms]
+(pass) admin approval execution > invalid financial values fail before creating an approval or issuing a request [0.31ms]
+(pass) admin approval execution > an account change during approval prevents gateway/local execution, local=false [0.44ms]
+(pass) admin approval execution > an account change during approval prevents gateway/local execution, local=true [0.27ms]
+
+tests/dataTable.test.ts:
+(pass) admin data table > makes row details explicit and keeps financial identities unrounded [14.80ms]
+(pass) admin data table > mobile cards keep both the primary action and existing business actions [1.80ms]
+(pass) admin data table > keeps product scopes separate in stable row identity and unknown columns inspectable [0.09ms]
+(pass) admin data table > represents a genuine empty list as a status [0.87ms]
+(pass) admin data table > duplicate candidate identities cannot collapse rows during reconciliation [0.09ms]
+(pass) admin data table > pending user writes can disable selection in both responsive views [1.52ms]
+
+tests/c2cReview.test.ts:
+(pass) C2C pages reject missing metadata, duplicates and wrong page offsets [1.04ms]
+(pass) audited payment details remain bound to exact owner, account and revision [2.96ms]
+(pass) appeal decisions inspect the original exact parties and amount [0.34ms]
+(pass) configuration and bond policy absence cannot masquerade as a disabled or zero policy [0.28ms]
+(pass) reconciliation preserves signed and aggregate integer discrepancies without rounding [0.31ms]
+(pass) review controls follow ad, payment and appeal states [0.13ms]
+
+tests/integers.test.ts:
+(pass) financial decimal integer boundary > preserves exact signed int64 9007199254740991 [0.05ms]
+(pass) financial decimal integer boundary > preserves exact signed int64 9007199254740992
+(pass) financial decimal integer boundary > preserves exact signed int64 9007199254740993
+(pass) financial decimal integer boundary > preserves exact signed int64 9223372036854775807
+(pass) financial decimal integer boundary > preserves exact signed int64 -9223372036854775808
+(pass) financial decimal integer boundary > preserves exact signed int64 -9007199254740993
+(pass) financial decimal integer boundary > preserves exact signed int64 0
+(pass) financial decimal integer boundary > rejects invalid integer "" [0.07ms]
+(pass) financial decimal integer boundary > rejects invalid integer " " [0.01ms]
+(pass) financial decimal integer boundary > rejects invalid integer "1.5"
+(pass) financial decimal integer boundary > rejects invalid integer "1e3"
+(pass) financial decimal integer boundary > rejects invalid integer "+1"
+(pass) financial decimal integer boundary > rejects invalid integer "01"
+(pass) financial decimal integer boundary > rejects invalid integer "NaN"
+(pass) financial decimal integer boundary > rejects invalid integer "Infinity"
+(pass) financial decimal integer boundary > rejects invalid integer "9223372036854775808"
+(pass) financial decimal integer boundary > rejects invalid integer "-9223372036854775809"
+(pass) financial decimal integer boundary > rejects invalid integer 
+(pass) financial decimal integer boundary > rejects invalid integer null
+(pass) financial decimal integer boundary > rejects invalid integer 9007199254740992
+(pass) financial decimal integer boundary > positive IDs and optional empty filters have distinct semantics [0.26ms]
+(pass) financial decimal integer boundary > write serialization covers adjustments, fees, instrument fields and maker ID arrays [0.94ms]
+
+tests/accountReads.test.ts:
+(pass) a failed report or ledger cannot erase independently read balances [0.84ms]
+(pass) a missing or malformed collection is an error, while a real empty collection stays empty [0.27ms]
+(pass) conflicting response ownership cannot be shown under the selected user and product [0.17ms]
+
+tests/feeSchedule.test.ts:
+(pass) real fee schedule operations > an empty new form renders without submitting or inventing a VIP engine [5.37ms]
+(pass) real fee schedule operations > schedule IDs stay decimal strings, rates stay validated ppm integers [0.31ms]
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"userId":""} [0.09ms]
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"userId":"1.5"} [0.02ms]
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"userId":"9223372036854775808"} [0.01ms]
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"instrumentId":"BTC-USDT"} [0.02ms]
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"instrumentId":"2147483648"} [0.01ms]
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"feeScheduleId":"0"} [0.03ms]
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"makerFeeRatePpm":"1.5"}
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"makerFeeRatePpm":"1000001"}
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"reason":" "}
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"effectiveTime":"invalid"} [0.07ms]
+(pass) real fee schedule operations > invalid schedule inputs cannot reach approval: {"effectiveTime":"2026-10-23T00:00:00Z","expireTime":"2026-10-22T00:00:00Z"} [0.02ms]
+
+tests/c2c.test.ts:
+(pass) normal support reply sends the fixed original body once [1.47ms]
+(pass) required approval uses c2c service and the same exact reply hash and body [2.20ms]
+(pass) network uncertainty is not retried; an audited receipt can recover the own support message [0.74ms]
+(pass) a different support identity cannot be mistaken for an own receipt [0.35ms]
+(pass) recent history and exact numeric values follow server contracts [1.26ms]
+
+tests/support.test.ts:
+(pass) support summary binds the exact user and never invents zero risk for missing data [0.55ms]
+(pass) support ticket identities retain int64 precision and reject unsafe numeric IDs [0.39ms]
+(pass) support pages reject incomplete metadata, duplicate records, wrong filters and stuck cursors [0.36ms]
+(pass) support notes cannot cross ticket targets and require explicit visibility and complete pagination [0.38ms]
+(pass) support mutation receipts bind both the original user and ticket before success [0.31ms]
+(pass) support rejects unknown status and date fields instead of enabling stale controls [0.18ms]
+(pass) uncertain writes require a read before any repeat; explicit business rejection remains distinct [0.12ms]
+
+tests/securityReview.test.ts:
+(pass) role reads cannot attach another role's permissions to the current selection [0.36ms]
+(pass) permission changes preserve unknown existing codes and expose exact additions/removals [0.85ms]
+(pass) approval records preserve long identities and reject incomplete binding metadata [0.40ms]
+(pass) self approval, expiry and handled requests are not actionable [0.10ms]
+(pass) approval page metadata cannot invent a successful empty page [0.22ms]
+
+tests/compliance.test.ts:
+(pass) compliance evidence preserves the selected user and exact material IDs [0.28ms]
+(pass) mixed owners, missing collections and unknown review states cannot become writable detail [0.34ms]
+(pass) review requires an explanation, valid evidence, expiry and the verified provider level [0.53ms]
+
+tests/client.test.ts:
+(pass) private admin requests > 429 exposes Retry-After for mutations and downloads without repeating them [1.50ms]
+(pass) private admin requests > never fetches a private file or history under a different owner [0.25ms]
+(pass) private admin requests > a late 401 cannot refresh or restore the previous account [0.60ms]
+(pass) private admin requests > an in-flight refresh cannot overwrite a newer login [1.17ms]
+(pass) private admin requests > concurrent 401 responses share one rotating refresh [14.54ms]
+(pass) private admin requests > a rejected refreshed token fails without an endless refresh loop [1.25ms]
+(pass) private admin requests > session changes during response body reading cannot return private content [1.96ms]
+(pass) private admin requests > unsafe JSON integers are preserved exactly rather than rounded [0.11ms]
+(pass) session boundary > nullable login labels preserve a valid session: {"username":null,"email":"admin@example.test"} [0.22ms]
+(pass) session boundary > nullable login labels preserve a valid session: {"email":"admin@example.test"} [0.05ms]
+(pass) session boundary > nullable login labels preserve a valid session: {"username":null,"email":null} [0.04ms]
+(pass) session boundary > nullable login labels preserve a valid session: {} [0.04ms]
+(pass) session boundary > malformed login labels are rejected: {"username":42,"email":"admin@example.test"} [0.13ms]
+(pass) session boundary > malformed login labels are rejected: {"username":{},"email":"admin@example.test"} [0.05ms]
+(pass) session boundary > malformed login labels are rejected: {"username":"QA","email":[]} [0.05ms]
+(pass) session boundary > malformed login labels are rejected: {"username":"QA","email":true} [0.04ms]
+(pass) session boundary > bad stored sessions recover to login: null [0.10ms]
+(pass) session boundary > bad stored sessions recover to login: {} [0.04ms]
+(pass) session boundary > bad stored sessions recover to login: {"user":{"userId":1},"accessToken":"audit"} [0.03ms]
+(pass) session boundary > bad stored sessions recover to login: {"user":{"userId":9,"roles":"ADMIN","username":"QA","status":"NORMAL","createdAt":"2026-10-20T00:00:00Z"},"accessToken":"old","refreshToken":null,"browserSession":true,"accessTokenExpiresAt":"2099-01-01T00:00:00Z","refreshTokenExpiresAt":"2099-01-01T00:00:00Z"} [0.03ms]
+(pass) session boundary > bad stored sessions recover to login: {"user":{"userId":9,"roles":["ADMIN"],"username":"QA","status":"NORMAL","createdAt":"2026-10-20T00:00:00Z"},"accessToken":"old","refreshToken":null,"browserSession":true,"accessTokenExpiresAt":"2099-01-01T00:00:00Z","refreshTokenExpiresAt":"invalid"} [0.04ms]
+(pass) session boundary > bad stored sessions recover to login: {"user":{"userId":9,"roles":["ADMIN"],"username":"QA","status":"NORMAL","createdAt":"2026-10-20T00:00:00Z"},"accessToken":"old","refreshToken":null,"browserSession":true,"accessTokenExpiresAt":"2099-01-01T00:00:00Z","refreshTokenExpiresAt":"2000-01-01T00:00:00Z"} [0.08ms]
+(pass) session boundary > a long user ID remains exact in a valid stored session [0.22ms]
+(pass) session boundary > storage denial and a blocked write keep only this tab's session [0.36ms]
+(pass) refresh failure classification > transient refresh status 503 preserves the session and never repeats a write [2.02ms]
+(pass) refresh failure classification > transient refresh status 500 preserves the session and never repeats a write [1.40ms]
+(pass) refresh failure classification > transient refresh status 429 preserves the session and never repeats a write [1.14ms]
+(pass) refresh failure classification > a network refresh failure preserves the session [0.82ms]
+(pass) refresh failure classification > confirmed refresh rejection 401 clears this session [0.92ms]
+(pass) refresh failure classification > confirmed refresh rejection 403 clears this session [0.64ms]
+(pass) refresh failure classification > an unexpected refresh identity cannot replace the logged-in user [0.81ms]
+(pass) complete request deadline and body limits > slow headers are aborted once; writes are not automatically retried [26.39ms]
+(pass) complete request deadline and body limits > unfinished response body is cancelled for blob=false [29.64ms]
+(pass) complete request deadline and body limits > unfinished response body is cancelled for blob=true [30.13ms]
+(pass) complete request deadline and body limits > caller cancellation also closes a body stream [3.04ms]
+(pass) complete request deadline and body limits > aborted requests never start a fetch [0.74ms]
+(pass) complete request deadline and body limits > stream size limit cancels without waiting for EOF, blob=false [0.46ms]
+(pass) complete request deadline and body limits > stream size limit cancels without waiting for EOF, blob=true [0.15ms]
+(pass) complete request deadline and body limits > declared oversize is rejected before body decoding [0.26ms]
+(pass) complete request deadline and body limits > the original deadline remains in force while a shared refresh is waiting [27.73ms]
+(pass) a real HTTP response with headers and an unfinished body reaches the application deadline [107.95ms]
+
+tests/announcements.test.ts:
+(pass) announcement reads retain exact IDs and versions [0.63ms]
+(pass) malformed announcement metadata and duplicate pages fail closed [0.28ms]
+(pass) editing text preserves exact scheduled instants when date fields were untouched [0.32ms]
+(pass) draft validation rejects empty translations, fractional priority and reversed dates [0.25ms]
+(pass) publication requires a saved draft with both required languages [0.27ms]
+
+tests/custodyWithdrawals.test.ts:
+(pass) gateway withdrawal reads retain exact amounts and financial identity [0.30ms]
+(pass) malformed or duplicate withdrawal records cannot appear as an empty successful list [0.17ms]
+(pass) human review and retry actions follow the backend state transitions [0.10ms]
+
+ 146 pass
+ 0 fail
+ 378 expect() calls
+Ran 146 tests across 16 files. [722.00ms]

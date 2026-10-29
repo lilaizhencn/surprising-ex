@@ -1,0 +1,13 @@
+
+> surprising-ex-web@0.1.0 test
+> vitest run src/api/kyc.test.ts src/i18n/index.test.ts
+
+
+ RUN  v4.1.12 /Users/atomex/Desktop/surprising/surprising-ex-web
+
+
+ Test Files  2 passed (2)
+      Tests  4 passed (4)
+   Start at  23:05:10
+   Duration  1.48s (transform 482ms, setup 0ms, import 894ms, tests 253ms, environment 0ms)
+

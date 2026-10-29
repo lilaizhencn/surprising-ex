@@ -1,0 +1,433 @@
+
+> surprising-ex-web@0.1.0 lint
+> biome check src --error-on-warnings
+
+src/api/c2cTrading.ts:304:18 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    302 │   .refine(
+    303 │     (value) =>
+  > 304 │       value.body["requestKey"] === value.requestKey &&
+        │                  ^^^^^^^^^^^^
+    305 │       !Object.hasOwn(value.body, "verification") &&
+    306 │       (value.kind === "ORDER_CREATE"
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    302 302 │     .refine(
+    303 303 │       (value) =>
+    304     │ - ······value.body["requestKey"]·===·value.requestKey·&&
+        304 │ + ······value.body.requestKey·===·value.requestKey·&&
+    305 305 │         !Object.hasOwn(value.body, "verification") &&
+    306 306 │         (value.kind === "ORDER_CREATE"
+  
+
+src/api/c2cTrading.ts:307:29 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    305 │       !Object.hasOwn(value.body, "verification") &&
+    306 │       (value.kind === "ORDER_CREATE"
+  > 307 │         ? typeof value.body["quoteId"] === "string" && value.body["quoteId"].length > 0
+        │                             ^^^^^^^^^
+    308 │         : value.body["payload"] !== null && typeof value.body["payload"] === "object"),
+    309 │   )
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    305 305 │         !Object.hasOwn(value.body, "verification") &&
+    306 306 │         (value.kind === "ORDER_CREATE"
+    307     │ - ········?·typeof·value.body["quoteId"]·===·"string"·&&·value.body["quoteId"].length·>·0
+        307 │ + ········?·typeof·value.body.quoteId·===·"string"·&&·value.body["quoteId"].length·>·0
+    308 308 │           : value.body["payload"] !== null && typeof value.body["payload"] === "object"),
+    309 309 │     )
+  
+
+src/api/c2cTrading.ts:307:67 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    305 │       !Object.hasOwn(value.body, "verification") &&
+    306 │       (value.kind === "ORDER_CREATE"
+  > 307 │         ? typeof value.body["quoteId"] === "string" && value.body["quoteId"].length > 0
+        │                                                                   ^^^^^^^^^
+    308 │         : value.body["payload"] !== null && typeof value.body["payload"] === "object"),
+    309 │   )
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    305 305 │         !Object.hasOwn(value.body, "verification") &&
+    306 306 │         (value.kind === "ORDER_CREATE"
+    307     │ - ········?·typeof·value.body["quoteId"]·===·"string"·&&·value.body["quoteId"].length·>·0
+        307 │ + ········?·typeof·value.body["quoteId"]·===·"string"·&&·value.body.quoteId.length·>·0
+    308 308 │           : value.body["payload"] !== null && typeof value.body["payload"] === "object"),
+    309 309 │     )
+  
+
+src/api/c2cTrading.ts:308:22 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    306 │       (value.kind === "ORDER_CREATE"
+    307 │         ? typeof value.body["quoteId"] === "string" && value.body["quoteId"].length > 0
+  > 308 │         : value.body["payload"] !== null && typeof value.body["payload"] === "object"),
+        │                      ^^^^^^^^^
+    309 │   )
+    310 │ export type C2cPendingTrade = z.infer<typeof pendingSchema>
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    306 306 │         (value.kind === "ORDER_CREATE"
+    307 307 │           ? typeof value.body["quoteId"] === "string" && value.body["quoteId"].length > 0
+    308     │ - ········:·value.body["payload"]·!==·null·&&·typeof·value.body["payload"]·===·"object"),
+        308 │ + ········:·value.body.payload·!==·null·&&·typeof·value.body["payload"]·===·"object"),
+    309 309 │     )
+    310 310 │   export type C2cPendingTrade = z.infer<typeof pendingSchema>
+  
+
+src/api/c2cTrading.ts:308:63 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    306 │       (value.kind === "ORDER_CREATE"
+    307 │         ? typeof value.body["quoteId"] === "string" && value.body["quoteId"].length > 0
+  > 308 │         : value.body["payload"] !== null && typeof value.body["payload"] === "object"),
+        │                                                               ^^^^^^^^^
+    309 │   )
+    310 │ export type C2cPendingTrade = z.infer<typeof pendingSchema>
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    306 306 │         (value.kind === "ORDER_CREATE"
+    307 307 │           ? typeof value.body["quoteId"] === "string" && value.body["quoteId"].length > 0
+    308     │ - ········:·value.body["payload"]·!==·null·&&·typeof·value.body["payload"]·===·"object"),
+        308 │ + ········:·value.body["payload"]·!==·null·&&·typeof·value.body.payload·===·"object"),
+    309 309 │     )
+    310 310 │   export type C2cPendingTrade = z.infer<typeof pendingSchema>
+  
+
+src/api/c2cTrading.ts:328:44 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    326 │   const requestKey = crypto.randomUUID()
+    327 │   const identity =
+  > 328 │     kind === "ORDER_CREATE" ? String(input["quoteId"]) : JSON.stringify(input["payload"])
+        │                                            ^^^^^^^^^
+    329 │   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity))
+    330 │   const requestHash = [...new Uint8Array(hash)]
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    326 326 │     const requestKey = crypto.randomUUID()
+    327 327 │     const identity =
+    328     │ - ····kind·===·"ORDER_CREATE"·?·String(input["quoteId"])·:·JSON.stringify(input["payload"])
+        328 │ + ····kind·===·"ORDER_CREATE"·?·String(input.quoteId)·:·JSON.stringify(input["payload"])
+    329 329 │     const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity))
+    330 330 │     const requestHash = [...new Uint8Array(hash)]
+  
+
+src/api/c2cTrading.ts:328:79 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    326 │   const requestKey = crypto.randomUUID()
+    327 │   const identity =
+  > 328 │     kind === "ORDER_CREATE" ? String(input["quoteId"]) : JSON.stringify(input["payload"])
+        │                                                                               ^^^^^^^^^
+    329 │   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity))
+    330 │   const requestHash = [...new Uint8Array(hash)]
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    326 326 │     const requestKey = crypto.randomUUID()
+    327 327 │     const identity =
+    328     │ - ····kind·===·"ORDER_CREATE"·?·String(input["quoteId"])·:·JSON.stringify(input["payload"])
+        328 │ + ····kind·===·"ORDER_CREATE"·?·String(input["quoteId"])·:·JSON.stringify(input.payload)
+    329 329 │     const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity))
+    330 330 │     const requestHash = [...new Uint8Array(hash)]
+  
+
+src/api/errors.ts:96:14 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    94 │ const validationMessages: Record<string, string> = {
+    95 │   "leveragePpm exceeds instrument max leverage":
+  > 96 │     messages["LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT"] ?? "",
+       │              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    97 │   "leveragePpm must be at least 1x": "Please enter leverage within the allowed range.",
+    98 │ }
+  
+  i Unsafe fix: Use a literal key instead.
+  
+     94  94 │   const validationMessages: Record<string, string> = {
+     95  95 │     "leveragePpm exceeds instrument max leverage":
+     96     │ - ····messages["LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT"]·??·"",
+         96 │ + ····messages.LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT·??·"",
+     97  97 │     "leveragePpm must be at least 1x": "Please enter leverage within the allowed range.",
+     98  98 │   }
+  
+
+src/api/errors.ts:103:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    101 │   const row = record(payload) ? payload : {}
+    102 │   const fields = [
+  > 103 │     row["code"],
+        │         ^^^^^^
+    104 │     row["errorCode"],
+    105 │     row["resultCode"],
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    101 101 │     const row = record(payload) ? payload : {}
+    102 102 │     const fields = [
+    103     │ - ····row["code"],
+        103 │ + ····row.code,
+    104 104 │       row["errorCode"],
+    105 105 │       row["resultCode"],
+  
+
+src/api/errors.ts:104:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    102 │   const fields = [
+    103 │     row["code"],
+  > 104 │     row["errorCode"],
+        │         ^^^^^^^^^^^
+    105 │     row["resultCode"],
+    106 │     row["detail"],
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    102 102 │     const fields = [
+    103 103 │       row["code"],
+    104     │ - ····row["errorCode"],
+        104 │ + ····row.errorCode,
+    105 105 │       row["resultCode"],
+    106 106 │       row["detail"],
+  
+
+src/api/errors.ts:105:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    103 │     row["code"],
+    104 │     row["errorCode"],
+  > 105 │     row["resultCode"],
+        │         ^^^^^^^^^^^^
+    106 │     row["detail"],
+    107 │     row["message"],
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    103 103 │       row["code"],
+    104 104 │       row["errorCode"],
+    105     │ - ····row["resultCode"],
+        105 │ + ····row.resultCode,
+    106 106 │       row["detail"],
+    107 107 │       row["message"],
+  
+
+src/api/errors.ts:106:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    104 │     row["errorCode"],
+    105 │     row["resultCode"],
+  > 106 │     row["detail"],
+        │         ^^^^^^^^
+    107 │     row["message"],
+    108 │     row["error"],
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    104 104 │       row["errorCode"],
+    105 105 │       row["resultCode"],
+    106     │ - ····row["detail"],
+        106 │ + ····row.detail,
+    107 107 │       row["message"],
+    108 108 │       row["error"],
+  
+
+src/api/errors.ts:107:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    105 │     row["resultCode"],
+    106 │     row["detail"],
+  > 107 │     row["message"],
+        │         ^^^^^^^^^
+    108 │     row["error"],
+    109 │     row["errorMessage"],
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    105 105 │       row["resultCode"],
+    106 106 │       row["detail"],
+    107     │ - ····row["message"],
+        107 │ + ····row.message,
+    108 108 │       row["error"],
+    109 109 │       row["errorMessage"],
+  
+
+src/api/errors.ts:108:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    106 │     row["detail"],
+    107 │     row["message"],
+  > 108 │     row["error"],
+        │         ^^^^^^^
+    109 │     row["errorMessage"],
+    110 │   ]
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    106 106 │       row["detail"],
+    107 107 │       row["message"],
+    108     │ - ····row["error"],
+        108 │ + ····row.error,
+    109 109 │       row["errorMessage"],
+    110 110 │     ]
+  
+
+src/api/errors.ts:109:9 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    107 │     row["message"],
+    108 │     row["error"],
+  > 109 │     row["errorMessage"],
+        │         ^^^^^^^^^^^^^^
+    110 │   ]
+    111 │   for (const value of fields) {
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    107 107 │       row["message"],
+    108 108 │       row["error"],
+    109     │ - ····row["errorMessage"],
+        109 │ + ····row.errorMessage,
+    110 110 │     ]
+    111 111 │     for (const value of fields) {
+  
+
+src/api/securityBoundary.test.ts:11:11 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    10 │ const key = {
+  > 11 │   apiKey: "sx_" + "a".repeat(32),
+       │           ^^^^^^^^^^^^^^^^^^^^^^
+    12 │   label: "Synthetic read key",
+    13 │   permissions: "READ",
+  
+  i Unsafe fix: Use a template literal.
+  
+     9  9 │   
+    10 10 │   const key = {
+    11    │ - ··apiKey:·"sx_"·+·"a".repeat(32),
+       11 │ + ··apiKey:·`sx_${"a".repeat(32)}`,
+    12 12 │     label: "Synthetic read key",
+    13 13 │     permissions: "READ",
+  
+
+src/api/tradingCommand.ts:20:25 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    18 │   if (
+    19 │     receipt.success &&
+  > 20 │     typeof receipt.data["commandId"] === "string" &&
+       │                         ^^^^^^^^^^^
+    21 │     typeof receipt.data["code"] === "string" &&
+    22 │     (receipt.data["outcome"] === "NOT_ACCEPTED" ||
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    18 18 │     if (
+    19 19 │       receipt.success &&
+    20    │ - ····typeof·receipt.data["commandId"]·===·"string"·&&
+       20 │ + ····typeof·receipt.data.commandId·===·"string"·&&
+    21 21 │       typeof receipt.data["code"] === "string" &&
+    22 22 │       (receipt.data["outcome"] === "NOT_ACCEPTED" ||
+  
+
+src/api/tradingCommand.ts:21:25 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    19 │     receipt.success &&
+    20 │     typeof receipt.data["commandId"] === "string" &&
+  > 21 │     typeof receipt.data["code"] === "string" &&
+       │                         ^^^^^^
+    22 │     (receipt.data["outcome"] === "NOT_ACCEPTED" ||
+    23 │       (receipt.data["outcome"] === "TERMINAL" && receipt.data["code"] !== "NONE"))
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    19 19 │       receipt.success &&
+    20 20 │       typeof receipt.data["commandId"] === "string" &&
+    21    │ - ····typeof·receipt.data["code"]·===·"string"·&&
+       21 │ + ····typeof·receipt.data.code·===·"string"·&&
+    22 22 │       (receipt.data["outcome"] === "NOT_ACCEPTED" ||
+    23 23 │         (receipt.data["outcome"] === "TERMINAL" && receipt.data["code"] !== "NONE"))
+  
+
+src/api/tradingCommand.ts:22:19 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    20 │     typeof receipt.data["commandId"] === "string" &&
+    21 │     typeof receipt.data["code"] === "string" &&
+  > 22 │     (receipt.data["outcome"] === "NOT_ACCEPTED" ||
+       │                   ^^^^^^^^^
+    23 │       (receipt.data["outcome"] === "TERMINAL" && receipt.data["code"] !== "NONE"))
+    24 │   )
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    20 20 │       typeof receipt.data["commandId"] === "string" &&
+    21 21 │       typeof receipt.data["code"] === "string" &&
+    22    │ - ····(receipt.data["outcome"]·===·"NOT_ACCEPTED"·||
+       22 │ + ····(receipt.data.outcome·===·"NOT_ACCEPTED"·||
+    23 23 │         (receipt.data["outcome"] === "TERMINAL" && receipt.data["code"] !== "NONE"))
+    24 24 │     )
+  
+
+src/api/tradingCommand.ts:23:21 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    21 │     typeof receipt.data["code"] === "string" &&
+    22 │     (receipt.data["outcome"] === "NOT_ACCEPTED" ||
+  > 23 │       (receipt.data["outcome"] === "TERMINAL" && receipt.data["code"] !== "NONE"))
+       │                     ^^^^^^^^^
+    24 │   )
+    25 │     return true
+  
+  i Unsafe fix: Use a literal key instead.
+  
+    21 21 │       typeof receipt.data["code"] === "string" &&
+    22 22 │       (receipt.data["outcome"] === "NOT_ACCEPTED" ||
+    23    │ - ······(receipt.data["outcome"]·===·"TERMINAL"·&&·receipt.data["code"]·!==·"NONE"))
+       23 │ + ······(receipt.data.outcome·===·"TERMINAL"·&&·receipt.data["code"]·!==·"NONE"))
+    24 24 │     )
+    25 25 │       return true
+  
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 769.
+Checked 215 files in 694ms. No fixes applied.
+Found 90 errors.
+Found 699 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+  
+

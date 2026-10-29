@@ -1,0 +1,52 @@
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/Users/atomex/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP): file_picker, screen_protector, share_plus
+Future versions of Flutter will fail to build if your app uses plugins that apply KGP.
+
+Please check the changelogs of these plugins and upgrade to a version that supports Built-in Kotlin.
+If no such version exists, report the issue to the plugin. If necessary, here is a guide on filing 
+an issue against a plugin: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers#report-incompatible-kotlin-gradle-plugin-usage-to-plugin-authors
+
+If you are a plugin author, please migrate your plugin to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app_links:compileDebugJavaWithJavac'.
+> Could not resolve all files for configuration ':app_links:androidJdkImage'.
+   > Failed to transform core-for-system-modules.jar to match attributes {artifactType=_internal_android_jdk_image, org.gradle.libraryelements=jar, org.gradle.usage=java-runtime}.
+      > Execution failed for JdkImageTransform: /Users/atomex/Library/Android/sdk/platforms/android-36/core-for-system-modules.jar.
+         > Error while executing process /Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/jlink with arguments {--module-path /Users/atomex/.gradle/caches/9.1.0/transforms/b15c5f1062f0c3dc2614ae8833fdc434-214becf0-2225-4f18-a434-7857d8c23db0/transformed/output/temp/jmod --add-modules java.base --output /Users/atomex/.gradle/caches/9.1.0/transforms/b15c5f1062f0c3dc2614ae8833fdc434-214becf0-2225-4f18-a434-7857d8c23db0/transformed/output/jdkImage --disable-plugin system-modules}
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to generate a Build Scan (Powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1m 26s
+Running Gradle task 'assembleDebug'...                             87.5s
+
+┌─ Flutter Fix ────────────────────────────────────────────────────────────────────────────────────┐
+│ [!] This is likely due to a known bug in Android Gradle Plugin (AGP) versions less than 8.2.1,   │
+│ when                                                                                             │
+│   1. setting a value for SourceCompatibility and                                                 │
+│   2. using Java 21 or above.                                                                     │
+│ To fix this error, please upgrade your AGP version to at least 8.2.1. The version of AGP that    │
+│ your project uses is likely defined in:                                                          │
+│ /Users/atomex/Desktop/surprising/surprising-client/android/settings.gradle.kts,                  │
+│ in the 'plugins' closure (by the number following "com.android.application").                    │
+│  Alternatively, if your project was created with an older version of the templates, it is likely │
+│ in the buildscript.dependencies closure of the top-level build.gradle:                           │
+│ /Users/atomex/Desktop/surprising/surprising-client/android/build.gradle.kts,                     │
+│ as the number following "com.android.tools.build:gradle:".                                       │
+│                                                                                                  │
+│ For more information, see:                                                                       │
+│ https://issuetracker.google.com/issues/294137077                                                 │
+│ https://github.com/flutter/flutter/issues/156304                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+Gradle task assembleDebug failed with exit code 1

@@ -1,0 +1,205 @@
+Running Gradle task 'assembleDebug'...                          
+WARNING: Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP): file_picker, screen_protector, share_plus
+Future versions of Flutter will fail to build if your app uses plugins that apply KGP.
+
+Please check the changelogs of these plugins and upgrade to a version that supports Built-in Kotlin.
+If no such version exists, report the issue to the plugin. If necessary, here is a guide on filing 
+an issue against a plugin: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers#report-incompatible-kotlin-gradle-plugin-usage-to-plugin-authors
+
+If you are a plugin author, please migrate your plugin to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors
+Running Gradle task 'assembleDebug'...                             15.7s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...        1,741ms
+I/flutter ( 8320): 00:00 +0: native navigation and six distinct themes, large text and repeated transitions
+I/Choreographer( 8320): Skipped 329 frames!  The application may be doing too much work on its main thread.
+I/WindowExtensionsImpl( 8320): Initializing Window Extensions, vendor API level=9, activity embedding enabled=true
+D/FlutterRenderer( 8320): Width is zero. 0,0
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+VMServiceFlutterDriver: Connecting to Flutter application at http://127.0.0.1:57401/yxzZ6PCNKg0=/
+I/rprising_client( 8320): Compiler allocated 5042KB to compile void android.view.ViewRootImpl.performTraversals()
+VMServiceFlutterDriver: Isolate found with number: 5239458497106123
+D/ProfileInstaller( 8320): Installing profile for com.surprising.surprising_client
+VMServiceFlutterDriver: Isolate 5239458497106123 is runnable.
+VMServiceFlutterDriver: Isolate is not paused. Assuming application is ready.
+I/rprising_client( 8320): AssetManager2(0x7925850a0ed8) locale list changing from [] to [en-US]
+VMServiceFlutterDriver: Connected to Flutter application.
+I/Choreographer( 8320): Skipped 174 frames!  The application may be doing too much work on its main thread.
+D/WindowLayoutComponentImpl( 8320): Register WindowLayoutInfoListener on Context=com.surprising.surprising_client.MainActivity@defe835, of which baseContext=android.app.ContextImpl@d9c5700
+I/Choreographer( 8320): Skipped 78 frames!  The application may be doing too much work on its main thread.
+I/HWUI    ( 8320): Davey! duration=1405ms; Flags=1, FrameTimelineVsyncId=109962, IntendedVsync=2189184056662, Vsync=2190484056610, InputEventId=0, HandleInputStart=2190487034364, AnimationStart=2190487035449, PerformTraversalsStart=2190487036047, DrawStart=2190493784658, FrameDeadline=2189200723328, FrameStartTime=2190485646773, FrameInterval=16666666, WorkloadTarget=16666666, SyncQueued=2190498401972, SyncStart=2190500670260, IssueDrawCommandsStart=2190505184557, SwapBuffers=2190534474108, FrameCompleted=2190592213317, DequeueBufferDuration=38141470, QueueBufferDuration=560097, GpuCompleted=2190588476271, SwapBuffersCompleted=2190592213317, DisplayPresentTime=0, CommandSubmissionCompleted=2190534474108, 
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/InsetsController( 8320): hide(ime(), fromIme=false)
+I/ImeTracker( 8320): com.surprising.surprising_client:7b2c0b9e: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+VMServiceFlutterDriver: request_data message is taking a long time to complete...
+I/flutter ( 8320): NATIVE_CAPTURE_READY:theme-dark:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-theme-dark.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:theme-light:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-theme-light.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:theme-ocean:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-theme-ocean.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:theme-forest:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-theme-forest.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:theme-dusk:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-theme-dusk.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:theme-sand:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-theme-sand.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:large-text-picker:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-large-text-picker.ack
+W/WindowOnBackDispatcher( 8320): sendCancelIfRunning: isInProgress=false callback=androidx.activity.OnBackPressedDispatcher$Api34Impl$createOnBackAnimationCallback$1@5770656
+I/flutter ( 8320): NATIVE_CAPTURE_READY:home-glass-navigation:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-home-glass-navigation.ack
+I/rprising_client( 8320): AssetManager2(0x7925850eac18) locale list changing from [] to [en-US]
+I/ImeTracker( 8320): com.surprising.surprising_client:733792d7: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+D/InsetsController( 8320): show(ime(), fromIme=false)
+D/InsetsController( 8320): Setting requestedVisibleTypes to -1 (was -9)
+I/ImeTracker( 8320): com.surprising.surprising_client:9746af19: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+D/InsetsController( 8320): show(ime(), fromIme=false)
+I/ImeTracker( 8320): com.surprising.surprising_client:9746af19: onCancelled at PHASE_CLIENT_REPORT_REQUESTED_VISIBLE_TYPES
+I/flutter ( 8320): NATIVE_CAPTURE_READY:trade-keyboard:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-trade-keyboard.ack
+I/AssistStructure( 8320): Flattened final assist data: 448 bytes, containing 1 windows, 3 views
+D/InputConnectionAdaptor( 8320): The input method toggled cursor monitoring on
+W/InteractionJankMonitor( 8320): Initializing without READ_DEVICE_CONFIG permission. enabled=true, interval=1, missedFrameThreshold=3, frameTimeThreshold=64, package=com.surprising.surprising_client
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+I/ImeTracker( 8320): com.surprising.surprising_client:733792d7: onShown
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+I/ImeTracker( 8320): com.surprising.surprising_client:9000444f: onRequestHide at ORIGIN_CLIENT reason HIDE_SOFT_INPUT fromUser false
+D/InsetsController( 8320): hide(ime(), fromIme=false)
+W/WindowOnBackDispatcher( 8320): sendCancelIfRunning: isInProgress=false callback=android.view.ImeBackAnimationController@c68aa62
+D/InsetsController( 8320): Setting requestedVisibleTypes to -9 (was -1)
+D/CompatChangeReporter( 8320): Compat change id reported: 395521150; UID 10220; state: ENABLED
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+I/Choreographer( 8320): Skipped 39 frames!  The application may be doing too much work on its main thread.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+W/FrameTracker( 8320): Missed SF frame:JANK_COMPOSER, 113408, 343381565, CUJ=J<IME_INSETS_SHOW_ANIMATION::0@1@com.surprising.surprising_client>
+W/FrameTracker( 8320): Missed SF frame:JANK_COMPOSER, 113481, 248789970, CUJ=J<IME_INSETS_SHOW_ANIMATION::0@1@com.surprising.surprising_client>
+W/FrameTracker( 8320): Missed App frame:UNKNOWN: 3, 113503, 360752123, CUJ=J<IME_INSETS_SHOW_ANIMATION::0@1@com.surprising.surprising_client>
+W/FrameTracker( 8320): Missed SF frame:UNKNOWN: 3, 113503, 360752123, CUJ=J<IME_INSETS_SHOW_ANIMATION::0@1@com.surprising.surprising_client>
+W/FrameTracker( 8320): Missed App frame:UNKNOWN: 3, 113584, 456524412, CUJ=J<IME_INSETS_SHOW_ANIMATION::0@1@com.surprising.surprising_client>
+W/FrameTracker( 8320): Missed SF frame:UNKNOWN: 3, 113584, 456524412, CUJ=J<IME_INSETS_SHOW_ANIMATION::0@1@com.surprising.surprising_client>
+I/ImeTracker( 8320): system_server:491c0ee2: onCancelled at PHASE_CLIENT_ON_CONTROLS_CHANGED
+V/PerfettoTrigger( 8320): Triggering /system/bin/trigger_perfetto com.android.telemetry.interaction-jank-monitor-80
+I/HWUI    ( 8320): Davey! duration=906ms; Flags=0, FrameTimelineVsyncId=114563, IntendedVsync=2220634055404, Vsync=2221284055378, InputEventId=0, HandleInputStart=2221285631992, AnimationStart=2221285634146, PerformTraversalsStart=2221302535523, DrawStart=2221302592453, FrameDeadline=2220867388728, FrameStartTime=2221284497981, FrameInterval=16666666, WorkloadTarget=16666666, SyncQueued=2221302650084, SyncStart=2221304743492, IssueDrawCommandsStart=2221304810557, SwapBuffers=2221369354607, FrameCompleted=2221542206068, DequeueBufferDuration=3606, QueueBufferDuration=609540, GpuCompleted=2221542206068, SwapBuffersCompleted=2221451749170, DisplayPresentTime=0, CommandSubmissionCompleted=2221369354607, 
+W/FrameTracker( 8320): Missed SF frame:JANK_COMPOSER, 114488, 6999381, CUJ=J<IME_INSETS_HIDE_ANIMATION::1@1@com.surprising.surprising_client>
+W/FrameTracker( 8320): Missed App frame:UNKNOWN: 3, 114510, 187979069, CUJ=J<IME_INSETS_HIDE_ANIMATION::1@1@com.surprising.surprising_client>
+W/FrameTracker( 8320): Missed SF frame:UNKNOWN: 3, 114510, 187979069, CUJ=J<IME_INSETS_HIDE_ANIMATION::1@1@com.surprising.surprising_client>
+W/FrameTracker( 8320): Missed SF frame:JANK_COMPOSER, 114533, 381381289, CUJ=J<IME_INSETS_HIDE_ANIMATION::1@1@com.surprising.surprising_client>
+I/flutter ( 8320): NATIVE_CAPTURE_READY:trade-layout:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-trade-layout.ack
+V/PerfettoTrigger( 8320): Triggering /system/bin/trigger_perfetto com.android.telemetry.interaction-jank-monitor-81
+I/flutter ( 8320): NATIVE_POSTURE_READY:folded:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-folded.ack
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/VRI[MainActivity]( 8320): visibilityChanged oldVisibility=true newVisibility=false
+I/AutofillManager( 8320): onInvisibleForAutofill(): expiringResponse
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/com.llfbandit.app_links( 8320): Intent { flg=0x30000000 xflg=0x5 cmp=com.surprising.surprising_client/.MainActivity }
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+I/AutofillManager( 8320): onInvisibleForAutofill(): expiringResponse
+E/SurfaceSyncGroup( 8320): Failed to receive transaction ready in 1000ms. Marking SurfaceSyncGroup(wmsSync-VRI[MainActivity]#4) as ready
+E/SurfaceSyncGroup( 8320): Failed to receive transaction ready in 1000ms. Marking SurfaceSyncGroup(VRI[MainActivity]#5) as ready
+E/SurfaceSyncGroup( 8320): Failed to receive transaction ready in 1000ms. Marking SurfaceSyncGroup(SurfaceView[com.surprising.surprising_client/com.surprising.surprising_client.MainActivity]#3) as ready
+I/rprising_client( 8320): AssetManager2(0x79258509b758) locale list changing from [] to [en-US]
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+I/Choreographer( 8320): Skipped 32 frames!  The application may be doing too much work on its main thread.
+E/SurfaceSyncGroup( 8320): Failed to receive transaction ready in 1000ms. Marking SurfaceSyncGroup(wmsSync-VRI[MainActivity]#7) as ready
+E/SurfaceSyncGroup( 8320): Failed to receive transaction ready in 1000ms. Marking SurfaceSyncGroup(VRI[MainActivity]#8) as ready
+E/SurfaceSyncGroup( 8320): Failed to receive transaction ready in 1000ms. Marking SurfaceSyncGroup(SurfaceView[com.surprising.surprising_client/com.surprising.surprising_client.MainActivity]#6) as ready
+D/InsetsController( 8320): hide(ime(), fromIme=false)
+I/ImeTracker( 8320): com.surprising.surprising_client:434480b6: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+I/flutter ( 8320): NATIVE_WINDOW:folded:Size(411.4, 797.0):[DisplayFeature(rect: Rect.fromLTRB(182.9, 0.0, 224.8, 41.9), type: DisplayFeatureType.cutout, state: DisplayFeatureState.unknown)]
+I/flutter ( 8320): NATIVE_CAPTURE_READY:trade-folded:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-trade-folded.ack
+I/flutter ( 8320): NATIVE_POSTURE_READY:unfolded:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-unfolded.ack
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/com.llfbandit.app_links( 8320): Intent { flg=0x30000000 xflg=0x5 cmp=com.surprising.surprising_client/.MainActivity }
+I/flutter ( 8320): NATIVE_WINDOW:unfolded:Size(841.1, 701.0):[DisplayFeature(rect: Rect.fromLTRB(420.6, 0.0, 420.6, 701.0), type: DisplayFeatureType.fold, state: DisplayFeatureState.postureFlat)]
+I/flutter ( 8320): NATIVE_CAPTURE_READY:trade-unfolded:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-trade-unfolded.ack
+I/flutter ( 8320): NATIVE_POSTURE_READY:half-opened:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-half-opened.ack
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/com.llfbandit.app_links( 8320): Intent { flg=0x30000000 xflg=0x5 cmp=com.surprising.surprising_client/.MainActivity }
+I/rprising_client( 8320): AssetManager2(0x7925850ff438) locale list changing from [] to [en-US]
+I/WebViewFactory( 8320): Loading com.google.android.webview version 133.0.6943.137 (code 694313738)
+I/rprising_client( 8320): AssetManager2(0x7925851035d8) locale list changing from [] to [en-US]
+I/rprising_client( 8320): AssetManager2(0x792585105838) locale list changing from [] to [en-US]
+I/rprising_client( 8320): AssetManager2(0x79258508bd58) locale list changing from [] to [en-US]
+I/rprising_client( 8320): AssetManager2(0x79258510a018) locale list changing from [] to [en-US]
+V/ResourcesManager( 8320): The following library key has been added: ResourcesKey{ mHash=3f5ad2eb mResDir=null mSplitDirs=[] mOverlayDirs=[] mLibDirs=[/data/app/~~VlisjFC1mVSI_v-mXMkXug==/com.google.android.webview-yNfeNKu_8D740uOOBrc8_g==/WebViewGoogle.apk,/data/app/~~qgKwTOFy5nXwe-62U1BYig==/com.google.android.trichromelibrary_694313738-R9IT3dp1MR3R2gB2CXQcRg==/TrichromeLibrary.apk] mDisplayId=0 mOverrideConfig=v36 mCompatInfo={420dpi always-compat} mLoaders=[]}
+W/rprising_client( 8320): Failed to find entry 'classes.dex': Entry not found
+D/nativeloader( 8320): Configuring clns-10 for other apk /data/app/~~qgKwTOFy5nXwe-62U1BYig==/com.google.android.trichromelibrary_694313738-R9IT3dp1MR3R2gB2CXQcRg==/TrichromeLibrary.apk. target_sdk_version=34, uses_libraries=ALL, library_path=/data/app/~~VlisjFC1mVSI_v-mXMkXug==/com.google.android.webview-yNfeNKu_8D740uOOBrc8_g==/lib/x86_64:/data/app/~~VlisjFC1mVSI_v-mXMkXug==/com.google.android.webview-yNfeNKu_8D740uOOBrc8_g==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~qgKwTOFy5nXwe-62U1BYig==/com.google.android.trichromelibrary_694313738-R9IT3dp1MR3R2gB2CXQcRg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+D/ApplicationLoaders( 8320): Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+D/nativeloader( 8320): Configuring clns-11 for other apk /data/app/~~VlisjFC1mVSI_v-mXMkXug==/com.google.android.webview-yNfeNKu_8D740uOOBrc8_g==/WebViewGoogle.apk. target_sdk_version=34, uses_libraries=, library_path=/data/app/~~VlisjFC1mVSI_v-mXMkXug==/com.google.android.webview-yNfeNKu_8D740uOOBrc8_g==/lib/x86_64:/data/app/~~VlisjFC1mVSI_v-mXMkXug==/com.google.android.webview-yNfeNKu_8D740uOOBrc8_g==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~qgKwTOFy5nXwe-62U1BYig==/com.google.android.trichromelibrary_694313738-R9IT3dp1MR3R2gB2CXQcRg==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand
+I/cr_WVCFactoryProvider( 8320): version=133.0.6943.137 (694313738) minSdkVersion=29 isBundle=false multiprocess=true packageId=2
+D/nativeloader( 8320): Load /data/app/~~qgKwTOFy5nXwe-62U1BYig==/com.google.android.trichromelibrary_694313738-R9IT3dp1MR3R2gB2CXQcRg==/TrichromeLibrary.apk!/lib/x86_64/libmonochrome_64.so using class loader ns clns-11 (caller=/data/app/~~VlisjFC1mVSI_v-mXMkXug==/com.google.android.webview-yNfeNKu_8D740uOOBrc8_g==/WebViewGoogle.apk): ok
+D/nativeloader( 8320): Load /system/lib64/libwebviewchromium_plat_support.so using class loader ns clns-11 (caller=/data/app/~~VlisjFC1mVSI_v-mXMkXug==/com.google.android.webview-yNfeNKu_8D740uOOBrc8_g==/WebViewGoogle.apk): ok
+I/chromium( 8320): [1029/235733.318926:INFO:variations_seed_loader.cc(67)] Failed to open file for reading.: No such file or directory (2)
+I/cr_VariationsUtils( 8320): Failed reading seed file "/data/user/0/com.surprising.surprising_client/app_webview/variations_seed_new"
+I/chromium( 8320): [1029/235733.322323:INFO:variations_seed_loader.cc(67)] Failed to open file for reading.: No such file or directory (2)
+I/cr_VariationsUtils( 8320): Failed reading seed file "/data/user/0/com.surprising.surprising_client/app_webview/variations_seed"
+I/cr_VariationsUtils( 8320): Requesting new seed from IVariationsSeedServer
+I/cr_LibraryLoader( 8320): Successfully loaded native library
+I/cr_CachingUmaRecorder( 8320): Flushed 6 samples from 6 histograms, 0 samples were dropped.
+I/cr_CombinedPProvider( 8320): #registerProvider() provider:WV.C8@d3d2bdb isPolicyCacheEnabled:false policyProvidersSize:0
+I/cr_PolicyProvider( 8320): #setManagerAndSource() 0
+I/cr_CombinedPProvider( 8320): #linkNativeInternal() 1
+I/cr_AppResProvider( 8320): #getApplicationRestrictionsFromUserManager() Bundle[EMPTY_PARCEL]
+I/cr_PolicyProvider( 8320): #notifySettingsAvailable() 0
+I/cr_CombinedPProvider( 8320): #onSettingsAvailable() 0
+I/cr_CombinedPProvider( 8320): #flushPolicies()
+I/rprising_client( 8320): AssetManager2(0x7925850bd718) locale list changing from [] to [en-US]
+I/rprising_client( 8320): AssetManager2(0x7925850b1eb8) locale list changing from [] to [en-US]
+I/CameraManagerGlobal( 8320): Connecting to camera service
+I/rprising_client( 8320): Background concurrent mark compact GC freed 2519KB AllocSpace bytes, 6(244KB) LOS objects, 49% free, 4030KB/8061KB, paused 1.506ms,8.748ms total 74.760ms
+W/HWUI    ( 8320): Image decoding logging dropped!
+W/HWUI    ( 8320): Image decoding logging dropped!
+W/cr_media( 8320): BLUETOOTH_CONNECT permission is missing.
+W/cr_media( 8320): getBluetoothAdapter() requires BLUETOOTH permission
+W/cr_media( 8320): registerBluetoothIntentsIfNeeded: Requires BLUETOOTH permission
+W/libc    ( 8320): Access denied finding property "vendor.mesa.log"
+W/libc    ( 8320): Access denied finding property "vendor.mesa.log.file"
+E/MESA    ( 8320): Failed to open rendernode: No such file or directory
+D/vulkan  ( 8320): searching for layers in '/data/app/~~juMjk6yNJGZ_wZMti_W3qw==/com.surprising.surprising_client-cToL0DI8IlLl_hqwZl1q1g==/lib/x86_64'
+D/vulkan  ( 8320): searching for layers in '/data/app/~~juMjk6yNJGZ_wZMti_W3qw==/com.surprising.surprising_client-cToL0DI8IlLl_hqwZl1q1g==/base.apk!/lib/x86_64'
+W/libc    ( 8320): Access denied finding property "vendor.mesa.vk.trace.per.submit"
+W/libc    ( 8320): Access denied finding property "vendor.mesa.gallium.print.optio"
+W/libc    ( 8320): Access denied finding property "vendor.mesa.vk.trace.frame"
+W/libc    ( 8320): Access denied finding property "vendor.mesa.vk.wsi.headless.swa"
+I/PlatformViewsChannel( 8320): Using legacy platform view rendering strategy.
+I/PlatformViewsController( 8320): Hosting view in view hierarchy for platform view: 0
+I/PlatformViewsController( 8320): PlatformView is using SurfaceProducer backend
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+W/chromium( 8320): [WARNING:viz_main_impl.cc(85)] VizNullHypothesis is disabled (not a warning)
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+I/rprising_client( 8320): Background concurrent mark compact GC freed 1355KB AllocSpace bytes, 8(2428KB) LOS objects, 49% free, 4270KB/8541KB, paused 182us,3.048ms total 180.979ms
+I/flutter ( 8320): NATIVE_WINDOW:half-opened:Size(841.1, 701.0):[DisplayFeature(rect: Rect.fromLTRB(420.6, 0.0, 420.6, 701.0), type: DisplayFeatureType.fold, state: DisplayFeatureState.postureHalfOpened)]
+I/flutter ( 8320): NATIVE_CAPTURE_READY:trade-half-opened:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-trade-half-opened.ack
+I/Choreographer( 8320): Skipped 44 frames!  The application may be doing too much work on its main thread.
+I/HWUI    ( 8320): Davey! duration=921ms; Flags=0, FrameTimelineVsyncId=122159, IntendedVsync=2242434054532, Vsync=2243167387836, InputEventId=0, HandleInputStart=2243176727522, AnimationStart=2243176729370, PerformTraversalsStart=2243181477431, DrawStart=2243181588420, FrameDeadline=2243100721172, FrameStartTime=2243175182870, FrameInterval=16666666, WorkloadTarget=16666666, SyncQueued=2243333162369, SyncStart=2243427338198, IssueDrawCommandsStart=2243427375820, SwapBuffers=2243428146768, FrameCompleted=2243449579500, DequeueBufferDuration=5564, QueueBufferDuration=740813, GpuCompleted=2243449579500, SwapBuffersCompleted=2243433976395, DisplayPresentTime=0, CommandSubmissionCompleted=2243428146768, 
+I/flutter ( 8320): NATIVE_POSTURE_READY:unfolded:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-unfolded.ack
+D/FlutterJNI( 8320): Sending viewport metrics to the engine.
+D/com.llfbandit.app_links( 8320): Intent { flg=0x30000000 xflg=0x5 cmp=com.surprising.surprising_client/.MainActivity }
+I/flutter ( 8320): NATIVE_WINDOW:unfolded:Size(841.1, 701.0):[DisplayFeature(rect: Rect.fromLTRB(420.6, 0.0, 420.6, 701.0), type: DisplayFeatureType.fold, state: DisplayFeatureState.postureFlat)]
+I/flutter ( 8320): NATIVE_CAPTURE_READY:trade-unfolded:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-trade-unfolded.ack
+E/chromium( 8320): [ERROR:aw_browser_terminator.cc(165)] Renderer process (9008) crash detected (code -1).
+I/rprising_client( 8320): AssetManager2(0x7925850be9d8) locale list changing from [] to [en-US]
+I/flutter ( 8320): NATIVE_CAPTURE_READY:after-navigation-cycles:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-after-navigation-cycles.ack
+I/flutter ( 8320): 01:28 +1: real HTTP KYC upload, rejection, correction, approval and expiry renewal
+I/rprising_client( 8320): Explicit concurrent mark compact GC freed 1484KB AllocSpace bytes, 0(0B) LOS objects, 49% free, 4122KB/8245KB, paused 127us,2.503ms total 36.932ms
+I/rprising_client( 8320): AssetManager2(0x7925850f2c38) locale list changing from [] to [en-US]
+I/flutter ( 8320): KYC_IDENTITY:true:42:ClientLanguage.zhHans
+I/flutter ( 8320): NATIVE_CAPTURE_READY:kyc-profile-entry:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-kyc-profile-entry.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:kyc-entry:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-kyc-entry.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:kyc-pending:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-kyc-pending.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:kyc-rejected:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-kyc-rejected.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:kyc-verified:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-kyc-verified.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:kyc-expired:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-kyc-expired.ack
+I/flutter ( 8320): NATIVE_CAPTURE_READY:kyc-renewed:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-kyc-renewed.ack
+I/rprising_client( 8320): Explicit concurrent mark compact GC freed 1378KB AllocSpace bytes, 1(20KB) LOS objects, 49% free, 4122KB/8245KB, paused 123us,3.168ms total 29.803ms
+I/flutter ( 8320): NATIVE_CAPTURE_READY:kyc-polling-after60s:/data/user/0/com.surprising.surprising_client/code_cache/kyc-adaptive-kyc-polling-after60s.ack
+I/flutter ( 8320): 03:11 +2: (tearDownAll)
+I/flutter ( 8320): 03:11 +3: All tests passed!
+All tests passed.
+I/rprising_client( 8320): Explicit concurrent mark compact GC freed 232KB AllocSpace bytes, 1(20KB) LOS objects, 49% free, 4122KB/8245KB, paused 133us,2.621ms total 26.173ms
