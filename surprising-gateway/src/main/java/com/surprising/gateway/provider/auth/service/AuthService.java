@@ -136,6 +136,16 @@ public class AuthService {
     /** Called only after a server-validated Telegram identity has been consumed. */
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
     public AuthModels.LoginResult loginTelegram(long userId, AuthClientMetadata request) {
+        return loginIdentity(userId, request, "TELEGRAM_LOGIN");
+    }
+
+    /** Called only after Google signature, audience and presentation have been verified. */
+    @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
+    public AuthModels.LoginResult loginGoogle(long userId, AuthClientMetadata request) {
+        return loginIdentity(userId, request, "GOOGLE_LOGIN");
+    }
+
+    private AuthModels.LoginResult loginIdentity(long userId, AuthClientMetadata request, String source) {
         Instant now = Instant.now();
         var user = repository.user(userId).orElseThrow();
         if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
@@ -143,7 +153,7 @@ public class AuthService {
         var credential = repository.credential(userId).orElseThrow();
         var challenge = loginVerification.begin(userId, credential.passwordHash(), now);
         if (challenge != null) return challenge;
-        repository.loginLog(userId, "SUCCESS", "TELEGRAM_LOGIN", userAgent(request), ipAddress(request), now);
+        repository.loginLog(userId, "SUCCESS", source, userAgent(request), ipAddress(request), now);
         return authResponse(user, request, now);
     }
 

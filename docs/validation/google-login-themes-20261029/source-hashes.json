@@ -1,0 +1,347 @@
+[
+  {
+    "repo": "backend",
+    "path": "README.md",
+    "sha256": "9fa066113ee84ed0973360d262ed90e90b5e45d635db6ba66eb779605791676f"
+  },
+  {
+    "repo": "backend",
+    "path": "deployment/migrations/20261029-google-login.sql",
+    "sha256": "61ac84d3c922953fdd2802ef643423aab1e770340a74e1157e28bd6c802d6a9a"
+  },
+  {
+    "repo": "backend",
+    "path": "docs/google-login.md",
+    "sha256": "792e8856499c55cfab10bac53c024d11f0e21907cd33440775afb6866433b446"
+  },
+  {
+    "repo": "backend",
+    "path": "init.sql",
+    "sha256": "97ff03924f90c6d4582888b05444d43ae602f02c5b594e0662c7b8a4d9f00c83"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/client/GoogleIdentityClient.java",
+    "sha256": "f2d898a98329e5248e62329bc1d06f33cb2ca06cc2585c633d24b8986ef8f7b4"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/controller/GoogleLoginController.java",
+    "sha256": "fee273c65f243c41ba0cd988ebe4495a3997f41a7862f7876e90f0cc7a99d355"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GoogleLoginRepository.java",
+    "sha256": "b2ce9592cd96ed95747164b7b755517345fb9a6006429310b810a93fac1a682b"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthService.java",
+    "sha256": "27808dd93239afc6cf3fa806ab4b64b592a63f584288a4ebed01eff3f9034e27"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/GoogleLoginService.java",
+    "sha256": "f7400d918acefef33785c8670336903680f1f5476c9b139af20f882c1147d556"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/config/GoogleLoginProperties.java",
+    "sha256": "3b295a75ca7c21afcc64b797ca2afa5e9449d4c3eaecd00cc8f10d044c334a71"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/main/resources/application.yml",
+    "sha256": "1b33793260ee8aae79743491681c2d0b5812819a650cb4ad54ea612b4c48bdea"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/GoogleAuthGateTest.java",
+    "sha256": "9c5231d96e83c0a110879e80417ceea0bf0a38532b9031f109f96f6bfe949784"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/GoogleIdentityClientTest.java",
+    "sha256": "bc69237d9fec6b11501511bf36f7b97bc3e6a83aa45280725f50c721a87e0ce9"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/GoogleLoginDatabaseTest.java",
+    "sha256": "66651dc55d89d577a43664260d636d88787c5eadcce11d9394320de3be3f17af"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/GoogleLoginHttpTest.java",
+    "sha256": "abe8abda41116d32723480be2199b88afe2fde2b5f762f1d3292d3234ba658c5"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/GoogleLoginServiceTest.java",
+    "sha256": "ade38dac98dd57734c85c968772956ccc9a1ad7b2de3a63aef4872e9a0dbec4e"
+  },
+  {
+    "repo": "backend",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/client/GoogleIdentityFailureTest.java",
+    "sha256": "439681d53a5f60982ffb74c664a4796acf16deb313921b51b9c12adf9d11422c"
+  },
+  {
+    "repo": "web",
+    "path": "README.md",
+    "sha256": "36c906f820d9d5872acfbca94d5d94836b15fba2d9f557c5683c201c6196f79d"
+  },
+  {
+    "repo": "web",
+    "path": "scripts/google-themes-browser.mjs",
+    "sha256": "f0f2786216268a3b14cbffcf4503255df54f754537ad2dab2b5160487b882eeb"
+  },
+  {
+    "repo": "web",
+    "path": "src/api/client.test.ts",
+    "sha256": "7d329bf5b5409088c9fd4c3fc826390c74f4c967c9ca7ec1936384682dd5f595"
+  },
+  {
+    "repo": "web",
+    "path": "src/api/client.ts",
+    "sha256": "f664689a5500a1da655e1e7e937136c20cd781d2cd137108c034ce5349752072"
+  },
+  {
+    "repo": "web",
+    "path": "src/api/google.ts",
+    "sha256": "23ba4de438afc9b993de635c939e79056fcdced4811c205d10b8d22ae5df0359"
+  },
+  {
+    "repo": "web",
+    "path": "src/components/layout/AppShell.tsx",
+    "sha256": "b41c2ff87c5084cd64908fe5306b97473d37333d2dff13fd37ac4a8dcf5e71d1"
+  },
+  {
+    "repo": "web",
+    "path": "src/components/layout/ThemePicker.css",
+    "sha256": "90581aa2492c47506c066469f4fc8c96cf7a74c3f7ed25cc6bf38e5967edbb67"
+  },
+  {
+    "repo": "web",
+    "path": "src/components/layout/ThemePicker.tsx",
+    "sha256": "515fe0c20e7a511328c8f8e4cacbf27a787f9b552ea94d26ab12108b34c58799"
+  },
+  {
+    "repo": "web",
+    "path": "src/components/layout/TopNav.tsx",
+    "sha256": "0291fc291a4ca2e539f4e1542c58e7cf621351fafe9c138ef8e518e2e4cbaf80"
+  },
+  {
+    "repo": "web",
+    "path": "src/components/market/marketList.test.ts",
+    "sha256": "c0d4efc814f03d23f74450736eca352eff731fbcd203d09185f2ac4c279a0931"
+  },
+  {
+    "repo": "web",
+    "path": "src/features/auth/AuthPage.tsx",
+    "sha256": "3e91ed4917ae7de94b37a0895e2ffecd7eaa6457d4b55dbf9bfe642e0e78d107"
+  },
+  {
+    "repo": "web",
+    "path": "src/features/auth/GoogleLogin.css",
+    "sha256": "3958f88758d20c842b0176f4a37c0a3fdd8daee46fb47870cc023738bf80baef"
+  },
+  {
+    "repo": "web",
+    "path": "src/features/auth/GoogleLogin.tsx",
+    "sha256": "05d3c7deef277b3e15907e0a157ba453131519b5a99f154199127d01c59af128"
+  },
+  {
+    "repo": "web",
+    "path": "src/features/auth/googleIdentity.ts",
+    "sha256": "cf824e48752f8b851160f797889b022857e2f8aa630e7ab6ce515ead351a260e"
+  },
+  {
+    "repo": "web",
+    "path": "src/i18n/zh.json",
+    "sha256": "25aa69489a96b2aa61a47cbd2353b70d8ce99769f0c5576b78020dd5ec833322"
+  },
+  {
+    "repo": "web",
+    "path": "src/main.tsx",
+    "sha256": "02c1caf54d216b04180c1be6339e206a235e93f335f62fbb897a12b64633cfbf"
+  },
+  {
+    "repo": "web",
+    "path": "src/state/theme.ts",
+    "sha256": "c785b10ca26050863420096df21a1cb9ea86795eeec6f458ddcac7f2bfa1bc62"
+  },
+  {
+    "repo": "web",
+    "path": "src/styles/tokens.css",
+    "sha256": "19a635fff8fe69f36dee51777e0784a45270d16dfc5d66f7766343574214e5da"
+  },
+  {
+    "repo": "client",
+    "path": "README.md",
+    "sha256": "bc47534d34157f5c42f08cf3563f0cba2544c9e8112ae939dc3ba30fbd0429fd"
+  },
+  {
+    "repo": "client",
+    "path": "assets/branding/google-g.png",
+    "sha256": "d1ce9c2af0b10a7333abc99bc706f9a6a199e5b65bf3e3009624f076b8638e6a"
+  },
+  {
+    "repo": "client",
+    "path": "integration_test/google_themes_driver.dart",
+    "sha256": "727982a03e03bb5bde9a8835e8703e8e002e4eb34a90a275ab951bf6337a7e1b"
+  },
+  {
+    "repo": "client",
+    "path": "integration_test/google_themes_host.py",
+    "sha256": "2ab0767cfad546d7f65fb8970401491ec5643c45e25492c3fabdcb7455c5e0b9"
+  },
+  {
+    "repo": "client",
+    "path": "integration_test/google_themes_keyboard.yaml",
+    "sha256": "18d32562ba62f399729cc67c5ce889eb2bcb4927c214c905ba2ad6c5f924f671"
+  },
+  {
+    "repo": "client",
+    "path": "integration_test/google_themes_preview.dart",
+    "sha256": "e40a68b08a6dafaef247a68378e536fa63a4c6eac12a84cfc2746945556c2a6c"
+  },
+  {
+    "repo": "client",
+    "path": "integration_test/google_themes_test.dart",
+    "sha256": "f4cfc62a0490844e8b0a9876a8e602c88356cc50f22e6faf9f9afee8a157570d"
+  },
+  {
+    "repo": "client",
+    "path": "ios/Flutter/Debug.xcconfig",
+    "sha256": "5dd953e37a726c1c20c475aa7e781f71d3c14ad6646dc63c39fa70efb831080a"
+  },
+  {
+    "repo": "client",
+    "path": "ios/Flutter/GoogleSignIn.xcconfig",
+    "sha256": "5ec51b4523a0d1a2825a805efdca9adc9aa458509d4716d4eb1fa682695828a6"
+  },
+  {
+    "repo": "client",
+    "path": "ios/Flutter/Release.xcconfig",
+    "sha256": "5dd953e37a726c1c20c475aa7e781f71d3c14ad6646dc63c39fa70efb831080a"
+  },
+  {
+    "repo": "client",
+    "path": "ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+    "sha256": "5b8e1f5b03d0567d7c1850335346067b5a25464c510cf40f5bf416bbcfb30ce3"
+  },
+  {
+    "repo": "client",
+    "path": "ios/Runner.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+    "sha256": "5b8e1f5b03d0567d7c1850335346067b5a25464c510cf40f5bf416bbcfb30ce3"
+  },
+  {
+    "repo": "client",
+    "path": "ios/Runner/AppDelegate.swift",
+    "sha256": "8afcea36cf1d4e2c4afcde989a4fd8f62318326f00f85c9be605a65ee440ae04"
+  },
+  {
+    "repo": "client",
+    "path": "ios/Runner/Info.plist",
+    "sha256": "de8ac2c4ea29981944679d13329c1d6064272883e3a4ffbd9d33c095b99e381f"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/account/profile_page.dart",
+    "sha256": "5989b46f7835e021ea4876688e65fc39ea51ccee5aea492e64d4313959cd3b29"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/app.dart",
+    "sha256": "f9ccbb2acf8dc54647cbd1917e5cc637c7cccecd9ac83f22af1a5207a8d178ae"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/app_state.dart",
+    "sha256": "a6517aa34550111664c4db09752f1da98ba17ed3d88b3660a036beb9979c8f10"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/auth/auth_sheet.dart",
+    "sha256": "3fb74828d7d1da731ef76edbf7fd057b3c9ca3946fd0a3436f11821cb7793373"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/auth/auth_state.dart",
+    "sha256": "368e5724363e77d09820aa789841e2731a9e77628a86d923d73c015574efb57a"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/exchange_widgets.dart",
+    "sha256": "8b7652fb08292907ef3161b1ee6db4ca2d0ae80b5a56465193728ef1a65cb797"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/google_login.dart",
+    "sha256": "61a0897c8694410e02c54c7aff26dd103fa5a123cca6c75c2fdc53871b8e9cfb"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/market/market_pages.dart",
+    "sha256": "fa8aae2b2e97839f95bbe8f9f18b378810345f87dbc334dac2fcd25ce4840154"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/models.dart",
+    "sha256": "65963d82558d102556f7fde0d9cbc2da9f3c3f83b612f0ea380ac5b58c41ab72"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/price_chart.dart",
+    "sha256": "89c92d731e71015d9351dbb9f5c55340e2e2ea64c65ccfdbf74d32a8d9c70ff2"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/trading/contract_settings.dart",
+    "sha256": "bbe4b3d3d649ad643faf0c399bedf8641adfcc24a88ad4d459a1b3ccb101c863"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/ui/client_colors.dart",
+    "sha256": "9b41c96452e194e987ad5b3cf57beff7afa6f6f5007f350593d60f0a59f5cf76"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/ui/client_theme.dart",
+    "sha256": "a8449dd2d416709aaef26ee940faeda7a38008c25c45f1b94e9d5c3dfe5191f3"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/ui/theme_picker.dart",
+    "sha256": "46a93f0807ea7be80e2559f0742e9d0560f5ccf68366404574645a38e60cfaa6"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/wallet/wallet_components.dart",
+    "sha256": "5a3adedab10c5208ca288e5a69a33923bdda82c02bcae74144b42feedf7649d5"
+  },
+  {
+    "repo": "client",
+    "path": "lib/src/wallet/withdrawal_page.dart",
+    "sha256": "b5bf3f1feba7ec8e456a84762ce076bd25885d87ce5b58a725064746760c071d"
+  },
+  {
+    "repo": "client",
+    "path": "pubspec.lock",
+    "sha256": "e5fc2118208842db6973b471273f13eba52f95ff5a5c0a7ceb24c481adc7bea2"
+  },
+  {
+    "repo": "client",
+    "path": "pubspec.yaml",
+    "sha256": "472b58d4e6539617a6e8c9aa4c460e548a07b48200f7829194116e943a6bf31b"
+  },
+  {
+    "repo": "client",
+    "path": "test/client_theme_test.dart",
+    "sha256": "3de42f9bc4babc528d821280858165aee88d1b3634ead7ca944e1d395517fd9b"
+  },
+  {
+    "repo": "client",
+    "path": "test/google_login_test.dart",
+    "sha256": "387982009c9fccb46628c0b540bd22fddef308f348e7628c352b5694636b0794"
+  }
+]

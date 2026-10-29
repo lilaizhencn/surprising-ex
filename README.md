@@ -60,6 +60,12 @@ The single-node stack has six Java processes:
 
 2026-10-28 使用10,000个账户、256币对、每批20单、全局256报文窗口执行4/8/16发压线程递增测试。16线程档因标记价过期拒单失败，稳定窗存在系统换页与CPU限频，尚未确认Core饱和，吞吐不能作为容量上限。8线程档资金、持仓、冻结与原Archive重启审计通过。详见 [压测报告](docs/validation/perpetual-saturation-20261028/REPORT.md)。
 
+## Google 登录与个性主题
+
+交易 Web 支持 Google 登录按钮和首页 One Tap，Flutter App 支持 Android/iOS 原生 Google 账号选择。服务端按 Google `sub` 识别用户，保留冻结、访问限制和二次验证，不自动合并同名邮箱的资金账户。未配置客户端 ID 时入口保持不可用。迁移、三个平台的 Google 配置及验收步骤见 [Google 登录说明](docs/google-login.md)。
+
+Web 与 App 提供经典石墨、明亮晨光、深海蓝、森林绿、暮光紫、暖沙色六套主题；背景、表面、按钮、输入框、弹窗及图表联动切换，选择保存在本机，红绿涨跌语义保持一致。实际验证范围见 [本轮验证](docs/validation/google-login-themes-20261029/README.md)。
+
 ## 网关安全
 
 Gateway 现使用 Spring Security、安全浏览器会话、共享限流/邮件与上传预算、私有健康检查和上传恶意内容扫描。密码采用新 600000 次规则，不兼容旧轮数。实现与部署要求见 [网关安全](docs/gateway-security.md)。

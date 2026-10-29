@@ -1,0 +1,113 @@
+backend-final.log
+[INFO] surprising-derivatives-lifecycle-api ............... SUCCESS [  0.387 s]
+[INFO] surprising-gateway ................................. SUCCESS [ 24.824 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  44.695 s
+[INFO] Finished at: 2026-10-29T18:02:00+08:00
+[INFO] ------------------------------------------------------------------------
+
+web-final-typecheck.log
+$ tsc -b --pretty false
+
+web-final-tests.log
+
+
+ Test Files  65 passed (65)
+      Tests  555 passed (555)
+   Start at  18:02:37
+   Duration  6.00s (transform 11.92s, setup 0ms, import 36.88s, tests 4.68s, environment 21ms)
+
+
+web-final-build.log
+
+✓ built in 1.15s
+
+web-feature-lint.log
+
+Checked 14 files in 29ms. No fixes applied.
+Found 3 infos.
+
+web-css-lint.log
+Checked 2 files in 8ms. No fixes applied.
+
+web-baseline-lint.log
+Found 98 errors.
+Found 696 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+
+
+error: script "lint" exited with code 1
+
+web-final-lint.log
+Found 93 errors.
+Found 699 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+
+
+error: script "lint" exited with code 1
+
+flutter-final-analyze.log
+Analyzing surprising-client...
+No issues found! (ran in 12.0s)
+
+flutter-final-tests.log
+00:09 +81: /Users/atomex/Desktop/surprising/surprising-client/test/app_presentation_test.dart: market updates retain MaterialApp while page data updates
+00:10 +82: All tests passed!
+
+android-production-final-build.log
+Running Gradle task 'assembleDebug'...                             35.7s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+
+ios-production-final-build.log
+Running Xcode build...
+Xcode build done.                                           81.8s
+✓ Built build/ios/iphonesimulator/Runner.app
+
+android-ui-final.log
+D/CompatChangeReporter( 3618): Compat change id reported: 395521150; UID 10216; state: ENABLED
+I/flutter ( 3618): 01:12 +1: (tearDownAll)
+I/flutter ( 3618): 01:12 +2: All tests passed!
+All tests passed.
+
+ios-ui-final.log
+Wrote screenshot to: /private/tmp/surprising-google-themes-20261029/ios/native-auth-text-entry.png
+flutter: 00:49 +1: (tearDownAll)
+flutter: 00:49 +2: All tests passed!
+All tests passed.
+
+android-keyboard-final.log
+ > Flow google_themes_keyboard
+Launch app "${APP_ID}"... COMPLETED
+Tap on "个人设置"... COMPLETED
+Tap on "登录"... COMPLETED
+Tap on point (${FIELD_POINT})... COMPLETED
+Input text long-google-user@example.com... COMPLETED
+Assert that "long-google-user@example.com" is visible... COMPLETED
+Take screenshot ${CAPTURE_DIR}/native-keyboard... COMPLETED
+Scrolling DOWN until "通过 Google 继续" is visible with speed 40, visibility percentage 100%, timeout 20000 ms, with centering disabled... COMPLETED
+Take screenshot ${CAPTURE_DIR}/native-keyboard-google-scroll... COMPLETED
+Hide Keyboard... COMPLETED
+Tap on "关闭"... COMPLETED
+Assert that "主题.*" is visible... COMPLETED
+
+ios-keyboard-final.log
+Running on surprising-google-themes-20261029 - iOS 26.5 - 39897DAA-80D2-409D-8A5E-3A6BF88E813C
+ > Flow google_themes_keyboard
+Launch app "${APP_ID}"... COMPLETED
+Tap on "个人设置"... COMPLETED
+Tap on "登录"... COMPLETED
+Tap on point (${FIELD_POINT})... COMPLETED
+Input text long-google-user@example.com... COMPLETED
+Assert that "long-google-user@example.com" is visible... COMPLETED
+Take screenshot ${CAPTURE_DIR}/native-keyboard... COMPLETED
+Scrolling DOWN until "通过 Google 继续" is visible with speed 40, visibility percentage 100%, timeout 20000 ms, with centering disabled... COMPLETED
+Take screenshot ${CAPTURE_DIR}/native-keyboard-google-scroll... COMPLETED
+Scrolling UP until "关闭" is visible with speed 40, visibility percentage 100%, timeout 20000 ms, with centering disabled... COMPLETED
+Tap on "关闭"... COMPLETED
+Assert that "主题.*" is visible... COMPLETED

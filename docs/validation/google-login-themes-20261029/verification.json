@@ -1,0 +1,41 @@
+{
+  "backend": {
+    "tests": 89,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "java": "Corretto HotSpot 27",
+    "maven": "3.9.16",
+    "isolated_source_copy": true
+  },
+  "web": {
+    "test_files": 65,
+    "tests": 555,
+    "typecheck": true,
+    "build": true,
+    "global_lint_errors": 93,
+    "feature_lint_errors": 0,
+    "browser_scenarios": 12,
+    "browser_page_errors": 0,
+    "fixture": "synthetic GIS and API",
+    "baseline_lint_errors": 98,
+    "feature_lint_files": 16
+  },
+  "flutter": {
+    "version": "3.44.4",
+    "tests": 82,
+    "analyze": "No issues found",
+    "ios_ui": "passed, 49 seconds",
+    "android_ui": "passed, 72 seconds",
+    "native_google_authorization": "not tested; OAuth configuration required",
+    "ios_native_keyboard": "Maestro flow passed; keyboard, long text, Google entry and close/return; screenshots visually inspected",
+    "android_debug_build": true,
+    "ios_simulator_debug_build": true
+  },
+  "concurrent_security_task": "Completed and pushed before final integration; all changes preserved",
+  "live_google_authorization": "not tested; OAuth configuration required",
+  "google_regressions": [
+    "Expired Web identity omitted for config/challenge/login: 3 tests red before fix, green after",
+    "Missing issuer and native azp: 2 assertions red as NullPointerException, green after"
+  ]
+}

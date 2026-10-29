@@ -667,3 +667,10 @@ telegram:
     client-id: ${TELEGRAM_CLIENT_ID:}
     client-secret: ${TELEGRAM_CLIENT_SECRET:}
     redirect-uri: ${TELEGRAM_REDIRECT_URI:}
+
+# Google Identity Services / native Google Sign-In. Empty IDs keep the provider disabled.
+google:
+  login:
+    web-client-id: ${GOOGLE_LOGIN_WEB_CLIENT_ID:}
+    ios-client-id: ${GOOGLE_LOGIN_IOS_CLIENT_ID:}
+    android-client-ids: ${GOOGLE_LOGIN_ANDROID_CLIENT_IDS:}

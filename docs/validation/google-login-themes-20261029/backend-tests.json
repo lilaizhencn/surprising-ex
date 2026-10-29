@@ -1,0 +1,74 @@
+[
+  {
+    "name": "com.surprising.gateway.provider.auth.LoginVerificationServiceTest",
+    "tests": "27",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "0.338"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.GoogleIdentityClientTest",
+    "tests": "6",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "1.596"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.GoogleLoginHttpTest",
+    "tests": "3",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "2.487"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.GoogleLoginDatabaseTest",
+    "tests": "6",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "2.176"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.TelegramLoginServiceTest",
+    "tests": "11",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "1.917"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.AuthServiceTest",
+    "tests": "28",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "0.175"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.GoogleAuthGateTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "0.311"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.GoogleLoginServiceTest",
+    "tests": "4",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "0.126"
+  },
+  {
+    "name": "com.surprising.gateway.provider.auth.client.GoogleIdentityFailureTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "0.003"
+  }
+]
