@@ -73,7 +73,7 @@ class KycNotificationTransactionPostgresTest {
             if (!statement.isBlank()) jdbc.execute(statement);
         }
         profiles = new ComplianceKycRepository(jdbc);
-        profiles.upsert(42, 7, update("PENDING"), Instant.now().minusSeconds(1));
+        profiles.submit(42, new com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest("INDIVIDUAL", "STANDARD", "SG", "PASSPORT", "SUMSUB", "session-42", null, "PENDING", List.of()), "[]", Instant.now().minusSeconds(1));
         notifications = new SecurityNotificationService(new SecurityEmailNotificationRepository(jdbc),
                 (recipient, subject, body) -> delivered.add(subject));
         var users = mock(AuthPersistenceService.class);
@@ -83,8 +83,9 @@ class KycNotificationTransactionPostgresTest {
         when(approvals.requireWrite(eq("Bearer admin"), eq("admin.compliance.write"), eq("gateway-admin"), any(), any()))
                 .thenReturn(new AuthModels.JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600)));
         var providers = mock(KycProviderRegistry.class);
-        when(providers.verifyCallback(eq("SELF"), any(), any()))
-                .thenReturn(Optional.of(new KycProvider.KycProviderResult(null, "42", "event-1", "VERIFIED", null)));
+        when(providers.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));
+        when(providers.verifyCallback(eq("SUMSUB"), any(), any()))
+                .thenReturn(Optional.of(new KycProvider.KycProviderResult("session-42", "42", "event-1", "VERIFIED", null, java.time.Instant.now(), null, null)));
         var target = new ComplianceService(mock(), profiles, new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc), mock(), mock(), mock(AuthService.class),
                 approvals, mock(KycDocumentService.class), mock(AdminAuditRepository.class), users,
                 notifications, providers, mock());
@@ -117,13 +118,13 @@ class KycNotificationTransactionPostgresTest {
     @Test
     void callbackFailureRollsBackItsDeduplicationMarkerAndTheSameEventCanBeRetried() {
         rejectNotification();
-        assertThatThrownBy(() -> service.applyProviderCallback("SELF", Map.of(), new byte[0]))
+        assertThatThrownBy(() -> service.applyProviderCallback("SUMSUB", Map.of(), new byte[0]))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(profiles.find(42).status()).isEqualTo("PENDING");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_kyc_provider_events", Integer.class)).isZero();
 
         jdbc.execute("ALTER TABLE gateway_security_email_notifications DROP CONSTRAINT reject_kyc_notification");
-        assertThat(service.applyProviderCallback("SELF", Map.of(), new byte[0]).status()).isEqualTo("VERIFIED");
+        assertThat(service.applyProviderCallback("SUMSUB", Map.of(), new byte[0]).status()).isEqualTo("VERIFIED");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_kyc_provider_events", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_security_email_notifications", Integer.class)).isEqualTo(1);
         assertThat(delivered).isEmpty();
@@ -142,7 +143,7 @@ class KycNotificationTransactionPostgresTest {
     }
 
     private KycUpdateRequest update(String status) {
-        return new KycUpdateRequest("STANDARD", status, "SG", "PASSPORT", "SELF", null, null, null);
+        return new KycUpdateRequest("STANDARD", status, "SG", "PASSPORT", "SUMSUB", "session-42", null, "VERIFIED".equals(status) ? Instant.now().plusSeconds(3600) : null);
     }
 
     @Configuration(proxyBeanMethods = false)

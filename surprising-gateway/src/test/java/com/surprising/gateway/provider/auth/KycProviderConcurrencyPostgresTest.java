@@ -76,10 +76,15 @@ class KycProviderConcurrencyPostgresTest {
             }
         };
         providers=mock(KycProviderRegistry.class);
-        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(new KycProvider.KycProviderResult("session-old","42","event-1","VERIFIED",null)));
-        when(providers.simulationEnabled()).thenReturn(true);when(providers.selectedProvider()).thenReturn("SUMSUB");
+        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(new KycProvider.KycProviderResult("session-old","42","event-1","VERIFIED",null, java.time.Instant.now(), null, null)));
+        when(providers.simulationEnabled()).thenReturn(true);when(providers.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));when(providers.selectedProvider()).thenReturn("SUMSUB");
         var auth=mock(AuthService.class);when(auth.authenticateBearer("auth")).thenReturn(new AuthModels.JwtPrincipal(42,"user","NORMAL",List.of(),Instant.now().plusSeconds(600)));
-        var target=new ComplianceService(mock(),profiles,events,mock(),mock(),auth,mock(),mock(KycDocumentService.class),mock(),mock(),mock(),providers,mock());
+        var countries=mock(com.surprising.gateway.provider.auth.repository.CountryRepository.class);
+        when(countries.supported("SG")).thenReturn(true);
+        when(providers.start(eq(42L),any(),anyList())).thenReturn(new KycProvider.KycProviderSession("SUMSUB","session-new", "token",null,"PENDING",false));
+        var documents=mock(KycDocumentService.class);
+        when(documents.references(anyList(),any(),any(),any())).thenReturn("[]");
+        var target=new ComplianceService(mock(),profiles,events,mock(),mock(),auth,mock(),documents,mock(),mock(),mock(),providers,countries);
         context=new AnnotationConfigApplicationContext();context.register(Transactions.class);
         context.registerBean(DataSourceTransactionManager.class,()->new DataSourceTransactionManager(source));context.registerBean(ComplianceService.class,()->target);context.refresh();service=context.getBean(ComplianceService.class);
     }
@@ -125,5 +130,72 @@ class KycProviderConcurrencyPostgresTest {
         afterEvent=()->new ComplianceKycRepository(independent).submit(42,request("session-new"),"[]",Instant.now());
         assertThatThrownBy(()->service.completeKycSimulation("auth","APPROVED")).isInstanceOf(IllegalStateException.class).hasMessageContaining("session changed");
         assertThat(profiles.find(42).providerReference()).isEqualTo("session-new");assertThat(profiles.find(42).status()).isEqualTo("PENDING");assertThat(events()).isZero();
+    }
+
+    @Test void newerPendingAndOlderFinalCallbacksCannotReplaceTheLatestVerifiedDecision() {
+        Instant time=Instant.now();
+        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
+                new KycProvider.KycProviderResult("session-old","42","approved","VERIFIED",null,time,null, null)));
+        assertThat(callback().status()).isEqualTo("VERIFIED");
+        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
+                new KycProvider.KycProviderResult("session-old","42","late-pending","PENDING",null,time.plusSeconds(1),null, null)));
+        assertThat(callback().status()).isEqualTo("VERIFIED");
+        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
+                new KycProvider.KycProviderResult("session-old","42","old-rejection","REJECTED","old",time.minusSeconds(1),null, null)));
+        assertThat(callback().status()).isEqualTo("VERIFIED");
+        assertThat(profiles.find(42).faceVerificationStatus()).isEqualTo("VERIFIED");
+    }
+
+    @Test void expiredVerifiedProfileCanSubmitAgainButValidProfileCannot() {
+        profiles.upsert(42,42,new com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest(
+                "STANDARD","VERIFIED","SG","PASSPORT","SUMSUB","session-old",null,Instant.now().plusSeconds(600)),Instant.now());
+        assertThatThrownBy(()->service.submitUserKyc("auth",request(null))).hasMessageContaining("already pending or complete");
+        profiles.updateExpiry(42,Instant.now().minusSeconds(1));
+        var renewed=service.submitUserKyc("auth",request(null));
+        assertThat(renewed.profile().status()).isEqualTo("PENDING");
+        assertThat(profiles.find(42).providerReference()).isEqualTo("session-new");
+        verify(providers,times(1)).start(eq(42L),any(),anyList());
+    }
+
+    @Test void concurrentFirstSubmissionsStartExactlyOneProviderSession() throws Exception {
+        jdbc.execute("DELETE FROM gateway_user_kyc_profiles");
+        var start=new CountDownLatch(1);var accepted=new AtomicInteger();var rejected=new AtomicInteger();
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()) {
+            var futures=new ArrayList<Future<?>>();
+            for(int i=0;i<6;i++) futures.add(executor.submit(()->{
+                start.await();
+                try { service.submitUserKyc("auth",request(null));accepted.incrementAndGet(); }
+                catch(IllegalStateException expected) { rejected.incrementAndGet(); }
+                return null;
+            }));
+            start.countDown();for(var future:futures)future.get(10,TimeUnit.SECONDS);
+        }
+        assertThat(accepted.get()).isEqualTo(1);assertThat(rejected.get()).isEqualTo(5);
+        verify(providers,times(1)).start(eq(42L),any(),anyList());
+    }
+
+    @Test void providerEvidenceExpiryCapsVerificationAndExpiredEvidenceCannotGrantAccess() {
+        Instant now=Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        for(Instant expiry:List.of(now.plusSeconds(90),now.minusSeconds(1))) {
+            profiles.submit(42,request("session-old"),"[]",now);
+            when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
+                    new KycProvider.KycProviderResult("session-old","42",expiry.toString(),"VERIFIED",null,now,null,expiry)));
+            var result=callback();
+            assertThat(result.status()).isEqualTo(expiry.isAfter(now)?"VERIFIED":"EXPIRED");
+            assertThat(result.expiresAt()).isEqualTo(expiry);
+        }
+    }
+
+    @Test void manualReviewRejectsOldCallbacksButANewerProviderRejectionRevokesApproval() {
+        Instant now=Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        profiles.upsert(42,42,new com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest(
+                "STANDARD","VERIFIED","SG","PASSPORT","SUMSUB","session-old",null,now.plusSeconds(600)),now);
+        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
+                new KycProvider.KycProviderResult("session-old","42","old-final","REJECTED","old",now.minusSeconds(1),null,null)));
+        assertThat(callback().status()).isEqualTo("VERIFIED");
+        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
+                new KycProvider.KycProviderResult("session-old","42","new-final","REJECTED","new risk decision",now.plusSeconds(1),null,null)));
+        assertThat(callback().status()).isEqualTo("REJECTED");
+        assertThat(profiles.find(42).faceVerificationStatus()).isEqualTo("FAILED");
     }
 }

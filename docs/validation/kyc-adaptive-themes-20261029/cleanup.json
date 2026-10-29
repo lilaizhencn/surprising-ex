@@ -1,0 +1,36 @@
+{
+  "databaseDropped": true,
+  "database": "surprising_kyc_adaptive_qa_20261029",
+  "stoppedDevServers": [
+    {
+      "port": 5183,
+      "pid": 80279
+    },
+    {
+      "port": 5184,
+      "pid": 85263
+    }
+  ],
+  "deletedTemporaryResources": [
+    "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/kyc-closure._i8l_grf",
+    "runtime-path.txt",
+    "backend-regression.log",
+    "backend-unit.log",
+    "flutter-unit.log",
+    "flutter-adaptive-test.log",
+    "kyc-http-fixture.log",
+    "web-lint.log",
+    "admin-dev.log",
+    "web-dev.log",
+    "android-emulator.log",
+    "android-fold-emulator.log",
+    "ios-phone/failure-current.png",
+    "android-kyc-diagnostic"
+  ],
+  "simulatorsPending": false,
+  "androidAvdDeleted": "surprising_kyc_fold_20261029",
+  "deletedSimulatorIds": [
+    "38113529-B12B-4EC0-91BC-8B442B2847BE",
+    "CDA19D14-4A41-475D-822D-414CF7CA6B3C"
+  ]
+}

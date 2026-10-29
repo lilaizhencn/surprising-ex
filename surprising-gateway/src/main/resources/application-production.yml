@@ -43,14 +43,22 @@ surprising:
       secret-key: ${GATEWAY_KYC_DOCUMENTS_SECRET_KEY}
     kyc:
       provider: ${GATEWAY_KYC_PROVIDER:SUMSUB}
+      validity: ${GATEWAY_KYC_VALIDITY:365d}
       simulation-enabled: false
       sumsub:
         app-token: ${GATEWAY_KYC_SUMSUB_APP_TOKEN:}
         secret-key: ${GATEWAY_KYC_SUMSUB_SECRET_KEY:}
         webhook-secret: ${GATEWAY_KYC_SUMSUB_WEBHOOK_SECRET:}
-        level-name: ${GATEWAY_KYC_SUMSUB_LEVEL_NAME:}
+        level-names:
+          INDIVIDUAL_BASIC: ${GATEWAY_KYC_SUMSUB_LEVEL_NAME:}
+          INDIVIDUAL_STANDARD: ${GATEWAY_KYC_SUMSUB_INDIVIDUAL_STANDARD_LEVEL_NAME:}
+          INDIVIDUAL_ENHANCED: ${GATEWAY_KYC_SUMSUB_INDIVIDUAL_ENHANCED_LEVEL_NAME:}
+          BUSINESS_BASIC: ${GATEWAY_KYC_SUMSUB_BUSINESS_BASIC_LEVEL_NAME:}
+          BUSINESS_STANDARD: ${GATEWAY_KYC_SUMSUB_BUSINESS_STANDARD_LEVEL_NAME:}
+          BUSINESS_ENHANCED: ${GATEWAY_KYC_SUMSUB_BUSINESS_ENHANCED_LEVEL_NAME:}
         base-url: ${GATEWAY_KYC_SUMSUB_BASE_URL:https://api.sumsub.com}
       veriff:
+        kyc-level: ${GATEWAY_KYC_VERIFF_LEVEL:BASIC}
         api-key: ${GATEWAY_KYC_VERIFF_API_KEY:}
         shared-secret: ${GATEWAY_KYC_VERIFF_SHARED_SECRET:}
         base-url: ${GATEWAY_KYC_VERIFF_BASE_URL:https://stationapi.veriff.com}

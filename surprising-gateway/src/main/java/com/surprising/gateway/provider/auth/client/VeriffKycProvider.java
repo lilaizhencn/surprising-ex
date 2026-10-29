@@ -2,6 +2,7 @@ package com.surprising.gateway.provider.auth.client;
 
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -65,14 +66,26 @@ public class VeriffKycProvider implements KycProvider {
             String providerStatus = verification.path("status").asString(root.path("status").asString(""));
             String status = switch (providerStatus.toLowerCase()) {
                 case "approved" -> "VERIFIED";
-                case "declined" -> "REJECTED";
-                default -> "PENDING";
+                case "declined", "resubmission_requested" -> "REJECTED";
+                case "expired", "abandoned" -> "EXPIRED";
+                case "review" -> "PENDING";
+                default -> throw new IllegalArgumentException("unknown Veriff verification status");
             };
             String reference = verification.path("id").asString("");
             String user = verification.path("vendorData").asString(verification.path("endUserId").asString(""));
-            String reason = root.path("reason").asString("");
+            String reason = verification.path("reason").asString("");
+            String until = verification.path("document").path("validUntil").asString("");
+            Instant expiry = until.isBlank() ? null : java.time.LocalDate.parse(until).plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
             return Optional.of(new KycProviderResult(reference, user, SumsubKycProvider.sha256(body), status,
-                    reason.isBlank() ? null : reason));
+                    reason.isBlank() ? null : reason, Instant.parse(verification.path("decisionTime").asString("")), null, expiry));
         } catch (Exception ex) { throw new IllegalArgumentException("invalid Veriff webhook body", ex); }
+    }
+
+    @Override public KycProviderSession refreshSession(KycProfile profile, String redirectUrl) {
+        URI uri = redirectUrl == null ? null : URI.create(redirectUrl);
+        if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null) {
+            throw new IllegalStateException("the Veriff verification session cannot be resumed");
+        }
+        return new KycProviderSession(code(), profile.providerReference(), null, redirectUrl, "PENDING", false);
     }
 }

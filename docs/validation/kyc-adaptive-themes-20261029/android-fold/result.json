@@ -1,0 +1,32 @@
+{
+  "device": "emulator-5574",
+  "exitCode": 0,
+  "captures": [
+    "theme-dark",
+    "theme-light",
+    "theme-ocean",
+    "theme-forest",
+    "theme-dusk",
+    "theme-sand",
+    "large-text-picker",
+    "home-glass-navigation",
+    "trade-keyboard",
+    "trade-layout",
+    "trade-folded",
+    "trade-unfolded",
+    "trade-half-opened",
+    "trade-unfolded",
+    "after-navigation-cycles",
+    "kyc-profile-entry",
+    "kyc-entry",
+    "kyc-pending",
+    "kyc-rejected",
+    "kyc-verified",
+    "kyc-expired",
+    "kyc-renewed",
+    "kyc-polling-after60s"
+  ],
+  "processSamples": [],
+  "syntheticIdentity": true,
+  "osFileSelectorSubstituted": true
+}

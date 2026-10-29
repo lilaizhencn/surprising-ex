@@ -77,11 +77,29 @@ class KycApplicationValidationTest {
     }
     @Test void pendingOrVerifiedCannotBeOverwrittenButRejectedCanResubmit() {
         for (String status : List.of("PENDING", "VERIFIED", "REJECTED")) {
-            when(profiles.find(42)).thenReturn(new ComplianceModels.KycProfile(42,"STANDARD",status,"SG","PASSPORT","SELF",null,null,null,"bad image",null,Instant.now(),Instant.now(),"INDIVIDUAL","[]","NOT_REQUIRED"));
+            when(profiles.lockForSubmission(eq(42L), any())).thenReturn(new ComplianceModels.KycProfile(42,"STANDARD",status,"SG","PASSPORT","SELF",null,null,null,"bad image",null,Instant.now(),Instant.now(),"INDIVIDUAL","[]","NOT_REQUIRED"));
             String expected = status.equals("REJECTED") ? "required KYC" : "already pending or complete";
             assertThatThrownBy(() -> service.submitUserKyc("token",request("SG",today,today,List.of()))).hasMessageContaining(expected);
         }
         verify(providers, never()).start(anyLong(), any(), anyList());
         verifyNoInteractions(documents);
+    }
+    @Test void administratorCannotGrantAnUnsubmittedExternalVerification() {
+        var request = new ComplianceModels.KycUpdateRequest("STANDARD", "VERIFIED", "SG", "PASSPORT",
+                "SUMSUB", "invented-reference", null, Instant.now().plusSeconds(600));
+        assertThatThrownBy(() -> service.upsertKyc(42, 7, request, Instant.now()))
+                .hasMessageContaining("submitted identity verification application");
+        verify(profiles, never()).upsert(anyLong(), anyLong(), any(), any());
+    }
+    @Test void administratorCannotChangeTheExternalVerifiedLevelOrSession() {
+        Instant now = Instant.now();
+        when(profiles.findForUpdate(42)).thenReturn(new ComplianceModels.KycProfile(42, "BASIC", "PENDING", "SG", "PASSPORT",
+                "SUMSUB", "original", null, null, null, null, now, now, "INDIVIDUAL", "[]", "NOT_REQUIRED"));
+        for (var request : List.of(
+                new ComplianceModels.KycUpdateRequest("STANDARD", "VERIFIED", "SG", "PASSPORT", "SUMSUB", "original", null, now.plusSeconds(600)),
+                new ComplianceModels.KycUpdateRequest("BASIC", "VERIFIED", "SG", "PASSPORT", "SUMSUB", "other", null, now.plusSeconds(600)))) {
+            assertThatThrownBy(() -> service.upsertKyc(42, 7, request, now)).hasMessageContaining("level or session");
+        }
+        verify(profiles, never()).upsert(anyLong(), anyLong(), any(), any());
     }
 }

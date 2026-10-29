@@ -1,0 +1,50 @@
+{
+  "device": "CDA19D14-4A41-475D-822D-414CF7CA6B3C",
+  "exitCode": 0,
+  "captures": [
+    "theme-dark",
+    "theme-light",
+    "theme-ocean",
+    "theme-forest",
+    "theme-dusk",
+    "theme-sand",
+    "large-text-picker",
+    "home-glass-navigation",
+    "trade-keyboard",
+    "trade-layout",
+    "after-navigation-cycles",
+    "kyc-profile-entry",
+    "kyc-entry",
+    "kyc-pending",
+    "kyc-rejected",
+    "kyc-verified",
+    "kyc-expired",
+    "kyc-renewed",
+    "kyc-polling-after60s"
+  ],
+  "processSamples": [
+    {
+      "capture": "after-navigation-cycles",
+      "time": 1793290234.400842,
+      "pid": 35028,
+      "cpuPercent": 1.7,
+      "rssKiB": 436940
+    },
+    {
+      "capture": "kyc-renewed",
+      "time": 1793290258.8169332,
+      "pid": 35028,
+      "cpuPercent": 6.6,
+      "rssKiB": 470336
+    },
+    {
+      "capture": "kyc-polling-after60s",
+      "time": 1793290321.970041,
+      "pid": 35028,
+      "cpuPercent": 2.0,
+      "rssKiB": 439816
+    }
+  ],
+  "syntheticIdentity": true,
+  "osFileSelectorSubstituted": true
+}

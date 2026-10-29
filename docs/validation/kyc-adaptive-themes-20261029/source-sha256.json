@@ -1,0 +1,91 @@
+{
+  "generatedAt": "2026-10-29T16:30:37.975299+00:00",
+  "repositories": {
+    "surprising-ex": {
+      "baseHead": "be0d7f2864dab779fc07e21f6c72b8331ccb5c81",
+      "files": {
+        "README.md": "99f36fcda37296e8b87b2a27b53a9e84720184d033f8f8f2aba35258b4d5363a",
+        "deployment/migrations/20261029-kyc-session-order.sql": "850795fca6ef5ee8dcba3c5c46469be7dfbeceabc74bbe1c4589c1939882c871",
+        "init.sql": "da3f97a68b352cf88c3067f4cb5522514319017bb606c5768919ec26810658f4",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/client/KycProvider.java": "1a49e7237c21e29fa58fd25dabbd0f2fee12f27941853a7145639284e6678e5a",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/client/KycProviderRegistry.java": "0341e28ad4d2d049f62a4018f93643812e9e612653853948e97a90b66a914c9c",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/client/SumsubKycProvider.java": "c007adab0b9ff05f452a69f3fd03f36133216f5ef4bc449489041c495b63f6e3",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/client/VeriffKycProvider.java": "e406b55520653dbb6fb2ebd23c30edc7830790a8c36e5f778b69fa446dd565ca",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/model/ComplianceModels.java": "0095b54154c6e06242e98a576e32b34fb3792db6d723ecc2bf0f2afa6d54979b",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/ComplianceKycRepository.java": "93b1139a8f279dba4b6534f4642a22d41616c0eaa27ff37d412b1a76e1306eda",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/ComplianceService.java": "cf91494f372cbfbc86618c80dd78aa9c8b26b8223780081b2879136c6ccd6d74",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/config/GatewayProperties.java": "64e9e6ad564c4e37d3862408f15978594fb6121c5856c4b87d3c7332207ed1d4",
+        "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/KycDocumentService.java": "60371fa4ce9b939ae009271dd259470dab239a0900f1639114342bcfe05bbb96",
+        "surprising-gateway/src/main/resources/application-production.yml": "d9c793e51236661173369412e3f5079549590407ce6854f245f996c209dd7117",
+        "surprising-gateway/src/main/resources/application.yml": "798b0a4f5f4b85a35978daf129712199ea7e33a1ae1751b78ac1f2c2f3f6585d",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/ComplianceServiceTest.java": "360051926799bcf63710791176f8caddd6f6e3073b7658e9d02ae8710711a024",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/ComplianceWritePostgresTest.java": "ebae7832a78f79ce1aaaf0dbe3e66313e67c751dc09e0da33f3fe62a49ca372b",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/ExternalKycProviderTest.java": "651da90b58b8498f207ef39edcfd719a8a4fe47d4dcc0d92171ed9f19af39709",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/KycApplicationValidationTest.java": "036e30530839bf2d2ee8f11fe6290fe8990c19b156b48efbe46daf182f96d8b6",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/KycClosureBrowserQaTest.java": "e6b94eac870039a5e6a69ac860ec87f9f3ac0ed4620e271e7216919d3e17ce96",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/KycProviderConcurrencyPostgresTest.java": "49632a57d4a5bb9fb5dc42afad6f362b62fa5031fc6bfcfac040611861c7fcd6",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/KycProviderDatabaseTest.java": "a60626bf98f8aeb6a444b7804ccd3e90584fed695a4824adf247a22d22a2a04f",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/KycProviderHttpContractTest.java": "b13f8794a5e434011812bbfd9c00a6a68bf4dce5b20089268432d6cac19a3d08",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/config/GatewayProductionSecurityConfigurationTest.java": "93812945390efd451b4c4314b376dcb450c1c6614963063e659858128863e8c5",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/KycNotificationTransactionPostgresTest.java": "342163af544096312c5e71deae20480a6da55be4ca6e335fed88aab6189c80a2"
+      }
+    },
+    "surprising-client": {
+      "baseHead": "cef4cea190f7520332615898b65f2d5e708c69f6",
+      "files": {
+        "README.md": "bf6497268e92d482056cac3581dcf27aeb43e2f5ce9be2b52f838ab26af6eecf",
+        "android/app/src/main/AndroidManifest.xml": "58f538f15a39bbe86224904603e1bc694115230c80939489a3f7e6edb3245d32",
+        "integration_test/kyc_adaptive_themes_test.dart": "8e4627cf8748a3443b7c5bf7622af088845942ffde2627fd726a366bf305b5fd",
+        "ios/Runner.xcodeproj/project.pbxproj": "2f945dcfbed42ed5674c9f5b38ef0b612a66835b52706e5b8508f64eaded716a",
+        "ios/Runner/AppDelegate.swift": "d6a8dfcb9bedcdd776940b9b948299ae7421b1acf205554915d88e7c1c5ae119",
+        "ios/Runner/LiquidGlassView.swift": "7aff076c972946960505428b3615c9b852a4037990e6f2f19908ac39994acdd8",
+        "lib/src/account/kyc_status.dart": "d2aa53348fdd767e1f46d40ef85d8362addb3166a7f49784129723f1175ae720",
+        "lib/src/account/kyc_webview.dart": "6621108362f7f243a10b85d71954c9443909b8d0e027368df0f94b7cdea7ac95",
+        "lib/src/account/security_sheet.dart": "48947149d09007e5e20bf747fcc8425be64e75ebf6bba33202f0ca5aeb781780",
+        "lib/src/api.dart": "39f0a8cee5e060b186596fe3dc22e93f11ab93c90a6c3f54870bf0e2369a7f35",
+        "lib/src/app.dart": "29d3f9323dbce4c1922d29ae6003a4e73d0c6ebb0a9b6449d1f4e061d1087eff",
+        "lib/src/asset_overview.dart": "222d381e27135b39eaadec0a1957540238192df96c81250ea7cf524555f7d93f",
+        "lib/src/exchange_widgets.dart": "a5a93b002454c815b57655b422efd95a65fa3476350f721d47e04b17e0d65127",
+        "lib/src/kyc_application_page.dart": "784a41b7552c8ff60e308066775b5e34e989113b1c4d1a1f8d9c8246cf1802f1",
+        "lib/src/market/market_pages.dart": "16a478563eacecf6666e7a775f709fa2937e580259623b813d2b44c75ad29bfa",
+        "lib/src/trading/trade_page.dart": "fb88001363b2aaa5e91a1d818d27a5bdcbf4c94e13220a9cd3b386ae2548a5c6",
+        "lib/src/ui/adaptive_client_layout.dart": "18837368e7593c6eeae6730e4ef8ae6039cfa4d7bc7d7d03c50092340abf389a",
+        "lib/src/ui/client_glass.dart": "64f3c3313e1e48a5bee21f85c8c625500981818ea02313ae087d4e4a0b607ab3",
+        "lib/src/ui/client_navigation.dart": "ac77a5758c8f2480ffc73acc170709cf640547928cc01afec34a4572c47b3444",
+        "lib/src/ui/client_theme.dart": "162966ebdfa0168acf4d1e4fca2c84cddedde440747c69f0dd98cc16d6495ce9",
+        "lib/src/user_scanner_page.dart": "ed2f2b571a3786b8e37df9151fe76f0788154a17cd9c9bcecf5c9128027d25ba",
+        "test/account_display_test.dart": "36b3c262fbd65a41c78c579319c5426e3e84c96754caa0d4f6d396c91135da42",
+        "test/adaptive_client_layout_test.dart": "17b447daa90567351afd565c331a3694bf3298e1ad094c9e0ffb3905c36ed98a",
+        "test/client_theme_test.dart": "f7dbce177878258ea9781efb80bf0c3728d30e91f631a36285019fe08eb3d12f",
+        "test/input_boundary_widgets_test.dart": "4b05782e8ad5875c6c99f454b6ad8261c218a54017f9c344b7b919270a3779bd",
+        "test/mobile_account_parity_test.dart": "8f6496af9683f257cf9067fc4a33374469250045615ddb67342d962c7c9c9337",
+        "tool/native_kyc_acceptance.py": "1d50a2d846204475290b1214e5d56246bbf31119040e4124e6dcddeed3b17cfb"
+      },
+      "commit": "dffb0a26aa8c837c804a3b42bf451b93091835fc"
+    },
+    "surprising-ex-web": {
+      "baseHead": "fc1b801f2408921d70a80d0caf0ac31ac9c8de08",
+      "files": {
+        "README.md": "9cdb312663f4bf2fe1baf9cf3759aa9ce84bbd34a808030bfd502d2f4b06b2de",
+        "scripts/kyc-closure-live-qa.mjs": "4be397cd9e7f2a8663d9299313db9d3397106ae1a786a8dc3b5884abcd0e5ba1",
+        "scripts/kyc-experience-qa.mjs": "89ce471c4991ee8e75c0cbf0bbbd88b485e1d2d160e05441295d84867ae1c7cb",
+        "src/api/kyc.test.ts": "bcf3cc0a3ad1ec111d73180ef5711fc2bdaaa9faf08a9b01837347ea43be6fa9",
+        "src/api/types.ts": "ab7f8bbf8fdc75ad55478ebe131bd479237189b4ae5bc54cd1294a11a054a526",
+        "src/features/compliance/CompliancePage.tsx": "d3fc6ff0cb0dd4fbaa9c80c51dc15b317b4b4ce471e0ffe8bda7133348cba0f0",
+        "src/features/compliance/KycApplicationForm.tsx": "104de60a84c992202f7c12220863983caf88fd821c79cdc25719900c65418b6b",
+        "src/i18n/zh.json": "52f3ef1219b524e875e590451ff9e639c8b84367b7905374f746e30c6ed6b91f"
+      },
+      "commit": "cbbe4190076d92e3980aff957992db0e1b027b16"
+    },
+    "surprising-admin-web": {
+      "baseHead": "e26b683444233a44df0135b4a8d28261954cf652",
+      "files": {
+        "README.md": "54950cb2fcf92276e542472366090ac41239cdb57d382eb32e61cb31df4d401b",
+        "src/lib/compliance.ts": "58508bdd19c43b120979b1004368eade12a48bca028aaf3f47dd30fb4257d579",
+        "src/pages/CompliancePage.tsx": "2df3cda4d7165ac926537dd928fd8212cc4c467aaa1186d70a81c4a67de2604c",
+        "tests/compliance.test.ts": "23c505f7eab1d476197196879fbd64a515d3b39a25dd87f18ab8b2f9c9715415"
+      },
+      "commit": "1e739b02bf64b3d5979a1e4c8fc7cb9828328116"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "command": [
+      "java",
+      "-version"
+    ],
+    "exitCode": 0,
+    "output": "openjdk version \"27\" 2026-09-15\nOpenJDK Runtime Environment Corretto-27.0.0.33.1 (build 27+33-FR)\nOpenJDK 64-Bit Server VM Corretto-27.0.0.33.1 (build 27+33-FR, mixed mode, sharing)\n"
+  },
+  {
+    "command": [
+      "mvn",
+      "-version"
+    ],
+    "exitCode": 0,
+    "output": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)\nMaven home: /usr/local/Cellar/maven/3.9.16/libexec\nJava version: 27, vendor: Amazon.com Inc., runtime: /Users/atomex/.sdkman/candidates/java/27.0.0-amzn\nDefault locale: zh_US_#Hans, platform encoding: UTF-8\nOS name: \"mac os x\", version: \"26.7.2\", arch: \"x86_64\", family: \"mac\"\n"
+  },
+  {
+    "command": [
+      "df",
+      "-h",
+      "."
+    ],
+    "exitCode": 0,
+    "output": "Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk1s2   932Gi   725Gi   179Gi    81%    5.2M  1.9G    0%   /System/Volumes/Data\n"
+  }
+]

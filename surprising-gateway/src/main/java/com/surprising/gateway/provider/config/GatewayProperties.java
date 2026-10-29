@@ -153,7 +153,9 @@ public class GatewayProperties implements EnvironmentAware {
             requireNonBlank(failures, "kyc.sumsub.app-token", configuredKyc.getSumsub().getAppToken());
             requireProductionSecret(failures, "kyc.sumsub.secret-key", configuredKyc.getSumsub().getSecretKey(), 32, null);
             requireProductionSecret(failures, "kyc.sumsub.webhook-secret", configuredKyc.getSumsub().getWebhookSecret(), 32, null);
-            requireNonBlank(failures, "kyc.sumsub.level-name", configuredKyc.getSumsub().getLevelName());
+            if (configuredKyc.getSumsub().getLevelNames().values().stream().noneMatch(value -> value != null && !value.isBlank())) {
+                failures.add("kyc.sumsub.level-names requires at least one configured verification flow");
+            }
             requireHttpsUrl(failures, "kyc.sumsub.base-url", configuredKyc.getSumsub().getBaseUrl());
         } else if ("VERIFF".equals(provider)) {
             requireNonBlank(failures, "kyc.veriff.api-key", configuredKyc.getVeriff().getApiKey());
@@ -629,6 +631,13 @@ public class GatewayProperties implements EnvironmentAware {
     @Getter
     public static class Kyc {
         private String provider = "SUMSUB";
+        private java.time.Duration validity = java.time.Duration.ofDays(365);
+        public void setValidity(java.time.Duration value) {
+            if (value == null || value.isNegative() || value.isZero() || value.compareTo(java.time.Duration.ofDays(3650)) > 0) {
+                throw new IllegalArgumentException("KYC validity must be positive and at most ten years");
+            }
+            validity = value;
+        }
         @Setter private boolean simulationEnabled = true;
         private Sumsub sumsub = new Sumsub();
         private Veriff veriff = new Veriff();
@@ -644,13 +653,35 @@ public class GatewayProperties implements EnvironmentAware {
         @Setter private String appToken = "";
         @Setter private String secretKey = "";
         @Setter private String webhookSecret = "";
-        @Setter private String levelName = "basic-kyc-level";
+        private java.util.Map<String, String> levelNames = new java.util.LinkedHashMap<>(
+                java.util.Map.of("INDIVIDUAL_BASIC", "basic-kyc-level"));
+        public void setLevelNames(java.util.Map<String, String> values) {
+            levelNames = new java.util.LinkedHashMap<>();
+            if (values != null) values.forEach((key, value) -> {
+                String name=key.trim().toUpperCase(java.util.Locale.ROOT).replace('-', '_');
+                if(!name.matches("(INDIVIDUAL|BUSINESS)_(BASIC|STANDARD|ENHANCED)")) throw new IllegalArgumentException("unsupported Sumsub verification option");
+                String flow=value == null ? "" : value.trim();
+                if(!flow.isEmpty() && levelNames.containsValue(flow)) throw new IllegalArgumentException("each KYC option requires a distinct Sumsub flow");
+                levelNames.put(name,flow);
+            });
+        }
+        public String levelName(String applicantType, String kycLevel) {
+            String value = levelNames.get(applicantType + "_" + kycLevel);
+            if (value == null || value.isBlank()) throw new IllegalArgumentException("the requested KYC verification flow is not configured");
+            return value;
+        }
         private String baseUrl = "https://api.sumsub.com";
         public void setBaseUrl(String value) { baseUrl = value == null || value.isBlank() ? "https://api.sumsub.com" : value.trim().replaceAll("/$", ""); }
     }
 
     @Getter
     public static class Veriff {
+        private String kycLevel = "BASIC";
+        public void setKycLevel(String value) {
+            String normalized=value == null ? "" : value.trim().toUpperCase(java.util.Locale.ROOT);
+            if(!java.util.List.of("BASIC","STANDARD","ENHANCED").contains(normalized)) throw new IllegalArgumentException("unsupported Veriff verification level");
+            kycLevel=normalized;
+        }
         @Setter private String apiKey = "";
         @Setter private String sharedSecret = "";
         private String baseUrl = "https://stationapi.veriff.com";

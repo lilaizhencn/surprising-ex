@@ -1,0 +1,28 @@
+{
+  "device": "38113529-B12B-4EC0-91BC-8B442B2847BE",
+  "exitCode": 0,
+  "captures": [
+    "theme-dark",
+    "theme-light",
+    "theme-ocean",
+    "theme-forest",
+    "theme-dusk",
+    "theme-sand",
+    "large-text-picker",
+    "home-glass-navigation",
+    "trade-keyboard",
+    "trade-layout",
+    "after-navigation-cycles"
+  ],
+  "processSamples": [
+    {
+      "capture": "after-navigation-cycles",
+      "time": 1793290957.044796,
+      "pid": 42440,
+      "cpuPercent": 2.2,
+      "rssKiB": 485828
+    }
+  ],
+  "syntheticIdentity": true,
+  "osFileSelectorSubstituted": true
+}

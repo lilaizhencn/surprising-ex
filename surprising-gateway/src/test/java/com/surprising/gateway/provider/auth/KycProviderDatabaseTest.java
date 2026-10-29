@@ -41,7 +41,8 @@ class KycProviderDatabaseTest {
                     reviewed_by_user_id BIGINT, reviewed_at TIMESTAMPTZ, rejection_reason TEXT, expires_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
                     applicant_type TEXT NOT NULL DEFAULT 'INDIVIDUAL', submitted_documents JSONB NOT NULL DEFAULT '[]',
-                    face_verification_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED')
+                    face_verification_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED',
+                    provider_event_at TIMESTAMPTZ, provider_redirect_url TEXT)
                 """);
         jdbc.execute("""
                 CREATE TABLE gateway_kyc_provider_events (
@@ -65,7 +66,7 @@ class KycProviderDatabaseTest {
         assertThat(submitted.provider()).isEqualTo("SUMSUB");
         assertThat(new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc).record("SUMSUB", "event-1", now)).isTrue();
         assertThat(new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc).record("SUMSUB", "event-1", now)).isFalse();
-        var verified = repository.applyProviderResult(1L, "SUMSUB", "VERIFIED", null, now.plusSeconds(1), "VERIFIED", now.plusSeconds(1));
+        var verified = repository.applyProviderResult(1L, "SUMSUB", "VERIFIED", null, now.plusSeconds(1), "VERIFIED", now.plusSeconds(1), now.plusSeconds(3600));
         assertThat(verified.status()).isEqualTo("VERIFIED");
         assertThat(verified.faceVerificationStatus()).isEqualTo("VERIFIED");
     }

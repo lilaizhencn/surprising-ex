@@ -85,7 +85,7 @@ class GatewayProductionSecurityConfigurationTest {
         properties.getKyc().getSumsub().setAppToken("sumsub-app-token");
         properties.getKyc().getSumsub().setSecretKey("sumsub-secret-key-with-at-least-32-characters");
         properties.getKyc().getSumsub().setWebhookSecret("sumsub-webhook-secret-with-at-least-32-chars");
-        properties.getKyc().getSumsub().setLevelName("basic-kyc-level");
+        properties.getKyc().getSumsub().setLevelNames(java.util.Map.of("INDIVIDUAL_BASIC", "basic-kyc-level"));
         properties.getKyc().setSimulationEnabled(false);
 
         assertThatCode(properties::validateProductionSecurityConfiguration)

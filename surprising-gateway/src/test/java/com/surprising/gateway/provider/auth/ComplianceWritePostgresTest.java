@@ -81,7 +81,7 @@ class ComplianceWritePostgresTest {
         when(auth.requireAdminPermission("Bearer writer", "admin.compliance.write")).thenReturn(writer);
         when(auth.adminUser("Bearer writer", 42)).thenReturn(new AuthenticatedUser(42, "user", null, "NORMAL", List.of("USER"), Instant.now()));
         var properties = new GatewayProperties(); properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(true);
-        providers = mock(KycProviderRegistry.class); when(providers.simulationEnabled()).thenReturn(true);
+        providers = mock(KycProviderRegistry.class); when(providers.simulationEnabled()).thenReturn(true);when(providers.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));
         context = new AnnotationConfigApplicationContext(); context.register(Transactions.class);
         context.registerBean(DataSourceTransactionManager.class, () -> new DataSourceTransactionManager(source));
         context.registerBean(AdminApprovalService.class, () -> new AdminApprovalService(auth, mock(AdminAuditRepository.class), approvalRows, properties));
@@ -102,13 +102,13 @@ class ComplianceWritePostgresTest {
     }
     @ParameterizedTest @MethodSource("providerResults")
     void providerDecisionOwnsReviewAndFaceStateWhileRepositoryOnlyWritesFacts(String status, String priorFace) {
-        jdbc.update("UPDATE gateway_user_kyc_profiles SET face_verification_status=?, reviewed_by_user_id=7, reviewed_at=?, rejection_reason='before' WHERE user_id=42",
+        jdbc.update("UPDATE gateway_user_kyc_profiles SET face_verification_status=?, reviewed_by_user_id=NULL, reviewed_at=?, rejection_reason='before' WHERE user_id=42",
                 priorFace, Timestamp.from(Instant.now().minusSeconds(1)));
         when(providers.verifyCallback(eq("SUMSUB"), any(), any())).thenReturn(Optional.of(
-                new KycProvider.KycProviderResult("session-42", "42", "event-1", status, " rejected ")));
+                new KycProvider.KycProviderResult("session-42", "42", "event-1", status, " rejected ", java.time.Instant.now(), null, null)));
         var updated = service.applyProviderCallback("SUMSUB", Map.of(), new byte[0]);
-        String expectedFace = priorFace.equals("PENDING") && status.equals("VERIFIED") ? "VERIFIED"
-                : priorFace.equals("PENDING") && status.equals("REJECTED") ? "FAILED" : priorFace;
+        String expectedFace = !priorFace.equals("NOT_REQUIRED") && status.equals("VERIFIED") ? "VERIFIED"
+                : !priorFace.equals("NOT_REQUIRED") && status.equals("REJECTED") ? "FAILED" : priorFace;
         assertThat(updated.status()).isEqualTo(status);
         assertThat(updated.faceVerificationStatus()).isEqualTo(expectedFace);
         assertThat(updated.reviewedByUserId()).isNull();

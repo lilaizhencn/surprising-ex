@@ -155,7 +155,7 @@ public class ComplianceService {
 
     public KycProviderInfo userKycProviderInfo(String authorization) {
         authService.authenticateBearer(authorization);
-        return new KycProviderInfo(kycProviders.selectedProvider(), kycProviders.simulationEnabled());
+        return new KycProviderInfo(kycProviders.selectedProvider(), kycProviders.simulationEnabled(), kycProviders.verificationOptions());
     }
 
     public KycProvider.KycProviderSession refreshUserKycSession(String authorization) {
@@ -165,7 +165,7 @@ public class ComplianceService {
                 || profile.provider() == null || "SELF".equalsIgnoreCase(profile.provider())) {
             throw new IllegalStateException("there is no active KYC provider session");
         }
-        return kycProviders.refreshSession(profile.provider(), userId, profile.providerReference());
+        return kycProviders.refreshSession(profile, kycRepository.providerRedirectUrl(userId));
     }
 
     public List<KycDocument> userKycDocuments(String authorization) {
@@ -208,14 +208,18 @@ public class ComplianceService {
     public KycSubmissionResponse submitUserKyc(String authorization, KycSubmissionRequest request) {
         long userId = authService.authenticateBearer(authorization).userId();
         if (!countries.supported(request.country())) throw new IllegalArgumentException("select a supported country");
-        KycProfile current = kycRepository.find(userId);
-        if (current != null && ("VERIFIED".equals(current.status()) || "PENDING".equals(current.status()))) {
+        Instant startedAt = Instant.now();
+        KycProfile current = kycRepository.lockForSubmission(userId, startedAt);
+        if (current != null && ("PENDING".equals(current.status()) || ("VERIFIED".equals(current.status())
+                && (current.expiresAt() == null || current.expiresAt().isAfter(startedAt))))) {
             throw new IllegalStateException("verification is already pending or complete");
         }
         java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
         boolean hasDocuments = request.documentIds() != null && !request.documentIds().isEmpty();
+        if (!List.of("ID_CARD", "PASSPORT", "DRIVING_LICENSE", "RESIDENCE_PERMIT").contains(request.documentType())) {
+            throw new IllegalArgumentException("select a supported identity document");
+        }
         if (hasDocuments) {
-            if (!List.of("ID_CARD", "PASSPORT", "DRIVING_LICENSE", "RESIDENCE_PERMIT").contains(request.documentType())) throw new IllegalArgumentException("select a supported identity document");
             if (request.documentExpiresOn() == null || request.documentExpiresOn().isBefore(today)) {
                 throw new IllegalArgumentException("identity document must not be expired");
             }
@@ -244,6 +248,11 @@ public class ComplianceService {
         String submittedDocuments = kycDocumentService.references(documents, request.documentExpiresOn(),
                 request.addressIssuedOn(), request.documentIssuedOn());
         KycProfile profile = kycRepository.submit(userId, providerRequest, submittedDocuments, Instant.now());
+        kycRepository.saveProviderSession(userId, session.redirectUrl(), startedAt);
+        if (hasDocuments && request.documentExpiresOn() != null) {
+            kycRepository.updateExpiry(userId, request.documentExpiresOn().plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant());
+            profile = kycRepository.find(userId);
+        }
         if (request.documentIds() != null && !request.documentIds().isEmpty()) kycDocumentService.markSubmitted(userId, request.documentIds());
         return new KycSubmissionResponse(profile, session);
     }
@@ -253,14 +262,29 @@ public class ComplianceService {
         KycProvider.KycProviderResult result = kycProviders.verifyCallback(provider, headers, body)
                 .orElseThrow(() -> new IllegalArgumentException("KYC callback could not be verified"));
         Long userId;
-        try { userId = Long.valueOf(result.externalUserId()); }
+        try { userId = Long.valueOf(result.externalUserId().replaceFirst(":BUSINESS$", "")); }
         catch (RuntimeException ex) { throw new IllegalArgumentException("KYC callback user reference is invalid", ex); }
         if (result.eventKey() == null || result.eventKey().isBlank()) throw new IllegalArgumentException("provider event key is required");
         if (!providerEvents.record(provider, result.eventKey(), Instant.now())) return kycRepository.find(userId);
         KycProfile previous = kycRepository.findForUpdate(userId);
         if (previous == null || !provider.equalsIgnoreCase(previous.provider())
-                || (result.providerReference() != null && !result.providerReference().equals(previous.providerReference()))) {
+                || result.providerReference() == null || !result.providerReference().equals(previous.providerReference())) {
             throw new IllegalArgumentException("KYC callback does not match the current verification session");
+        }
+        if ("SUMSUB".equalsIgnoreCase(provider) && "BUSINESS".equals(previous.applicantType()) != result.externalUserId().endsWith(":BUSINESS")) {
+            throw new IllegalArgumentException("KYC callback applicant type does not match the current verification session");
+        }
+        kycProviders.requireCallbackLevel(previous, result);
+        if (result.occurredAt() == null || result.occurredAt().isAfter(Instant.now().plusSeconds(300))) {
+            throw new IllegalArgumentException("KYC callback timestamp is invalid");
+        }
+        // 人工决定具有明确审核主体；迟到待审事件不能撤销终态，新申请以会话起始时间隔离旧回执。
+        if ((previous.reviewedByUserId() != null && !List.of("REJECTED","EXPIRED").contains(result.status()))
+                || (!"PENDING".equals(previous.status()) && "PENDING".equals(result.status()))
+                || !kycRepository.acceptProviderEvent(userId, result.occurredAt())) return previous;
+        if (result.evidenceExpiresAt() != null && (previous.expiresAt() == null || result.evidenceExpiresAt().isBefore(previous.expiresAt()))) {
+            kycRepository.updateExpiry(userId,result.evidenceExpiresAt());
+            previous = kycRepository.findForUpdate(userId);
         }
         KycProfile updated = applyProviderResult(previous, provider, result.status(), result.rejectionReason(), Instant.now());
         if (!kycProviders.simulationEnabled()) enqueueKycTransition(previous, updated);
@@ -294,24 +318,30 @@ public class ComplianceService {
                                            String rejectionReason, Instant now) {
         // 提供方允许的结果及其与人脸状态的联动属于业务状态机；当前行已由调用入口加锁。
         String status = ComplianceValidation.kycStatus(rawStatus);
-        if (!List.of("PENDING", "VERIFIED", "REJECTED").contains(status)) {
+        if (!List.of("PENDING", "VERIFIED", "REJECTED", "EXPIRED").contains(status)) {
             throw new IllegalArgumentException("provider KYC status is invalid");
         }
         String faceStatus = current.faceVerificationStatus();
-        if ("PENDING".equals(faceStatus)) {
+        if (!"NOT_REQUIRED".equals(faceStatus)) {
             faceStatus = switch (status) {
                 case "VERIFIED" -> "VERIFIED";
                 case "REJECTED" -> "FAILED";
                 default -> faceStatus;
             };
         }
+        Instant expiry = current.expiresAt();
+        if ("VERIFIED".equals(status)) {
+            Instant validityEnd = now.plus(kycProviders.verificationValidity());
+            if (expiry == null || expiry.isAfter(validityEnd)) expiry = validityEnd;
+            if (!expiry.isAfter(now)) status = "EXPIRED";
+        }
         return kycRepository.applyProviderResult(current.userId(), provider, status,
                 "REJECTED".equals(status) ? ComplianceValidation.blankToNull(rejectionReason) : null,
-                "PENDING".equals(status) ? null : now, faceStatus, now);
+                "PENDING".equals(status) ? null : now, faceStatus, now, expiry);
     }
 
     private void enqueueKycTransition(KycProfile previous, KycProfile updated) {
-        if (previous != null && "PENDING".equals(previous.status())
+        if (previous != null && !previous.status().equals(updated.status())
                 && List.of("VERIFIED", "REJECTED").contains(updated.status())) {
             authPersistence.user(updated.userId()).map(AuthenticatedUser::email).filter(email -> email != null && !email.isBlank())
                     .ifPresent(email -> notifications.kycResult(updated, email));
@@ -380,7 +410,35 @@ public class ComplianceService {
 
     @Transactional
     public KycProfile upsertKyc(long userId, long adminUserId, KycUpdateRequest request, Instant now) {
-        KycProfile previous = kycRepository.find(userId);
+        KycProfile previous = kycRepository.findForUpdate(userId);
+        if ("REJECTED".equals(request.status()) && (request.rejectionReason() == null || request.rejectionReason().isBlank())) {
+            throw new IllegalArgumentException("a rejection reason is required");
+        }
+        if ("VERIFIED".equals(request.status()) && (request.expiresAt() == null || !request.expiresAt().isAfter(now))) {
+            throw new IllegalArgumentException("verified KYC requires a future expiry date");
+        }
+        if ("VERIFIED".equals(request.status()) && (previous == null || "NONE".equals(request.kycLevel())
+                || (!"SELF".equals(request.provider()) && (previous.providerReference() == null || previous.providerReference().isBlank())))) {
+            throw new IllegalArgumentException("approval requires a submitted identity verification application");
+        }
+        if ("VERIFIED".equals(request.status()) && "SELF".equals(request.provider())
+                && (previous == null || "[]".equals(previous.submittedDocuments()))) {
+            throw new IllegalArgumentException("manual approval requires submitted identity evidence");
+        }
+        if ("VERIFIED".equals(request.status()) && previous != null) {
+            if (!java.util.Objects.equals(previous.provider(),request.provider())) {
+                throw new IllegalArgumentException("approval must use the provider of the submitted application");
+            }
+            if ("SELF".equals(request.provider())) kycDocumentService.requireManualApprovalEvidence(previous,request.documentType(),request.kycLevel());
+            else if (!previous.kycLevel().equals(request.kycLevel())
+                    || !java.util.Objects.equals(previous.providerReference(), request.providerReference())) {
+                throw new IllegalArgumentException("approval cannot change the level or session verified by the provider");
+            }
+        }
+        if ("VERIFIED".equals(request.status()) && previous != null && previous.expiresAt() != null
+                && request.expiresAt().isAfter(previous.expiresAt())) {
+            throw new IllegalArgumentException("approval expiry cannot exceed submitted identity evidence validity");
+        }
         KycProfile updated = kycRepository.upsert(userId, adminUserId, request, now);
         enqueueKycTransition(previous, updated);
         return updated;

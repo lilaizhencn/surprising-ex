@@ -39,6 +39,7 @@ class ExternalKycProviderTest {
     void registrySelectsTheServerConfiguredProviderInsteadOfClientProviderField() {
         GatewayProperties properties = new GatewayProperties();
         properties.getKyc().setProvider("VERIFF");
+        properties.getKyc().getVeriff().setKycLevel("STANDARD");
         properties.getKyc().setSimulationEnabled(true);
         var registry = new KycProviderRegistry(List.of(
                 new SumsubKycProvider(properties, mapper), new VeriffKycProvider(properties, mapper)), properties);
@@ -55,7 +56,7 @@ class ExternalKycProviderTest {
         KycProvider veriff = provider("VERIFF");
         var registry = new KycProviderRegistry(List.of(sumsub, veriff), properties);
 
-        var refreshed = registry.refreshSession("VERIFF", 42, "existing-veriff-session");
+        var refreshed = registry.refreshSession(new ComplianceModels.KycProfile(42, "BASIC", "PENDING", "SG", "PASSPORT", "VERIFF", "existing-veriff-session", null, null, null, null, java.time.Instant.now(), java.time.Instant.now()), "https://example.veriff.com/session");
 
         assertThat(refreshed.provider()).isEqualTo("VERIFF");
         assertThat(refreshed.providerReference()).isEqualTo("existing-veriff-session");
@@ -66,7 +67,7 @@ class ExternalKycProviderTest {
         GatewayProperties properties = new GatewayProperties();
         properties.getKyc().setSimulationEnabled(false);
         properties.getKyc().getSumsub().setWebhookSecret("a-test-webhook-secret-with-at-least-32-chars");
-        byte[] body = "{\"type\":\"applicantReviewed\",\"reviewStatus\":\"onHold\",\"applicantId\":\"app-1\",\"externalUserId\":\"42\"}"
+        byte[] body = "{\"type\":\"applicantReviewed\",\"reviewStatus\":\"onHold\",\"createdAtMs\":\"2026-10-29 12:00:00.123\",\"levelName\":\"basic-kyc-level\",\"applicantId\":\"app-1\",\"externalUserId\":\"42\"}"
                 .getBytes(StandardCharsets.UTF_8);
         String digest = SumsubKycProvider.hmac(properties.getKyc().getSumsub().getWebhookSecret(), "HmacSHA256", body);
         var result = new SumsubKycProvider(properties, mapper)
@@ -86,7 +87,7 @@ class ExternalKycProviderTest {
         properties.getKyc().setSimulationEnabled(false);
         properties.getKyc().getVeriff().setApiKey("veriff-api-key");
         properties.getKyc().getVeriff().setSharedSecret("veriff-shared-secret-with-at-least-32-characters");
-        byte[] body = "{\"status\":\"success\",\"verification\":{\"id\":\"session-1\",\"status\":\"approved\",\"vendorData\":\"42\"}}"
+        byte[] body = "{\"status\":\"success\",\"verification\":{\"id\":\"session-1\",\"status\":\"approved\",\"vendorData\":\"42\",\"decisionTime\":\"2026-10-29T12:00:00Z\"}}"
                 .getBytes(StandardCharsets.UTF_8);
         String signature = SumsubKycProvider.hmac(properties.getKyc().getVeriff().getSharedSecret(), "HmacSHA256", body);
         var result = new VeriffKycProvider(properties, mapper).verifyCallback(Map.of(
@@ -111,8 +112,8 @@ class ExternalKycProviderTest {
                                                        List<com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument> documents) {
                 return new KycProviderSession(code, "new-session", null, null, "PENDING", false);
             }
-            @Override public KycProviderSession refreshSession(long userId, String providerReference) {
-                return new KycProviderSession(code, providerReference, "refreshed-token", null, "PENDING", false);
+            @Override public KycProviderSession refreshSession(ComplianceModels.KycProfile profile, String redirectUrl) {
+                return new KycProviderSession(code, profile.providerReference(), "refreshed-token", null, "PENDING", false);
             }
         };
     }

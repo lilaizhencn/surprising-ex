@@ -73,3 +73,17 @@ Gateway 现使用 Spring Security、安全浏览器会话、共享限流/邮件�
 ## 钱包 / custody 审计
 
 后台提现手续费目前尚未进入实际计费；未知状态重试后的错误退款仍是资金风险阻断项。已修复充提历史的用户归属过滤和充值回调十进制精度。复现步骤、测试结果、尚未闭环的故障路径与未测范围见 [钱包审计报告](docs/validation/wallet-custody-audit-20261029/README.md)；该报告不代表提现链路已完成安全验收。
+
+## KYC 闭环与移动适配
+
+身份认证由 Gateway 服务层维护。首次申请锁定资料行，阻止并发启动多个提供方会话；有效认证不可重复提交，过期认证与驳回申请可重新提交。人工通过必须有本次提交的证据和未来的有效期，驳回必须给出补正原因；人工有效期不得超过证件期限。增强认证按本次材料校验，第三方审核不能手动提升级别。
+
+`GET /api/v1/compliance/kyc/provider` 返回 `verificationOptions`（`applicantType`、`kycLevel`）。App/Web 只能选择服务端配置的流程。Sumsub 使用 `kyc.sumsub.level-names` 按 `INDIVIDUAL_BASIC`、`INDIVIDUAL_STANDARD`、`INDIVIDUAL_ENHANCED`、`BUSINESS_BASIC`、`BUSINESS_STANDARD`、`BUSINESS_ENHANCED` 绑定独立流程；空配置不开放，不能把同一个流程绑定成多个等级。基础个人流程沿用环境变量 `GATEWAY_KYC_SUMSUB_LEVEL_NAME`，其余采用 `GATEWAY_KYC_SUMSUB_<主体>_<等级>_LEVEL_NAME`。Veriff 的集成等级由 `GATEWAY_KYC_VERIFF_LEVEL` 明确绑定，仅开放个人认证。生产禁用模拟模式，流程名称必须与提供商账户实际配置一致。
+
+Sumsub 查询使用官方 `-;externalUserId=.../one` 路径，个人和企业有独立标识，国家转为 ISO 三位码。过期/可补正申请重置提供方材料；服务商最终拒绝不得自动重置。需要提供方的查看、创建、重置及令牌权限，Webhook 地址须在服务商后台单独配置，Veriff 的浏览器返回地址不替代 Webhook 地址。
+
+回调校验原文签名、申请人、会话、流程和提供方事件时间。回执、时间水位、资料和通知意图在同一事务提交；失败可重试。迟到待审及旧终态不能覆盖新结果，人工审核建立新的时间水位，之后服务商更新的拒绝仍会撤销资格并通知用户。第三方认证期限默认由 `GATEWAY_KYC_VALIDITY=365d` 限制，并取证件到期日与已有期限的最早值；过期证据只能得到 EXPIRED，不能授予资格。
+
+部署前执行 [数据库迁移](deployment/migrations/20261029-kyc-session-order.sql)。配置绑定与前后端应一起发布；先提供服务端流程元数据，再发布新客户端。已有待审会话所属流程配置应保持稳定，不能在尚未结束时替换其等级对应的服务商流程。
+
+Flutter 增加窗口宽度、真实折痕区域及横竖屏处理，iOS 26+ 导航接入 UIKit `UIGlassEffect`，六个主题使用独立的深色或实色调色板。验收证据与明确未测范围见 [本轮记录](docs/validation/kyc-adaptive-themes-20261029/README.md)。

@@ -37,7 +37,12 @@ public class ComplianceKycRepository {
                        provider_reference = EXCLUDED.provider_reference,
                        reviewed_by_user_id = EXCLUDED.reviewed_by_user_id,
                        reviewed_at = EXCLUDED.reviewed_at,
+                       provider_event_at = GREATEST(gateway_user_kyc_profiles.provider_event_at, EXCLUDED.reviewed_at),
                        rejection_reason = EXCLUDED.rejection_reason,
+                       face_verification_status = CASE
+                           WHEN EXCLUDED.status = 'VERIFIED' AND gateway_user_kyc_profiles.face_verification_status <> 'NOT_REQUIRED' THEN 'VERIFIED'
+                           WHEN EXCLUDED.status = 'REJECTED' AND gateway_user_kyc_profiles.face_verification_status <> 'NOT_REQUIRED' THEN 'FAILED'
+                           ELSE gateway_user_kyc_profiles.face_verification_status END,
                        expires_at = EXCLUDED.expires_at,
                        updated_at = EXCLUDED.updated_at
                 RETURNING user_id, kyc_level, status, country, document_type, provider, provider_reference,
@@ -78,6 +83,8 @@ public class ComplianceKycRepository {
                        reviewed_at = NULL,
                        rejection_reason = NULL,
                        expires_at = NULL,
+                       provider_event_at = NULL,
+                       provider_redirect_url = NULL,
                        updated_at = EXCLUDED.updated_at
                 RETURNING user_id, kyc_level, status, country, document_type, provider, provider_reference,
                           reviewed_by_user_id, reviewed_at, rejection_reason, expires_at, created_at, updated_at,
@@ -92,6 +99,35 @@ public class ComplianceKycRepository {
                 request.applicantType(),
                 request.faceVerificationStatus(),
                 Timestamp.from(now), Timestamp.from(now));
+    }
+
+    /** 首次申请也创建可锁定的资料行，防止并发请求启动两个第三方会话。调用方必须持有事务。 */
+    public KycProfile lockForSubmission(long userId, Instant now) {
+        jdbcTemplate.update("""
+                INSERT INTO gateway_user_kyc_profiles(user_id, created_at, updated_at)
+                VALUES (?, ?, ?) ON CONFLICT (user_id) DO NOTHING
+                """, userId, Timestamp.from(now), Timestamp.from(now));
+        return findForUpdate(userId);
+    }
+
+    public void saveProviderSession(long userId, String redirectUrl, Instant startedAt) {
+        jdbcTemplate.update("UPDATE gateway_user_kyc_profiles SET provider_redirect_url=?, provider_event_at=? WHERE user_id=?",
+                redirectUrl, Timestamp.from(startedAt.minusMillis(1)), userId);
+    }
+
+    public String providerRedirectUrl(long userId) {
+        return jdbcTemplate.queryForObject("SELECT provider_redirect_url FROM gateway_user_kyc_profiles WHERE user_id=?", String.class, userId);
+    }
+
+    public boolean acceptProviderEvent(long userId, Instant occurredAt) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_user_kyc_profiles SET provider_event_at=?
+                 WHERE user_id=? AND (provider_event_at IS NULL OR provider_event_at<?)
+                """, Timestamp.from(occurredAt), userId, Timestamp.from(occurredAt)) == 1;
+    }
+
+    public void updateExpiry(long userId, Instant expiresAt) {
+        jdbcTemplate.update("UPDATE gateway_user_kyc_profiles SET expires_at=? WHERE user_id=?", Timestamp.from(expiresAt), userId);
     }
 
     public KycProfile find(long userId) {
@@ -115,20 +151,20 @@ public class ComplianceKycRepository {
                 """, (rs, rowNum) -> toProfile(rs), userId).stream().findFirst().orElse(null);
     }
 
-    public KycProfile applyProviderResult(long userId, String provider, String status, String rejectionReason, Instant reviewedAt, String faceStatus, Instant now) {
+    public KycProfile applyProviderResult(long userId, String provider, String status, String rejectionReason, Instant reviewedAt, String faceStatus, Instant now, Instant expiresAt) {
         return jdbcTemplate.queryForObject("""
                 UPDATE gateway_user_kyc_profiles
                    SET status = ?, rejection_reason = ?,
                        reviewed_by_user_id = NULL,
                        reviewed_at = ?,
-                       face_verification_status = ?,
+                       face_verification_status = ?, expires_at = ?,
                        updated_at = ?
                  WHERE user_id = ? AND provider = ?
                 RETURNING user_id, kyc_level, status, country, document_type, provider, provider_reference,
                           reviewed_by_user_id, reviewed_at, rejection_reason, expires_at, created_at, updated_at,
                           applicant_type, submitted_documents::text, face_verification_status
                 """, (rs, rowNum) -> toProfile(rs), status, rejectionReason,
-                ComplianceValidation.timestamp(reviewedAt), faceStatus, Timestamp.from(now), userId, provider);
+                ComplianceValidation.timestamp(reviewedAt), faceStatus, ComplianceValidation.timestamp(expiresAt), Timestamp.from(now), userId, provider);
     }
 
     private KycProfile toProfile(java.sql.ResultSet rs) throws java.sql.SQLException {

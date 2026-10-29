@@ -1,0 +1,545 @@
+{
+  "checks": [
+    "load failure/retry, loading, selections, date calendar, invalid file, upload/remove with exact ID, wrong upload owner rejection, document progress, one submit and pending result",
+    "rejected review displays full reason and supports a fresh application",
+    "verified profile remains usable when provider metadata fails",
+    "expired verified record offers a fresh application with current provider requirements",
+    "mismatched profile owner is rejected",
+    "provider failure blocks new application and has a working retry",
+    "country catalogue failure and retry keep submission disabled until real options load",
+    "external SDK fixture opens once, closes/destroys, reopens and cleans up before refresh",
+    "1440/390/320 layouts, light/dark screenshots, 60-second pending polling observation without unexpected console/page errors"
+  ],
+  "errors": [],
+  "samples": [
+    {
+      "JSEventListeners": 362,
+      "Nodes": 422,
+      "JSHeapUsedSize": 25470024
+    },
+    {
+      "JSEventListeners": 368,
+      "Nodes": 422,
+      "JSHeapUsedSize": 25698584
+    },
+    {
+      "JSEventListeners": 374,
+      "Nodes": 422,
+      "JSHeapUsedSize": 25937212
+    },
+    {
+      "JSEventListeners": 380,
+      "Nodes": 422,
+      "JSHeapUsedSize": 26148304
+    },
+    {
+      "JSEventListeners": 386,
+      "Nodes": 422,
+      "JSHeapUsedSize": 25604700
+    },
+    {
+      "JSEventListeners": 392,
+      "Nodes": 422,
+      "JSHeapUsedSize": 25831552
+    },
+    {
+      "JSEventListeners": 410,
+      "Nodes": 422,
+      "JSHeapUsedSize": 26148140
+    }
+  ],
+  "retained": [
+    {
+      "name": "JSEventListeners",
+      "value": 362
+    },
+    {
+      "name": "Nodes",
+      "value": 422
+    },
+    {
+      "name": "JSHeapUsedSize",
+      "value": 25513008
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/auth/csrf",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents/9007199254740993",
+      "method": "DELETE"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents/9007199254740993",
+      "method": "DELETE"
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/runtime",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/session/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/session/refresh",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/announcements",
+      "method": "GET"
+    }
+  ],
+  "browser": "153.0.8010.12",
+  "fixtureOnly": true
+}

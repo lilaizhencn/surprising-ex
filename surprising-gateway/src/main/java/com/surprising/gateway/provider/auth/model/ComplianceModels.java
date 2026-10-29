@@ -93,7 +93,9 @@ public final class ComplianceModels {
     public record KycSubmissionResponse(KycProfile profile, KycProvider.KycProviderSession verificationSession) {}
 
     public record KycSimulationRequest(@NotBlank @Size(max = 20) String decision) {}
-    public record KycProviderInfo(String provider, boolean simulationEnabled) {}
+    public record KycVerificationOption(String applicantType, String kycLevel) {}
+    public record KycProviderInfo(String provider, boolean simulationEnabled,
+                                  List<KycVerificationOption> verificationOptions) {}
 
     public record KycDocument(
             long documentId,

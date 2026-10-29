@@ -1,0 +1,264 @@
+{
+  "checks": [
+    "real upload, submission, admin original-document preview and rejection reason",
+    "corrected application and real admin approval on narrow screens",
+    "expired VERIFIED profile renews through a real new submission"
+  ],
+  "failures": [],
+  "requests": [
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents",
+      "method": "POST",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "POST",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/admin/compliance/aml-cases",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/aml-cases",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/risk-tags",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/risk-tags",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users/42",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users/42/kyc/documents/21",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users/42/kyc",
+      "method": "POST",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/aml-cases",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/risk-tags",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users/42",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents",
+      "method": "POST",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "POST",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/admin/compliance/risk-tags",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/risk-tags",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/aml-cases",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/aml-cases",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users/42",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users/42/kyc",
+      "method": "POST",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/risk-tags",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/aml-cases",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/admin/compliance/users/42",
+      "method": "GET",
+      "status": 200,
+      "admin": true
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc/provider",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/countries",
+      "method": "GET",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc/documents",
+      "method": "POST",
+      "status": 200,
+      "admin": false
+    },
+    {
+      "path": "/api/v1/compliance/kyc",
+      "method": "POST",
+      "status": 200,
+      "admin": false
+    }
+  ],
+  "browser": "153.0.8010.12",
+  "source": "KycClosureBrowserQaTest: actual controllers, transactions, PostgreSQL and filesystem; synthetic auth/identity and scan/rate-limit/email boundaries"
+}

@@ -2,6 +2,7 @@ package com.surprising.gateway.provider.auth.client;
 
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -33,35 +34,49 @@ public class SumsubKycProvider implements KycProvider {
         var config = properties.getKyc();
         if (config.isSimulationEnabled()) return new KycProviderSession(code(), "SIM-SUMSUB-" + userId + "-" + Instant.now().toEpochMilli(), null, null, "PENDING", true);
         var sumsub = config.getSumsub();
+        String levelName = sumsub.levelName(request.applicantType(), request.kycLevel());
         try {
-            String externalUserId = Long.toString(userId);
-            String existingPath = "/resources/applicants/-/byExternalUserId/" + enc(externalUserId);
+            String externalUserId = externalUserId(userId,request.applicantType());
+            String existingPath = "/resources/applicants/-;externalUserId=" + enc(externalUserId) + "/one";
             JsonNode existing = request("GET", existingPath, "");
             String applicantId = existing.path("id").asString("");
             if (applicantId.isBlank()) {
-                String applicant = requestBody(Map.of("externalUserId", externalUserId, "fixedInfo", Map.of("country", request.country())));
-                JsonNode created = request("POST", "/resources/applicants?levelName=" + enc(sumsub.getLevelName()), applicant);
+                String country = new java.util.Locale.Builder().setRegion(request.country()).build().getISO3Country();
+                String applicant = requestBody(Map.of("externalUserId", externalUserId,
+                        "type", "BUSINESS".equals(request.applicantType()) ? "company" : "individual",
+                        "fixedInfo", "BUSINESS".equals(request.applicantType())
+                                ? Map.of("companyInfo",Map.of("country",country)) : Map.of("country",country)));
+                JsonNode created = request("POST", "/resources/applicants?levelName=" + enc(levelName), applicant);
                 applicantId = created.path("id").asString("");
+            } else {
+                if ("FINAL".equals(existing.path("review").path("reviewResult").path("reviewRejectType").asString(""))) {
+                    throw new IllegalArgumentException("the provider requires a compliance review before another application");
+                }
+                if (!levelName.equals(existing.path("review").path("levelName").asString(""))) {
+                    request("POST", "/resources/applicants/" + enc(applicantId) + "/moveToLevel?name=" + enc(levelName), "{}");
+                }
+                request("POST", "/resources/applicants/" + enc(applicantId) + "/reset", "");
             }
             if (applicantId.isBlank()) throw new IllegalStateException("Sumsub did not return an applicant id");
-            String tokenBody = requestBody(Map.of("userId", externalUserId, "levelName", sumsub.getLevelName(), "ttlInSecs", 600));
+            String tokenBody = requestBody(Map.of("userId", externalUserId, "levelName", levelName, "ttlInSecs", 600));
             JsonNode token = request("POST", "/resources/accessTokens/sdk", tokenBody);
             String accessToken = token.path("token").asString("");
             if (accessToken.isBlank()) throw new IllegalStateException("Sumsub did not return an SDK token");
             return new KycProviderSession(code(), applicantId, accessToken, null, "PENDING", false);
-        } catch (Exception ex) { throw new IllegalStateException("Sumsub session creation failed", ex); }
+        } catch (IllegalArgumentException ex) { throw ex; }
+        catch (Exception ex) { throw new IllegalStateException("Sumsub session creation failed", ex); }
     }
 
-    @Override public KycProviderSession refreshSession(long userId, String providerReference) {
+    @Override public KycProviderSession refreshSession(KycProfile profile, String redirectUrl) {
         var config = properties.getKyc();
-        if (config.isSimulationEnabled()) return new KycProviderSession(code(), providerReference, null, null, "PENDING", true);
+        if (config.isSimulationEnabled()) return new KycProviderSession(code(), profile.providerReference(), null, null, "PENDING", true);
         try {
-            String body = requestBody(Map.of("userId", Long.toString(userId),
-                    "levelName", config.getSumsub().getLevelName(), "ttlInSecs", 600));
+            String body = requestBody(Map.of("userId", externalUserId(profile.userId(),profile.applicantType()),
+                    "levelName", config.getSumsub().levelName(profile.applicantType(), profile.kycLevel()), "ttlInSecs", 600));
             JsonNode token = request("POST", "/resources/accessTokens/sdk", body);
             String accessToken = token.path("token").asString("");
             if (accessToken.isBlank()) throw new IllegalStateException("Sumsub did not return an SDK token");
-            return new KycProviderSession(code(), providerReference, accessToken, null, "PENDING", false);
+            return new KycProviderSession(code(), profile.providerReference(), accessToken, null, "PENDING", false);
         } catch (Exception ex) { throw new IllegalStateException("Sumsub session token refresh failed", ex); }
     }
 
@@ -90,8 +105,30 @@ public class SumsubKycProvider implements KycProvider {
             String external = root.path("externalUserId").asString("");
             String event = sha256(body);
             String reason = root.path("reviewResult").path("clientComment").asString("");
-            return Optional.of(new KycProviderResult(id, external, event, status, reason.isBlank() ? null : reason));
-        } catch (Exception ex) { throw new IllegalArgumentException("invalid Sumsub webhook body", ex); }
+            String timestamp = root.path("createdAtMs").asString(root.path("createdAt").asString(""));
+            Instant occurredAt = timestamp.contains("T") ? Instant.parse(timestamp)
+                    : java.time.LocalDateTime.parse(timestamp, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss[.SSS]")).toInstant(java.time.ZoneOffset.UTC);
+            Instant evidenceExpiry = null;
+            if ("VERIFIED".equals(status)) {
+                final JsonNode applicant;
+                try { applicant = request("GET", "/resources/applicants/" + enc(id) + "/one", ""); }
+                catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new IllegalStateException("KYC evidence lookup was interrupted",ex); }
+                catch (Exception ex) { throw new IllegalStateException("KYC evidence is temporarily unavailable",ex); }
+                if (!id.equals(applicant.path("id").asString("")) || !external.equals(applicant.path("externalUserId").asString(""))) {
+                    throw new IllegalArgumentException("Sumsub verification evidence does not match the applicant");
+                }
+                for (JsonNode document : applicant.path("info").path("idDocs")) {
+                    if (!List.of("ID_CARD","PASSPORT","DRIVERS","RESIDENCE_PERMIT").contains(document.path("idDocType").asString(""))) continue;
+                    String until = document.path("validUntil").asString("");
+                    if (until.isBlank()) continue;
+                    Instant end = java.time.LocalDate.parse(until).plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+                    if (evidenceExpiry == null || end.isBefore(evidenceExpiry)) evidenceExpiry = end;
+                }
+            }
+            return Optional.of(new KycProviderResult(id, external, event, status, reason.isBlank() ? null : reason,
+                    occurredAt, root.path("levelName").asString(""), evidenceExpiry));
+        } catch (IllegalStateException ex) { throw ex; }
+        catch (Exception ex) { throw new IllegalArgumentException("invalid Sumsub webhook body", ex); }
     }
 
     private JsonNode request(String method, String path, String body) throws Exception {
@@ -109,6 +146,9 @@ public class SumsubKycProvider implements KycProvider {
         return mapper.readTree(res.body());
     }
     private String requestBody(Object value) { return mapper.writeValueAsString(value); }
+    private static String externalUserId(long userId,String applicantType) {
+        return Long.toString(userId) + ("BUSINESS".equals(applicantType) ? ":BUSINESS" : "");
+    }
     public static String hmac(String secret, String algorithm, byte[] data) {
         try { Mac mac = Mac.getInstance(algorithm); mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), algorithm)); return HexFormat.of().formatHex(mac.doFinal(data)); }
         catch (Exception ex) { throw new IllegalStateException("unable to calculate provider signature", ex); }

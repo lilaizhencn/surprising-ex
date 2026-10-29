@@ -7,6 +7,7 @@ import com.surprising.gateway.provider.storage.KycDocumentStorageService;
 import com.surprising.gateway.provider.exception.KycDocumentNotFoundException;
 import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.repository.KycDocumentRepository;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import static com.surprising.gateway.provider.utils.KycDocumentFormats.normalizeDocumentType;
@@ -179,6 +180,24 @@ public class KycDocumentService {
         if ("PENDING".equals(normalizedFaceStatus)
                 && documents.stream().noneMatch(document -> Set.of("FACE_IMAGE", "ID_CARD_SELFIE").contains(document.documentType()))) {
             throw new IllegalArgumentException("a face image is required when face verification is enabled");
+        }
+    }
+
+    /** 审核只能使用本次已提交的证据；草稿或上次申请的材料不能据此提升级别。 */
+    public void requireManualApprovalEvidence(KycProfile profile, String documentType, String level) {
+        try {
+            JsonNode references = objectMapper.readTree(profile.submittedDocuments());
+            if (!references.isArray() || references.isEmpty()) throw new IllegalArgumentException("manual approval requires submitted identity evidence");
+            java.util.ArrayList<Long> ids = new java.util.ArrayList<>();
+            for (JsonNode reference : references) {
+                String value = reference.path("reference").asString("");
+                if (!value.startsWith("document:")) throw new IllegalArgumentException("manual approval evidence reference is invalid");
+                ids.add(Long.parseLong(value.substring("document:".length())));
+            }
+            requireSubmissionDocuments(profile.userId(), ids, documentType, profile.applicantType(), level,
+                    "ENHANCED".equals(level) ? "PENDING" : "NOT_REQUIRED");
+        } catch (tools.jackson.core.JacksonException | NumberFormatException ex) {
+            throw new IllegalArgumentException("manual approval evidence is invalid", ex);
         }
     }
 
