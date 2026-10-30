@@ -76,6 +76,26 @@ class ClusterCapacityMetricsTest {
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("not drained");
     }
 
+    @Test
+    @org.junit.jupiter.api.Timeout(2)
+    void waitsForWorkerQueuePublicationAfterTerminalReplies() {
+        var queries = new java.util.concurrent.atomic.AtomicInteger();
+        var drained = laneMetrics(0);
+        var actual = ClusterCapacityMain.awaitDrainedTopology(
+                () -> queries.incrementAndGet() == 1 ? laneMetrics(1) : drained,
+                1, 2, java.util.concurrent.TimeUnit.SECONDS.toNanos(1));
+        assertThat(actual).isSameAs(drained);
+        assertThat(queries.get()).isEqualTo(2);
+    }
+
+    @Test
+    void rejectsStalledQueuesAndWrongTopologyAtTheBoundary() {
+        assertThatThrownBy(() -> ClusterCapacityMain.awaitDrainedTopology(() -> laneMetrics(1), 1, 2, 0))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("boundary timeout");
+        assertThatThrownBy(() -> ClusterCapacityMain.awaitDrainedTopology(() -> laneMetrics(0), 2, 2, 0))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("topology");
+    }
+
     private static com.surprising.aeron.protocol.CoreLaneMetricsView laneMetrics(int dispatchDepth) {
         return new com.surprising.aeron.protocol.CoreLaneMetricsView(1, 2,
                 dispatchDepth, 64, dispatchDepth, 0, 64, 0, 0, 64, 0, 0,

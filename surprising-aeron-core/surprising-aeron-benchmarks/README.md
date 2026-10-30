@@ -34,6 +34,9 @@
 
 核对 offered、accepted、terminal、unfinished 和账户资金、冻结、持仓、终态及恢复。JMH fork 失败、缺少资金核对或录制窗口截断都不能记为通过。
 
+`ClusterCapacityMain` 在预热及测量边界最多等待 30 秒，确认实际队列和在途水位全部排空；
+边界等待不计入稳定测量窗口。拓扑不符立即失败，排空超时保留最后一次观测指标。
+
 无 profiler 的主吞吐与 GC/JFR 分开测量。`pipelineInterval` 和录制事件中的 MEASUREMENT 区间用于归因；DataLoss、swap、限频或驱动上限按实际证据报告。历史数据见根 [性能验证记录](../../PERFORMANCE_VALIDATION.md)，不作为当前修改的性能结论。
 
 仅编译本模块可用：

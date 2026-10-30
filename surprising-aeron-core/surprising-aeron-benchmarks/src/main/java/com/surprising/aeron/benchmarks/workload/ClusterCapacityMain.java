@@ -681,19 +681,39 @@ public final class ClusterCapacityMain implements AutoCloseable {
 
     /** Read actual topology and drained queues outside the offered-load window. */
     private void auditLaneMetrics(String phase) {
-        var response = clients.query(CoreMessageType.LANE_METRICS_QUERY, stableId("lane-metrics:" + phase),
-                0, new byte[0]);
-        if (response.status() != ResponseStatus.OK)
-            throw new IllegalStateException("Lane metrics query failed: " + response.resultCode());
-        CoreLaneMetricsView view = CoreLaneMetricsCodec.decode(response.data());
-        requireDrainedTopology(view, positiveInt("surprising.aeron.matching-engines", 1),
-                positiveInt("surprising.aeron.account-lanes", 2));
+        CoreLaneMetricsView view = awaitDrainedTopology(() -> {
+            var response = clients.query(CoreMessageType.LANE_METRICS_QUERY, stableId("lane-metrics:" + phase),
+                    0, new byte[0]);
+            if (response.status() != ResponseStatus.OK)
+                throw new IllegalStateException("Lane metrics query failed: " + response.resultCode());
+            return CoreLaneMetricsCodec.decode(response.data());
+        }, positiveInt("surprising.aeron.matching-engines", 1),
+                positiveInt("surprising.aeron.account-lanes", 2), TimeUnit.SECONDS.toNanos(30));
         log.info("actualLaneMetrics phase={} matchingEngines={} accountLanes={} matcherDispatchDepth={} "
                         + "matchingCompletionDepth={} commandContextDepth={} accountQueueDepths={} "
                         + "accountQueueHighWater={} committedCoreSequence={}", phase, view.matchingEngineCount(),
                 view.accountLaneCount(), view.matcherDispatchDepth(), view.matchingCompletionDepth(),
                 view.commandContextDepth(), Arrays.toString(view.accountLaneQueueDepths()),
                 Arrays.toString(view.accountLaneQueueHighWaterMarks()), view.committedCoreSequence());
+    }
+
+    /** Terminal replies may precede the final worker queue publication. Wait only outside measurement. */
+    static CoreLaneMetricsView awaitDrainedTopology(java.util.function.Supplier<CoreLaneMetricsView> query,
+            int expectedMatchers, int expectedLanes, long timeoutNanos) {
+        long started = System.nanoTime();
+        while (true) {
+            CoreLaneMetricsView view = query.get();
+            if (view.matchingEngineCount() != expectedMatchers || view.accountLaneCount() != expectedLanes)
+                throw new IllegalStateException("actual Core topology differs from the requested benchmark topology");
+            try {
+                requireDrainedTopology(view, expectedMatchers, expectedLanes);
+                return view;
+            } catch (IllegalStateException pending) {
+                if (System.nanoTime() - started >= timeoutNanos)
+                    throw new IllegalStateException("Core queues did not drain within the boundary timeout: " + view, pending);
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+            }
+        }
     }
 
     static void requireDrainedTopology(CoreLaneMetricsView view, int expectedMatchers, int expectedLanes) {
