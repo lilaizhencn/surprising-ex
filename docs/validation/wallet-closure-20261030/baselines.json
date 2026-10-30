@@ -1,0 +1,32 @@
+[
+  {
+    "repository": "surprising-ex",
+    "branch": "master",
+    "baseline": "d8c07fea29a3cf25edbbaebbe1e04ba1d52963e5"
+  },
+  {
+    "repository": "surprising-wallet",
+    "branch": "master",
+    "baseline": "7d376c8577808034b2370a143ae20d074f86b83e"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "branch": "main",
+    "baseline": "cbbe4190076d92e3980aff957992db0e1b027b16"
+  },
+  {
+    "repository": "surprising-client",
+    "branch": "main",
+    "baseline": "dffb0a26aa8c837c804a3b42bf451b93091835fc"
+  },
+  {
+    "repository": "surprising-admin-web",
+    "branch": "main",
+    "baseline": "1e739b02bf64b3d5979a1e4c8fc7cb9828328116"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "branch": "main",
+    "baseline": "a0720511972d1773514686f7c7085f627caddbd4"
+  }
+]

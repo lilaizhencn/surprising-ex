@@ -1,0 +1,53 @@
+Running Gradle task 'assembleDebug'...
+WARNING: Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP): file_picker, screen_protector, share_plus
+Future versions of Flutter will fail to build if your app uses plugins that apply KGP.
+
+Please check the changelogs of these plugins and upgrade to a version that supports Built-in Kotlin.
+If no such version exists, report the issue to the plugin. If necessary, here is a guide on filing
+an issue against a plugin: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers#report-incompatible-kotlin-gradle-plugin-usage-to-plugin-authors
+
+If you are a plugin author, please migrate your plugin to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors
+Running Gradle task 'assembleDebug'...                             35.2s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...        2,794ms
+I/Choreographer( 3681): Skipped 146 frames!  The application may be doing too much work on its main thread.
+D/WindowLayoutComponentImpl( 3681): Register WindowLayoutInfoListener on Context=com.surprising.surprising_client.MainActivity@4b911e7, of which baseContext=android.app.ContextImpl@a13d300
+D/FlutterJNI( 3681): Sending viewport metrics to the engine.
+VMServiceFlutterDriver: Connecting to Flutter application at http://127.0.0.1:52484/roxx042tSHw=/
+VMServiceFlutterDriver: Isolate found with number: 1003357869531923
+VMServiceFlutterDriver: Isolate 1003357869531923 is runnable.
+VMServiceFlutterDriver: Isolate is paused at start.
+VMServiceFlutterDriver: Attempting to resume isolate
+I/flutter ( 3681): 00:00 +0: quotation, lost reply, restart and original-request recovery
+VMServiceFlutterDriver: Connected to Flutter application.
+I/Choreographer( 3681): Skipped 47 frames!  The application may be doing too much work on its main thread.
+I/Choreographer( 3681): Skipped 145 frames!  The application may be doing too much work on its main thread.
+I/HWUI    ( 3681): Davey! duration=2558ms; Flags=1, FrameTimelineVsyncId=12186, IntendedVsync=260501516782, Vsync=262918183352, InputEventId=0, HandleInputStart=262932573649, AnimationStart=262932575272, PerformTraversalsStart=262932576151, DrawStart=262947215735, FrameDeadline=260518183448, FrameStartTime=262931825511, FrameInterval=16666666, WorkloadTarget=16666666, SyncQueued=262949262723, SyncStart=262952010660, IssueDrawCommandsStart=262952644445, SwapBuffers=262983827987, FrameCompleted=263062747565, DequeueBufferDuration=55388820, QueueBufferDuration=2382213, GpuCompleted=263054246378, SwapBuffersCompleted=263062747565, DisplayPresentTime=0, CommandSubmissionCompleted=262983827987,
+VMServiceFlutterDriver: request_data message is taking a long time to complete...
+I/rprising_client( 3681): AssetManager2(0x716d2f21ab98) locale list changing from [] to [en-US]
+I/ImeTracker( 3681): com.surprising.surprising_client:d16dc217: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+I/ImeTracker( 3681): com.surprising.surprising_client:d16dc217: onFailed at PHASE_CLIENT_VIEW_SERVED
+W/InputMethodManager( 3681): Ignoring showSoftInput() as view=io.flutter.embedding.android.FlutterView{a29b6de VFE...... .F....ID 0,0-1080,2400 #2} is not served.
+I/ImeTracker( 3681): com.surprising.surprising_client:c38efe66: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+I/ImeTracker( 3681): com.surprising.surprising_client:c38efe66: onFailed at PHASE_CLIENT_VIEW_SERVED
+W/InputMethodManager( 3681): Ignoring showSoftInput() as view=io.flutter.embedding.android.FlutterView{a29b6de VFE...... .F....ID 0,0-1080,2400 #2} is not served.
+I/AssistStructure( 3681): Flattened final assist data: 516 bytes, containing 1 windows, 3 views
+I/ImeTracker( 3681): com.surprising.surprising_client:411297a7: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+I/ImeTracker( 3681): com.surprising.surprising_client:411297a7: onFailed at PHASE_CLIENT_VIEW_SERVED
+W/InputMethodManager( 3681): Ignoring showSoftInput() as view=io.flutter.embedding.android.FlutterView{a29b6de VFE...... .F...... 0,0-1080,2400 #2 aid=1073741824} is not served.
+I/ImeTracker( 3681): com.surprising.surprising_client:ea19fcca: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+I/ImeTracker( 3681): com.surprising.surprising_client:ea19fcca: onFailed at PHASE_CLIENT_VIEW_SERVED
+W/InputMethodManager( 3681): Ignoring showSoftInput() as view=io.flutter.embedding.android.FlutterView{a29b6de VFE...... .F...... 0,0-1080,2400 #2 aid=1073741824} is not served.
+I/ImeTracker( 3681): com.surprising.surprising_client:944c2be0: onRequestHide at ORIGIN_CLIENT reason HIDE_SOFT_INPUT fromUser false
+I/ImeTracker( 3681): com.surprising.surprising_client:944c2be0: onFailed at PHASE_CLIENT_VIEW_SERVED
+D/CompatChangeReporter( 3681): Compat change id reported: 395521150; UID 10216; state: ENABLED
+I/flutter ( 3681): NATIVE_CAPTURE_READY:native-wallet-quote:/data/user/0/com.surprising.surprising_client/code_cache/wallet-closure-native-wallet-quote.ack
+I/rprising_client( 3681): AssetManager2(0x716d2f21da78) locale list changing from [] to [en-US]
+W/WindowOnBackDispatcher( 3681): sendCancelIfRunning: isInProgress=false callback=androidx.activity.OnBackPressedDispatcher$Api34Impl$createOnBackAnimationCallback$1@3a12f8d
+I/flutter ( 3681): NATIVE_CAPTURE_READY:native-wallet-unknown:/data/user/0/com.surprising.surprising_client/code_cache/wallet-closure-native-wallet-unknown.ack
+I/flutter ( 3681): NATIVE_CAPTURE_READY:native-wallet-restarted-dark-large:/data/user/0/com.surprising.surprising_client/code_cache/wallet-closure-native-wallet-restarted-dark-large.ack
+I/flutter ( 3681): NATIVE_CAPTURE_READY:native-wallet-completed:/data/user/0/com.surprising.surprising_client/code_cache/wallet-closure-native-wallet-completed.ack
+I/flutter ( 3681): NATIVE_CAPTURE_READY:native-wallet-history:/data/user/0/com.surprising.surprising_client/code_cache/wallet-closure-native-wallet-history.ack
+I/flutter ( 3681): 01:11 +1: (tearDownAll)
+I/flutter ( 3681): 01:11 +2: All tests passed!
+All tests passed.

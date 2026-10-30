@@ -22,16 +22,25 @@ public class CustodyWithdrawalStateService {
     private final CustodyWithdrawalRepository repository;
     private final CustodyWithdrawalEventRepository events;
     private final CustodyWithdrawalActionRepository actions;
+    private final com.surprising.gateway.provider.repository.CustodyWithdrawalFeeRepository fees;
+    private final com.surprising.asset.service.AssetConfigurationService assets;
     public CustodyWithdrawalStateService(CustodyWithdrawalRepository repository,
                                         CustodyWithdrawalEventRepository events,
-                                        CustodyWithdrawalActionRepository actions) {
+                                        CustodyWithdrawalActionRepository actions, com.surprising.gateway.provider.repository.CustodyWithdrawalFeeRepository fees,
+                                        com.surprising.asset.service.AssetConfigurationService assets) {
         this.repository = repository;
         this.events = events;
         this.actions = actions;
+        this.fees = fees;
+        this.assets = assets;
     }
 
     @Transactional
     public CreateResult createOrGet(CreateRequest request) {
+        if (request.fees()==null || request.fees().feeUnits()<0 || request.fees().receivedUnits()<=0
+                || request.amountUnits()!=Math.addExact(request.fees().feeUnits(),request.fees().receivedUnits())) {
+            throw new IllegalArgumentException("withdrawal fee snapshot does not balance");
+        }
         WithdrawalRecord existing = repository.findByUserAndIdempotency(request.userId(), request.idempotencyKey());
         if (existing != null) {
             if (!existing.requestHash().equals(request.requestHash())) {
@@ -50,6 +59,12 @@ public class CustodyWithdrawalStateService {
         BigDecimal dailyTotal = repository.dailyTotal(request.userId());
         if (dailyTotal != null && dailyTotal.add(request.usdtValue()).compareTo(request.dailyLimitUsdt()) > 0) {
             throw new IllegalArgumentException("daily withdrawal limit exceeded");
+        }
+        var quote = assets.lockWithdrawalQuote(request.assetSymbol(),request.chain(),request.amount());
+        if (quote.networkId()!=request.fees().networkId() || quote.networkRevision()!=request.fees().networkRevision()
+                || quote.amountUnits()!=request.amountUnits() || quote.feeUnits()!=request.fees().feeUnits()
+                || quote.receivedUnits()!=request.fees().receivedUnits()) {
+            throw new IllegalArgumentException("withdrawal quote changed before intent commit; request a new quotation");
         }
         UUID id = UUID.randomUUID();
         String status = request.requiresApproval() ? "PENDING_APPROVAL" : "PROCESSING";
@@ -282,6 +297,7 @@ public class CustodyWithdrawalStateService {
             throw new IllegalStateException("wallet withdrawal id is already bound", ex);
         }
         WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal completed", "COMPLETED");
+        fees.recognize(record);
         recordTransitionEvent(id, "COMPLETED", "CUSTODY_WALLET", before, record, updated,
                 walletWithdrawalId, walletResponse, null, providerEventId);
         return record;

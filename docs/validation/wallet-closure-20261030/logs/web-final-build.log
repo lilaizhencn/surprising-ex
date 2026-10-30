@@ -1,0 +1,58 @@
+$ tsc -b && vite build
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 2883 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                  0.96 kB │ gzip:  0.44 kB
+dist/assets/AccountSecurityPage-CBIo29tQ.css     0.17 kB │ gzip:  0.13 kB
+dist/assets/TradeFillTable-BEqftnzm.css          0.78 kB │ gzip:  0.36 kB
+dist/assets/TradingAccountTables-CWPpJxzs.css    0.96 kB │ gzip:  0.44 kB
+dist/assets/TradePage-Dhmo7Idw.css               1.35 kB │ gzip:  0.51 kB
+dist/assets/SecurityPages-BtnQQ_3K.css           1.41 kB │ gzip:  0.56 kB
+dist/assets/AffiliatePage-v9tII4Nw.css           1.55 kB │ gzip:  0.58 kB
+dist/assets/DevelopersPage-BitSWJ6N.css          2.23 kB │ gzip:  0.65 kB
+dist/assets/CompliancePage-cGTt106H.css          5.10 kB │ gzip:  1.47 kB
+dist/assets/AssetsPage-ButhmbfV.css              6.61 kB │ gzip:  1.46 kB
+dist/assets/FundingPage-DYQvAN50.css             7.21 kB │ gzip:  1.68 kB
+dist/assets/DatePicker-BK0sZUay.css              8.71 kB │ gzip:  1.84 kB
+dist/assets/C2cTradingPage-Ce0Y1fkS.css         15.18 kB │ gzip:  3.07 kB
+dist/assets/index-CXxMGdRu.css                 103.28 kB │ gzip: 17.99 kB
+dist/assets/plus-BeI68vjX.js                     0.14 kB │ gzip:  0.14 kB
+dist/assets/arrow-left-BXaCoRw3.js               0.16 kB │ gzip:  0.15 kB
+dist/assets/download-DypzCvKk.js                 0.22 kB │ gzip:  0.18 kB
+dist/assets/copy-CWfn8gh7.js                     0.23 kB │ gzip:  0.20 kB
+dist/assets/circle-alert-Dux_pmui.js             0.24 kB │ gzip:  0.18 kB
+dist/assets/send-cKmfBHyp.js                     0.28 kB │ gzip:  0.22 kB
+dist/assets/key-round-CmJYI4xf.js                0.35 kB │ gzip:  0.25 kB
+dist/assets/eye-BpGFptb5.js                      0.62 kB │ gzip:  0.34 kB
+dist/assets/SecurityPages-CvEdY1aV.js            1.04 kB │ gzip:  0.49 kB
+dist/assets/assetPortfolio-CY4V4SZW.js           2.51 kB │ gzip:  1.05 kB
+dist/assets/units-BrWoTXKo.js                    2.57 kB │ gzip:  0.98 kB
+dist/assets/affiliate-DCNocYJ6.js                2.64 kB │ gzip:  1.18 kB
+dist/assets/HelpPage-Baq4RpCg.js                 3.83 kB │ gzip:  1.61 kB
+dist/assets/TradeFillTable-DmDSwjUd.js           4.24 kB │ gzip:  1.31 kB
+dist/assets/NotificationsPage-BasWFXow.js        4.73 kB │ gzip:  1.76 kB
+dist/assets/AuthPage-AKXdRiRO.js                 9.60 kB │ gzip:  3.63 kB
+dist/assets/realtime-BqVRriHC.js                 9.63 kB │ gzip:  3.66 kB
+dist/assets/DeviceManagementPage-2NcngWsX.js    10.59 kB │ gzip:  3.85 kB
+dist/assets/AssetsPage-DJf_Oivb.js              10.74 kB │ gzip:  3.51 kB
+dist/assets/DeveloperApiPage-CGxY7i6P.js        11.48 kB │ gzip:  3.70 kB
+dist/assets/LedgerPage-C06p3Qih.js              11.99 kB │ gzip:  3.56 kB
+dist/assets/AffiliatePage-ZsgBKNiX.js           14.27 kB │ gzip:  4.98 kB
+dist/assets/AccountSecurityPage-LsdPq2sF.js     15.17 kB │ gzip:  4.92 kB
+dist/assets/DevelopersPage-DlQscckK.js          16.97 kB │ gzip:  6.39 kB
+dist/assets/TradingAccountTables-DsgyCPiP.js    22.19 kB │ gzip:  7.20 kB
+dist/assets/CompliancePage-p23Z3alZ.js          23.39 kB │ gzip:  7.43 kB
+dist/assets/browser-Cgti_2FH.js                 23.45 kB │ gzip:  8.85 kB
+dist/assets/OrdersPage-Dc6TAn9q.js              24.98 kB │ gzip:  7.01 kB
+dist/assets/endpoints-CCVS-H4Q.js               39.48 kB │ gzip: 10.20 kB
+dist/assets/FundingPage-DUiRavFU.js             42.99 kB │ gzip: 11.82 kB
+dist/assets/DatePicker-BnIrWD38.js              76.69 kB │ gzip: 23.09 kB
+dist/assets/C2cTradingPage-BhZVDJXx.js          77.85 kB │ gzip: 23.62 kB
+dist/assets/jsx-runtime-DLO0cHq1.js            112.03 kB │ gzip: 42.18 kB
+dist/assets/Primitives-_JonfUdI.js             150.58 kB │ gzip: 45.62 kB
+dist/assets/TradePage-C-fvZtq8.js              264.41 kB │ gzip: 80.70 kB
+dist/assets/index-B7OE9syA.js                  282.79 kB │ gzip: 87.93 kB
+
+✓ built in 4.10s

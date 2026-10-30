@@ -44,30 +44,31 @@ class CustodyWalletControllerTest {
         when(complianceService.kyc(42L)).thenReturn(new KycProfile(
                 42L, "STANDARD", "VERIFIED", null, null, null, null,
                 null, null, null, null, Instant.now(), Instant.now()));
-        when(walletClient.withdrawalAddressId(42L, "ETH", "USDT", "25")).thenReturn(configuredSource);
+
         CustodyWithdrawalService.WithdrawalResponse response = new CustodyWithdrawalService.WithdrawalResponse(
                 UUID.randomUUID(), "BROADCAST_UNKNOWN", "wallet-withdrawal-1", new BigDecimal("25"),
-                Instant.now(), Instant.now());
+                Instant.now(), Instant.now(), "25", "0", "25",0L);
         when(withdrawalService.submit(eq(42L), eq("withdraw-1"), any())).thenReturn(response);
+        when(withdrawalService.submit(eq(42L),eq("withdraw-1"),org.mockito.ArgumentMatchers.argThat(value -> forgedSource.equals(value.custodyAddressId()))))
+                .thenThrow(new IllegalArgumentException("withdrawal source differs from funded source"));
         CustodyWalletController controller = new CustodyWalletController(
                 authService, walletClient, verificationService, complianceService, withdrawalService);
 
         assertThatThrownBy(() -> controller.createWithdrawal("Bearer token", "withdraw-1", null, null,
                 new CustodyWalletController.CreateWithdrawalRequest(
-                        forgedSource, "ETH", "USDT", "0xrecipient", "25", null)))
+                        forgedSource, "ETH", "USDT", "0xrecipient", "25", null, 0L)))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode())
                         .isEqualTo(HttpStatus.BAD_REQUEST));
         controller.createWithdrawal("Bearer token", "withdraw-1", null, null,
                 new CustodyWalletController.CreateWithdrawalRequest(
-                        null, "ETH", "USDT", "0xrecipient", "25", null));
+                        null, "ETH", "USDT", "0xrecipient", "25", null, 0L));
 
         ArgumentCaptor<CustodyWithdrawalService.WithdrawalRequest> requests =
                 ArgumentCaptor.forClass(CustodyWithdrawalService.WithdrawalRequest.class);
-        verify(withdrawalService)
-                .submit(eq(42L), eq("withdraw-1"), requests.capture());
-        assertThat(requests.getValue().custodyAddressId()).isEqualTo(configuredSource);
-        verify(walletClient, times(2)).withdrawalAddressId(42L, "ETH", "USDT", "25");
+        verify(withdrawalService,times(2)).submit(eq(42L),eq("withdraw-1"),requests.capture());
+        assertThat(requests.getValue().custodyAddressId()).isNull();
+        org.mockito.Mockito.verifyNoInteractions(walletClient);
     }
 
     @Test

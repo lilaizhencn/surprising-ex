@@ -37,12 +37,15 @@ public class CustodyWithdrawalRepository {
                 INSERT INTO gateway_wallet_withdrawals (
                     withdrawal_id, user_id, idempotency_key, request_sha256, chain, asset_symbol,
                     custody_address_id, to_address, amount, amount_units, usdt_value, external_reference,
-                    spot_debit_reference, request_payload, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                    spot_debit_reference, request_payload, status, created_at, updated_at,
+                    fee_amount, fee_units, received_amount, received_units, network_id, network_revision, funding_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, id, request.userId(), request.idempotencyKey(), request.requestHash(), request.chain(),
                 request.assetSymbol(), request.custodyAddressId(), request.toAddress(), request.amount(),
                 request.amountUnits(), request.usdtValue(), request.externalReference(),
-                request.spotDebitReference(), request.requestPayload(), status, Timestamp.from(now), Timestamp.from(now));
+                request.spotDebitReference(), request.requestPayload(), status, Timestamp.from(now), Timestamp.from(now),
+                request.fees().fee(), request.fees().feeUnits(), request.fees().receivedAmount(),
+                request.fees().receivedUnits(), request.fees().networkId(), request.fees().networkRevision(), request.fundingSource());
     }
 
     public WithdrawalRecord find(UUID withdrawalId) {
@@ -91,12 +94,18 @@ public class CustodyWithdrawalRepository {
                 : jdbcTemplate.query(selectListSql(predicate, safeLimit), this::toRecord, status.trim().toUpperCase());
     }
 
-    public List<WithdrawalRecord> listPendingFailures(Duration gracePeriod, int limit) {
-        int safeLimit = Math.max(1, Math.min(limit, 200));
-        long seconds = Math.max(1L, gracePeriod.getSeconds());
-        return jdbcTemplate.query(selectListSql(
-                "status = 'FAILED_PENDING' AND updated_at <= now() - (? * INTERVAL '1 second')", safeLimit),
-                this::toRecord, seconds);
+    /** Claim a bounded, fair recovery page; lease expiry only retries the original identities, never authorizes refunds. */
+    public List<WithdrawalRecord> claimRecoverable(Duration gracePeriod, Duration lease, int limit) {
+        return jdbcTemplate.query("""
+                with candidates as (
+                    select withdrawal_id from gateway_wallet_withdrawals
+                     where status in ('PROCESSING','DEBIT_UNKNOWN','DEBITED','BROADCAST_UNKNOWN','SUBMITTED','FAILED_PENDING','REFUND_PENDING')
+                       and updated_at <= now() - (? * interval '1 second') and reconcile_after <= now()
+                     order by reconcile_after,created_at,withdrawal_id limit ? for update skip locked
+                )
+                update gateway_wallet_withdrawals w set reconcile_after=now()+(? * interval '1 second')
+                 where withdrawal_id in (select withdrawal_id from candidates) returning w.*
+                """,this::toRecord,Math.max(1,gracePeriod.getSeconds()),Math.max(1,Math.min(limit,200)),Math.max(1,lease.getSeconds()));
     }
 
     public int recordAdminRetryRow(UUID id, long adminUserId, String adminUsername, String reason) {
@@ -206,7 +215,7 @@ public class CustodyWithdrawalRepository {
         return jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REJECTED', error_code = ?, error_message = ?, updated_at = now()
-                 WHERE withdrawal_id = ? AND status IN ('PENDING_APPROVAL', 'PROCESSING', 'REJECTED')
+                 WHERE withdrawal_id = ? AND status IN ('PENDING_APPROVAL', 'PROCESSING', 'DEBIT_UNKNOWN', 'REJECTED')
                 """, code, error, id);
     }
 
@@ -226,7 +235,8 @@ public class CustodyWithdrawalRepository {
                        custody_address_id, to_address, amount, amount_units, usdt_value, external_reference,
                        spot_debit_reference, request_payload::text, status, wallet_response::text,
                        wallet_withdrawal_id, error_code, error_message, created_at, updated_at,
-                       submitted_at, completed_at, admin_user_id, admin_username, admin_reason
+                       submitted_at, completed_at, admin_user_id, admin_username, admin_reason,
+                       fee_amount, fee_units, received_amount, received_units, network_id, network_revision, funding_source
                   FROM gateway_wallet_withdrawals
                  WHERE
                 """ + predicate + " ORDER BY created_at DESC LIMIT " + limit;
@@ -265,7 +275,10 @@ public class CustodyWithdrawalRepository {
                 rs.getString("wallet_response"), rs.getString("wallet_withdrawal_id"), rs.getString("error_code"),
                 rs.getString("error_message"), instant(rs, "created_at"), instant(rs, "updated_at"),
                 nullableInstant(rs, "submitted_at"), nullableInstant(rs, "completed_at"),
-                nullableLong(rs, "admin_user_id"), rs.getString("admin_username"), rs.getString("admin_reason"));
+                nullableLong(rs, "admin_user_id"), rs.getString("admin_username"), rs.getString("admin_reason"),
+                new com.surprising.gateway.provider.model.CustodyWithdrawalModels.FeeSnapshot(
+                        rs.getString("fee_amount"), rs.getLong("fee_units"), rs.getString("received_amount"),
+                        rs.getLong("received_units"), rs.getInt("network_id"), rs.getLong("network_revision")), rs.getString("funding_source"));
     }
     private Instant instant(ResultSet rs, String column) throws SQLException {
         return rs.getTimestamp(column).toInstant();

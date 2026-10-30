@@ -149,10 +149,10 @@ class BinanceApiControllerTest {
         Instant now = Instant.now();
         when(withdrawalService.submit(eq(1001L), eq("withdraw-1"), any()))
                 .thenReturn(new CustodyWithdrawalService.WithdrawalResponse(
-                        withdrawalId, "SUBMITTED", "wallet-withdrawal-1", BigDecimal.ONE, now, now));
+                        withdrawalId, "SUBMITTED", "wallet-withdrawal-1", BigDecimal.ONE, now, now, "25", "0", "25", 0L));
         CustodyWalletClient custodyWalletClient = mock(CustodyWalletClient.class);
         UUID sourceAddressId = UUID.randomUUID();
-        when(custodyWalletClient.withdrawalAddressId(1001L, "ETH", "USDT", "1")).thenReturn(sourceAddressId);
+
         BinanceApiController controller = new BinanceApiController(properties, mock(GatewayProxyController.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,
                 custodyWalletClient, withdrawalService, new ObjectMapper());
@@ -168,8 +168,8 @@ class BinanceApiControllerTest {
         ArgumentCaptor<CustodyWithdrawalService.WithdrawalRequest> requestCaptor =
                 ArgumentCaptor.forClass(CustodyWithdrawalService.WithdrawalRequest.class);
         verify(withdrawalService).submit(eq(1001L), eq("withdraw-1"), requestCaptor.capture());
-        assertThat(requestCaptor.getValue().custodyAddressId()).isEqualTo(sourceAddressId);
-        verify(custodyWalletClient).withdrawalAddressId(1001L, "ETH", "USDT", "1");
+        assertThat(requestCaptor.getValue().custodyAddressId()).isNull();
+        org.mockito.Mockito.verifyNoInteractions(custodyWalletClient);
     }
 
     @Test
@@ -349,6 +349,7 @@ class BinanceApiControllerTest {
         request.addParameter("address", "0x1111111111111111111111111111111111111111");
         request.addParameter("amount", "1");
         request.addParameter("withdrawOrderId", "withdraw-1");
+        request.addParameter("networkRevision", "0");
         return request;
     }
 }

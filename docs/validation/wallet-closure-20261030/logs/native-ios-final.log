@@ -1,0 +1,33 @@
+Running Xcode build...
+Xcode build done.                                           123.4s
+VMServiceFlutterDriver: Connecting to Flutter application at http://127.0.0.1:49795/2hOVlO5Rbi0=/
+VMServiceFlutterDriver: Isolate found with number: 6880418924713995
+VMServiceFlutterDriver: Isolate 6880418924713995 is runnable.
+VMServiceFlutterDriver: Isolate is paused at start.
+VMServiceFlutterDriver: Attempting to resume isolate
+flutter: 00:00 +0: quotation, lost reply, restart and original-request recovery
+VMServiceFlutterDriver: Connected to Flutter application.
+VMServiceFlutterDriver: request_data message is taking a long time to complete...
+flutter: NATIVE_CAPTURE_READY:native-wallet-quote:/Users/atomex/Library/Developer/CoreSimulator/Devices/BCCA28B1-567E-404B-A8F2-79D56A701F75/data/Containers/Data/Application/F1148D98-5EFB-4CA0-B90A-7F9F22FD2DD9/tmp/wallet-closure-native-wallet-quote.ack
+Detected file type from extension: PNG
+Note: No display specified. Defaulting to display: C666BF28-7853-4B67-8F99-9BF6D1CD8D07 (screenID: 1, name: LCD)
+Wrote screenshot to: /private/tmp/surprising-wallet-closure-20261030/ios-final/native-wallet-quote.png
+flutter: NATIVE_CAPTURE_READY:native-wallet-unknown:/Users/atomex/Library/Developer/CoreSimulator/Devices/BCCA28B1-567E-404B-A8F2-79D56A701F75/data/Containers/Data/Application/F1148D98-5EFB-4CA0-B90A-7F9F22FD2DD9/tmp/wallet-closure-native-wallet-unknown.ack
+Detected file type from extension: PNG
+Note: No display specified. Defaulting to display: C666BF28-7853-4B67-8F99-9BF6D1CD8D07 (screenID: 1, name: LCD)
+Wrote screenshot to: /private/tmp/surprising-wallet-closure-20261030/ios-final/native-wallet-unknown.png
+flutter: NATIVE_CAPTURE_READY:native-wallet-restarted-dark-large:/Users/atomex/Library/Developer/CoreSimulator/Devices/BCCA28B1-567E-404B-A8F2-79D56A701F75/data/Containers/Data/Application/F1148D98-5EFB-4CA0-B90A-7F9F22FD2DD9/tmp/wallet-closure-native-wallet-restarted-dark-large.ack
+Detected file type from extension: PNG
+Note: No display specified. Defaulting to display: C666BF28-7853-4B67-8F99-9BF6D1CD8D07 (screenID: 1, name: LCD)
+Wrote screenshot to: /private/tmp/surprising-wallet-closure-20261030/ios-final/native-wallet-restarted-dark-large.png
+flutter: NATIVE_CAPTURE_READY:native-wallet-completed:/Users/atomex/Library/Developer/CoreSimulator/Devices/BCCA28B1-567E-404B-A8F2-79D56A701F75/data/Containers/Data/Application/F1148D98-5EFB-4CA0-B90A-7F9F22FD2DD9/tmp/wallet-closure-native-wallet-completed.ack
+Detected file type from extension: PNG
+Note: No display specified. Defaulting to display: C666BF28-7853-4B67-8F99-9BF6D1CD8D07 (screenID: 1, name: LCD)
+Wrote screenshot to: /private/tmp/surprising-wallet-closure-20261030/ios-final/native-wallet-completed.png
+flutter: NATIVE_CAPTURE_READY:native-wallet-history:/Users/atomex/Library/Developer/CoreSimulator/Devices/BCCA28B1-567E-404B-A8F2-79D56A701F75/data/Containers/Data/Application/F1148D98-5EFB-4CA0-B90A-7F9F22FD2DD9/tmp/wallet-closure-native-wallet-history.ack
+Detected file type from extension: PNG
+Note: No display specified. Defaulting to display: C666BF28-7853-4B67-8F99-9BF6D1CD8D07 (screenID: 1, name: LCD)
+Wrote screenshot to: /private/tmp/surprising-wallet-closure-20261030/ios-final/native-wallet-history.png
+flutter: 01:12 +1: (tearDownAll)
+flutter: 01:12 +2: All tests passed!
+All tests passed.

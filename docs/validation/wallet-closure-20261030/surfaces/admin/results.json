@@ -1,0 +1,1008 @@
+{
+  "browser": "153.0.8010.12",
+  "checks": [
+    "wallet service failure shows no fake metrics; platform withdrawals independently retry, preserve exact IDs/amounts and open focused complete details",
+    "blank reason and cancelled confirmation do not POST; exact target confirmation and existing approval binding are retained; unknown write result requires a fresh read",
+    "approval/rejection/retry use the original UUID and backend state transitions; cancelled stale status reads cannot replace the selected status",
+    "a captured known response refreshes the original status list and clears a request that no longer belongs to the current filter",
+    "completed requests have no mutation controls; scoped search and malformed-response retry preserve honest empty/error states",
+    "1440/390/320px light and dark layouts retain complete request details, readable integer fields and accessible review controls",
+    "complete custody read responses restore the original operations view, with real zero values and independent query controls"
+  ],
+  "errors": [],
+  "requests": [
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "x-auth-client": "admin",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5184",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "admin",
+        "x-auth-transport": "cookie",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=PENDING_APPROVAL",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet/dashboard",
+      "query": "?limit=200",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/config",
+      "query": "?limit=200",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/summary",
+      "query": "?windowHours=24&limit=100",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/overview",
+      "query": "?windowHours=24&limit=100",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/addresses",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/balances",
+      "query": "?nonZeroOnly=true&limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/exceptions",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/deposits",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/withdrawals",
+      "query": "?status=PENDING_REVIEW&limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/withdrawal-reviews",
+      "query": "?limit=100&sort=createdAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=PENDING_APPROVAL",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet/dashboard",
+      "query": "?limit=200",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/config",
+      "query": "?limit=200",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/summary",
+      "query": "?windowHours=24&limit=100",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/overview",
+      "query": "?windowHours=24&limit=100",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/addresses",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/balances",
+      "query": "?nonZeroOnly=true&limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/exceptions",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/deposits",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/withdrawals",
+      "query": "?status=PENDING_REVIEW&limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/withdrawal-reviews",
+      "query": "?limit=100&sort=createdAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=PENDING_APPROVAL",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals/11111111-1111-4111-8111-111111111111/approve",
+      "query": "",
+      "method": "POST",
+      "body": "{\"reason\":\"已核对用户、金额、网络与完整收款地址；本地验收不执行资金操作\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5184",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-admin-approval-id": "ui-approved-withdrawal"
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=PENDING_APPROVAL",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals/11111111-1111-4111-8111-111111111111/reject",
+      "query": "",
+      "method": "POST",
+      "body": "{\"reason\":\"第二次仅核对原申请的失败反馈\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5184",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-admin-approval-id": "ui-approved-reject"
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=PROCESSING",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=DEBIT_UNKNOWN",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals/11111111-1111-4111-8111-111111111111/retry",
+      "query": "",
+      "method": "POST",
+      "body": "{\"reason\":\"核对后重试原申请，不创建新的提现\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5184",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-admin-approval-id": "ui-approved-retry"
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=DEBIT_UNKNOWN",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals/11111111-1111-4111-8111-111111111111/retry",
+      "query": "",
+      "method": "POST",
+      "body": "{\"reason\":\"核对成功响应仅刷新原申请状态\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5184",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-admin-approval-id": "ui-approved-known-response"
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=DEBIT_UNKNOWN",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=COMPLETED",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=COMPLETED",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=COMPLETED",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet/dashboard",
+      "query": "?limit=200",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/config",
+      "query": "?limit=200",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/summary",
+      "query": "?windowHours=24&limit=100",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/overview",
+      "query": "?windowHours=24&limit=100",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/addresses",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/balances",
+      "query": "?nonZeroOnly=true&limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/exceptions",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/deposits",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/withdrawals",
+      "query": "?status=PENDING_REVIEW&limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/withdrawal-reviews",
+      "query": "?limit=100&sort=createdAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/wallet/withdrawals",
+      "query": "?limit=50&status=COMPLETED",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet/dashboard",
+      "query": "?limit=200",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/config",
+      "query": "?limit=200",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/summary",
+      "query": "?windowHours=24&limit=100",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/overview",
+      "query": "?windowHours=24&limit=100",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/addresses",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/balances",
+      "query": "?nonZeroOnly=true&limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/operations/exceptions",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/deposits",
+      "query": "?limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/withdrawals",
+      "query": "?status=PENDING_REVIEW&limit=100&sort=updatedAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    },
+    {
+      "path": "/api/v1/admin/gateway/wallet-admin/finance/withdrawal-reviews",
+      "query": "?limit=100&sort=createdAt.desc",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5184/",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer admin-withdrawal-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\""
+      }
+    }
+  ],
+  "samples": [
+    {
+      "second": 0,
+      "Nodes": 4629,
+      "TaskDuration": 0.000025,
+      "JSHeapUsedSize": 28373140,
+      "requests": 58
+    },
+    {
+      "second": 10,
+      "Nodes": 4629,
+      "TaskDuration": 0.000917,
+      "JSHeapUsedSize": 28373140,
+      "requests": 58
+    },
+    {
+      "second": 20,
+      "Nodes": 4629,
+      "TaskDuration": 0.002082,
+      "JSHeapUsedSize": 28373140,
+      "requests": 58
+    },
+    {
+      "second": 30,
+      "Nodes": 4629,
+      "TaskDuration": 0.004894,
+      "JSHeapUsedSize": 28373480,
+      "requests": 58
+    },
+    {
+      "second": 40,
+      "Nodes": 1936,
+      "TaskDuration": 0.089586,
+      "JSHeapUsedSize": 17094432,
+      "requests": 58
+    },
+    {
+      "second": 50,
+      "Nodes": 1936,
+      "TaskDuration": 0.099465,
+      "JSHeapUsedSize": 16950000,
+      "requests": 58
+    },
+    {
+      "second": 60,
+      "Nodes": 1936,
+      "TaskDuration": 0.100804,
+      "JSHeapUsedSize": 16950468,
+      "requests": 58
+    }
+  ],
+  "limitations": [
+    "All HTTP responses intercepted; no real approvals, wallet, funds, debit/refund or blockchain recovery executed.",
+    "The legacy custody operations read/write flows were not live-verified."
+  ]
+}

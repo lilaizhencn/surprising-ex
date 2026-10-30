@@ -1,8 +1,9 @@
 package com.surprising.gateway.provider.exception;
 
-/** SPOT命令被明确拒绝；提现业务可据此记录拒绝，不能按未知结果重试扣款。 */
+/** A failed Core decision is distinct from local validation or an unknown transport outcome. */
 public class SpotAccountRejectedException extends IllegalStateException {
-    public SpotAccountRejectedException(String message) {
-        super(message);
-    }
+    private final String coreCode;
+    public SpotAccountRejectedException(String message) { this(null,message); }
+    public SpotAccountRejectedException(String coreCode,String message) { super(message); this.coreCode=coreCode; }
+    public boolean isCoreDecision() { return coreCode!=null && !"IDEMPOTENCY_CONFLICT".equals(coreCode); }
 }

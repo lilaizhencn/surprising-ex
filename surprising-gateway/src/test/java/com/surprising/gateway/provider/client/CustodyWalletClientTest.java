@@ -75,13 +75,11 @@ class CustodyWalletClientTest {
         CustodyWalletClient rejectedClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
 
         assertThatThrownBy(() -> rejectedClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
-                .isInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class)
-                .extracting(ex -> ((CustodyWalletClient.CustodyWalletRejectedException) ex).responseBody())
-                .asString().contains("rejected");
+                .isInstanceOf(IllegalStateException.class).isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
     }
 
     @Test
-    void retainsResponseBodyAndClassifiesInvalidState409WhenRestTemplateReturnsErrorEntity() {
+    void invalidState409WithoutAPermanentReceiptRemainsUnknown() {
         GatewayProperties properties = new GatewayProperties();
         properties.getCustodyWallet().setEnabled(true);
         properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
@@ -93,13 +91,8 @@ class CustodyWalletClientTest {
                         "code", "INVALID_STATE", "message", "insufficient gas balance"))));
         CustodyWalletClient rejectedClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
 
-        assertThatThrownBy(() -> rejectedClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
-                .isInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class)
-                .satisfies(ex -> {
-                    var rejection = (CustodyWalletClient.CustodyWalletRejectedException) ex;
-                    assertThat(rejection.status()).isEqualTo(409);
-                    assertThat(rejection.responseBody()).contains("INVALID_STATE", "insufficient gas balance");
-                });
+        assertThatThrownBy(() -> rejectedClient.createWithdrawal(42L,Map.of("amount","1"),"withdraw-1"))
+                .isInstanceOf(IllegalStateException.class).isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
     }
 
     @Test
@@ -138,7 +131,7 @@ class CustodyWalletClientTest {
     }
 
     @Test
-    void mapsWalletBusinessInvalidState409ToDeterministicRejection() {
+    void businessInvalidStateIsNotRefundEvidence() {
         GatewayProperties properties = new GatewayProperties();
         properties.getCustodyWallet().setEnabled(true);
         properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
@@ -154,9 +147,7 @@ class CustodyWalletClientTest {
         CustodyWalletClient rejectedClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
 
         assertThatThrownBy(() -> rejectedClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
-                .isInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class)
-                .extracting(ex -> ((CustodyWalletClient.CustodyWalletRejectedException) ex).status())
-                .isEqualTo(409);
+                .isInstanceOf(IllegalStateException.class).isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
     }
 
     @Test
@@ -180,62 +171,7 @@ class CustodyWalletClientTest {
                 .isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
     }
 
-    @Test
-    void signsTheExactEncodedAddressSearchUriWithoutDoubleEncoding() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
-        properties.getCustodyWallet().setApiKey("wallet-key");
-        properties.getCustodyWallet().setApiSecret("wallet-secret");
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        UUID addressId = UUID.randomUUID();
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
-                any(ParameterizedTypeReference.class)))
-                .thenReturn(ResponseEntity.ok(List.<Map<String, Object>>of(Map.of(
-                        "id", addressId.toString(), "chain", "BTC", "subject", "user:42",
-                        "status", "ACTIVE", "addressVersion", 1))));
-        CustodyWalletClient queryClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
-        ArgumentCaptor<URI> uri = ArgumentCaptor.forClass(URI.class);
-        ArgumentCaptor<HttpEntity> request = ArgumentCaptor.forClass(HttpEntity.class);
 
-        assertThat(queryClient.withdrawalAddressId(42L, "BTC")).isEqualTo(addressId);
-        org.mockito.Mockito.verify(restTemplate).exchange(uri.capture(), eq(HttpMethod.GET), request.capture(),
-                any(ParameterizedTypeReference.class));
-        assertThat(uri.getValue().getRawQuery()).contains("search=user%3A42").doesNotContain("%253A");
-        String requestTarget = uri.getValue().getRawPath() + "?" + uri.getValue().getRawQuery();
-        String timestamp = request.getValue().getHeaders().getFirst("X-Custody-Timestamp");
-        String nonce = request.getValue().getHeaders().getFirst("X-Custody-Nonce");
-        String canonical = queryClient.canonicalRequest(Long.parseLong(timestamp), nonce, "GET",
-                requestTarget, new byte[0]);
-        assertThat(request.getValue().getHeaders().getFirst("X-Custody-Signature"))
-                .isEqualTo(queryClient.sign("wallet-secret", canonical));
-    }
 
-    @Test
-    void selectsHighestVersionAddressThatActuallyCoversAssetAmount() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
-        properties.getCustodyWallet().setApiKey("wallet-key");
-        properties.getCustodyWallet().setApiSecret("wallet-secret");
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        UUID v1 = UUID.randomUUID();
-        UUID v2 = UUID.randomUUID();
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
-                any(ParameterizedTypeReference.class)))
-                .thenReturn(ResponseEntity.ok(List.of(
-                        Map.of("custodyAddressId", v2.toString(), "chain", "ETH", "assetSymbol", "ETH",
-                                "subject", "user:34", "addressVersion", 2, "availableBalance", "0"),
-                        Map.of("custodyAddressId", v1.toString(), "chain", "ETH", "assetSymbol", "ETH",
-                                "subject", "user:34", "addressVersion", 1, "availableBalance", "0.005"))));
-        CustodyWalletClient queryClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
-        ArgumentCaptor<URI> uri = ArgumentCaptor.forClass(URI.class);
 
-        assertThat(queryClient.withdrawalAddressId(34L, "ETH", "ETH", "0.0005")).isEqualTo(v1);
-        org.mockito.Mockito.verify(restTemplate).exchange(uri.capture(), eq(HttpMethod.GET), any(HttpEntity.class),
-                any(ParameterizedTypeReference.class));
-        assertThat(uri.getValue().getRawPath()).isEqualTo("/custody/api/v1/address-balances");
-        assertThat(uri.getValue().getRawQuery()).contains("subject=user%3A34", "assetSymbol=ETH",
-                "requiredAmount=0.0005");
-    }
 }

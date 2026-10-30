@@ -23,8 +23,14 @@ public class GatewayHttpConfiguration {
     @Bean
     @Qualifier("custodyWalletRestTemplate")
     public RestTemplate custodyWalletRestTemplate(GatewayProperties properties) {
-        return restTemplate(properties.getHttpClient().getConnectTimeout(),
+        RestTemplate template = restTemplate(properties.getHttpClient().getConnectTimeout(),
                 properties.getCustodyWallet().getRequestTimeout());
+        var mapper = tools.jackson.databind.json.JsonMapper.builder()
+                .enable(tools.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
+        template.getMessageConverters().replaceAll(converter ->
+                converter instanceof org.springframework.http.converter.json.JacksonJsonHttpMessageConverter
+                        ? new org.springframework.http.converter.json.JacksonJsonHttpMessageConverter(mapper) : converter);
+        return template;
     }
 
     private RestTemplate restTemplate(java.time.Duration connectTimeout, java.time.Duration readTimeout) {

@@ -80,11 +80,15 @@ class CustodyWithdrawalReconciliationPostgresTest {
         applicationContext.registerBean(CustodyWithdrawalRepository.class);
         applicationContext.registerBean(com.surprising.gateway.provider.repository.CustodyWithdrawalEventRepository.class);
         applicationContext.registerBean(com.surprising.gateway.provider.repository.CustodyWithdrawalActionRepository.class);
+        applicationContext.registerBean(com.surprising.gateway.provider.repository.CustodyWithdrawalFeeRepository.class);
         applicationContext.registerBean(CustodyWithdrawalStateService.class);
         applicationContext.registerBean(CustodyWithdrawalRefundService.class);
         applicationContext.registerBean(CustodyWithdrawalReconciliationService.class);
-        applicationContext.registerBean(com.surprising.asset.service.AssetConfigurationService.class,
-                () -> Mockito.mock(com.surprising.asset.service.AssetConfigurationService.class));
+        applicationContext.registerBean(com.surprising.asset.service.AssetConfigurationService.class, () -> {
+            var config=Mockito.mock(com.surprising.asset.service.AssetConfigurationService.class);
+            when(config.lockWithdrawalQuote("USDT","ETH","25")).thenReturn(new com.surprising.asset.service.AssetConfigurationService.WithdrawalQuote("USDT","ETH","25",25_000_000L,"0",0L,"25",25_000_000L,1,0L));
+            return config;
+        });
         applicationContext.registerBean(CustodyWithdrawalService.class);
         applicationContext.refresh();
         repository = applicationContext.getBean(CustodyWithdrawalRepository.class);
@@ -108,6 +112,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 jdbcTemplate.update("DELETE FROM " + table + " WHERE withdrawal_id IN "
                         + "(SELECT withdrawal_id FROM gateway_wallet_withdrawals WHERE user_id = 43)");
             }
+            jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_fees DISABLE TRIGGER gateway_wallet_withdrawal_fees_immutable_trigger");
+            jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawal_fees WHERE user_id IN (42,43)");
+            jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_fees ENABLE TRIGGER gateway_wallet_withdrawal_fees_immutable_trigger");
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE user_id = 43");
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawal_actions WHERE withdrawal_id = ?", withdrawalId);
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawal_events WHERE withdrawal_id = ?", withdrawalId);
@@ -179,16 +186,87 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThat(states.createOrGet(intent("intent-event-failed", "hash", new BigDecimal("25"))).created()).isTrue();
     }
 
+
+    @Test
+    void coreAuthorizesProfitWithdrawalAndConfirmedNetPaymentBooksTheQuotedFeeOnce() {
+        configurePlatformFee();
+        var paid=withdrawalService.submit(43L,"pool-profit-fee",poolRequest());
+        var record=repository.find(paid.withdrawalId());
+        assertThat(record.custodyAddressId()).isNull();
+        assertThat(record.fundingSource()).isEqualTo("TENANT_POOL");
+        assertThat(record.fees().receivedAmount()).isEqualTo("22.5");
+        Mockito.verify(spotAccountClient).adjustBalance(43L,"USDT",-25_000_000L,record.spotDebitReference(),"custody wallet withdrawal");
+        var body=CustodyWithdrawalModels.custodyRequest(record);
+        assertThat(body).containsEntry("custodyAddressId",null).containsEntry("subject","user:43")
+                .containsEntry("fundingSource","TENANT_POOL").containsEntry("amount","22.5");
+        var confirmed=new java.util.LinkedHashMap<String,Object>(body);
+        confirmed.put("withdrawalId",record.walletWithdrawalId());
+        withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED",Map.of("data",confirmed));
+        withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED",Map.of("data",confirmed));
+        assertThat(repository.find(record.withdrawalId()).status()).isEqualTo("COMPLETED");
+        assertThat(jdbcTemplate.queryForObject("select fee_units from gateway_wallet_withdrawal_fees where withdrawal_id=?",Long.class,record.withdrawalId())).isEqualTo(2_500_000L);
+        assertThat(jdbcTemplate.queryForObject("select count(*) from gateway_wallet_withdrawal_fees where withdrawal_id=?",Integer.class,record.withdrawalId())).isEqualTo(1);
+        Mockito.verify(spotAccountClient,Mockito.never()).adjustBalance(Mockito.eq(43L),Mockito.eq("USDT"),Mockito.eq(25_000_000L),Mockito.anyString(),Mockito.anyString());
+    }
+
+    @Test
+    void verifiedFailedNetPaymentRefundsTheFullCoreDebitAndBooksNoPlatformIncome() {
+        configurePlatformFee();
+        var submitted=withdrawalService.submit(43L,"pool-fee-refund",poolRequest());
+        var record=repository.find(submitted.withdrawalId());
+        var failed=new java.util.LinkedHashMap<String,Object>(CustodyWithdrawalModels.custodyRequest(record));
+        failed.put("id",record.walletWithdrawalId()); failed.put("status","FAILED"); failed.put("refundable",true);
+        Mockito.when(walletClient.withdrawalsByExternalReference(record.externalReference(),"ETH","USDT",2)).thenReturn(List.of(failed));
+        reconciliationService.reconcile(record);
+        reconciliationService.reconcile(repository.find(record.withdrawalId()));
+        assertThat(repository.find(record.withdrawalId()).status()).isEqualTo("REFUNDED");
+        Mockito.verify(spotAccountClient).adjustBalance(43L,"USDT",25_000_000L,record.spotDebitReference()+":refund","custody wallet withdrawal failed");
+        assertThat(jdbcTemplate.queryForObject("select count(*) from gateway_wallet_withdrawal_fees where withdrawal_id=?",Integer.class,record.withdrawalId())).isZero();
+    }
+
+    @Test
+    void anotherBeneficiaryCannotCompleteOrRefundThisPoolWithdrawal() {
+        configurePlatformFee();
+        var submitted=withdrawalService.submit(43L,"pool-wrong-owner",poolRequest());
+        var record=repository.find(submitted.withdrawalId());
+        var wrong=new java.util.LinkedHashMap<String,Object>(CustodyWithdrawalModels.custodyRequest(record));
+        wrong.put("id",record.walletWithdrawalId()); wrong.put("withdrawalId",record.walletWithdrawalId());
+        wrong.put("subject","user:42"); wrong.put("status","FAILED"); wrong.put("refundable",true);
+        assertThatThrownBy(()->withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED",Map.of("data",wrong))).isInstanceOf(IllegalArgumentException.class);
+        Mockito.when(walletClient.withdrawalsByExternalReference(record.externalReference(),"ETH","USDT",2)).thenReturn(List.of(wrong));
+        reconciliationService.reconcile(record);
+        assertThat(repository.find(record.withdrawalId()).status()).isEqualTo("SUBMITTED");
+        Mockito.verify(spotAccountClient,Mockito.never()).adjustBalance(Mockito.eq(43L),Mockito.eq("USDT"),Mockito.eq(25_000_000L),Mockito.anyString(),Mockito.anyString());
+        assertThat(jdbcTemplate.queryForObject("select count(*) from gateway_wallet_withdrawal_fees where withdrawal_id=?",Integer.class,record.withdrawalId())).isZero();
+    }
+
+    private CustodyWithdrawalService.WithdrawalRequest poolRequest() {
+        return new CustodyWithdrawalService.WithdrawalRequest(null,"ETH","USDT","0xrecipient","25",null,0L);
+    }
+    private void configurePlatformFee() {
+        var assets=org.springframework.test.util.AopTestUtils.<com.surprising.asset.service.AssetConfigurationService>getTargetObject(
+                applicationContext.getBean(com.surprising.asset.service.AssetConfigurationService.class));
+        var quote=new com.surprising.asset.service.AssetConfigurationService.WithdrawalQuote("USDT","ETH","25",25_000_000L,"2.5",2_500_000L,"22.5",22_500_000L,1,0L);
+        Mockito.when(assets.withdrawalQuote("USDT","ETH","25")).thenReturn(quote);
+        Mockito.when(assets.lockWithdrawalQuote("USDT","ETH","25")).thenReturn(quote);
+        Mockito.when(applicationContext.getBean(WithdrawalValuationClient.class).toUsdt("USDT",new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
+        Mockito.when(walletClient.createWithdrawal(Mockito.eq(43L),Mockito.anyMap(),Mockito.anyString())).thenAnswer(call->{
+            var body=new java.util.LinkedHashMap<String,Object>(call.getArgument(1));
+            body.put("id","pool-payment-"+call.getArgument(2)); body.put("status","FROZEN");
+            return body;
+        });
+    }
+
     private CustodyWithdrawalModels.CreateRequest intent(String key, String hash, BigDecimal dailyLimit) {
-        return new CustodyWithdrawalModels.CreateRequest(43L, key, hash, "ETH", "USDT", UUID.randomUUID(),
+        return new CustodyWithdrawalModels.CreateRequest(43L, key, hash, "ETH", "USDT", null,
                 "0xrecipient", "25", 25_000_000L, new BigDecimal("25"), "intent:" + key,
-                "intent:" + key, "{}", false, dailyLimit);
+                "intent:" + key, "{}", false, dailyLimit, new com.surprising.gateway.provider.model.CustodyWithdrawalModels.FeeSnapshot("0",0L,"25",25_000_000L,1,0L), "TENANT_POOL");
     }
 
     @Test
     void confirmationThatWinsTheOutcomeLockDoesNotCreditSpot() throws Exception {
         when(walletClient.withdrawalsByExternalReference(
-                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 2))
                 .thenReturn(List.of(walletRow("CONFIRMED")));
         CustodyWithdrawalModels.WithdrawalRecord record = repository.find(withdrawalId);
         CountDownLatch confirmationUpdated = new CountDownLatch(1);
@@ -214,11 +292,11 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
-    void refundDecisionHoldsOutcomeLockUntilSpotCreditAndStateCommit() throws Exception {
+    void confirmationCanFinishWhileRemoteReconciliationIsWaiting() throws Exception {
         CountDownLatch custodyReadStarted = new CountDownLatch(1);
         CountDownLatch allowCustodyRead = new CountDownLatch(1);
         when(walletClient.withdrawalsByExternalReference(
-                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 2))
                 .thenAnswer(invocation -> {
                     custodyReadStarted.countDown();
                     await(allowCustodyRead);
@@ -230,16 +308,14 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThat(custodyReadStarted.await(2, TimeUnit.SECONDS)).isTrue();
         Future<?> confirmation = executor.submit(() -> inTransaction(
                 () -> states.markCompleted(withdrawalId, "{}", "wallet-integration")));
+        confirmation.get(5,TimeUnit.SECONDS);
         allowCustodyRead.countDown();
-        reconciliation.get(5, TimeUnit.SECONDS);
-        assertThatThrownBy(() -> confirmation.get(5, TimeUnit.SECONDS))
-                .isInstanceOf(ExecutionException.class)
-                .hasCauseInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> reconciliation.get(5,TimeUnit.SECONDS)).hasCauseInstanceOf(IllegalStateException.class);
 
-        verify(spotAccountClient).adjustBalance(
+        verify(spotAccountClient,never()).adjustBalance(
                 42L, "USDT", 25_000_000L,
                 "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
-        assertThat(repository.find(withdrawalId).status()).isEqualTo("REFUNDED");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("COMPLETED");
     }
 
     @Test
@@ -306,9 +382,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         forceStatus("SUBMITTED");
 
         withdrawalService.handleWebhook("provider-event-late", "WITHDRAWAL.BROADCAST_UNKNOWN", Map.of(
-                "data", Map.of("withdrawalId", "wallet-integration",
-                        "externalReference", "custody-wallet-withdrawal:integration",
-                        "asset", "USDT", "chain", "ETH", "amount", "25")));
+                "data", Map.of("withdrawalId","wallet-integration","externalReference","custody-wallet-withdrawal:integration","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","fundingSource","TENANT_POOL","subject","user:42")));
 
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT provider_event_id FROM gateway_wallet_withdrawal_events
@@ -324,9 +398,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 withdrawalId);
 
         assertThatThrownBy(() -> withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED", Map.of(
-                "data", Map.of("withdrawalId", "wallet-invalid",
-                        "externalReference", "custody-wallet-withdrawal:integration",
-                        "asset", "USDT", "chain", "ETH", "amount", "26"))))
+                "data", Map.of("withdrawalId","wallet-invalid","externalReference","custody-wallet-withdrawal:integration","asset","USDT","chain","ETH","amount","26","fundingSource","TENANT_POOL","subject","user:42"))))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(repository.find(withdrawalId).walletWithdrawalId()).isNull();
@@ -336,7 +408,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     @Test
     void ambiguousCustodyResultDoesNotCompleteOrRefundWithdrawal() {
         when(walletClient.withdrawalsByExternalReference(
-                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 2))
                 .thenReturn(List.of(walletRow("CONFIRMED"), walletRow("FAILED", "wallet-other")));
 
         reconciliationService.reconcile(repository.find(withdrawalId));
@@ -356,7 +428,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
             firstPage.add(Map.of("id", "unrelated-" + index, "externalReference", "unrelated-" + index));
         }
         when(walletClient.withdrawalsByExternalReference(
-                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 2))
                 .thenReturn(firstPage);
         when(walletClient.withdrawalsByExternalReference(
                 "custody-wallet-withdrawal:integration", "ETH", "USDT", 20, 20L))
@@ -373,11 +445,8 @@ class CustodyWithdrawalReconciliationPostgresTest {
     @Test
     void custodyResultWithMismatchedAmountDoesNotCompleteOrRefundWithdrawal() {
         when(walletClient.withdrawalsByExternalReference(
-                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
-                .thenReturn(List.of(Map.of(
-                        "id", "wallet-integration",
-                        "externalReference", "custody-wallet-withdrawal:integration",
-                        "status", "CONFIRMED", "asset", "USDT", "chain", "ETH", "amount", "26")));
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 2))
+                .thenReturn(List.of(Map.of("id","wallet-integration","externalReference","custody-wallet-withdrawal:integration","status","CONFIRMED","asset","USDT","chain","ETH","amount","26","fundingSource","TENANT_POOL","subject","user:42")));
 
         reconciliationService.reconcile(repository.find(withdrawalId));
 
@@ -392,10 +461,8 @@ class CustodyWithdrawalReconciliationPostgresTest {
         jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = NULL WHERE withdrawal_id = ?",
                 withdrawalId);
         when(walletClient.withdrawalsByExternalReference(
-                "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
-                .thenReturn(List.of(Map.of(
-                        "externalReference", "custody-wallet-withdrawal:integration",
-                        "status", "CONFIRMED", "asset", "USDT", "chain", "ETH", "amount", "25")));
+                "custody-wallet-withdrawal:integration", "ETH", "USDT", 2))
+                .thenReturn(List.of(Map.of("externalReference","custody-wallet-withdrawal:integration","status","CONFIRMED","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","fundingSource","TENANT_POOL","subject","user:42")));
 
         reconciliationService.reconcile(repository.find(withdrawalId));
 
@@ -408,9 +475,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         forceStatus("COMPLETED");
 
         withdrawalService.handleWebhook("provider-event-terminal-1", "WITHDRAWAL.CONFIRMED", Map.of(
-                "data", Map.of("withdrawalId", "wallet-integration",
-                        "externalReference", "custody-wallet-withdrawal:integration",
-                        "asset", "USDT", "chain", "ETH", "amount", "25")));
+                "data", Map.of("withdrawalId","wallet-integration","externalReference","custody-wallet-withdrawal:integration","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","fundingSource","TENANT_POOL","subject","user:42")));
 
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM gateway_wallet_withdrawal_events
@@ -566,6 +631,111 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 .hasMessageContaining("gateway wallet withdrawal actions are immutable");
     }
 
+    @Test
+    void onlyNetAmountConfirmsAndPlatformIncomeIsRecognizedOnce() {
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET fee_amount='1',fee_units=1000000,received_amount='24',received_units=24000000 WHERE withdrawal_id=?",withdrawalId);
+        var wrong = new java.util.HashMap<String,Object>(walletRow("CONFIRMED"));
+        wrong.put("withdrawalId",wrong.get("id"));
+        assertThatThrownBy(() -> withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED",Map.of("data",wrong)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
+        wrong.put("amount","24");
+        withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED",Map.of("data",wrong));
+        withdrawalService.handleWebhook("WITHDRAWAL.CONFIRMED",Map.of("data",wrong));
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("COMPLETED");
+        assertThat(jdbcTemplate.queryForObject("SELECT fee_units FROM gateway_wallet_withdrawal_fees WHERE withdrawal_id=?",Long.class,withdrawalId)).isEqualTo(1_000_000L);
+        assertThatThrownBy(() -> jdbcTemplate.update("UPDATE gateway_wallet_withdrawal_fees SET fee_units=0 WHERE withdrawal_id=?",withdrawalId))
+                .hasMessageContaining("fees are immutable");
+    }
+
+    @Test
+    void confirmationAndIncomeRollBackTogetherWhenAuditCannotCommit() {
+        forceStatus("SUBMITTED");
+        rejectEventInserts();
+        try {
+            assertThatThrownBy(() -> states.markCompleted(withdrawalId,"{}","wallet-integration"))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(repository.find(withdrawalId).status()).isEqualTo("SUBMITTED");
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM gateway_wallet_withdrawal_fees WHERE withdrawal_id=?",Integer.class,withdrawalId)).isZero();
+        } finally { allowEventInserts(); }
+    }
+
+    @Test
+    void conflictingIncomeCannotBeSilentlyAccepted() {
+        forceStatus("SUBMITTED");
+        jdbcTemplate.update("INSERT INTO gateway_wallet_withdrawal_fees(withdrawal_id,user_id,asset_symbol,fee_units) VALUES (?,42,'USDT',1)",withdrawalId);
+        assertThatThrownBy(() -> states.markCompleted(withdrawalId,"{}","wallet-integration"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("income entry");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("SUBMITTED");
+    }
+
+    @Test
+    void rawHttpErrorNeverAuthorizesPositiveCoreAdjustment() {
+        var refunds=applicationContext.getBean(CustodyWithdrawalRefundService.class);
+        assertThatThrownBy(() -> refunds.refund(repository.find(withdrawalId),"refund","invalid","{\"status\":409}"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("receipt");
+        Mockito.verifyNoInteractions(spotAccountClient);
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
+    }
+
+    @Test
+    void lostRefundAcknowledgmentRetainsCommittedProofAndOriginalCoreReference() {
+        var refunds=applicationContext.getBean(CustodyWithdrawalRefundService.class);
+        var applied=java.util.concurrent.ConcurrentHashMap.<String>newKeySet();
+        var credited=new java.util.concurrent.atomic.AtomicLong();
+        var calls=new java.util.concurrent.atomic.AtomicInteger();
+        Mockito.doAnswer(call -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            var persisted=repository.find(withdrawalId);
+            assertThat(persisted.status()).isEqualTo("REFUND_PENDING");
+            assertThat(persisted.walletResponse()).contains("PRINCIPAL_RELEASED","user:42");
+            String reference=call.getArgument(3);
+            if(applied.add(reference)) credited.addAndGet(call.getArgument(2,Long.class));
+            if(calls.getAndIncrement()==0) throw new com.surprising.gateway.provider.exception.SpotAccountUnknownException("ack lost",null);
+            return null;
+        }).when(spotAccountClient).adjustBalance(Mockito.eq(42L),Mockito.eq("USDT"),Mockito.eq(25_000_000L),Mockito.anyString(),Mockito.anyString());
+        String evidence=new ObjectMapper().writeValueAsString(Map.of("kind","PRINCIPAL_RELEASED","receipt",walletRow("FAILED")));
+        assertThatThrownBy(() -> refunds.refund(repository.find(withdrawalId),"refund","failed",evidence))
+                .isInstanceOf(com.surprising.gateway.provider.exception.SpotAccountUnknownException.class);
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("REFUND_PENDING");
+        refunds.refund(repository.find(withdrawalId),"refund","resume");
+        assertThat(repository.find(withdrawalId).status()).isEqualTo("REFUNDED");
+        assertThat(credited.get()).isEqualTo(25_000_000L);
+        assertThat(applied).containsExactly("custody-wallet-withdrawal:integration:refund");
+        refunds.refund(repository.find(withdrawalId),"refund","duplicate");
+        assertThat(calls.get()).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM gateway_wallet_withdrawal_fees WHERE withdrawal_id=?",Integer.class,withdrawalId)).isZero();
+    }
+
+    @Test
+    void recoveryLeasesAreBoundedDisjointAndDoNotStarveOtherIntents() throws Exception {
+        for(int i=0;i<8;i++) states.createOrGet(intent("lease-"+i,"hash-"+i,new BigDecimal("1000000")));
+        jdbcTemplate.update("UPDATE gateway_wallet_withdrawals SET updated_at=now()-interval '1 hour',reconcile_after=now()-interval '1 hour' WHERE user_id in (42,43)");
+        var grace=java.time.Duration.ofSeconds(1);var lease=java.time.Duration.ofMinutes(1);
+        Future<List<CustodyWithdrawalModels.WithdrawalRecord>> first=executor.submit(() -> repository.claimRecoverable(grace,lease,3));
+        Future<List<CustodyWithdrawalModels.WithdrawalRecord>> second=executor.submit(() -> repository.claimRecoverable(grace,lease,3));
+        var a=first.get(5,TimeUnit.SECONDS);var b=second.get(5,TimeUnit.SECONDS);
+        assertThat(a).hasSize(3);assertThat(b).hasSize(3);
+        var ids=new java.util.HashSet<UUID>();
+        a.forEach(row -> assertThat(ids.add(row.withdrawalId())).isTrue());
+        b.forEach(row -> assertThat(ids.add(row.withdrawalId())).isTrue());
+        repository.claimRecoverable(grace,lease,3).forEach(row -> assertThat(ids.add(row.withdrawalId())).isTrue());
+        assertThat(ids).hasSize(9);
+        assertThat(repository.claimRecoverable(grace,lease,3)).isEmpty();
+    }
+
+    @Test
+    void aConfigurationChangeBeforeIntentCommitRejectsTheOldQuotationWithoutSpendingQuota() {
+        com.surprising.asset.service.AssetConfigurationService config=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(
+                applicationContext.getBean(com.surprising.asset.service.AssetConfigurationService.class));
+        when(config.lockWithdrawalQuote("USDT","ETH","25")).thenReturn(new com.surprising.asset.service.AssetConfigurationService.WithdrawalQuote("USDT","ETH","25",25_000_000L,"1",1_000_000L,"24",24_000_000L,1,1L));
+        assertThatThrownBy(()->states.createOrGet(intent("stale-quote","hash",new BigDecimal("50"))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("quote changed");
+        assertThat(repository.findByUserAndIdempotency(43L,"stale-quote")).isNull();
+        assertThat(repository.dailyTotal(43L)).isEqualByComparingTo("0");
+        Mockito.verifyNoInteractions(spotAccountClient,walletClient);
+    }
+
     private void rejectEventInserts() {
         jdbcTemplate.execute("""
                 CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_events_reject_insert()
@@ -589,7 +759,11 @@ class CustodyWithdrawalReconciliationPostgresTest {
     private DataSource dataSource() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.postgresql.Driver");
-        dataSource.setUrl(System.getenv("SURPRISING_WITHDRAWAL_IT_DATABASE_URL"));
+        String url = System.getenv("SURPRISING_WITHDRAWAL_IT_DATABASE_URL");
+        if (url == null || !url.matches("jdbc:postgresql://127\\.0\\.0\\.1:5432/surprising_exchange_test_[a-zA-Z0-9_]+")) {
+            throw new IllegalArgumentException("withdrawal integration tests require an isolated local test database");
+        }
+        dataSource.setUrl(url);
         dataSource.setUsername(System.getenv().getOrDefault("SURPRISING_WITHDRAWAL_IT_DATABASE_USER", ""));
         dataSource.setPassword(System.getenv().getOrDefault("SURPRISING_WITHDRAWAL_IT_DATABASE_PASSWORD", ""));
         return dataSource;
@@ -600,15 +774,30 @@ class CustodyWithdrawalReconciliationPostgresTest {
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawals ("
                 + "withdrawal_id UUID PRIMARY KEY, user_id BIGINT NOT NULL, idempotency_key TEXT NOT NULL, "
                 + "request_sha256 TEXT NOT NULL, chain TEXT NOT NULL, asset_symbol TEXT NOT NULL, "
-                + "custody_address_id UUID NOT NULL, to_address TEXT NOT NULL, amount TEXT NOT NULL, "
-                + "amount_units BIGINT NOT NULL, usdt_value NUMERIC(38,18) NOT NULL, external_reference TEXT NOT NULL, "
+                + "custody_address_id UUID, funding_source TEXT NOT NULL, to_address TEXT NOT NULL, amount TEXT NOT NULL, "
+                + "amount_units BIGINT NOT NULL, fee_amount TEXT NOT NULL, fee_units BIGINT NOT NULL, received_amount TEXT NOT NULL,received_units BIGINT NOT NULL,network_id INTEGER NOT NULL,network_revision BIGINT NOT NULL, usdt_value NUMERIC(38,18) NOT NULL, external_reference TEXT NOT NULL, "
                 + "spot_debit_reference TEXT NOT NULL, request_payload JSONB NOT NULL, status TEXT NOT NULL, "
                 + "wallet_response JSONB, wallet_withdrawal_id TEXT, error_code TEXT, error_message TEXT, "
-                + "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+                + "reconcile_after TIMESTAMPTZ NOT NULL DEFAULT now(),created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
                 + "submitted_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, admin_user_id BIGINT, "
                 + "admin_username TEXT, admin_reason TEXT, "
                 + "CONSTRAINT gateway_wallet_withdrawals_wallet_id_uq UNIQUE (wallet_withdrawal_id), "
                 + "CONSTRAINT gateway_wallet_withdrawal_idempotency_uq UNIQUE (user_id, idempotency_key))");
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_fees (withdrawal_id UUID PRIMARY KEY REFERENCES gateway_wallet_withdrawals,user_id BIGINT NOT NULL,asset_symbol TEXT NOT NULL,fee_units BIGINT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+        jdbcTemplate.execute("DROP TRIGGER IF EXISTS gateway_wallet_withdrawal_fees_immutable_trigger ON gateway_wallet_withdrawal_fees");
+        jdbcTemplate.execute("""
+CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_fees_immutable_guard()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'gateway wallet withdrawal fees are immutable';
+END;
+$$;
+                """);
+        jdbcTemplate.execute("""
+CREATE TRIGGER gateway_wallet_withdrawal_fees_immutable_trigger
+BEFORE UPDATE OR DELETE ON gateway_wallet_withdrawal_fees
+FOR EACH ROW EXECUTE FUNCTION gateway_wallet_withdrawal_fees_immutable_guard();
+                """);
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_actions ("
                 + "action_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
                 + "admin_user_id BIGINT NOT NULL REFERENCES gateway_users, admin_username TEXT NOT NULL, "
@@ -654,7 +843,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
                     IF OLD.status <> NEW.status AND NOT (
                         (OLD.status = 'PENDING_APPROVAL' AND NEW.status IN ('PROCESSING', 'REJECTED'))
                         OR (OLD.status = 'PROCESSING' AND NEW.status IN ('DEBIT_UNKNOWN', 'DEBITED', 'REJECTED'))
-                        OR (OLD.status = 'DEBIT_UNKNOWN' AND NEW.status = 'DEBITED')
+                        OR (OLD.status = 'DEBIT_UNKNOWN' AND NEW.status IN ('DEBITED','REJECTED'))
                         OR (OLD.status = 'DEBITED' AND NEW.status IN ('SUBMITTED', 'BROADCAST_UNKNOWN', 'COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
                         OR (OLD.status = 'SUBMITTED' AND NEW.status IN ('COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
                         OR (OLD.status = 'BROADCAST_UNKNOWN' AND NEW.status IN ('SUBMITTED', 'COMPLETED', 'FAILED_PENDING', 'REFUND_PENDING', 'REFUNDED'))
@@ -716,11 +905,11 @@ class CustodyWithdrawalReconciliationPostgresTest {
         jdbcTemplate.update("""
                 INSERT INTO gateway_wallet_withdrawals (
                     withdrawal_id, user_id, idempotency_key, request_sha256, chain, asset_symbol,
-                    custody_address_id, to_address, amount, amount_units, usdt_value, external_reference,
-                    spot_debit_reference, request_payload, status, wallet_withdrawal_id
-                ) VALUES (?, 42, ?, ?, 'ETH', 'USDT', ?, '0xrecipient', '25',
-                          25000000, 25, ?, ?, '{}'::jsonb, 'FAILED_PENDING', ?)
-                """, id, externalReference + ":key", "hash-" + externalReference, UUID.randomUUID(),
+                    custody_address_id, funding_source, to_address, amount, amount_units, usdt_value, external_reference,
+                    spot_debit_reference, request_payload, status, wallet_withdrawal_id,fee_amount,fee_units,received_amount,received_units,network_id,network_revision
+                ) VALUES (?, 42, ?, ?, 'ETH', 'USDT', null, 'TENANT_POOL', '0xrecipient', '25',
+                          25000000, 25, ?, ?, '{}'::jsonb, 'FAILED_PENDING', ?, '0',0,'25',25000000,1,0)
+                """, id, externalReference + ":key", "hash-" + externalReference,
                 externalReference, externalReference, walletWithdrawalId);
         return id;
     }
@@ -730,8 +919,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     private Map<String, Object> walletRow(String status, String walletWithdrawalId) {
-        return Map.of("id", walletWithdrawalId, "externalReference", "custody-wallet-withdrawal:integration",
-                "status", status, "asset", "USDT", "chain", "ETH", "amount", "25");
+        return Map.of("id",walletWithdrawalId,"externalReference","custody-wallet-withdrawal:integration","status",status,"asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","subject","user:42","refundable",true,"fundingSource","TENANT_POOL");
     }
 
     private void inTransaction(Runnable action) {

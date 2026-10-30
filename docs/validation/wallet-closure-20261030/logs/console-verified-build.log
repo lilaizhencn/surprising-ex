@@ -1,0 +1,46 @@
+$ tsc -b && vite build
+vite v8.1.5 building client environment for production...
+[2K
+transforming...✓ 3171 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                     1.10 kB │ gzip:   0.49 kB
+dist/assets/index-DNoEV77y.css                     33.14 kB │ gzip:   7.31 kB
+dist/assets/pagination-CCVwTvL0.js                  0.07 kB │ gzip:   0.08 kB
+dist/assets/PageHeader-CBjnhzHE.js                  0.34 kB │ gzip:   0.21 kB
+dist/assets/useServerPagination-CGoFaeJG.js         0.41 kB │ gzip:   0.28 kB
+dist/assets/rolldown-runtime-Bh1tDfsg.js            0.56 kB │ gzip:   0.36 kB
+dist/assets/CopyText-C_JlSZDX.js                    0.69 kB │ gzip:   0.44 kB
+dist/assets/chains-DGdLZS9T.js                      0.78 kB │ gzip:   0.52 kB
+dist/assets/useApiQuery-BC0541OW.js                 1.00 kB │ gzip:   0.57 kB
+dist/assets/format-C5nerLYI.js                      1.05 kB │ gzip:   0.63 kB
+dist/assets/StatusText-D7NWddag.js                  1.05 kB │ gzip:   0.55 kB
+dist/assets/Web3Logo-BJ18eILr.js                    1.40 kB │ gzip:   0.75 kB
+dist/assets/client-Bh_OmZHi.js                      1.45 kB │ gzip:   0.76 kB
+dist/assets/AuditPage-cyzXrjzD.js                   2.13 kB │ gzip:   1.00 kB
+dist/assets/LoginPage-RwRXakGG.js                   2.60 kB │ gzip:   1.17 kB
+dist/assets/TenantsPage-CVUKLjCa.js                 4.78 kB │ gzip:   2.09 kB
+dist/assets/walletConfigMessage-B0Qn8iSz.js         5.05 kB │ gzip:   1.28 kB
+dist/assets/TenantChainsPage-DZpeyzee.js            5.31 kB │ gzip:   2.03 kB
+dist/assets/AssetRecoveriesPage-Llrqoj2d.js         8.08 kB │ gzip:   2.88 kB
+dist/assets/AddressesPage-CQqZjpJI.js               8.35 kB │ gzip:   3.01 kB
+dist/assets/OverviewPage-v6Dt1p9M.js               11.58 kB │ gzip:   3.81 kB
+dist/assets/WalletConfigOverviewPage-B1_w6uFC.js   12.12 kB │ gzip:   4.01 kB
+dist/assets/index-qdMDlTfA.js                      14.10 kB │ gzip:   4.63 kB
+dist/assets/LandingPage-Du7p1hRZ.js                15.42 kB │ gzip:   4.21 kB
+dist/assets/ApiAccessPage-n4god7H7.js              16.48 kB │ gzip:   4.79 kB
+dist/assets/TenantDetailPage-CadayZ1Q.js           16.87 kB │ gzip:   4.59 kB
+dist/assets/TransfersPage-C1vKH3M5.js              17.42 kB │ gzip:   5.93 kB
+dist/assets/WalletChainDetailPage-DaBjXWRe.js      19.10 kB │ gzip:   5.07 kB
+dist/assets/DeveloperDocsPage-H_GlHHGi.js          35.70 kB │ gzip:  11.80 kB
+dist/assets/i18n--3lpf6iz.js                       55.00 kB │ gzip:  20.82 kB
+dist/assets/vendor-DAVW-PB8.js                     73.36 kB │ gzip:  26.64 kB
+dist/assets/vendor-react-BfKwMLOd.js              349.61 kB │ gzip: 112.92 kB
+dist/assets/vendor-ui-CjjyQxhI.js                 917.17 kB │ gzip: 290.59 kB
+
+✓ built in 1.04s
+[plugin builtin:vite-reporter]
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

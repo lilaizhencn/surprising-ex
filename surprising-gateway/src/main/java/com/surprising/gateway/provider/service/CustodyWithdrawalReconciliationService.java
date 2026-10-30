@@ -5,22 +5,18 @@ import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
+@org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
 public class CustodyWithdrawalReconciliationService {
 
-    private static final int PAGE_SIZE = 20;
-    private static final int MAX_PAGES = 1_000;
 
     private final CustodyWithdrawalRepository repository;
     private final CustodyWithdrawalStateService states;
@@ -40,51 +36,14 @@ public class CustodyWithdrawalReconciliationService {
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     }
 
-    @Transactional
     public void reconcile(CustodyWithdrawalModels.WithdrawalRecord record) {
         if (record.externalReference() == null || record.externalReference().isBlank()) {
             return;
         }
-        repository.lockForOutcome(record.withdrawalId());
-        List<Map<String, Object>> matches = new ArrayList<>();
-        Set<String> seenPages = new HashSet<>();
-        boolean complete = false;
-        long offset = 0L;
-        int pageCount = 0;
-        while (true) {
-            if (++pageCount > MAX_PAGES) {
-                return;
-            }
-            List<Map<String, Object>> rows = offset == 0
-                    ? walletClient.withdrawalsByExternalReference(
-                            record.externalReference(), record.chain(), record.assetSymbol(), PAGE_SIZE)
-                    : walletClient.withdrawalsByExternalReference(
-                            record.externalReference(), record.chain(), record.assetSymbol(), PAGE_SIZE, offset);
-            if (rows == null) {
-                return;
-            }
-            if (!seenPages.add(json(rows))) {
-                return;
-            }
-            for (Map<String, Object> row : rows) {
-                if (matches.size() < 2 && record.externalReference().equals(
-                        stringValue(row.get("externalReference"), stringValue(row.get("external_reference"), null)))) {
-                    matches.add(row);
-                }
-            }
-            if (rows.size() < PAGE_SIZE) {
-                complete = true;
-                break;
-            }
-            long nextOffset = offset + rows.size();
-            if (nextOffset <= offset) {
-                return;
-            }
-            offset = nextOffset;
-        }
-        if (!complete || matches.size() != 1 || !matchesRecord(record, matches.getFirst())) {
-            return;
-        }
+        List<Map<String, Object>> matches = walletClient.withdrawalsByExternalReference(
+                record.externalReference(),record.chain(),record.assetSymbol(),2);
+        if (matches == null || matches.size() != 1 || !record.externalReference().equals(matches.getFirst().get("externalReference"))
+                || !matchesRecord(record,matches.getFirst())) return;
         Map<String, Object> walletRecord = matches.getFirst();
         String walletWithdrawalId = stringValue(walletRecord.get("withdrawalId"),
                 stringValue(walletRecord.get("id"), record.walletWithdrawalId()));
@@ -92,8 +51,10 @@ public class CustodyWithdrawalReconciliationService {
         String response = json(walletRecord);
         if ("CONFIRMED".equals(status)) {
             states.markCompleted(record.withdrawalId(), response, walletWithdrawalId);
-        } else if (Set.of("FAILED", "REJECTED", "CANCELLED").contains(status)) {
-            refundService.refund(record, "custody wallet withdrawal failed", "custody wallet withdrawal failed");
+        } else if (Set.of("FAILED", "REJECTED", "CANCELLED").contains(status) && Boolean.TRUE.equals(walletRecord.get("refundable"))) {
+            refundService.refund(record, "custody wallet withdrawal failed", "custody wallet withdrawal failed", json(Map.of("kind","PRINCIPAL_RELEASED","receipt",walletRecord)));
+        } else if (!Set.of("COMPLETED", "REFUNDED", "REJECTED", "FAILED_PENDING").contains(record.status())) {
+            states.markSubmitted(record.withdrawalId(), response, walletWithdrawalId);
         }
     }
 
@@ -112,13 +73,18 @@ public class CustodyWithdrawalReconciliationService {
         String asset = stringValue(walletRecord.get("assetSymbol"), stringValue(walletRecord.get("asset"), null));
         String amount = stringValue(walletRecord.get("amount"),
                 stringValue(walletRecord.get("withdrawalAmount"), null));
-        if (chain == null || asset == null || amount == null
+        String toAddress = stringValue(walletRecord.get("toAddress"), null);
+        String subject = stringValue(walletRecord.get("subject"), null);
+        if (toAddress == null || !record.toAddress().equals(toAddress)
+                || !record.fundingSource().equals(walletRecord.get("fundingSource"))
+                || !("user:" + record.userId()).equals(subject)
+                || chain == null || asset == null || amount == null
                 || !record.chain().equalsIgnoreCase(chain)
                 || !record.assetSymbol().equalsIgnoreCase(asset)) {
             return false;
         }
         try {
-            return new BigDecimal(amount).compareTo(new BigDecimal(record.amount())) == 0;
+            return new BigDecimal(amount).compareTo(new BigDecimal(record.fees().receivedAmount())) == 0;
         } catch (NumberFormatException ex) {
             return false;
         }

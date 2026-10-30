@@ -26,6 +26,12 @@ import tools.jackson.databind.ObjectMapper;
 class CustodyWithdrawalServiceTest {
     private final com.surprising.asset.service.AssetConfigurationService assets = Mockito.mock(com.surprising.asset.service.AssetConfigurationService.class);
 
+    @org.junit.jupiter.api.BeforeEach
+    void quoteMetadata() {
+        when(assets.withdrawalQuote("USDT","ETH","25")).thenReturn(new com.surprising.asset.service.AssetConfigurationService.WithdrawalQuote(
+                "USDT","ETH","25",25_000_000L,"0",0L,"25",25_000_000L,1,0L));
+    }
+
     @Test
     void unknownCustodyResponseKeepsFundsInBroadcastUnknownWithoutRefund() {
         GatewayProperties properties = new GatewayProperties();
@@ -73,8 +79,7 @@ class CustodyWithdrawalServiceTest {
         when(states.createOrGet(any())).thenReturn(new CustodyWithdrawalModels.CreateResult(processing, true));
         when(states.markDebited(eq(withdrawalId), any())).thenReturn(debited);
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-concurrent")))
-                .thenReturn(Map.of("id", "wallet-concurrent",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-concurrent"));
+                .thenReturn(Map.of("id","wallet-concurrent","externalReference","custody-wallet-withdrawal:withdraw-concurrent","chain","ETH","assetSymbol","USDT","toAddress","0xrecipient","amount","25","fundingSource","TENANT_POOL","subject","user:42"));
         when(states.markSubmitted(eq(withdrawalId), any(), eq("wallet-concurrent")))
                 .thenThrow(new IllegalStateException("already submitted"));
         when(repository.find(withdrawalId)).thenReturn(submitted);
@@ -136,8 +141,7 @@ class CustodyWithdrawalServiceTest {
         when(states.createOrGet(any())).thenReturn(new CustodyWithdrawalModels.CreateResult(processing, true));
         when(states.markDebited(eq(withdrawalId), any())).thenReturn(debited);
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-local-conflict")))
-                .thenReturn(Map.of("id", "wallet-local-conflict",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-local-conflict"));
+                .thenReturn(Map.of("id","wallet-local-conflict","externalReference","custody-wallet-withdrawal:withdraw-local-conflict","chain","ETH","assetSymbol","USDT","toAddress","0xrecipient","amount","25","fundingSource","TENANT_POOL","subject","user:42"));
         when(states.markSubmitted(eq(withdrawalId), any(), eq("wallet-local-conflict")))
                 .thenThrow(new IllegalStateException("invalid local status"));
         when(repository.find(withdrawalId)).thenReturn(debited);
@@ -151,7 +155,7 @@ class CustodyWithdrawalServiceTest {
     }
 
     @Test
-    void rejectedCustodyResponseRefundsExactlyOnceAndReturnsRejected() {
+    void unverifiedCustodyRejectionNeverAuthorizesARefund() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
         CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
@@ -174,10 +178,10 @@ class CustodyWithdrawalServiceTest {
                 valuationClient);
 
         assertThatThrownBy(() -> service.submit(42L, "withdraw-rejected", request()))
-                .isInstanceOf(CustodyWithdrawalService.WithdrawalRejectedException.class);
-        verify(spotAccountClient).adjustBalance(42L, "USDT", 25_000_000L,
+                .isInstanceOf(CustodyWithdrawalService.WithdrawalUnknownException.class);
+        verify(spotAccountClient,never()).adjustBalance(42L, "USDT", 25_000_000L,
                 "custody-wallet-withdrawal:withdraw-rejected:refund", "custody wallet withdrawal rejected refund");
-        verify(states).markRefunded(eq(withdrawalId), any(), eq("custody wallet rejected withdrawal"));
+        verify(states,never()).markRefunded(eq(withdrawalId), any(), eq("custody wallet rejected withdrawal"));
     }
 
     @Test
@@ -219,8 +223,7 @@ class CustodyWithdrawalServiceTest {
         when(states.markDebited(eq(withdrawalId), any()))
                 .thenReturn(record(withdrawalId, "DEBITED", "withdraw-retry"));
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-retry")))
-                .thenReturn(Map.of("id", "wallet-withdrawal-1",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-retry"));
+                .thenReturn(Map.of("id","wallet-withdrawal-1","externalReference","custody-wallet-withdrawal:withdraw-retry","chain","ETH","assetSymbol","USDT","toAddress","0xrecipient","amount","25","fundingSource","TENANT_POOL","subject","user:42"));
         when(states.markSubmitted(eq(withdrawalId), any(), eq("wallet-withdrawal-1")))
                 .thenReturn(record(withdrawalId, "SUBMITTED", "withdraw-retry"));
 
@@ -254,14 +257,12 @@ class CustodyWithdrawalServiceTest {
                 record(withdrawalId, "FAILED_PENDING", "withdraw-failed");
         when(states.markFailurePending(eq(withdrawalId), any(), any(), eq("wallet-withdrawal-1")))
                 .thenReturn(pending);
-        when(repository.listPendingFailures(any(), eq(50))).thenReturn(java.util.List.of(pending));
+        when(repository.claimRecoverable(any(), any(), eq(50))).thenReturn(java.util.List.of(pending));
+        when(repository.find(withdrawalId)).thenReturn(pending);
         when(walletClient.withdrawalsByExternalReference(
-                eq("custody-wallet-withdrawal:withdraw-failed"), eq("ETH"), eq("USDT"), eq(20)))
-                .thenReturn(java.util.List.of(Map.of(
-                        "id", "wallet-withdrawal-1",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-failed",
-                        "status", "FAILED", "asset", "USDT", "chain", "ETH", "amount", "25")));
-        when(states.markRefundPending(eq(withdrawalId), any()))
+                eq("custody-wallet-withdrawal:withdraw-failed"), eq("ETH"), eq("USDT"), eq(2)))
+                .thenReturn(java.util.List.of(Map.of("id","wallet-withdrawal-1","externalReference","custody-wallet-withdrawal:withdraw-failed","status","FAILED","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","subject","user:42","refundable",true,"fundingSource","TENANT_POOL")));
+        when(states.markRefundPending(eq(withdrawalId), any(), any()))
                 .thenReturn(record(withdrawalId, "REFUND_PENDING", "withdraw-failed"));
         when(states.markRefunded(eq(withdrawalId), any(), eq("custody wallet withdrawal failed")))
                 .thenReturn(record(withdrawalId, "REFUNDED", "withdraw-failed"));
@@ -270,9 +271,7 @@ class CustodyWithdrawalServiceTest {
                 valuationClient);
 
         service.handleWebhook("WITHDRAWAL.FAILED", Map.of(
-                "data", Map.of("withdrawalId", "wallet-withdrawal-1",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-failed",
-                        "asset", "USDT", "chain", "ETH", "amount", "25")));
+                "data", Map.of("withdrawalId","wallet-withdrawal-1","externalReference","custody-wallet-withdrawal:withdraw-failed","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","subject","user:42","refundable",true,"fundingSource","TENANT_POOL")));
 
         verify(spotAccountClient, never()).adjustBalance(eq(42L), eq("USDT"), eq(25_000_000L),
                 eq("custody-wallet-withdrawal:withdraw-failed:refund"), any());
@@ -300,9 +299,7 @@ class CustodyWithdrawalServiceTest {
                 valuationClient);
 
         assertThatThrownBy(() -> service.handleWebhook("WITHDRAWAL.FAILED", Map.of(
-                "data", Map.of("withdrawalId", "wallet-withdrawal-1",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-late",
-                        "asset", "USDT", "chain", "ETH", "amount", "25"))))
+                "data", Map.of("withdrawalId","wallet-withdrawal-1","externalReference","custody-wallet-withdrawal:withdraw-late","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","subject","user:42","refundable",true,"fundingSource","TENANT_POOL"))))
                 .isInstanceOf(IllegalStateException.class);
 
         verify(spotAccountClient, never()).adjustBalance(any(Long.class), any(), any(Long.class), any(), any());
@@ -331,9 +328,7 @@ class CustodyWithdrawalServiceTest {
                 valuationClient);
 
         assertThatThrownBy(() -> service.handleWebhook("WITHDRAWAL.BROADCAST_UNKNOWN", Map.of(
-                "data", Map.of("withdrawalId", "wallet-webhook-conflict",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-webhook-conflict",
-                        "asset", "USDT", "chain", "ETH", "amount", "25"))))
+                "data", Map.of("withdrawalId","wallet-webhook-conflict","externalReference","custody-wallet-withdrawal:withdraw-webhook-conflict","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","subject","user:42","refundable",true,"fundingSource","TENANT_POOL"))))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -358,9 +353,7 @@ class CustodyWithdrawalServiceTest {
                 valuationClient);
 
         service.handleWebhook("provider-event-late", "WITHDRAWAL.BROADCAST_UNKNOWN", Map.of(
-                "data", Map.of("withdrawalId", "wallet-webhook-late",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-webhook-late",
-                        "asset", "USDT", "chain", "ETH", "amount", "25")));
+                "data", Map.of("withdrawalId","wallet-webhook-late","externalReference","custody-wallet-withdrawal:withdraw-webhook-late","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","subject","user:42","refundable",true,"fundingSource","TENANT_POOL")));
 
         verify(states).recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-late"),
                 any(), eq("late broadcast-unknown webhook ignored after local status advanced"),
@@ -387,9 +380,7 @@ class CustodyWithdrawalServiceTest {
                 valuationClient);
 
         service.handleWebhook("WITHDRAWAL.CONFIRMED", Map.of(
-                "data", Map.of("withdrawalId", "wallet-withdrawal-1",
-                        "externalReference", "custody-wallet-withdrawal:withdraw-ordering",
-                        "asset", "USDT", "chain", "ETH", "amount", "25")));
+                "data", Map.of("withdrawalId","wallet-withdrawal-1","externalReference","custody-wallet-withdrawal:withdraw-ordering","asset","USDT","chain","ETH","amount","25","toAddress","0xrecipient","subject","user:42","refundable",true,"fundingSource","TENANT_POOL")));
 
         verify(states).markCompleted(eq(withdrawalId), any(), eq("wallet-withdrawal-1"));
         verify(spotAccountClient, never()).adjustBalance(any(Long.class), any(), any(Long.class), any(), any());
@@ -427,16 +418,17 @@ class CustodyWithdrawalServiceTest {
                                              SpotAccountClient spotAccountClient,
                                              WithdrawalValuationClient valuationClient) {
         CustodyWithdrawalRefundService refundService =
-                new CustodyWithdrawalRefundService(states, spotAccountClient);
+                new CustodyWithdrawalRefundService(states, spotAccountClient, new ObjectMapper());
         CustodyWithdrawalReconciliationService reconciliationService =
                 new CustodyWithdrawalReconciliationService(repository, states, walletClient, refundService, new ObjectMapper());
+
         return new CustodyWithdrawalService(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient, refundService, reconciliationService, new ObjectMapper(), assets);
     }
 
     private CustodyWithdrawalService.WithdrawalRequest request() {
         return new CustodyWithdrawalService.WithdrawalRequest(
-                UUID.randomUUID(), "ETH", "USDT", "0xrecipient", "25", null);
+                null, "ETH", "USDT", "0xrecipient", "25", null, 0L);
     }
 
     private CustodyWithdrawalModels.WithdrawalRecord record(UUID id, String status) {
@@ -445,10 +437,10 @@ class CustodyWithdrawalServiceTest {
 
     private CustodyWithdrawalModels.WithdrawalRecord record(UUID id, String status, String key) {
         return new CustodyWithdrawalModels.WithdrawalRecord(
-                id, 42L, key, "hash", "ETH", "USDT", UUID.randomUUID(),
+                id, 42L, key, "hash", "ETH", "USDT", null,
                 "0xrecipient", "25", 25_000_000L, new BigDecimal("25"),
                 "custody-wallet-withdrawal:" + key,
                 "custody-wallet-withdrawal:" + key, "{}", status, null, null, null, null,
-                Instant.now(), Instant.now(), null, null, null, null, null);
+                Instant.now(), Instant.now(), null, null, null, null, null, new com.surprising.gateway.provider.model.CustodyWithdrawalModels.FeeSnapshot("0",0L,"25",25_000_000L,1,0L), "TENANT_POOL");
     }
 }

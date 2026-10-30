@@ -24,9 +24,10 @@ public class SpotAccountClient {
             commands.adjustBalance(new BalanceAdjustmentRequest(userId, asset.trim().toUpperCase(Locale.ROOT),
                     amountUnits, referenceId, reason == null ? "" : reason), null, null);
         } catch (AccountCommandRejectedException ex) {
-            throw new SpotAccountRejectedException(ex.getMessage());
+            if ("IDEMPOTENCY_CONFLICT".equals(ex.errorCode())) throw new SpotAccountUnknownException("spot adjustment reference conflicts with an existing command",ex);
+            throw new SpotAccountRejectedException(ex.errorCode(),ex.getMessage());
         } catch (IllegalArgumentException ex) {
-            throw new SpotAccountRejectedException(ex.getMessage());
+            throw new SpotAccountUnknownException("spot adjustment could not establish a Core outcome",ex);
         } catch (RuntimeException ex) {
             throw new SpotAccountUnknownException("spot adjustment outcome is unknown", ex);
         }

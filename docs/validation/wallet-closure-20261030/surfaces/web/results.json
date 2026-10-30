@@ -1,0 +1,4247 @@
+{
+  "browser": "153.0.8010.12",
+  "checks": [
+    "catalog failure/retry; exact available balance, minimum, precision and insufficient-funds validation before sending",
+    "a disabled selected network clears the selection and requires a new explicit network choice",
+    "the funding top-up link preserves the asset and presets a product source and funding destination",
+    "configured network fee stays precise; review shows complete address/network/amount/fee, Escape restores focus, and no POST occurs before confirmation",
+    "another tab’s stored request invalidates an open confirmation; unavailable clipboard is recoverable without crashing or sending another request",
+    "denied durable storage prevents POST; unknown response preserves original details/reference across reload without saving security codes or allowing a new request",
+    "cross-tab lock allows only one in-flight retry; the original body/reference is reused; recorded response synchronizes across tabs without claiming blockchain completion",
+    "an explicit first-request policy rejection is shown separately and requires an explicit new-request action",
+    "asset-scoped history cancels stale reads, failure clears old records and retries; disabled SPOT does not show a spendable zero balance",
+    "failed receipt removal retains the original request; switching login owners hides another user’s pending request and restoring the owner restores its reference without POST",
+    "an unsupported requested asset never silently switches to another asset or allocates its deposit address; an explicit available-asset selection is required",
+    "deposit network amounts normalize exactly; records distinguish loading, error and real empty; retry does not reassign the deposit address",
+    "light/dark and Chinese layouts at 1440/390/320px fit; corrupt stored intent blocks a replacement submission and offers recovery"
+  ],
+  "errors": [],
+  "requests": [
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals/quote",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"amount\":\"0.05\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/product-balances",
+      "query": "?userId=1&accountType=SPOT",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/transfers",
+      "query": "?limit=100&accountType=SPOT&asset=USDT",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/transfers",
+      "query": "?limit=100&accountType=USDT_PERPETUAL&asset=USDT",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "LINEAR_PERPETUAL",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/transfers",
+      "query": "?limit=100&accountType=COIN_PERPETUAL&asset=USDT",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "INVERSE_PERPETUAL",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/transfers",
+      "query": "?limit=100&accountType=USDT_DELIVERY&asset=USDT",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "LINEAR_DELIVERY",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/transfers",
+      "query": "?limit=100&accountType=COIN_DELIVERY&asset=USDT",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "INVERSE_DELIVERY",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/transfers",
+      "query": "?limit=100&accountType=OPTION&asset=USDT",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/transfer?asset=USDT&from=SPOT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "OPTION",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals/quote",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"amount\":\"0.05\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals/quote",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"amount\":\"0.05\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals/quote",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"amount\":\"0.05\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals/quote",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"amount\":\"0.05\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"toAddress\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"amount\":\"0.05\",\"externalReference\":\"withdraw-bc15490a-19a0-4fa0-918a-4d1ea0ca2c6d\",\"networkRevision\":17}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "idempotency-key": "withdraw-bc15490a-19a0-4fa0-918a-4d1ea0ca2c6d",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-security-email-code": "123456",
+        "x-security-totp-code": "654321",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"toAddress\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"amount\":\"0.05\",\"externalReference\":\"withdraw-bc15490a-19a0-4fa0-918a-4d1ea0ca2c6d\",\"networkRevision\":17}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "idempotency-key": "withdraw-bc15490a-19a0-4fa0-918a-4d1ea0ca2c6d",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-security-email-code": "123456",
+        "x-security-totp-code": "654321",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals/quote",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"amount\":\"0.05\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "",
+      "method": "POST",
+      "body": "{\"chain\":\"ETH\",\"assetSymbol\":\"USDT\",\"toAddress\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"amount\":\"0.05\",\"externalReference\":\"withdraw-f6c13fe0-afee-43a7-bbda-9ebb8e9171d2\",\"networkRevision\":17}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "idempotency-key": "withdraw-f6c13fe0-afee-43a7-bbda-9ebb8e9171d2",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-security-email-code": "123456",
+        "x-security-totp-code": "654321",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer owner-2-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "2"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer owner-2-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "2"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer owner-2-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "2"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer owner-2-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "2"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer owner-2-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "2"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer owner-2-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "2"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=2",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer owner-2-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "2"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer owner-2-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "2"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=USDT&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=USDT",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=deposit",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/deposit-address",
+      "query": "",
+      "method": "POST",
+      "body": "{\"asset\":\"USDT\",\"network\":\"ETH\"}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/deposits",
+      "query": "?asset=USDT&chain=ETH&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/deposits",
+      "query": "?asset=USDT&chain=ETH&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/deposit?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=en-US&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/auth/csrf",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web"
+      }
+    },
+    {
+      "path": "/api/v1/auth/browser/refresh",
+      "query": "",
+      "method": "POST",
+      "body": "{}",
+      "headers": {
+        "accept": "*/*",
+        "origin": "http://127.0.0.1:5183",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "content-type": "application/json",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-auth-client": "web",
+        "x-auth-transport": "cookie",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-xsrf-token": "test-only-csrf"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/withdrawals",
+      "query": "?asset=BTC&limit=50",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/wallet/assets",
+      "query": "?operation=withdraw",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/account/balances",
+      "query": "?userId=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-product-line": "SPOT",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/gateway/instrument/asset-scales",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a"
+      }
+    },
+    {
+      "path": "/api/v1/runtime",
+      "query": "",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=CENTER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=BANNER&offset=0&limit=1",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    },
+    {
+      "path": "/api/v1/announcements",
+      "query": "?locale=zh-CN&productLine=ALL&platform=WEB&placement=MODAL&offset=0&limit=20",
+      "method": "GET",
+      "body": null,
+      "headers": {
+        "accept": "*/*",
+        "referer": "http://127.0.0.1:5183/assets/withdraw?asset=BTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+        "authorization": "Bearer withdrawal-ui-fixture",
+        "sec-ch-ua": "\"HeadlessChrome\";v=\"153\", \"Not_A Brand\";v=\"8\", \"Chromium\";v=\"153\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"macOS\"",
+        "x-device-id": "7cd007ab-30be-4f62-a79a-272884aa850a",
+        "x-user-id": "1"
+      }
+    }
+  ],
+  "samples": [
+    {
+      "second": 0,
+      "Nodes": 2477,
+      "TaskDuration": 0.000047,
+      "JSHeapUsedSize": 31362424,
+      "requests": 241
+    },
+    {
+      "second": 10,
+      "Nodes": 572,
+      "TaskDuration": 0.029862,
+      "JSHeapUsedSize": 21611620,
+      "requests": 241
+    },
+    {
+      "second": 20,
+      "Nodes": 572,
+      "TaskDuration": 0.032477,
+      "JSHeapUsedSize": 21628128,
+      "requests": 241
+    },
+    {
+      "second": 30,
+      "Nodes": 572,
+      "TaskDuration": 0.035198,
+      "JSHeapUsedSize": 21639452,
+      "requests": 241
+    },
+    {
+      "second": 40,
+      "Nodes": 572,
+      "TaskDuration": 0.038256,
+      "JSHeapUsedSize": 21649944,
+      "requests": 241
+    },
+    {
+      "second": 50,
+      "Nodes": 572,
+      "TaskDuration": 0.040307,
+      "JSHeapUsedSize": 21651064,
+      "requests": 241
+    },
+    {
+      "second": 60,
+      "Nodes": 572,
+      "TaskDuration": 0.048819,
+      "JSHeapUsedSize": 21773912,
+      "requests": 244
+    }
+  ],
+  "limitations": [
+    "HTTP fixtures only; no real funds, custody, KYC, security-code or approval execution.",
+    "No live crash/restart or blockchain recovery verified."
+  ]
+}

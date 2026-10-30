@@ -1,0 +1,8 @@
+
+ RUN  v4.1.12 /Users/atomex/Desktop/surprising/surprising-ex-web
+
+
+ Test Files  65 passed (65)
+      Tests  556 passed (556)
+   Start at  10:16:03
+   Duration  106.13s (transform 4.18s, setup 0ms, import 38.57s, tests 6.01s, environment 26ms)

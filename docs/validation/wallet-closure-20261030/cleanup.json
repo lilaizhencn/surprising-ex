@@ -1,0 +1,28 @@
+{
+  "owned_databases_deleted": [
+    "surprising_wallet_test_closure_20261030",
+    "surprising_exchange_test_wallet_20261030",
+    "surprising_wallet_test_upgrade_20261030",
+    "surprising_exchange_test_wallet_upgrade_20261030",
+    "surprising_exchange_test_wallet_init_20261030",
+    "surprising_wallet_test_red_20261030"
+  ],
+  "owned_simulator_deleted": "BCCA28B1-567E-404B-A8F2-79D56A701F75",
+  "owned_avds_deleted": [
+    "surprising_wallet_closure_20261030",
+    "surprising_wallet_closure35_20261030"
+  ],
+  "owned_server_sessions_stopped": [
+    "Web 5183",
+    "Admin 5184",
+    "Console 5185",
+    "Hardhat 18545"
+  ],
+  "private_temporary_directory_removed": true,
+  "hardhat_private_key_log_archived": false,
+  "original_avd_definition_preserved": true,
+  "unrelated_workspace_changes_preserved": [
+    "Root README deletions",
+    "Admin .codegraph/"
+  ]
+}

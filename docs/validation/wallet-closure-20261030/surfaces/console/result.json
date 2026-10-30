@@ -1,0 +1,67 @@
+{
+  "acceptedPayments": 1,
+  "refusedIntents": 1,
+  "posts": [
+    {
+      "key": "console-d37d7ad6-f645-4682-84c4-b83fef623d49",
+      "body": {
+        "custodyAddressId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "subject": "user:43",
+        "chain": "ETH",
+        "assetSymbol": "USDT",
+        "toAddress": "0x3434343434343434343434343434343434343434",
+        "amount": "25",
+        "externalReference": "console-d37d7ad6-f645-4682-84c4-b83fef623d49",
+        "fundingSource": "ADDRESS",
+        "confirmed": true
+      },
+      "path": "/custody/console/v1/withdrawals"
+    },
+    {
+      "key": "console-d37d7ad6-f645-4682-84c4-b83fef623d49",
+      "body": {
+        "custodyAddressId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "subject": "user:43",
+        "chain": "ETH",
+        "assetSymbol": "USDT",
+        "toAddress": "0x3434343434343434343434343434343434343434",
+        "amount": "25",
+        "externalReference": "console-d37d7ad6-f645-4682-84c4-b83fef623d49",
+        "fundingSource": "ADDRESS",
+        "confirmed": true
+      },
+      "path": "/custody/console/v1/withdrawals"
+    },
+    {
+      "key": "console-1b28a7e2-8529-47d5-a035-bfb803bdb7cd",
+      "body": {
+        "custodyAddressId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "subject": "user:43",
+        "chain": "ETH",
+        "assetSymbol": "USDT",
+        "toAddress": "0x3434343434343434343434343434343434343434",
+        "amount": "25",
+        "externalReference": "console-1b28a7e2-8529-47d5-a035-bfb803bdb7cd",
+        "fundingSource": "ADDRESS",
+        "confirmed": true
+      },
+      "path": "/custody/console/v1/withdrawals"
+    },
+    {
+      "key": "console-1b28a7e2-8529-47d5-a035-bfb803bdb7cd",
+      "body": {
+        "custodyAddressId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "subject": "user:43",
+        "chain": "ETH",
+        "assetSymbol": "USDT",
+        "toAddress": "0x3434343434343434343434343434343434343434",
+        "amount": "25",
+        "externalReference": "console-1b28a7e2-8529-47d5-a035-bfb803bdb7cd",
+        "fundingSource": "ADDRESS",
+        "confirmed": true
+      },
+      "path": "/custody/console/v1/withdrawals/resolve"
+    }
+  ],
+  "failures": []
+}

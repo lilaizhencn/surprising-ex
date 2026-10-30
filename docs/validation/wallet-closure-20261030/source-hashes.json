@@ -1,0 +1,612 @@
+[
+  {
+    "repository": "surprising-ex",
+    "path": "deployment/migrations/20261030-wallet-withdrawal-fees.sql",
+    "sha256": "545684e85c180e34ce51b3b96f850ea4a35953782dd9bad254dd3a0e319780dc"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "init.sql",
+    "sha256": "693acd482b4deefe3972d7616410622079d95d2e824ac5fd8e9b9f62b577e421"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/asset/service/AssetConfigurationService.java",
+    "sha256": "fc1e524bba75ee1b96762711ba98dba938bb047906129c70951a1e9d705ebaa7"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/client/CustodyWalletClient.java",
+    "sha256": "d24f5d8025629c9bdd54e1e3da6308b4557ee2f0890bd578a1d1ec2082d475e0"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/client/SpotAccountClient.java",
+    "sha256": "4d0b6e7db4ee645ced38c9d4740d8f6def859e47abce11977ccd17ce32329352"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/config/GatewayHttpConfiguration.java",
+    "sha256": "2d1b5265e22120c9910601567075f523e4af7981501036f4ba76d0086804b82e"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/BinanceApiController.java",
+    "sha256": "cb8ff2c4caa36393257540b8a04eb073fff399756bfe96964f8908e86f1e2a5c"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/CustodyWalletController.java",
+    "sha256": "35a66a41adbe204f2621520ed68102f8b029164d428475daa971dc670ede9712"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/exception/SpotAccountRejectedException.java",
+    "sha256": "9e7b29b934551ebf3037fe4930605ae940d070b00129bec4186ec0b9f3cea6c0"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/model/CustodyWithdrawalModels.java",
+    "sha256": "69c76f0e70864065d59e0843db275057223ae9fd12f37d92b952e1457b8700b1"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/CustodyWithdrawalFeeRepository.java",
+    "sha256": "ad07938d61c2ebbb07a69af571af9bf2ca769fb6dd7a7d022d9cb67d1572a0e6"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/CustodyWithdrawalRepository.java",
+    "sha256": "b0beefb540fbd79f71d86d7199b0413e3289211d04505094b2d9f6436b61ae24"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationService.java",
+    "sha256": "8c20b62486846830e923e7dbaaa223f24f24b015d8f436e867ea38e1995dd9bf"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalRefundService.java",
+    "sha256": "a21dc9e7defb290bde53f466a4e53dcbfda744f6a31bd2966d9521b930dbaabd"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalService.java",
+    "sha256": "28b103551a4cc85603930d3ae13f19d317dd91f6aa596dfbe1c14b46d2fbadfa"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalStateService.java",
+    "sha256": "33f695a6902f72c9880c08563449f4dfcbd8795cca3299c312ba0e3d146b7ec2"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/asset/service/WithdrawalQuotePostgresTest.java",
+    "sha256": "a25004c2e5f7e23b348303ba7613f08ccd3b22256a1aecdef0c8cc2fa17fb4ad"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/asset/service/WithdrawalQuoteTest.java",
+    "sha256": "1ea55240250d7a7487e683e609c5eecefcea89b1d9ecde1d33bf8586c31c1884"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/client/CustodySubmissionReceiptTest.java",
+    "sha256": "2f97fe0f9b47cbbaee04cfd39c65edc0df2ecc2578d9af2c9ef7a6d6dc0dfb8b"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/client/CustodyWalletClientTest.java",
+    "sha256": "7daba01e190d9bd504e92c794f00bc965806e66e45ffae71a90de3c905ede205"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/client/SpotAccountClientTest.java",
+    "sha256": "97d9bcc0585745d92ae7645efe8b93126bca29b29aa680385ac79bcf1a46da7b"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/controller/BinanceApiControllerTest.java",
+    "sha256": "130b0b4afedf6c9d023e8d7850bfd4ae9d12f8c71f7c7bdd904262cc10a0b778"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/controller/CustodyWalletControllerTest.java",
+    "sha256": "d5e25c7937187795b2646df12a47a8ddf5322dc1a5af0a1d0459ec13f603236a"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationPostgresTest.java",
+    "sha256": "3c966ed1e6957d91259ac585b56b6af4ef2bc2092232e5d05c2666d8b3bb038c"
+  },
+  {
+    "repository": "surprising-ex",
+    "path": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWithdrawalServiceTest.java",
+    "sha256": "32adb6942ef3427a6a88bbf6bac9df581465341784dc99bbb3847c8d5534cf64"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "resources/docs/assets/architecture-diagram.svg",
+    "sha256": "bab7fde1df574b145e12e067f60522cdb56785a8b6f61c03dd8596c4ff2b4c1e"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "resources/docs/assets/system-code-flow-diagram.svg",
+    "sha256": "a3f971e83111e1d0ca94ea84caee00e9345cce568027817f6979287dde259276"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "resources/docs/db/surprising-wallet-init-pgsql.sql",
+    "sha256": "e939f9f0ec8c6568b49d8c76db47b7a0a315cafc4df1a623b01c50680cdc56ab"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "resources/docs/db/wallet-withdrawal-closure-upgrade.sql",
+    "sha256": "7b6d075b25c8c955e44c4e1db3691f35f27e709f88e20ffc8f0a331d45559cb6"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "resources/docs/openapi/custody-v1.yaml",
+    "sha256": "11d665cecf92b2ba9d6b352a1c9bcc716c0ae2d92ca8d3d9828e8339a16f1d7e"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/pom.xml",
+    "sha256": "9dfff05266d565e275a67d881ff1a907113aa054e95541d9aad3919e3987750d"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/chain/evm/EvmAccountTransactionService.java",
+    "sha256": "7a1f4f818db228d725b877eede3700c0f2305572c6f1aa6eea8456795ba51837"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/config/custody/CustodyWebJsonConfiguration.java",
+    "sha256": "91c6f1317e3c5592fa5493b4abc60908902e10b699b8fb4e027982179388ccc1"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/controller/CustodyConsoleTransferController.java",
+    "sha256": "d0be05fb870fb5fbb30fcc6b6a21a7f30166b37f40af455ae3d67b606d8b5207"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/controller/CustodyPublicApiController.java",
+    "sha256": "298f75e4ba867ea5a3c3a81835cd6e2871855fa684e1f9d618568857498f6b0a"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/exception/CustodyExceptionHandler.java",
+    "sha256": "b48f32a7f18062d3a097aa9b3efead8c27f99b48ec1170bed6658782313e98e6"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/exception/CustodyWithdrawalRefusedException.java",
+    "sha256": "6a6685e628773991d0eb73a8198590e5dde1e3dc9a87feee76b963960d592d63"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/gateway/EvmAssetRecoveryChainGateway.java",
+    "sha256": "5c51a28e8f5e96b6d988e7e13b58286f475ebb73ba2e1feabf168d5de52d1c69"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/CollectionRecordRepository.java",
+    "sha256": "372863aaea9f34e11ad3f2cfccae752ec38ff6792639fd35815c944fe2914b94"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/CustodyAddressRepository.java",
+    "sha256": "816b867b46ee3ea63ae3931840566e2a6e97ba84173747bf158bd5f595fac989"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/CustodyAssetRecoveryRepository.java",
+    "sha256": "2cc51e81564cfdc2c964d6d166afcc27a165cb0cbdc7173cbfbcce910ccd0c36"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/CustodyDepositRepository.java",
+    "sha256": "e2ff84857c79ea56ea05d8a17b00d28b0eefbfacfaa5bdb102c8166e185d713f"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/CustodyGasUsageRepository.java",
+    "sha256": "b37f0afc4c094a70534d4b6eb66780ddbccf88649ce0277f0b38c12ecb286b58"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/CustodyIdempotencyRepository.java",
+    "sha256": "20f78d1653e3eed5297543359755f2354f021f64d06be16e385bd5d5593fc1ba"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/CustodyReorgDeficitRepository.java",
+    "sha256": "c1090cc296a766dae5b146bfaa417c463238dd532f008b0f97706069a0a2cfa9"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/CustodyWithdrawalRepository.java",
+    "sha256": "144fff6cd204af0d19d4b3ecd5c68d5cde78d8d340d55d88ddfeaa4d5bb2694f"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/EvmTransactionRepository.java",
+    "sha256": "e46daa547f729c4d6953553f986b8b95f16bed4675c2251f63b19f57ccdba843"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/LedgerBalanceRepository.java",
+    "sha256": "7a200ec9a4e07e09a1553c3af63efda86f9482f67895dc8fa664e9e5b62186b5"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/repository/WithdrawalOrderRepository.java",
+    "sha256": "a56134c7141eb997c7507495da5b076a2d922503886730ba3ea88ddc751c57d7"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/AccountChainWorkflowService.java",
+    "sha256": "96df32fcdfb2fe2f036c062cd96fdef20f52874602917186c602ae39817767c4"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyAssetDashboardService.java",
+    "sha256": "656f88238e1fe394b6792ec21269ae62548f5c400fa16b7be1dba1e030ad50bb"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyAssetRecoveryService.java",
+    "sha256": "17d6202b672111aeb85c109d03bd7902038270a8ad7e4cedaaa5bef0f589a0e2"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyGasReconciliationService.java",
+    "sha256": "29ed6c45a648c9fa7e9f50348669e55ef4af7490644bc8bfb0546ed78d9dcc82"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyPoolFundingService.java",
+    "sha256": "7ddc06daeaa29b4eaafd9980e2b8310f2ed5b24eb05c891569939f90a0efece7"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyTransactionQueryService.java",
+    "sha256": "02b49255f636b701667a01b7444624e80212dc3f1ea250e90fac60cf79e88b08"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyWithdrawalExecutionService.java",
+    "sha256": "1d69c0ddbee40cedfddffb1389822c2d4e67482de8f6520c35472e8da7ee39a2"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyWithdrawalReconciliationService.java",
+    "sha256": "7a863bbe6331a41e028f3b1f9b66b97edc1c33d860e8f060523b5f2c5d1a2849"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/CustodyWithdrawalService.java",
+    "sha256": "a93e8a2df5da285a5db5b1843a93219865357c76054b03edc6ba7020b9f1ed55"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/EvmSubmissionService.java",
+    "sha256": "54e044a202d2d3b2b2e7ef3f54ce25f279bda67c0ef82c2c176d9031dfab931d"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/UtxoBroadcastService.java",
+    "sha256": "4a9343c5da07b69aab13922873fe4be3072bbafeea9947ef23fca71623dc69b8"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/WalletChainConfigService.java",
+    "sha256": "8263283f9ff30cf53d56fcbd3595cafa3ad5ef46aeadd4b1179c4e4bcb02b2b7"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/WalletConfigIdentityGuard.java",
+    "sha256": "088849c0c59eec36d7592065ddd257938dc51f093feb5a7b58df0ba92316a783"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/WithdrawalClaimService.java",
+    "sha256": "7b276bdcfb82369fdc3b26ec8e4da89848795230ba635aef79c5dc1b2853cdc2"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/main/java/com/surprising/wallet/service/WithdrawalSettlementService.java",
+    "sha256": "009529b3e43ea1860459e3d6ceac24b9f3e1edd20eaec843b176e4e251e5a24e"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/chain/evm/EvmForkTransactionServiceIntegrationTest.java",
+    "sha256": "2cd1f58d066410cab08912754e0da5c6a9932242330d4e8077aacdf129aa63e2"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/CustodyControlPlaneQueriesIntegrationTest.java",
+    "sha256": "4cd9237bfd1d3eb47611bc7b6d82f6bcc01be38e04423876286a7416702c17c1"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/CustodyGasAccountingIntegrationTest.java",
+    "sha256": "6d4db42e0c107848a3ed5577717417c3eff6cc42dfccf1a9d9c94c7cf0f88869"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/CustodyMoneyHttpTest.java",
+    "sha256": "233cdea79d7d16fecc8781f6952a6c3819fbcdc21a0f8dd1bcf93a9fe7854037"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/CustodyMultiChainLoadIntegrationTest.java",
+    "sha256": "4682e098615f0dfa222bd1982f18047e1970d891a86f6c78c4461a76eb0a6bfb"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/CustodyOperationsIntegrationTest.java",
+    "sha256": "edf8e4300c413a49ebabfa298ec22beb5183e08a99d3b7ecbf460df879c63623"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/CustodyTenantIsolationIntegrationTest.java",
+    "sha256": "944235d95057b52a46935b691b764b5f344aab9d7679c3ff6a523cbf9b398935"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/CustodyWithdrawalCreationIntegrationTest.java",
+    "sha256": "42123576d1d5f7347eb9c132c8a10657ee601bd33e809cd0f6acaf81d68b6427"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/CustodyWithdrawalProjectionIntegrationTest.java",
+    "sha256": "1749b7d45294122184600da806f48e284a3dac3c88a0f76b8aeb7e1c30dd34c8"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/Evm7702ProductionFlowIntegrationTest.java",
+    "sha256": "5ced8ac9a713e6cd24c12152cfc4c1286b4181b979492c2d7e89cb742cf8d5a9"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/EvmBatchOwnershipIntegrationTest.java",
+    "sha256": "5365538237020ffc10dd96d9c5fd09c4a9b52f9d4b3ed8085c3bcb417574d6cd"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/EvmBatchRowsIntegrationTest.java",
+    "sha256": "c01da6ff6a5e3ba46fc42a8fa649b7678351f2bc9be9b34f57ad2f0d81aea26e"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/EvmSubmissionIntegrationTest.java",
+    "sha256": "89eeca80af3639238519ef8a613c2db539153e2139af45537770ee745be38d8b"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/custody/UtxoSigningPipelineIntegrationTest.java",
+    "sha256": "7cd82a09f6ddc17eccf5b248a099d4a2f040a75fe8be4b59818f025a11675be1"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/service/AccountChainWorkflowServiceTest.java",
+    "sha256": "9d6e2d8f29293dd3fd488562a376f39642a88119ced0add8fbf8fcb6791fbeb4"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/service/CustodyWithdrawalAddressValidationTest.java",
+    "sha256": "9214cf12b5a418d9a94c71f22c6d6a6236f940d0438abc6830bc07dee51e6ba4"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/service/WalletConfigTestSupport.java",
+    "sha256": "ef33cc3fd3fcf6804d6b345548924f4b8dd534cf6dcca6e791c993c56f664f98"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/service/WalletRpcAuthenticationTest.java",
+    "sha256": "dcab00410eece39a59ff8479a3d0f7681763a24ad96c7940f7ce6216f3980f77"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/service/WalletTokenValidationIntegrationTest.java",
+    "sha256": "f5b99b2da3e1d6b78aa2ae8f2189dcc20c0577b01145bddde721692abf3986d1"
+  },
+  {
+    "repository": "surprising-wallet",
+    "path": "wallet-api/src/test/java/com/surprising/wallet/testutil/CustodyTestSupport.java",
+    "sha256": "7f6cd261becb7f3b4b9b47b4a22c54b0f097ab02bd4d0b241166efeb44abc112"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "pnpm-lock.yaml",
+    "sha256": "973653d46819b8bb9836aaf394ff14de934c83ba9a2c06c63cd132c033ca07ce"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "scripts/withdrawal-experience-qa.mjs",
+    "sha256": "9ec49e44acb4a88ade3d098c09e008f50721a40352f2a30ecbeedb3cd4c31ca7"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "src/api/endpoints.ts",
+    "sha256": "284f5cd06c9c9d4954941a8d3286cdb4bfc9c10d32a2ec09dae87d5748c10206"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "src/api/types.ts",
+    "sha256": "0afededcd9fb6d48e10040a66b6df629d0de9eba38363564a5e488bbd80868d5"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "src/components/ui/StandardDialog.tsx",
+    "sha256": "25298facd35d6fb1fe7b7d1652ac86fec3a4404571fc3003aa60d3e3e543a321"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "src/features/assets/WithdrawPage.tsx",
+    "sha256": "25b1fa489fad1be2bc1e0c3062fb8a8451bcd90bbbbc430c749ee10abe14a344"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "src/features/assets/WithdrawalHistory.tsx",
+    "sha256": "2585cb0bf9af770d78e5c695d4c5a7c91c547352828a1cc5e312c02c6f4f7e10"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "src/features/assets/withdrawal.test.ts",
+    "sha256": "fd0ef0ead5495267092bad65e88ef2f6f0aeeb891f50cf2857a7e4564f75c8d9"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "src/features/assets/withdrawalIntent.ts",
+    "sha256": "8f9cb8b4a4b84c3a35e6799faa2214f4aa1ef6895e910c02c43bf88cf90dfd8a"
+  },
+  {
+    "repository": "surprising-ex-web",
+    "path": "src/i18n/zh.json",
+    "sha256": "998dc3cde4a3c5f7772a45a8b0fb4875c56b71b92a0d6f030d7b786543dfc72b"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "integration_test/wallet_closure_host.py",
+    "sha256": "ad463dc970ef4a8e7a685903e7559809f1926438e3ec49d0355008900e317aef"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "integration_test/wallet_closure_test.dart",
+    "sha256": "a810e827a17bd3d6342b582ef1012c08a9752a5ccb55c4b31cccd025925fcd39"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "lib/src/api.dart",
+    "sha256": "d4bb712e31ac3399649990a86bf21e286097c28b26ce807d74e8b1332d736975"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "lib/src/app_state.dart",
+    "sha256": "08bd36ce295853d2ff37538c69e3d5285146a3da0d83446f4e2124d8cf7c43dd"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "lib/src/models.dart",
+    "sha256": "f89eb09b6613f41137d19bf686fec1fc506fc26cbaa00d6335f4d6e654697360"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "lib/src/wallet/wallet_components.dart",
+    "sha256": "ed53bcea3dff689e1fc5733bc748db1fb0d1ca31e7ffd7f262bcced4eacde244"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "lib/src/wallet/wallet_state.dart",
+    "sha256": "d2a03a7b8038a552ba84c89bc4bf767c9045f8a28ea6ef101861383b16bea5e2"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "lib/src/wallet/withdrawal_page.dart",
+    "sha256": "a7fec5de189fa90e9189b03c47f437e86aa3e560745ce9373b31f54366d5885b"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "test/wallet_state_test.dart",
+    "sha256": "11485061e0dc81ca883c3f2b74ed42f9ad021efffb3a375fa2911aaa520b7f38"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "test/widget_test.dart",
+    "sha256": "6fd361295f959a13a848d9774e847e5fb7f74619e3e09a3f3ccdfb3dec90a5d1"
+  },
+  {
+    "repository": "surprising-client",
+    "path": "test/withdrawal_security_test.dart",
+    "sha256": "8369f24b34128cf995ae4cd079373ace074d6044a0714522b1df05ee4d91c103"
+  },
+  {
+    "repository": "surprising-admin-web",
+    "path": "scripts/custody-withdrawal-qa.mjs",
+    "sha256": "73786d0fc809876a4f2645bd0a1479e5c2f7a0fb6ae5f457b0d22e2c1419a767"
+  },
+  {
+    "repository": "surprising-admin-web",
+    "path": "src/AssetsPage.tsx",
+    "sha256": "aa2930714e9237dc2ed6e7d81e2d9f3489446e7599e4f5b8624908af271d0b1f"
+  },
+  {
+    "repository": "surprising-admin-web",
+    "path": "src/api/custodyWithdrawals.ts",
+    "sha256": "eb3cca9cca373bc9dbe97fa160459c4331792e1cb7f99daff7f774c5afb28527"
+  },
+  {
+    "repository": "surprising-admin-web",
+    "path": "src/features/CustodyWithdrawalsPanel.tsx",
+    "sha256": "580b7c1e9e707d594455d01adcad74969931f93e7bc60924a8e5502145b4b2b5"
+  },
+  {
+    "repository": "surprising-admin-web",
+    "path": "src/lib/tableRows.ts",
+    "sha256": "a6b6794bc4685d51e34100f21b2337f3d0658e08a532676a9cdda8987217740d"
+  },
+  {
+    "repository": "surprising-admin-web",
+    "path": "tests/custodyWithdrawals.test.ts",
+    "sha256": "b93811462c80ed4c2f1c670c6435e1ad6fc9d14104615e71a51a79734af0e563"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "scripts/withdrawal-closure-qa.mjs",
+    "sha256": "302174ef5bb946bf5d5924dc95e57fc7717419b31c3985ece5e6545ea007a6f1"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/auth/session.ts",
+    "sha256": "96cb4682aeb8dc60ddf30a0111ead4781980ecaccd838c4761f84a0b033736cd"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/i18n/zh-CN.ts",
+    "sha256": "7ab3e6620d12f835de66dc7a3e10561cd85e6a5373e1808f623c6607d4ada659"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/pages/DeveloperDocsPage.tsx",
+    "sha256": "0f915f272cd558c3c1261c4f9060668e4db45b888fc0f46aea1ec9375c4aedf9"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/pages/TransfersPage.tsx",
+    "sha256": "6309dd6496a366ea1e7a1634e450dd6071d9a1523c0e503e0a9bba67dfe35a47"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/test/CustodyWorkflowInteractions.test.tsx",
+    "sha256": "4a715bc51b97255d149dfe8d6f0353bdee37ce49f5499883b510c7efa4090a91"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/test/format.test.ts",
+    "sha256": "1e3e19a9d5cb90bfbaf20b52d3bfecda38cd7e884fcd3eca8df7b1b6be342a9a"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/test/setup.ts",
+    "sha256": "9fb7d3508aafc1695f1c83fcb497e61175daf0ac700ffbc35514152bb8db5deb"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/test/withdrawalIntent.test.ts",
+    "sha256": "6f0e14a7bee72bde57e0f945dca3f90917a1062d11e881eecdb791d7d4d6110f"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/utils/format.ts",
+    "sha256": "23216d85466aabe74f053cd5e3698c70a190cad216a69aefbe1fd31c7fd00245"
+  },
+  {
+    "repository": "surprising-wallet-web",
+    "path": "src/utils/withdrawalIntent.ts",
+    "sha256": "6b8e8a72ab44f4f6224d241c6790cb56fe33662a57c04b166af96783f27e9674"
+  }
+]

@@ -1,0 +1,324 @@
+{
+  "java_unique_tests": 310,
+  "java_classes": {
+    "exchange:com.surprising.asset.service.WithdrawalQuoteTest": {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.asset.service.WithdrawalQuotePostgresTest": {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.gateway.provider.controller.CustodyWalletControllerTest": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.gateway.provider.controller.BinanceApiControllerTest": {
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest": {
+      "tests": 35,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest": {
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.gateway.provider.client.SpotAccountClientTest": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.gateway.provider.client.CustodySubmissionReceiptTest": {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.gateway.provider.client.CustodyWalletClientTest": {
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "exchange-pool-suite-3.log"
+    },
+    "exchange:com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest": {
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "gateway-webhook-tests.log"
+    },
+    "exchange:com.surprising.gateway.provider.service.WalletFundingServiceTest": {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "gateway-funding-tests.log"
+    },
+    "exchange:com.surprising.aeron.service.core.AsyncAccountBalanceCommandTest": {
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "core-withdrawal-recovery.log"
+    },
+    "exchange:com.surprising.aeron.service.retention.CoreFundsIdempotencyTest": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "core-withdrawal-recovery.log"
+    },
+    "custody:com.surprising.wallet.walletapp.ArchitectureBoundaryTest": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodyTenantIsolationIntegrationTest": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodyControlPlaneQueriesIntegrationTest": {
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.EvmSubmissionIntegrationTest": {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-signer-schema-tests.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodyDepositProjectionIntegrationTest": {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodyWithdrawalCreationIntegrationTest": {
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodyWithdrawalProjectionIntegrationTest": {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodyMoneyHttpTest": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.UtxoSigningPipelineIntegrationTest": {
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.WalletConfigManagementContractTest": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.WithdrawalSettlementIntegrationTest": {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodyGasAccountingIntegrationTest": {
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.UtxoSigningSubmissionIntegrationTest": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodyAssetRecoveryIntegrationTest": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.service.AccountChainWorkflowServiceTest": {
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.service.CustodyWithdrawalAddressValidationTest": {
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.service.WalletRpcAuthenticationTest": {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.service.TransactionQueueSafetyTest": {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.service.Evm7702WithdrawalAuthorizationTest": {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-pool-suite-2.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodySchemaContractTest": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-signer-schema-tests.log"
+    },
+    "custody:com.surprising.wallet.custody.EvmUnknownAttemptRecoveryIntegrationTest": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-security-recovery-tests.log"
+    },
+    "custody:com.surprising.wallet.custody.AccountSequenceReservationIntegrationTest": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-security-recovery-tests.log"
+    },
+    "custody:com.surprising.wallet.custody.CustodySecurityIntegrationTest": {
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-security-recovery-tests.log"
+    },
+    "custody:com.surprising.wallet.custody.EvmNonceReservationIntegrationTest": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log": "wallet-security-recovery-tests.log"
+    }
+  },
+  "ui_tests": {
+    "Web": {
+      "tests": 556,
+      "log": "web-final-tests.log"
+    },
+    "Console": {
+      "tests": 45,
+      "log": "console-verified-tests.log"
+    },
+    "Admin": {
+      "tests": 147,
+      "log": "admin-tests.log"
+    },
+    "App": {
+      "tests": 65,
+      "log": "client-final-tests.log"
+    }
+  },
+  "ui_unique_tests": 813,
+  "total_unique_tests": 1123,
+  "native": {
+    "ios": {
+      "paidOnce": 1,
+      "distinctIntents": 1,
+      "quoteVersion": 17,
+      "platformFee": "0.25",
+      "net": "24.75",
+      "lifecycleCycles": 20,
+      "rssBefore": 426856448,
+      "rssAfter": 446631936,
+      "httpRequests": 27
+    },
+    "android": {
+      "paidOnce": 1,
+      "distinctIntents": 1,
+      "quoteVersion": 17,
+      "platformFee": "0.25",
+      "net": "24.75",
+      "lifecycleCycles": 20,
+      "rssBefore": 478937088,
+      "rssAfter": 488517632,
+      "httpRequests": 27
+    }
+  },
+  "console": {
+    "accepted_payments": 1,
+    "refused_intents": 1,
+    "held_pointer_regression": "failed before distinct button keys; passed after"
+  },
+  "lint": {
+    "web_baseline_errors": 90,
+    "web_current_errors": 81,
+    "changed_files": 8,
+    "changed_file_errors": 0
+  },
+  "limits": [
+    "No production database, hardware signing, or full-chain live fault injection.",
+    "Native/browser HTTP fixtures and backend PG/local EVM tests are separate.",
+    "Full Web lint retains 81 existing errors."
+  ]
+}

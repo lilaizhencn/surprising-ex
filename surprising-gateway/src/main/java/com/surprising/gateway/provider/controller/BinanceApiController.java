@@ -42,7 +42,7 @@ public class BinanceApiController {
             "/account", "/account/status", "/openOrders", "/allOrders", "/order", "/ticker/bookTicker");
     private static final java.util.Set<String> ACCOUNT_PATHS = java.util.Set.of("/sapi/v1/account/status", "/sapi/v1/asset/transfer",
             "/sapi/v1/capital/deposit/address", "/sapi/v1/capital/deposit/hisrec", "/sapi/v1/capital/config/getall",
-            "/sapi/v1/capital/withdraw/history", "/sapi/v1/capital/withdraw/apply");
+            "/sapi/v1/capital/withdraw/history", "/sapi/v1/capital/withdraw/apply", "/sapi/v1/capital/withdraw/quote");
 
     private final ApiKeyRequestBinding apiKeyRequests;
     private final GatewayProperties properties;
@@ -123,6 +123,11 @@ public class BinanceApiController {
             }
             if (path.endsWith("/capital/withdraw/history")) {
                 return withdrawHistory(request);
+            }
+            if (path.endsWith("/capital/withdraw/quote")) {
+                authenticate(request,"WITHDRAW",body);
+                var params = parameters(request,body);
+                return json(HttpStatus.OK,withdrawalService.quote(required(params,"coin"),required(params,"network"),required(params,"amount")));
             }
             if (path.endsWith("/capital/withdraw/apply")) {
                 return withdraw(request, body);
@@ -258,9 +263,6 @@ public class BinanceApiController {
         boolean apiKeyRequest = request.getHeader("X-MBX-APIKEY") != null
                 && !request.getHeader("X-MBX-APIKEY").isBlank();
         long userId = authenticate(request, "WITHDRAW", body);
-        requireWithdrawalSecurity(request, userId, apiKeyRequest ? "API_WITHDRAWAL" : "WITHDRAWAL");
-        requireKyc(userId);
-        complianceService.requireWithdrawalEligibility(userId);
         String asset = required(params, "coin");
         String chain = required(params, "network");
         String idempotencyKey = first(params, "withdrawOrderId", "clientOrderId");
@@ -271,15 +273,19 @@ public class BinanceApiController {
             throw new IllegalArgumentException("withdrawOrderId or Idempotency-Key is required");
         }
         String amount = required(params, "amount");
-        java.util.UUID sourceAddressId = custodyWalletClient.withdrawalAddressId(userId, chain, asset, amount);
-        CustodyWithdrawalService.WithdrawalResponse result = withdrawalService.submit(userId, idempotencyKey,
-                new CustodyWithdrawalService.WithdrawalRequest(
-                        sourceAddressId, chain, asset, required(params, "address"),
-                        amount, null));
+        String revision = required(params,"networkRevision");
+        var intent = new CustodyWithdrawalService.WithdrawalRequest(null,chain,asset,required(params,"address"),amount,null,Long.parseLong(revision));
+        var result = withdrawalService.replay(userId,idempotencyKey,intent);
+        if (result == null) {
+            requireWithdrawalSecurity(request,userId,apiKeyRequest ? "API_WITHDRAWAL" : "WITHDRAWAL");
+            requireKyc(userId);
+            complianceService.requireWithdrawalEligibility(userId);
+            result = withdrawalService.submit(userId,idempotencyKey,intent);
+        }
         return json(HttpStatus.OK, Map.of("id", result.walletWithdrawalId() == null
                         ? result.withdrawalId().toString() : result.walletWithdrawalId(),
                 "withdrawalId", result.withdrawalId().toString(), "status", result.status(),
-                "msg", "success", "success", true));
+                "msg", "success", "success", true, "amount",result.amount(),"platformFee",result.fee(),"receivedAmount",result.receivedAmount()));
     }
 
     private ResponseEntity<byte[]> withdrawHistory(HttpServletRequest request) {

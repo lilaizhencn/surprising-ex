@@ -89,6 +89,43 @@ public class AssetConfigurationService {
         return after;
     }
 
+    /** Platform fee is deducted from the requested gross amount. Chain Gas is accounted by custody separately. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public WithdrawalQuote lockWithdrawalQuote(String assetCode, String chain, String amount) {
+        Asset asset = assets.byAccountingCode(assetCode)
+                .orElseThrow(() -> new IllegalArgumentException("asset is not listed for withdrawal"));
+        assets.lock(asset.assetId()).orElseThrow(() -> new IllegalArgumentException("asset is not listed for withdrawal"));
+        return withdrawalQuote(assetCode,chain,amount);
+    }
+
+    public WithdrawalQuote withdrawalQuote(String assetCode, String chain, String amount) {
+        Asset asset = assets.byAccountingCode(assetCode)
+                .filter(Asset::listed).orElseThrow(() -> new IllegalArgumentException("asset is not listed for withdrawal"));
+        Network route = networks.list(asset.assetId()).stream()
+                .filter(network -> network.networkCode().equals(chain) && network.withdrawalEnabled())
+                .findFirst().orElseThrow(() -> new IllegalArgumentException("withdrawal network is disabled for this asset"));
+        long grossUnits = amountUnits(assetCode, amount);
+        BigDecimal gross = new BigDecimal(amount);
+        if (gross.compareTo(route.minWithdrawal()) < 0) throw new IllegalArgumentException("amount is below the minimum withdrawal");
+        requireAmount(gross, asset.scaleUnits(), route.chainDecimals(), false);
+        requireAmount(route.withdrawalFee(), asset.scaleUnits(), route.chainDecimals(), true);
+        long feeUnits = route.withdrawalFee().multiply(BigDecimal.valueOf(asset.scaleUnits())).longValueExact();
+        long receivedUnits = Math.subtractExact(grossUnits, feeUnits);
+        if (receivedUnits <= 0) throw new IllegalArgumentException("withdrawal amount must exceed the platform fee");
+        return new WithdrawalQuote(asset.asset(), chain, gross.stripTrailingZeros().toPlainString(), grossUnits,
+                route.withdrawalFee().stripTrailingZeros().toPlainString(), feeUnits,
+                gross.subtract(route.withdrawalFee()).stripTrailingZeros().toPlainString(), receivedUnits,
+                route.networkId(), route.revision());
+    }
+
+    public record WithdrawalQuote(String asset, String chain, String amount,
+                                  @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) long amountUnits,
+                                  String fee,
+                                  @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) long feeUnits,
+                                  String receivedAmount,
+                                  @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING) long receivedUnits,
+                                  int networkId, long networkRevision) { }
+
     public long amountUnits(String accountingCode, String amount) {
         Asset asset = assets.byAccountingCode(accountingCode)
                 .orElseThrow(() -> new IllegalArgumentException("asset not found"));

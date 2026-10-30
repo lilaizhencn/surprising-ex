@@ -24,19 +24,18 @@ class SpotAccountClientTest {
         assertThat(java.util.Arrays.stream(SpotAccountClient.class.getDeclaredFields())
                 .anyMatch(field -> field.getType() == org.springframework.web.client.RestTemplate.class)).isFalse();
     }
-    @Test void rejectedAndInvalidCommandsStayRejectedAndDoNotRetry() {
-        var products = mock(GatewayProductServices.class);
-        var commands = mock(AccountCommandGateway.class);
-        when(products.service(ProductLine.SPOT, AccountCommandGateway.class)).thenReturn(commands);
-        var client = new SpotAccountClient(products);
-        for (RuntimeException failure : java.util.List.of(
-                new com.surprising.account.provider.exception.AccountCommandRejectedException("INSUFFICIENT_FUNDS", "insufficient funds"),
-                new IllegalArgumentException("invalid account"))) {
-            reset(commands);
-            when(commands.adjustBalance(any(), isNull(), isNull())).thenThrow(failure);
-            assertThatThrownBy(() -> client.adjustBalance(42, "USDT", -100, "withdrawal:1", "withdrawal"))
-                    .isInstanceOf(SpotAccountRejectedException.class).hasMessage(failure.getMessage());
-            verify(commands, times(1)).adjustBalance(any(), isNull(), isNull());
+    @Test void onlyADefinitiveCoreDecisionCanRejectTheOriginalAdjustment() {
+        var products=mock(GatewayProductServices.class); var commands=mock(AccountCommandGateway.class);
+        when(products.service(ProductLine.SPOT,AccountCommandGateway.class)).thenReturn(commands);
+        var client=new SpotAccountClient(products);
+        when(commands.adjustBalance(any(),isNull(),isNull())).thenThrow(new com.surprising.account.provider.exception.AccountCommandRejectedException("INSUFFICIENT_FUNDS","insufficient funds"));
+        assertThatThrownBy(()->client.adjustBalance(42,"USDT",-100,"withdrawal:1","withdrawal"))
+                .isInstanceOf(SpotAccountRejectedException.class).satisfies(error->assertThat(((SpotAccountRejectedException)error).isCoreDecision()).isTrue());
+        for (RuntimeException failure:java.util.List.of(new IllegalArgumentException("local metadata unavailable"),
+                new com.surprising.account.provider.exception.AccountCommandRejectedException("IDEMPOTENCY_CONFLICT","conflicting command"))) {
+            reset(commands); when(commands.adjustBalance(any(),isNull(),isNull())).thenThrow(failure);
+            assertThatThrownBy(()->client.adjustBalance(42,"USDT",-100,"withdrawal:1","withdrawal")).isInstanceOf(SpotAccountUnknownException.class);
+            verify(commands,times(1)).adjustBalance(any(),isNull(),isNull());
         }
     }
 

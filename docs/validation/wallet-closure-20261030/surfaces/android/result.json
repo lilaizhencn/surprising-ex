@@ -1,0 +1,11 @@
+{
+  "paidOnce": 1,
+  "distinctIntents": 1,
+  "quoteVersion": 17,
+  "platformFee": "0.25",
+  "net": "24.75",
+  "lifecycleCycles": 20,
+  "rssBefore": 478937088,
+  "rssAfter": 488517632,
+  "httpRequests": 27
+}

@@ -98,6 +98,25 @@ public class CustodyWalletController {
         }
     }
 
+    @GetMapping("/withdrawals/submission")
+    public Map<String,Object> submission(@RequestHeader("Authorization") String authorization, @RequestParam String reference) {
+        try {
+            var response = withdrawalService.submission(principal(authorization).userId(),reference);
+            if (response == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"withdrawal intent is not currently recorded; retry only the original reference");
+            return withdrawalReceipt(response);
+        } catch (IllegalArgumentException ex) { throw badRequest(ex); }
+    }
+
+    @PostMapping("/withdrawals/quote")
+    public com.surprising.asset.service.AssetConfigurationService.WithdrawalQuote quote(
+            @RequestHeader("Authorization") String authorization,
+            @Valid @RequestBody WithdrawalQuoteRequest request) {
+        principal(authorization);
+        try {
+            return withdrawalService.quote(request.assetSymbol(),request.chain(),request.amount());
+        } catch (IllegalArgumentException ex) { throw badRequest(ex); }
+    }
+
     @PostMapping("/withdrawals")
     public Map<String, Object> createWithdrawal(
             @RequestHeader("Authorization") String authorization,
@@ -107,24 +126,14 @@ public class CustodyWalletController {
             @Valid @RequestBody CreateWithdrawalRequest request) {
         try {
             JwtPrincipal principal = principal(authorization);
+            var intent = new CustodyWithdrawalService.WithdrawalRequest(request.custodyAddressId(), request.chain(),
+                    request.assetSymbol(), request.toAddress(), request.amount(), request.externalReference(), request.networkRevision());
+            var replay = withdrawalService.replay(principal.userId(), idempotencyKey, intent);
+            if (replay != null) return withdrawalReceipt(replay);
             requireSecurity(principal.userId(), "WITHDRAWAL", emailCode, totpCode);
             requireKyc(principal.userId());
             complianceService.requireWithdrawalEligibility(principal.userId());
-            java.util.UUID configuredSourceAddressId = walletClient.withdrawalAddressId(
-                    principal.userId(), request.chain(), request.assetSymbol(), request.amount());
-            if (request.custodyAddressId() != null
-                    && !configuredSourceAddressId.equals(request.custodyAddressId())) {
-                throw new IllegalArgumentException("withdrawal source address does not match configured custody address");
-            }
-            CustodyWithdrawalService.WithdrawalResponse response = withdrawalService.submit(
-                    principal.userId(), idempotencyKey,
-                    new CustodyWithdrawalService.WithdrawalRequest(
-                            configuredSourceAddressId, request.chain(), request.assetSymbol(), request.toAddress(),
-                            request.amount(), request.externalReference()));
-            return Map.of("id", response.walletWithdrawalId() == null
-                            ? response.withdrawalId().toString() : response.walletWithdrawalId(),
-                    "withdrawalId", response.withdrawalId().toString(), "status", response.status(),
-                    "success", true);
+            return withdrawalReceipt(withdrawalService.submit(principal.userId(), idempotencyKey, intent));
         } catch (CustodyWithdrawalService.WithdrawalRejectedException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (CustodyWithdrawalService.WithdrawalUnknownException ex) {
@@ -136,6 +145,12 @@ public class CustodyWalletController {
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
+    }
+
+    private Map<String, Object> withdrawalReceipt(CustodyWithdrawalService.WithdrawalResponse response) {
+        return Map.of("id", response.walletWithdrawalId() == null ? response.withdrawalId().toString() : response.walletWithdrawalId(),
+                "withdrawalId", response.withdrawalId().toString(), "status", response.status(), "success", true,
+                "amount", response.amount(), "platformFee", response.fee(), "receivedAmount", response.receivedAmount(), "networkRevision", response.networkRevision());
     }
 
     private void requireKyc(long userId) {
@@ -172,11 +187,16 @@ public class CustodyWalletController {
                                        @Positive Long addressVersion) {
     }
 
+    public record WithdrawalQuoteRequest(@NotBlank @Size(max = 32) String chain,
+                                         @NotBlank @Size(max = 32) String assetSymbol,
+                                         @NotBlank @Size(max = 120) String amount) { }
+
     public record CreateWithdrawalRequest(java.util.UUID custodyAddressId,
                                           @NotBlank @Size(max = 32) String chain,
                                           @NotBlank @Size(max = 32) String assetSymbol,
                                           @NotBlank @Size(max = 160) String toAddress,
                                           @NotBlank @Size(max = 120) String amount,
-                                          @Size(max = 160) String externalReference) {
+                                          @Size(max = 160) String externalReference,
+                                          @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long networkRevision) {
     }
 }

@@ -1,0 +1,424 @@
+src/features/assets/WithdrawPage.tsx:109:52 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    107 │   const balances = cash?.key === readScope ? cash.value : undefined
+    108 │   const scale = balances?.scales[asset]
+  > 109 │   const balance = balances?.rows.find((row) => row["asset"] === asset)
+        │                                                    ^^^^^^^
+    110 │   const rawAvailable = balance?.["availableUnits"]
+    111 │   let availableUnits: string | null = null
+
+  i Unsafe fix: Use a literal key instead.
+
+    107 107 │     const balances = cash?.key === readScope ? cash.value : undefined
+    108 108 │     const scale = balances?.scales[asset]
+    109     │ - ··const·balance·=·balances?.rows.find((row)·=>·row["asset"]·===·asset)
+        109 │ + ··const·balance·=·balances?.rows.find((row)·=>·row.asset·===·asset)
+    110 110 │     const rawAvailable = balance?.["availableUnits"]
+    111 111 │     let availableUnits: string | null = null
+
+
+src/features/assets/WithdrawalHistory.tsx:70:31 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    68 │           {historyRows.map((row, index) => (
+    69 │             <li
+  > 70 │               key={String(row["gatewayWithdrawalId"] ?? row["withdrawalId"] ?? row["id"] ?? index)}
+       │                               ^^^^^^^^^^^^^^^^^^^^^
+    71 │             >
+    72 │               <div className="withdraw-history-title">
+
+  i Unsafe fix: Use a literal key instead.
+
+     68  68 │             {historyRows.map((row, index) => (
+     69  69 │               <li
+     70     │ - ··············key={String(row["gatewayWithdrawalId"]·??·row["withdrawalId"]·??·row["id"]·??·index)}
+         70 │ + ··············key={String(row.gatewayWithdrawalId·??·row["withdrawalId"]·??·row["id"]·??·index)}
+     71  71 │               >
+     72  72 │                 <div className="withdraw-history-title">
+
+
+src/features/assets/WithdrawalHistory.tsx:70:61 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    68 │           {historyRows.map((row, index) => (
+    69 │             <li
+  > 70 │               key={String(row["gatewayWithdrawalId"] ?? row["withdrawalId"] ?? row["id"] ?? index)}
+       │                                                             ^^^^^^^^^^^^^^
+    71 │             >
+    72 │               <div className="withdraw-history-title">
+
+  i Unsafe fix: Use a literal key instead.
+
+     68  68 │             {historyRows.map((row, index) => (
+     69  69 │               <li
+     70     │ - ··············key={String(row["gatewayWithdrawalId"]·??·row["withdrawalId"]·??·row["id"]·??·index)}
+         70 │ + ··············key={String(row["gatewayWithdrawalId"]·??·row.withdrawalId·??·row["id"]·??·index)}
+     71  71 │               >
+     72  72 │                 <div className="withdraw-history-title">
+
+
+src/features/assets/WithdrawalHistory.tsx:70:84 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    68 │           {historyRows.map((row, index) => (
+    69 │             <li
+  > 70 │               key={String(row["gatewayWithdrawalId"] ?? row["withdrawalId"] ?? row["id"] ?? index)}
+       │                                                                                    ^^^^
+    71 │             >
+    72 │               <div className="withdraw-history-title">
+
+  i Unsafe fix: Use a literal key instead.
+
+     68  68 │             {historyRows.map((row, index) => (
+     69  69 │               <li
+     70     │ - ··············key={String(row["gatewayWithdrawalId"]·??·row["withdrawalId"]·??·row["id"]·??·index)}
+         70 │ + ··············key={String(row["gatewayWithdrawalId"]·??·row["withdrawalId"]·??·row.id·??·index)}
+     71  71 │               >
+     72  72 │                 <div className="withdraw-history-title">
+
+
+src/features/assets/WithdrawalHistory.tsx:74:31 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    72 │               <div className="withdraw-history-title">
+    73 │                 <strong className="mono">
+  > 74 │                   {String(row["amount"] ?? "—")}{" "}
+       │                               ^^^^^^^^
+    75 │                   {String(row["asset"] ?? row["assetSymbol"] ?? asset)}
+    76 │                 </strong>
+
+  i Unsafe fix: Use a literal key instead.
+
+     72  72 │                 <div className="withdraw-history-title">
+     73  73 │                   <strong className="mono">
+     74     │ - ··················{String(row["amount"]·??·"—")}{"·"}
+         74 │ + ··················{String(row.amount·??·"—")}{"·"}
+     75  75 │                     {String(row["asset"] ?? row["assetSymbol"] ?? asset)}
+     76  76 │                   </strong>
+
+
+src/features/assets/WithdrawalHistory.tsx:75:31 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    73 │                 <strong className="mono">
+    74 │                   {String(row["amount"] ?? "—")}{" "}
+  > 75 │                   {String(row["asset"] ?? row["assetSymbol"] ?? asset)}
+       │                               ^^^^^^^
+    76 │                 </strong>
+    77 │                 <span>{String(row["status"] ?? "—")}</span>
+
+  i Unsafe fix: Use a literal key instead.
+
+     73  73 │                   <strong className="mono">
+     74  74 │                     {String(row["amount"] ?? "—")}{" "}
+     75     │ - ··················{String(row["asset"]·??·row["assetSymbol"]·??·asset)}
+         75 │ + ··················{String(row.asset·??·row["assetSymbol"]·??·asset)}
+     76  76 │                   </strong>
+     77  77 │                   <span>{String(row["status"] ?? "—")}</span>
+
+
+src/features/assets/WithdrawalHistory.tsx:75:47 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    73 │                 <strong className="mono">
+    74 │                   {String(row["amount"] ?? "—")}{" "}
+  > 75 │                   {String(row["asset"] ?? row["assetSymbol"] ?? asset)}
+       │                                               ^^^^^^^^^^^^^
+    76 │                 </strong>
+    77 │                 <span>{String(row["status"] ?? "—")}</span>
+
+  i Unsafe fix: Use a literal key instead.
+
+     73  73 │                   <strong className="mono">
+     74  74 │                     {String(row["amount"] ?? "—")}{" "}
+     75     │ - ··················{String(row["asset"]·??·row["assetSymbol"]·??·asset)}
+         75 │ + ··················{String(row["asset"]·??·row.assetSymbol·??·asset)}
+     76  76 │                   </strong>
+     77  77 │                   <span>{String(row["status"] ?? "—")}</span>
+
+
+src/features/assets/WithdrawalHistory.tsx:77:35 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    75 │                   {String(row["asset"] ?? row["assetSymbol"] ?? asset)}
+    76 │                 </strong>
+  > 77 │                 <span>{String(row["status"] ?? "—")}</span>
+       │                                   ^^^^^^^^
+    78 │               </div>
+    79 │               <dl>
+
+  i Unsafe fix: Use a literal key instead.
+
+     75  75 │                     {String(row["asset"] ?? row["assetSymbol"] ?? asset)}
+     76  76 │                   </strong>
+     77     │ - ················<span>{String(row["status"]·??·"—")}</span>
+         77 │ + ················<span>{String(row.status·??·"—")}</span>
+     78  78 │                 </div>
+     79  79 │                 <dl>
+
+
+src/features/assets/WithdrawalHistory.tsx:82:35 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    80 │                 <div>
+    81 │                   <dt>{t("Network")}</dt>
+  > 82 │                   <dd>{String(row["chain"] ?? "—")}</dd>
+       │                                   ^^^^^^^
+    83 │                 </div>
+    84 │                 <div>
+
+  i Unsafe fix: Use a literal key instead.
+
+     80  80 │                   <div>
+     81  81 │                     <dt>{t("Network")}</dt>
+     82     │ - ··················<dd>{String(row["chain"]·??·"—")}</dd>
+         82 │ + ··················<dd>{String(row.chain·??·"—")}</dd>
+     83  83 │                   </div>
+     84  84 │                   <div>
+
+
+src/features/assets/WithdrawalHistory.tsx:86:35 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    84 │                 <div>
+    85 │                   <dt>{t("Created")}</dt>
+  > 86 │                   <dd>{String(row["createdAt"] ?? "—")}</dd>
+       │                                   ^^^^^^^^^^^
+    87 │                 </div>
+    88 │                 <div>
+
+  i Unsafe fix: Use a literal key instead.
+
+     84  84 │                   <div>
+     85  85 │                     <dt>{t("Created")}</dt>
+     86     │ - ··················<dd>{String(row["createdAt"]·??·"—")}</dd>
+         86 │ + ··················<dd>{String(row.createdAt·??·"—")}</dd>
+     87  87 │                   </div>
+     88  88 │                   <div>
+
+
+src/features/assets/WithdrawalHistory.tsx:90:35 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    88 │                 <div>
+    89 │                   <dt>{t("Platform withdrawal fee")}</dt>
+  > 90 │                   <dd>{String(row["platformFee"] ?? "—")}</dd>
+       │                                   ^^^^^^^^^^^^^
+    91 │                 </div>
+    92 │                 <div>
+
+  i Unsafe fix: Use a literal key instead.
+
+     88  88 │                   <div>
+     89  89 │                     <dt>{t("Platform withdrawal fee")}</dt>
+     90     │ - ··················<dd>{String(row["platformFee"]·??·"—")}</dd>
+         90 │ + ··················<dd>{String(row.platformFee·??·"—")}</dd>
+     91  91 │                   </div>
+     92  92 │                   <div>
+
+
+src/features/assets/WithdrawalHistory.tsx:94:35 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    92 │                 <div>
+    93 │                   <dt>{t("Recipient receives")}</dt>
+  > 94 │                   <dd>{String(row["receivedAmount"] ?? "—")}</dd>
+       │                                   ^^^^^^^^^^^^^^^^
+    95 │                 </div>
+    96 │                 <div>
+
+  i Unsafe fix: Use a literal key instead.
+
+     92  92 │                   <div>
+     93  93 │                     <dt>{t("Recipient receives")}</dt>
+     94     │ - ··················<dd>{String(row["receivedAmount"]·??·"—")}</dd>
+         94 │ + ··················<dd>{String(row.receivedAmount·??·"—")}</dd>
+     95  95 │                   </div>
+     96  96 │                   <div>
+
+
+src/features/assets/WithdrawalHistory.tsx:99:33 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+     97 │                   <dt>{t("On-chain network fee")}</dt>
+     98 │                   <dd>
+   > 99 │                     {String(row["networkFee"] ?? "—")} {String(row["networkFeeAsset"] ?? "")}
+        │                                 ^^^^^^^^^^^^
+    100 │                   </dd>
+    101 │                 </div>
+
+  i Unsafe fix: Use a literal key instead.
+
+     97  97 │                     <dt>{t("On-chain network fee")}</dt>
+     98  98 │                     <dd>
+     99     │ - ····················{String(row["networkFee"]·??·"—")}·{String(row["networkFeeAsset"]·??·"")}
+         99 │ + ····················{String(row.networkFee·??·"—")}·{String(row["networkFeeAsset"]·??·"")}
+    100 100 │                     </dd>
+    101 101 │                   </div>
+
+
+src/features/assets/WithdrawalHistory.tsx:99:68 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+     97 │                   <dt>{t("On-chain network fee")}</dt>
+     98 │                   <dd>
+   > 99 │                     {String(row["networkFee"] ?? "—")} {String(row["networkFeeAsset"] ?? "")}
+        │                                                                    ^^^^^^^^^^^^^^^^^
+    100 │                   </dd>
+    101 │                 </div>
+
+  i Unsafe fix: Use a literal key instead.
+
+     97  97 │                     <dt>{t("On-chain network fee")}</dt>
+     98  98 │                     <dd>
+     99     │ - ····················{String(row["networkFee"]·??·"—")}·{String(row["networkFeeAsset"]·??·"")}
+         99 │ + ····················{String(row["networkFee"]·??·"—")}·{String(row.networkFeeAsset·??·"")}
+    100 100 │                     </dd>
+    101 101 │                   </div>
+
+
+src/features/assets/WithdrawalHistory.tsx:104:52 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    102 │                 <div className="withdraw-wide">
+    103 │                   <dt>{t("Transaction hash")}</dt>
+  > 104 │                   <dd className="mono">{String(row["txHash"] ?? "—")}</dd>
+        │                                                    ^^^^^^^^
+    105 │                 </div>
+    106 │                 <div className="withdraw-wide">
+
+  i Unsafe fix: Use a literal key instead.
+
+    102 102 │                   <div className="withdraw-wide">
+    103 103 │                     <dt>{t("Transaction hash")}</dt>
+    104     │ - ··················<dd·className="mono">{String(row["txHash"]·??·"—")}</dd>
+        104 │ + ··················<dd·className="mono">{String(row.txHash·??·"—")}</dd>
+    105 105 │                   </div>
+    106 106 │                   <div className="withdraw-wide">
+
+
+src/features/assets/WithdrawalHistory.tsx:108:52 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    106 │                 <div className="withdraw-wide">
+    107 │                   <dt>{t("Recipient address")}</dt>
+  > 108 │                   <dd className="mono">{String(row["toAddress"] ?? "—")}</dd>
+        │                                                    ^^^^^^^^^^^
+    109 │                 </div>
+    110 │                 <div className="withdraw-wide">
+
+  i Unsafe fix: Use a literal key instead.
+
+    106 106 │                   <div className="withdraw-wide">
+    107 107 │                     <dt>{t("Recipient address")}</dt>
+    108     │ - ··················<dd·className="mono">{String(row["toAddress"]·??·"—")}</dd>
+        108 │ + ··················<dd·className="mono">{String(row.toAddress·??·"—")}</dd>
+    109 109 │                   </div>
+    110 110 │                   <div className="withdraw-wide">
+
+
+src/features/assets/WithdrawalHistory.tsx:113:33 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    111 │                   <dt>{t("Withdrawal ID")}</dt>
+    112 │                   <dd className="mono">
+  > 113 │                     {String(row["gatewayWithdrawalId"] ?? row["withdrawalId"] ?? row["id"] ?? "—")}
+        │                                 ^^^^^^^^^^^^^^^^^^^^^
+    114 │                   </dd>
+    115 │                 </div>
+
+  i Unsafe fix: Use a literal key instead.
+
+    111 111 │                     <dt>{t("Withdrawal ID")}</dt>
+    112 112 │                     <dd className="mono">
+    113     │ - ····················{String(row["gatewayWithdrawalId"]·??·row["withdrawalId"]·??·row["id"]·??·"—")}
+        113 │ + ····················{String(row.gatewayWithdrawalId·??·row["withdrawalId"]·??·row["id"]·??·"—")}
+    114 114 │                     </dd>
+    115 115 │                   </div>
+
+
+src/features/assets/WithdrawalHistory.tsx:113:63 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    111 │                   <dt>{t("Withdrawal ID")}</dt>
+    112 │                   <dd className="mono">
+  > 113 │                     {String(row["gatewayWithdrawalId"] ?? row["withdrawalId"] ?? row["id"] ?? "—")}
+        │                                                               ^^^^^^^^^^^^^^
+    114 │                   </dd>
+    115 │                 </div>
+
+  i Unsafe fix: Use a literal key instead.
+
+    111 111 │                     <dt>{t("Withdrawal ID")}</dt>
+    112 112 │                     <dd className="mono">
+    113     │ - ····················{String(row["gatewayWithdrawalId"]·??·row["withdrawalId"]·??·row["id"]·??·"—")}
+        113 │ + ····················{String(row["gatewayWithdrawalId"]·??·row.withdrawalId·??·row["id"]·??·"—")}
+    114 114 │                     </dd>
+    115 115 │                   </div>
+
+
+src/features/assets/WithdrawalHistory.tsx:113:86 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    111 │                   <dt>{t("Withdrawal ID")}</dt>
+    112 │                   <dd className="mono">
+  > 113 │                     {String(row["gatewayWithdrawalId"] ?? row["withdrawalId"] ?? row["id"] ?? "—")}
+        │                                                                                      ^^^^
+    114 │                   </dd>
+    115 │                 </div>
+
+  i Unsafe fix: Use a literal key instead.
+
+    111 111 │                     <dt>{t("Withdrawal ID")}</dt>
+    112 112 │                     <dd className="mono">
+    113     │ - ····················{String(row["gatewayWithdrawalId"]·??·row["withdrawalId"]·??·row["id"]·??·"—")}
+        113 │ + ····················{String(row["gatewayWithdrawalId"]·??·row["withdrawalId"]·??·row.id·??·"—")}
+    114 114 │                     </dd>
+    115 115 │                   </div>
+
+
+src/features/assets/WithdrawalHistory.tsx:117:20 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+
+    115 │                 </div>
+    116 │               </dl>
+  > 117 │               {row["custodyWalletUnavailable"] === true ? (
+        │                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    118 │                 <p className="withdraw-network-note">
+    119 │                   {t(
+
+  i Unsafe fix: Use a literal key instead.
+
+    115 115 │                   </div>
+    116 116 │                 </dl>
+    117     │ - ··············{row["custodyWalletUnavailable"]·===·true·?·(
+        117 │ + ··············{row.custodyWalletUnavailable·===·true·?·(
+    118 118 │                   <p className="withdraw-network-note">
+    119 119 │                     {t(
+
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 144.
+Checked 8 files in 274ms. No fixes applied.
+Found 164 infos.

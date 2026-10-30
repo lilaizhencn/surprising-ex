@@ -1,0 +1,45 @@
+{
+  "error": "AssertionError [ERR_ASSERTION]: a receipt must never turn the in-progress Retry click into Start another withdrawal\n\n0 !== 1\n",
+  "posts": [
+    {
+      "key": "console-d564bfbe-648d-4eee-965d-120924c2d45c",
+      "body": {
+        "custodyAddressId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "subject": "user:43",
+        "chain": "ETH",
+        "assetSymbol": "USDT",
+        "toAddress": "0x3434343434343434343434343434343434343434",
+        "amount": "25",
+        "externalReference": "console-d564bfbe-648d-4eee-965d-120924c2d45c",
+        "fundingSource": "ADDRESS",
+        "confirmed": true
+      },
+      "path": "/custody/console/v1/withdrawals"
+    },
+    {
+      "key": "console-d564bfbe-648d-4eee-965d-120924c2d45c",
+      "body": {
+        "custodyAddressId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "subject": "user:43",
+        "chain": "ETH",
+        "assetSymbol": "USDT",
+        "toAddress": "0x3434343434343434343434343434343434343434",
+        "amount": "25",
+        "externalReference": "console-d564bfbe-648d-4eee-965d-120924c2d45c",
+        "fundingSource": "ADDRESS",
+        "confirmed": true
+      },
+      "path": "/custody/console/v1/withdrawals"
+    }
+  ],
+  "failures": [],
+  "local": {
+    "intents": [],
+    "clicks": [
+      {
+        "action": "Start another withdrawal",
+        "at": 1793326311590
+      }
+    ]
+  }
+}
