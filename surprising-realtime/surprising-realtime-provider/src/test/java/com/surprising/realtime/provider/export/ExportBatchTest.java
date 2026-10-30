@@ -23,14 +23,14 @@ class ExportBatchTest {
             attempts.add(List.copyOf(call.getArgument(6)));
             if (attempts.size() == 1) throw new IllegalStateException("SQL failed");
             return null;
-        }).when(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(1L), anyList(), anyList(), anyList());
+        }).when(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(1L), anyList(), anyList(), anyList(), eq(List.of()));
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
         batch.add(List.of(), null, 1, 1, List.of(), flow);
         assertThatThrownBy(() -> batch.flush(1)).hasMessage("SQL failed");
         verifyNoInteractions(sink);
         batch.flush(1);
         assertThat(attempts).containsExactly(List.of(flow), List.of(flow));
-        verify(orders, times(2)).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(1L), anyList(), anyList(), anyList());
+        verify(orders, times(2)).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(1L), anyList(), anyList(), anyList(), eq(List.of()));
     }
 
     @Test void liquidationOnlyChangesFlushAtTheSameExportSequenceAndSurviveSqlFailure() {
@@ -47,11 +47,11 @@ class ExportBatchTest {
             if (attempts.incrementAndGet() == 1) throw new IllegalStateException("SQL failed");
             return null;
         }).when(orders)
-                .persist(eq(ProductLine.LINEAR_PERPETUAL), anyList(), anyList(), eq(0L), anyList(), anyList(), anyList());
+                .persist(eq(ProductLine.LINEAR_PERPETUAL), anyList(), anyList(), eq(0L), anyList(), anyList(), anyList(), eq(List.of()));
         assertThatThrownBy(() -> batch.flush(0)).hasMessage("SQL failed");
         verifyNoInteractions(sink);
         batch.flush(0);
-        verify(orders, times(2)).persist(eq(ProductLine.LINEAR_PERPETUAL), anyList(), anyList(), eq(0L), anyList(), anyList(), anyList());
+        verify(orders, times(2)).persist(eq(ProductLine.LINEAR_PERPETUAL), anyList(), anyList(), eq(0L), anyList(), anyList(), anyList(), eq(List.of()));
         verify(sink).publish(List.of());
         batch.flush(0);
         verifyNoMoreInteractions(orders, sink);
@@ -118,11 +118,11 @@ class ExportBatchTest {
             assertThat(call.<List<?>>getArgument(2)).isEqualTo(List.of(result));
             if (attempts.incrementAndGet() == 1) throw new IllegalStateException("SQL failed");
             return null;
-        }).when(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(0L), anyList(), anyList(), anyList());
+        }).when(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(0L), anyList(), anyList(), anyList(), eq(List.of()));
         assertThatThrownBy(() -> batch.flush(0)).hasMessage("SQL failed");
         verifyNoInteractions(sink);
         batch.flush(0);
-        verify(orders, times(2)).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(0L), anyList(), anyList(), anyList());
+        verify(orders, times(2)).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(0L), anyList(), anyList(), anyList(), eq(List.of()));
         verify(sink).publish(List.of());
         batch.flush(0);
         verifyNoMoreInteractions(orders, sink);
@@ -135,7 +135,7 @@ class ExportBatchTest {
         var projected = new ArrayList<RealtimeFrame>();
         var published = new ArrayList<RealtimeFrame>();
         doAnswer(call -> { projected.addAll(call.getArgument(1)); return null; })
-                .when(orders).persist(eq(product), anyList(), anyList(), anyLong(), anyList(), anyList(), anyList());
+                .when(orders).persist(eq(product), anyList(), anyList(), anyLong(), anyList(), anyList(), anyList(), eq(List.of()));
         doAnswer(call -> { published.addAll(call.getArgument(0)); return null; })
                 .when(sink).publish(anyList());
         for (int i = 0; i < 100; i++) {
@@ -148,7 +148,7 @@ class ExportBatchTest {
         assertThat(batch.waitNanos(4_000_000,100_000_000)).isEqualTo(1_000_000);
         batch.flushIfDue(99, 5_000_000);
         var order = inOrder(orders, sink);
-        order.verify(orders).persist(eq(product), anyList(), anyList(), eq(99L), anyList(), anyList(), anyList());
+        order.verify(orders).persist(eq(product), anyList(), anyList(), eq(99L), anyList(), anyList(), anyList(), eq(List.of()));
         order.verify(sink).publish(anyList());
         assertThat(projected).extracting(RealtimeFrame::sequence).containsExactlyElementsOf(
                 java.util.stream.LongStream.range(0,100).boxed().flatMap(i -> java.util.stream.Stream.of(i,i)).toList());
@@ -163,11 +163,11 @@ class ExportBatchTest {
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
         for (int i=0;i<256;i++) batch.add(List.of(), null, i, i);
-        verify(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(255L), anyList(), anyList(), anyList());
+        verify(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(255L), anyList(), anyList(), anyList(), eq(List.of()));
         verify(sink).publish(anyList());
         clearInvocations(orders, sink);
         batch.add(java.util.Collections.nCopies(4096, frame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 256)), null,256,1000);
-        verify(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(256L), anyList(), anyList(), anyList());
+        verify(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(256L), anyList(), anyList(), anyList(), eq(List.of()));
     }
 
     @Test void failuresRetainBatchAndDoNotMarkItFlushed() {
@@ -176,15 +176,15 @@ class ExportBatchTest {
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
         batch.add(List.of(frame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 1)), null,1,0);
         doThrow(new IllegalStateException("SQL failed")).doNothing()
-                .when(orders).persist(any(),anyList(), anyList(),anyLong(), anyList(), anyList(), anyList());
+                .when(orders).persist(any(),anyList(), anyList(),anyLong(), anyList(), anyList(), anyList(), eq(List.of()));
         assertThatThrownBy(()->batch.flush(1)).hasMessage("SQL failed");
         verifyNoInteractions(sink);
         doAnswer(call -> { assertThat(call.<List<RealtimeFrame>>getArgument(1)).hasSize(1); return null; })
-                .when(orders).persist(any(),anyList(), anyList(),anyLong(), anyList(), anyList(), anyList());
+                .when(orders).persist(any(),anyList(), anyList(),anyLong(), anyList(), anyList(), anyList(), eq(List.of()));
         doThrow(new IllegalStateException("Kafka failed")).doNothing().when(sink).publish(anyList());
         assertThatThrownBy(()->batch.flush(1)).hasMessage("Kafka failed");
         batch.flush(1);
-        verify(orders,times(3)).persist(any(),anyList(), anyList(),eq(1L), anyList(), anyList(), anyList());
+        verify(orders,times(3)).persist(any(),anyList(), anyList(),eq(1L), anyList(), anyList(), anyList(), eq(List.of()));
     }
 
     @ParameterizedTest @EnumSource(ProductLine.class)
@@ -193,7 +193,7 @@ class ExportBatchTest {
         var sink = mock(ReliableTradeKafkaSink.class);
         var projected = new ArrayList<RealtimeFrame>();
         doAnswer(call -> { projected.addAll(call.getArgument(1)); return null; })
-                .when(orders).persist(eq(product), anyList(), anyList(), anyLong(), anyList(), anyList(), anyList());
+                .when(orders).persist(eq(product), anyList(), anyList(), anyLong(), anyList(), anyList(), anyList(), eq(List.of()));
         var batch = new CommittedTradeExporter.ExportBatch(product, orders, sink);
         batch.catchUp(true);
         // A historical command taking 2ms previously triggered a SQL commit every
@@ -205,19 +205,19 @@ class ExportBatchTest {
         verifyNoInteractions(orders, sink);
         assertThat(batch.waitNanos(98_000_000L, 10_000_000L)).isEqualTo(2_000_000L);
         batch.flushIfDue(49, 100_000_000L);
-        verify(orders).persist(eq(product), anyList(), anyList(), eq(49L), anyList(), anyList(), anyList());
+        verify(orders).persist(eq(product), anyList(), anyList(), eq(49L), anyList(), anyList(), anyList(), eq(List.of()));
         assertThat(projected).extracting(RealtimeFrame::sequence).containsExactlyElementsOf(
                 java.util.stream.LongStream.range(0, 50).boxed().toList());
         verify(sink).publish(anyList());
         clearInvocations(orders, sink);
         // The original capacity limits still force recovery batches to flush.
         for (int i = 0; i < 256; i++) batch.add(List.of(), null, 50 + i, 101_000_000L + i);
-        verify(orders).persist(eq(product), anyList(), anyList(), eq(305L), anyList(), anyList(), anyList());
+        verify(orders).persist(eq(product), anyList(), anyList(), eq(305L), anyList(), anyList(), anyList(), eq(List.of()));
         clearInvocations(orders, sink);
         batch.add(List.of(frame(product, RealtimeFrame.Kind.ORDER, 306)), null, 306, 102_000_000L);
         batch.catchUp(false);
         batch.flushIfDue(306, 107_000_000L);
-        verify(orders).persist(eq(product), anyList(), anyList(), eq(306L), anyList(), anyList(), anyList());
+        verify(orders).persist(eq(product), anyList(), anyList(), eq(306L), anyList(), anyList(), anyList(), eq(List.of()));
     }
 
     private static RealtimeFrame frame(ProductLine product, RealtimeFrame.Kind kind, long sequence) {

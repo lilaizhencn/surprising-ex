@@ -34,7 +34,13 @@ class AdminCursorPageTest {
 
         String oldFormat = java.util.Base64.getUrlEncoder().withoutPadding()
                 .encodeToString("1783081845123:99".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        assertThatThrownBy(() -> AdminCursorPage.decodeCursor(oldFormat))
+        AdminCursorPage.Cursor legacy = AdminCursorPage.decodeCursor(oldFormat);
+        assertThat(legacy.timestamp()).isEqualTo(Instant.ofEpochMilli(1783081845123L));
+        assertThat(legacy.id()).isEqualTo(99L);
+
+        String malformed = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("invalid-timestamp:99".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> AdminCursorPage.decodeCursor(malformed))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("invalid cursor");
     }

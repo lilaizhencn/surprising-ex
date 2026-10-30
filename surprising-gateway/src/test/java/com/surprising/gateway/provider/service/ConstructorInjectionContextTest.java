@@ -10,6 +10,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.local.LocalBusinessApi;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
@@ -66,7 +67,7 @@ class ConstructorInjectionContextTest {
             when(products.local(product)).thenReturn(local);
             context.registerBean(GatewayProductServices.class, () -> products);
             context.registerBean(ObjectMapper.class, () -> new ObjectMapper());
-            for (Class<?> type : List.of(AuthService.class, AdminAuditRepository.class, AdminApprovalRepository.class,
+            for (Class<?> type : List.of(AuthService.class, GatewayApiKeyService.class, AdminAuditRepository.class, AdminApprovalRepository.class,
                     ProductTransferCoordinator.class, ProductTransferSecurityService.class, RestTemplate.class,
                     com.surprising.instrument.provider.service.InstrumentService.class,
                     OrderValidator.class, OrderPlacementStateService.class, AeronOrderCommandService.class,
