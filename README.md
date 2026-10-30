@@ -20,6 +20,11 @@ Product line identity controls routing and keeps instruments, accounts, trading 
 
 构建基线：HotSpot JDK 27、Spring Boot 4.1.2、Spring Cloud 2025.1.4；框架版本统一由 `surprising-parent/pom.xml` 管理。
 
+撮合库使用 fork 的 `exchange.core2:exchange-core:0.5.19-emporia`，与 Aeron 1.54.0 对齐 Agrona 2.7.0、HdrHistogram 2.2.2，
+与 Spring Boot 4.1.2 BOM 对齐 Jackson 和日志等共享依赖，并统一使用 `at.yawk.lz4:lz4-java:1.11.4`。
+首次构建前，在相邻的 `exchange-core-lilaizhencn` 仓库干净的 `master` 上执行 `mvn install` 安装该版本。
+依赖版本与验证范围见[升级记录](docs/validation/2026-10-30-exchange-core-dependency-alignment.md)。
+
 Core startup, snapshots and command recovery: [Aeron architecture](surprising-aeron-core/README.md).
 
 The single-node stack has six Java processes:

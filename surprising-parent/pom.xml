@@ -33,7 +33,7 @@
         <bouncycastle.version>1.86</bouncycastle.version>
         <lz4-java.version>1.11.4</lz4-java.version>
         <snappy-java.version>1.1.10.12</snappy-java.version>
-        <exchange-core.version>0.5.18-emporia</exchange-core.version>
+        <exchange-core.version>0.5.19-emporia</exchange-core.version>
         <aeron.version>1.54.0</aeron.version>
         <hdrhistogram.version>2.2.2</hdrhistogram.version>
         <chronicle.bom.version>2026.18</chronicle.bom.version>
