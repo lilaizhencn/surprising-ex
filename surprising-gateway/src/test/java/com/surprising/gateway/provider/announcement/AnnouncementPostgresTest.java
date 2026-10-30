@@ -62,12 +62,14 @@ class AnnouncementPostgresTest {
         context.registerBean(AnnouncementReadRepository.class,()->new AnnouncementReadRepository(jdbc));
         context.registerBean(AnnouncementAuditRepository.class,()->new AnnouncementAuditRepository(jdbc,json));
         context.registerBean(AuthService.class,()->auth);context.registerBean(AdminApprovalService.class,()->approvals);
+        context.registerBean(com.surprising.gateway.provider.content.service.ContentMediaService.class,()->mock(com.surprising.gateway.provider.content.service.ContentMediaService.class));
+        context.registerBean(com.surprising.gateway.provider.content.service.ArticleRenderingService.class,()->mock(com.surprising.gateway.provider.content.service.ArticleRenderingService.class));
         context.register(AnnouncementService.class);context.refresh();service=context.getBean(AnnouncementService.class);
     }
     @AfterEach void close() { if(context!=null)context.close(); }
     private Content content(String title,String line,Instant starts,Instant expires) {
         return new Content("GENERAL",10,List.of("CENTER","MODAL"),List.of(line),List.of("WEB"),starts,expires,
-                List.of(new Translation("en-US",title,"Summary","Body"),new Translation("zh-CN",title+"中文","摘要","正文"),new Translation("en",title+" base","Summary","Body")));
+                List.of(new Translation("en-US",title,"Summary","Body",null),new Translation("zh-CN",title+"中文","摘要","正文",null),new Translation("en",title+" base","Summary","Body",null)));
     }
     private Content content(String title) { return content(title,"SPOT",Instant.now().minusSeconds(60),null); }
     private ClientFilter filter(String locale,String line) { int split=locale.indexOf('-');return new ClientFilter(locale,split<0?locale:locale.substring(0,split),line,"WEB","CENTER"); }

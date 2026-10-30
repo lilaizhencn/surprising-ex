@@ -8,7 +8,7 @@ public final class AnnouncementModels {
     private AnnouncementModels() {
     }
 
-    public record TranslationInput(String locale, String title, String summary, String body) {
+    public record TranslationInput(String locale, String title, String summary, String body, String bodyHtml) {
     }
 
     public record SaveRequest(String category,
@@ -28,7 +28,7 @@ public final class AnnouncementModels {
     public record PublishRequest(String reason, Long version) {
     }
 
-    public record Translation(String locale, String title, String summary, String body) {
+    public record Translation(String locale, String title, String summary, String body, String bodyHtml) {
     }
 
     public record Announcement(long announcementId,
@@ -46,13 +46,18 @@ public final class AnnouncementModels {
                                String title,
                                String summary,
                                String body,
+                               String bodyHtml,
                                Instant readAt,
                                Instant createdAt,
                                Instant updatedAt,
                                String effectiveStatus) {
     }
 
-    public record AdminPage(int count, List<Announcement> announcements, int offset, int limit, boolean hasMore) {
+    public record TranslationSummary(String locale,String title,String summary) { }
+    public record AdminSummary(long announcementId,String category,String status,int priority,List<String> placements,
+                               List<String> productLines,List<String> platforms,Instant startsAt,Instant expiresAt,long version,
+                               List<TranslationSummary> translations,Instant createdAt,Instant updatedAt,String effectiveStatus) { }
+    public record AdminPage(int count, List<AdminSummary> announcements, int offset, int limit, boolean hasMore) {
     }
 
     public record ClientPage(List<Announcement> announcements, int unreadCount, int offset, int limit,
@@ -71,9 +76,10 @@ public final class AnnouncementModels {
     public record BaseRow(long id, String category, String status, int priority,
                           Instant startsAt, Instant expiresAt, long version,
                           long createdBy, long updatedBy, Instant createdAt, Instant updatedAt) { }
-    public record ClientRow(BaseRow base, String locale, String title, String summary, String body, Instant readAt) { }
+    public record ClientRow(BaseRow base, String locale, String title, String summary, String body, String bodyHtml, Instant readAt) { }
     public record AdminRows(int count, List<BaseRow> rows) { }
     public record TranslationRow(long announcementId, Translation translation) { }
+    public record TranslationSummaryRow(long announcementId,TranslationSummary translation) { }
     public record TargetRow(long announcementId, String type, String value) { }
 
 }

@@ -1,0 +1,2 @@
+nginx: the configuration file /Users/atomex/.cache/announcement-nginx-check/qa.conf syntax is ok
+nginx: configuration file /Users/atomex/.cache/announcement-nginx-check/qa.conf test is successful

@@ -100,7 +100,7 @@ class GatewayLimitHttpTest {
         var clients = new AuthClientMetadataBinding(gateway, limits, binding);
         auth = new AuthService(gateway, users, mock(PasswordHasher.class), tokens, mock(EmailVerificationService.class),
                 mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), clients,
-                mock(com.surprising.affiliate.service.AffiliateService.class));
+                mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class));
         keys = new GatewayApiKeyService(keyRows, auth, totp, mock(SensitiveActionVerificationService.class), gateway, clients);
         var proxy = new GatewayProxyController(gateway, new RestTemplate(), auth, keys, null, json,
                 mock(com.surprising.gateway.provider.service.ProductTransferCoordinator.class), null,

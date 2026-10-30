@@ -22,8 +22,12 @@ public final class ProductRequestBodyFilter extends OncePerRequestFilter {
     }
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                               FilterChain chain) throws ServletException, IOException {
-        byte[] body = request.getInputStream().readNBytes(MAX_BYTES + 1);
-        if (body.length > MAX_BYTES) { response.sendError(413, "product request body is too large"); return; }
+        String path=request.getRequestURI();
+        boolean articleSave=("POST".equals(request.getMethod()) || "PUT".equals(request.getMethod()))
+                && (path.matches("/api/v1/admin/announcements(?:/[0-9]+)?") || path.matches("/api/v1/admin/legal/revisions(?:/[0-9]+)?"));
+        int limit=articleSave?3*MAX_BYTES:MAX_BYTES;
+        byte[] body = request.getInputStream().readNBytes(limit + 1);
+        if (body.length > limit) { response.sendError(413, "product request body is too large"); return; }
         request.setAttribute(BODY, body);
         chain.doFilter(new HttpServletRequestWrapper(request) {
             @Override public ServletInputStream getInputStream() {

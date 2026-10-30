@@ -1,0 +1,10 @@
+appId: com.surprising.surprising_client
+---
+- tapOn:
+    point: 11%,46%
+- extendedWaitUntil:
+    visible: 'QA video 0\.0 s; audio [1-9][0-9]*\.[0-9] s'
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/android-audio-clock-proof
+- pressKey: Back
+- assertVisible: 公告验证

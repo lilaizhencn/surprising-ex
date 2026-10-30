@@ -22,20 +22,20 @@ class AnnouncementServiceTest {
     private final AnnouncementTargetRepository targets=mock(AnnouncementTargetRepository.class);
     private final AnnouncementAuditRepository audit=mock(AnnouncementAuditRepository.class);
     private final AdminApprovalService approvals=mock(AdminApprovalService.class);
-    private final AnnouncementService service=new AnnouncementService(repository,translations,targets,mock(AnnouncementReadRepository.class),audit,mock(AuthService.class),approvals);
+    private final AnnouncementService service=new AnnouncementService(repository,translations,targets,mock(AnnouncementReadRepository.class),audit,mock(AuthService.class),approvals,mock(com.surprising.gateway.provider.content.service.ContentMediaService.class),mock(com.surprising.gateway.provider.content.service.ArticleRenderingService.class));
     private final JwtPrincipal actor=new JwtPrincipal(9,"operator","ACTIVE",List.of("ADMIN"),Instant.now().plusSeconds(60));
     private final AdminRequestMetadata metadata=new AdminRequestMetadata(com.surprising.gateway.provider.auth.controller.AdminApprovalRequestBinding.reference("approval-1"),"POST","/api/v1/admin/announcements/7/publish",null);
     private final byte[] raw={1,2,3};
     private BaseRow row(String status,long version,Instant start) { return new BaseRow(7,"GENERAL",status,10,start,null,version,9,9,start,start); }
-    private Translation translation(String locale) { return new Translation(locale,"Title","Summary","Body"); }
+    private Translation translation(String locale) { return new Translation(locale,"Title","Summary","Body",null); }
     private void ready() {
         when(approvals.requireWrite("Bearer admin","admin.announcements.publish","gateway-admin",metadata,raw)).thenReturn(actor);
         when(targets.findFor(List.of(7L))).thenReturn(List.of(new TargetRow(7,"PLACEMENT","CENTER"),new TargetRow(7,"PLACEMENT","MODAL"),new TargetRow(7,"PRODUCT_LINE","ALL"),new TargetRow(7,"PLATFORM","ALL")));
     }
-    @Test void publishingRequiresBothSupportedLocalesBeforeChangingStatus() {
+    @Test void publishingRequiresACompleteTranslationBeforeChangingStatus() {
         ready();when(repository.find(7)).thenReturn(Optional.of(row("DRAFT",3,Instant.now())));
-        when(translations.findFor(List.of(7L))).thenReturn(List.of(new TranslationRow(7,translation("zh-CN"))));
-        assertThatThrownBy(()->service.publish("Bearer admin",7,3,"",metadata,raw)).isInstanceOf(AnnouncementProblem.class).hasMessageContaining("zh-CN and en-US");
+        when(translations.findFor(List.of(7L))).thenReturn(List.of());
+        assertThatThrownBy(()->service.publish("Bearer admin",7,3,"",metadata,raw)).isInstanceOf(AnnouncementProblem.class).hasMessageContaining("at least one complete translation");
         verify(repository,never()).publish(anyLong(),anyLong(),anyLong(),any());
     }
     @Test void publishingPreservesScheduleAndAuditsTheReturnedSnapshot() {
@@ -52,7 +52,7 @@ class AnnouncementServiceTest {
         when(repository.find(7)).thenReturn(Optional.of(row("DRAFT",1,Instant.now())));
         var content=new Content("GENERAL",0,List.of("CENTER"),List.of("ALL"),List.of("ALL"),Instant.now(),null,List.of(translation("en-US")));
         var auth=mock(AuthService.class);when(auth.requireAdminPermission("admin","admin.announcements.write")).thenReturn(actor);
-        var service=new AnnouncementService(repository,translations,targets,mock(AnnouncementReadRepository.class),audit,auth,approvals);
+        var service=new AnnouncementService(repository,translations,targets,mock(AnnouncementReadRepository.class),audit,auth,approvals,mock(com.surprising.gateway.provider.content.service.ContentMediaService.class),mock(com.surprising.gateway.provider.content.service.ArticleRenderingService.class));
         assertThatThrownBy(()->service.update("admin",7,content,2)).isInstanceOf(AnnouncementProblem.class).hasMessageContaining("changed");
         verify(repository,never()).update(anyLong(),any(),anyLong(),anyLong(),any());
     }

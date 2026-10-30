@@ -62,7 +62,7 @@ class AuditLogPagePostgresTest {
                 logins,mock(GatewayUserMfaRepository.class),mock(GatewayRefreshSessionRepository.class));
         var properties=new GatewayProperties();
         var auth=spy(new AuthService(properties,persistence,mock(PasswordHasher.class),mock(JwtTokenService.class),
-                mock(EmailVerificationService.class),mock(LoginVerificationService.class),mock(GatewayUserAccessBlockRepository.class),mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class)));
+                mock(EmailVerificationService.class),mock(LoginVerificationService.class),mock(GatewayUserAccessBlockRepository.class),mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class)));
         doReturn(new JwtPrincipal(7,"user","NORMAL",List.of("USER"),now.plusSeconds(3600))).when(auth).authenticateBearer("Bearer user");
         doReturn(new JwtPrincipal(99,"admin","NORMAL",List.of("ADMIN"),now.plusSeconds(3600))).when(auth).authenticateAdminBearer("Bearer admin");
         var approvals=new AdminApprovalService(auth,audits,mock(AdminApprovalRepository.class),properties);

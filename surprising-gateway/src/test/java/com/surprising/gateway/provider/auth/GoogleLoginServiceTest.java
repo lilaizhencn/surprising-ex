@@ -19,7 +19,7 @@ class GoogleLoginServiceTest {
     AuthService auth = mock(AuthService.class);
     com.surprising.affiliate.service.AffiliateService affiliates = mock(com.surprising.affiliate.service.AffiliateService.class);
     GoogleLoginService service = new GoogleLoginService(identities, google, rows, users, auth, affiliates);
-    AuthClientMetadata device = new AuthClientMetadata("test", "127.0.0.1", "device");
+    AuthClientMetadata device = new AuthClientMetadata("test", "127.0.0.1", "device", java.util.List.of(), false);
     String nonce = "n".repeat(43);
     @BeforeEach void setup() {
         when(google.verify(anyString(), any(), anyString())).thenReturn(new GoogleIdentityClient.Profile("google-123", "小李 🚀"));

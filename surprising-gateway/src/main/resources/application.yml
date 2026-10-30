@@ -25,8 +25,8 @@ spring:
     name: surprising-gateway
   servlet:
     multipart:
-      max-file-size: ${GATEWAY_KYC_MULTIPART_MAX_FILE_SIZE:20MB}
-      max-request-size: ${GATEWAY_KYC_MULTIPART_MAX_REQUEST_SIZE:25MB}
+      max-file-size: ${GATEWAY_MULTIPART_MAX_FILE_SIZE:64MB}
+      max-request-size: ${GATEWAY_MULTIPART_MAX_REQUEST_SIZE:68MB}
   main:
     keep-alive: true
   threads:
@@ -62,6 +62,14 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
+  content:
+    r2:
+      enabled: ${GATEWAY_CONTENT_R2_ENABLED:false}
+      endpoint: ${GATEWAY_CONTENT_R2_ENDPOINT:}
+      access-key-id: ${GATEWAY_CONTENT_R2_ACCESS_KEY_ID:}
+      secret-access-key: ${GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY:}
+      bucket: ${GATEWAY_CONTENT_R2_BUCKET:app-public}
+      public-base-url: ${GATEWAY_CONTENT_R2_PUBLIC_BASE_URL:https://cdn.surprising.top}
   c2c:
     enabled: ${C2C_ENABLED:false}
     r2:

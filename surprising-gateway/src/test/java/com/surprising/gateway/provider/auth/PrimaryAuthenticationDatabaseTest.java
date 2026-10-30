@@ -33,6 +33,9 @@ import org.springframework.mock.web.MockHttpServletRequest;
 
 @EnabledIfEnvironmentVariable(named = "TELEGRAM_TEST_JDBC_URL", matches = ".+")
 class PrimaryAuthenticationDatabaseTest {
+    @org.springframework.context.annotation.Configuration
+    @org.springframework.transaction.annotation.EnableTransactionManagement
+    static class Transactions { }
     JdbcTemplate admin, jdbc;
     String schema;
     GatewayRefreshSessionRepository sessions;
@@ -89,7 +92,7 @@ class PrimaryAuthenticationDatabaseTest {
         var jwt = mock(JwtTokenService.class);
         var verification = mock(LoginVerificationService.class);
         var auth = new AuthService(properties, persistence, mock(PasswordHasher.class), jwt,
-                mock(EmailVerificationService.class), verification, mock(GatewayUserAccessBlockRepository.class), new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), mock(com.surprising.affiliate.service.AffiliateService.class));
+                mock(EmailVerificationService.class), verification, mock(GatewayUserAccessBlockRepository.class), new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class));
         when(persistence.user(1)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
                 1, null, null, "NORMAL", List.of("USER"), Instant.now())));
         when(persistence.credential(1)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
@@ -112,5 +115,38 @@ class PrimaryAuthenticationDatabaseTest {
         assertThat(times).hasSize(3).containsOnly(original);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE revoked_at IS NULL AND authenticated_at IS NOT NULL", Long.class))
                 .isEqualTo(1);
+    }
+
+    @Test void missingLegalConsentRollsBackRefreshConsumptionAndTheSameTokenCanBeUsedAfterReview() throws Exception {
+        var persistence=mock(AuthPersistenceService.class);var properties=new GatewayProperties();var jwt=mock(JwtTokenService.class);
+        var legal=mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class);
+        var binding=new AuthClientMetadataBinding(properties,mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class),mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class));
+        var implementation=new AuthService(properties,persistence,mock(PasswordHasher.class),jwt,mock(EmailVerificationService.class),mock(LoginVerificationService.class),mock(GatewayUserAccessBlockRepository.class),binding,mock(com.surprising.affiliate.service.AffiliateService.class),legal);
+        when(persistence.user(1)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(1,null,null,"NORMAL",List.of("USER"),Instant.now())));
+        when(persistence.credential(1)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(1,null,null,null,null,"NORMAL",Instant.now())));
+        when(persistence.refreshSession(anyString())).thenAnswer(call->sessions.find(call.getArgument(0)));
+        when(persistence.consumeRefreshSession(anyLong(),any())).thenAnswer(call->sessions.consume(call.getArgument(0),call.getArgument(1)));
+        when(persistence.saveRefreshSession(anyLong(),anyString(),any(),any(),any(),any(),any(),nullable(Instant.class)))
+                .thenAnswer(call->sessions.save(call.getArgument(0),call.getArgument(1),call.getArgument(2),call.getArgument(3),call.getArgument(4),call.getArgument(5),call.getArgument(6),call.getArgument(7)));
+        String token="controlled-refresh-token";
+        String hash=java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        long original=sessions.save(1,hash,Instant.now().plusSeconds(600),null,null,null,Instant.now(),Instant.now());
+        doThrow(new com.surprising.gateway.provider.legal.exception.LegalProblem(com.surprising.gateway.provider.legal.exception.LegalProblem.Kind.CONSENT_REQUIRED,"review required"))
+                .when(legal).recordAndRequire(eq(1L),any(),any());
+        try(var context=new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
+            context.register(Transactions.class);
+            context.registerBean(org.springframework.transaction.PlatformTransactionManager.class,()->new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
+            context.registerBean(AuthService.class,()->implementation);context.refresh();
+            var auth=context.getBean(AuthService.class);
+            var metadata=new com.surprising.gateway.provider.auth.model.AuthClientMetadata(null,"127.0.0.1",null,List.of(),false);
+            assertThatThrownBy(()->auth.refresh(new AuthModels.RefreshRequest(token),metadata)).isInstanceOf(com.surprising.gateway.provider.legal.exception.LegalProblem.class);
+            assertThat(sessions.find(hash).orElseThrow().revokedAt()).isNull();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions",Long.class)).isEqualTo(2);
+            verifyNoInteractions(jwt);
+            reset(legal);
+            auth.refresh(new AuthModels.RefreshRequest(token),metadata);
+            assertThat(sessions.find(hash).orElseThrow().revokedAt()).isNotNull();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE session_id<>? AND token_hash<>'legacy' AND revoked_at IS NULL",Long.class,original)).isEqualTo(1);
+        }
     }
 }

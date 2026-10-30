@@ -1,0 +1,72 @@
+{
+  "provider": "synthetic",
+  "scenarios": [
+    {
+      "name": "six palettes, preview, persistence, cross-tab sync",
+      "width": 320,
+      "passed": true
+    },
+    {
+      "name": "six palettes, preview, persistence, cross-tab sync",
+      "width": 390,
+      "passed": true
+    },
+    {
+      "name": "six palettes, preview, persistence, cross-tab sync",
+      "width": 1440,
+      "passed": true
+    },
+    {
+      "name": "Google button success, invitation and cookie session",
+      "passed": true
+    },
+    {
+      "name": "Google button mfa, invitation and cookie session",
+      "passed": true
+    },
+    {
+      "name": "landing One Tap",
+      "passed": true
+    },
+    {
+      "name": "failed authorization retry obtains fresh nonce",
+      "passed": true
+    },
+    {
+      "name": "SDK failure retry and cancel One Tap on typing",
+      "passed": true
+    },
+    {
+      "name": "MFA cancel starts a fresh login and ignores duplicate credentials",
+      "passed": true
+    },
+    {
+      "name": "landing MFA cancel closes without repeated One Tap",
+      "passed": true
+    },
+    {
+      "name": "unconfigured provider makes no SDK or challenge request",
+      "passed": true
+    },
+    {
+      "name": "24 palette switches and idle SDK lifecycle",
+      "durationMs": 60000,
+      "resourceStart": {
+        "Documents": 6,
+        "JSEventListeners": 642,
+        "Nodes": 1279,
+        "TaskDuration": 0.000033,
+        "JSHeapUsedSize": 25161212
+      },
+      "resourceEnd": {
+        "Documents": 2,
+        "JSEventListeners": 233,
+        "Nodes": 396,
+        "TaskDuration": 0.077981,
+        "JSHeapUsedSize": 22145456
+      },
+      "passed": true
+    }
+  ],
+  "errors": []
+}

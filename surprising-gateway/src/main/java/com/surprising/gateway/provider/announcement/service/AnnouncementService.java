@@ -18,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 /** 聚合公告状态、投放/翻译、必需审计与本人已读；单表访问均由各自Repository承担。 */
 @Service
 public class AnnouncementService {
-    private static final List<String> REQUIRED_LOCALES=List.of("en-US","zh-CN");
     private final AnnouncementRepository repository;
     private final AnnouncementTranslationRepository translations;
     private final AnnouncementTargetRepository targets;
@@ -26,18 +25,20 @@ public class AnnouncementService {
     private final AnnouncementAuditRepository audit;
     private final AuthService auth;
     private final AdminApprovalService approvals;
+    private final com.surprising.gateway.provider.content.service.ContentMediaService media;
+    private final com.surprising.gateway.provider.content.service.ArticleRenderingService renderer;
 
     public AnnouncementService(AnnouncementRepository repository,AnnouncementTranslationRepository translations,
             AnnouncementTargetRepository targets,AnnouncementReadRepository reads,AnnouncementAuditRepository audit,
-            AuthService auth,AdminApprovalService approvals) {
+            AuthService auth,AdminApprovalService approvals,com.surprising.gateway.provider.content.service.ContentMediaService media,com.surprising.gateway.provider.content.service.ArticleRenderingService renderer) {
         this.repository=repository;this.translations=translations;this.targets=targets;this.reads=reads;
-        this.audit=audit;this.auth=auth;this.approvals=approvals;
+        this.audit=audit;this.auth=auth;this.approvals=approvals;this.media=media;this.renderer=renderer;
     }
 
     public AdminPage adminList(String authorization,String status,String query,int offset,int limit) {
         admin(authorization,"admin.announcements.read");
         var page=repository.listAdmin(status,query,offset,limit);
-        var items=adminViews(page.rows());
+        var items=adminSummaries(page.rows());
         return new AdminPage(page.count(),items,offset,limit,offset+items.size()<page.count());
     }
     public Announcement adminGet(String authorization,long id) {
@@ -58,8 +59,6 @@ public class AnnouncementService {
     public Announcement update(String authorization,long id,Content content,long version) {
         var actor=admin(authorization,"admin.announcements.write");var current=requireRow(id);
         if(current.version()!=version)throw conflict("announcement was changed by another operator");
-        if(current.status().equals("PUBLISHED") && !content.translations().stream().map(Translation::locale).toList().containsAll(REQUIRED_LOCALES))
-            throw invalid("published announcements must retain complete zh-CN and en-US translations");
         var now=Instant.now();
         if(!repository.update(id,content,version,actor.userId(),now))throw conflict("announcement was changed by another operator");
         replaceContent(id,content);
@@ -72,9 +71,9 @@ public class AnnouncementService {
         var actor=approvedActor(authorization,metadata,rawBody);var current=findAdmin(id);
         if(current.version()!=version)throw conflict("announcement was changed by another operator");
         if(current.status().equals("WITHDRAWN"))throw invalid("withdrawn announcements must be saved as a draft before publishing");
-        for(String locale:REQUIRED_LOCALES)
-            if(current.translations().stream().noneMatch(t->t.locale().equals(locale) && !t.title().isBlank() && !t.body().isBlank()))
-                throw invalid("publish requires complete zh-CN and en-US translations");
+        if(current.translations().isEmpty() || current.translations().stream().anyMatch(t->t.title().isBlank() || t.body().isBlank()))
+            throw invalid("publish requires at least one complete translation");
+        current.translations().forEach(t->media.requireArticleMedia(t.bodyHtml()));
         if(current.placements().isEmpty() || current.productLines().isEmpty() || current.platforms().isEmpty())
             throw invalid("announcement targeting is incomplete");
         if(!current.placements().contains("CENTER"))throw invalid("published announcements must be available in the announcement center");
@@ -90,7 +89,9 @@ public class AnnouncementService {
         return auditResult(id,"WITHDRAW",actor,reason,now);
     }
     private void replaceContent(long id,Content content) {
+        content.translations().forEach(t->media.requireArticleMedia(t.bodyHtml()));
         translations.replace(id,content.translations());targets.replace(id,content);
+        media.retainArticleMedia("ANNOUNCEMENT",id,content.translations().stream().map(Translation::bodyHtml).toList());
     }
     private Announcement auditResult(long id,String action,JwtPrincipal actor,String reason,Instant now) {
         var snapshot=findAdmin(id);
@@ -100,7 +101,9 @@ public class AnnouncementService {
 
     public ClientPage clientList(String authorization,ClientFilter filter,int offset,int limit) {
         var userId=optionalUserId(authorization);var now=Instant.now();
-        var items=repository.listClient(filter,userId,offset,limit,now).stream().map(row->clientView(row,filter)).toList();
+        var rows=repository.listClient(filter,userId,offset,limit,now);
+        var rendered=renderer.render(rows.stream().map(ClientRow::bodyHtml).toList());
+        var items=rows.stream().map(row->clientView(row,filter,rendered.get(row.bodyHtml()))).toList();
         int count=repository.countClient(filter,userId,false,now);
         int unread=userId==null?0:repository.countClient(filter,userId,true,now);
         return new ClientPage(items,unread,offset,limit,offset+items.size()<count);
@@ -124,10 +127,20 @@ public class AnnouncementService {
         return reads.markAllRead(user(authorization).userId(),filter,Instant.now());
     }
     private Announcement findClient(long id,ClientFilter filter,Long userId) {
-        return repository.findClient(id,filter,userId,Instant.now()).map(row->clientView(row,filter)).orElseThrow(this::missing);
+        return repository.findClient(id,filter,userId,Instant.now()).map(row->clientView(row,filter,renderer.render(java.util.Collections.singletonList(row.bodyHtml())).get(row.bodyHtml()))).orElseThrow(this::missing);
     }
     private BaseRow requireRow(long id) { return repository.find(id).orElseThrow(this::missing); }
     private Announcement findAdmin(long id) { return adminViews(List.of(requireRow(id))).getFirst(); }
+    private List<AdminSummary> adminSummaries(List<BaseRow> rows) {
+        if(rows.isEmpty())return List.of();
+        var ids=rows.stream().map(BaseRow::id).toList();
+        var translated=translations.findSummariesFor(ids).stream().collect(Collectors.groupingBy(TranslationSummaryRow::announcementId,
+                Collectors.mapping(TranslationSummaryRow::translation,Collectors.toList())));
+        var scoped=targets.findFor(ids).stream().collect(Collectors.groupingBy(TargetRow::announcementId));
+        return rows.stream().map(row->new AdminSummary(row.id(),row.category(),row.status(),row.priority(),
+                targetValues(scoped,row.id(),"PLACEMENT"),targetValues(scoped,row.id(),"PRODUCT_LINE"),targetValues(scoped,row.id(),"PLATFORM"),
+                row.startsAt(),row.expiresAt(),row.version(),translated.getOrDefault(row.id(),List.of()),row.createdAt(),row.updatedAt(),effectiveStatus(row))).toList();
+    }
     private List<Announcement> adminViews(List<BaseRow> rows) {
         if(rows.isEmpty())return List.of();
         var ids=rows.stream().map(BaseRow::id).toList();
@@ -137,17 +150,17 @@ public class AnnouncementService {
         return rows.stream().map(row->new Announcement(row.id(),row.category(),row.status(),row.priority(),
                 targetValues(targetsById,row.id(),"PLACEMENT"),targetValues(targetsById,row.id(),"PRODUCT_LINE"),
                 targetValues(targetsById,row.id(),"PLATFORM"),row.startsAt(),row.expiresAt(),row.version(),
-                translationsById.getOrDefault(row.id(),List.of()),null,null,null,null,null,row.createdAt(),row.updatedAt(),
+                translationsById.getOrDefault(row.id(),List.of()),null,null,null,null,null,null,row.createdAt(),row.updatedAt(),
                 effectiveStatus(row))).toList();
     }
     private List<String> targetValues(Map<Long,List<TargetRow>> rows,long id,String type) {
         return rows.getOrDefault(id,List.of()).stream().filter(row->row.type().equals(type)).map(TargetRow::value).toList();
     }
-    private Announcement clientView(ClientRow row,ClientFilter filter) {
+    private Announcement clientView(ClientRow row,ClientFilter filter,String bodyHtml) {
         var base=row.base();
         return new Announcement(base.id(),base.category(),base.status(),base.priority(),List.of(filter.placement()),
                 List.of(filter.productLine()),List.of(),base.startsAt(),base.expiresAt(),base.version(),List.of(),
-                row.locale(),row.title(),row.summary(),row.body(),row.readAt(),base.createdAt(),base.updatedAt(),effectiveStatus(base));
+                row.locale(),row.title(),row.summary(),row.body(),bodyHtml,row.readAt(),base.createdAt(),base.updatedAt(),effectiveStatus(base));
     }
     private String effectiveStatus(BaseRow row) {
         if(row.status().equals("WITHDRAWN") || row.status().equals("DRAFT"))return row.status();

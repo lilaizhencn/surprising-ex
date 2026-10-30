@@ -53,6 +53,7 @@ public class AuthService {
     private final LoginVerificationService loginVerification;
     private final GatewayUserAccessBlockRepository accessBlocks;
     private final CurrentAuthClient currentClient;
+    private final com.surprising.gateway.provider.legal.service.LegalConsentService legal;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(GatewayProperties properties,
@@ -62,7 +63,8 @@ public class AuthService {
                        EmailVerificationService emailVerificationService,
                        LoginVerificationService loginVerification,
                        GatewayUserAccessBlockRepository accessBlocks, CurrentAuthClient currentClient,
-                       com.surprising.affiliate.service.AffiliateService affiliates) {
+                       com.surprising.affiliate.service.AffiliateService affiliates,
+                       com.surprising.gateway.provider.legal.service.LegalConsentService legal) {
         this.affiliates = affiliates;
         this.properties = properties;
         this.repository = repository;
@@ -72,6 +74,7 @@ public class AuthService {
         this.loginVerification = loginVerification;
         this.accessBlocks = accessBlocks;
         this.currentClient = currentClient;
+        this.legal = legal;
     }
 
     @Transactional
@@ -92,6 +95,7 @@ public class AuthService {
             throw new IllegalArgumentException("phone registration is not enabled");
         }
         Instant now = Instant.now();
+        legal.validateRegistration(httpRequest==null?List.of():httpRequest.acknowledgements());
         String passwordHash = passwordHasher.hash(request.password());
         AuthenticatedUser user = phone == null
                 ? repository.createUser(username, email, passwordHash, now)
@@ -476,6 +480,8 @@ public class AuthService {
         if (!refreshExpiresAt.isAfter(now)) throw new IllegalArgumentException("session requires fresh authentication");
         String deviceId = deviceId(request);
         requireAccessAllowed(user.userId(), deviceId, ipAddress(request));
+        if(!admin || request==null || !request.administrativeClient())
+            legal.recordAndRequire(user.userId(),request==null?List.of():request.acknowledgements(),now);
         long sessionId = repository.saveRefreshSession(user.userId(), hashRefreshToken(refreshToken), refreshExpiresAt,
                 userAgent(request), ipAddress(request), deviceId, now, authenticatedAt);
         String accessToken = sessionId > 0

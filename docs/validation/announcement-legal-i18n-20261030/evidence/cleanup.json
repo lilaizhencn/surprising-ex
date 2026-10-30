@@ -1,0 +1,12 @@
+{
+  "r2OwnedObjectKeysDeleted": 27,
+  "qaDatabaseDropped": true,
+  "iosSimulatorDeleted": true,
+  "androidAvdDeleted": true,
+  "qaServicesStopped": true,
+  "temporaryR2CredentialFilesRemoved": true,
+  "otherR2PrefixesListed": false,
+  "clientQaBuildRemoved": true,
+  "ownedTemporaryCacheRemoved": true,
+  "projectDependencyCachesPreserved": true
+}

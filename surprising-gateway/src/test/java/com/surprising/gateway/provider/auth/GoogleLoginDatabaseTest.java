@@ -26,7 +26,7 @@ class GoogleLoginDatabaseTest {
     GoogleLoginService login;
     GoogleLoginRepository identities;
     AuthService auth;
-    final AuthClientMetadata device = new AuthClientMetadata("qa", "127.0.0.1", "google-test-device");
+    final AuthClientMetadata device = new AuthClientMetadata("qa", "127.0.0.1", "google-test-device", java.util.List.of(), false);
 
     @BeforeEach void setup() throws Exception {
         String url = System.getenv("GOOGLE_TEST_JDBC_URL"), user = System.getenv("GOOGLE_TEST_DB_USER"), password = System.getenv("GOOGLE_TEST_DB_PASSWORD");
@@ -72,7 +72,7 @@ class GoogleLoginDatabaseTest {
     }
     @Test void wrongDeviceExpiryAndReplayCannotCreateAnotherSession() {
         var flow = login.challenge(device.deviceId());
-        assertThatThrownBy(() -> complete(flow, new AuthClientMetadata("qa", "127.0.0.1", "other-device"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> complete(flow, new AuthClientMetadata("qa", "127.0.0.1", "other-device", java.util.List.of(), false))).isInstanceOf(IllegalArgumentException.class);
         complete(flow, device);
         assertThatThrownBy(() -> complete(flow, device)).isInstanceOf(IllegalArgumentException.class);
         var expired = login.challenge(device.deviceId());
@@ -85,7 +85,7 @@ class GoogleLoginDatabaseTest {
         try (var pool = Executors.newFixedThreadPool(2)) {
             var gate = new CountDownLatch(1);
             var one = pool.submit(() -> { gate.await(); return complete(a, device); });
-            var two = pool.submit(() -> { gate.await(); return complete(b, new AuthClientMetadata("qa", "127.0.0.1", "second-device")); });
+            var two = pool.submit(() -> { gate.await(); return complete(b, new AuthClientMetadata("qa", "127.0.0.1", "second-device", java.util.List.of(), false)); });
             gate.countDown();
             assertThat(one.get(20, TimeUnit.SECONDS).user().userId()).isEqualTo(two.get(20, TimeUnit.SECONDS).user().userId());
         }

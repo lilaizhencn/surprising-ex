@@ -1,0 +1,38 @@
+appId: com.surprising.surprising_client
+---
+- launchApp:
+    stopApp: false
+- tapOn: 个人设置
+- tapOn:
+    id: client.language.select
+- tapOn:
+    id: client.language.option.en
+- takeScreenshot: ${QA_ARTIFACTS}/android-final-profile-large-font
+- tapOn: '(?s).*Legal and privacy.*'
+- scrollUntilVisible:
+    element: '(?s).*User Agreement.*'
+    direction: DOWN
+- tapOn: '(?s).*User Agreement.*'
+- extendedWaitUntil:
+    visible: About this agreement
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/android-final-legal-body-proof
+- pressKey: Back
+- pressKey: Back
+- tapOn: Log In
+- scrollUntilVisible:
+    element: '(?s).*I have read and agree to the User Agreement.*'
+    direction: DOWN
+- takeScreenshot: ${QA_ARTIFACTS}/android-final-consent-unchecked
+- tapOn: '(?s).*I have read and agree to the User Agreement.*'
+- takeScreenshot: ${QA_ARTIFACTS}/android-final-consent-checked
+- pressKey: Back
+- tapOn:
+    id: client.language.select
+- scrollUntilVisible:
+    element:
+      id: client.language.option.ar
+    direction: DOWN
+- tapOn:
+    id: client.language.option.ar
+- takeScreenshot: ${QA_ARTIFACTS}/android-final-arabic-profile-large-font

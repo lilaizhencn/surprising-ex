@@ -1,0 +1,45 @@
+{
+  "published": [
+    {
+      "id": 38,
+      "type": "SECURITY_NOTICE"
+    },
+    {
+      "id": 37,
+      "type": "COMPLAINTS"
+    },
+    {
+      "id": 36,
+      "type": "AML_KYC"
+    },
+    {
+      "id": 35,
+      "type": "FEES"
+    },
+    {
+      "id": 34,
+      "type": "FUNDS_AND_WITHDRAWALS"
+    },
+    {
+      "id": 33,
+      "type": "DERIVATIVES_RISK"
+    },
+    {
+      "id": 32,
+      "type": "TRADING_RISK"
+    },
+    {
+      "id": 31,
+      "type": "COOKIE_POLICY"
+    },
+    {
+      "id": 30,
+      "type": "PRIVACY_POLICY"
+    },
+    {
+      "id": 29,
+      "type": "USER_AGREEMENT"
+    }
+  ],
+  "errors": []
+}

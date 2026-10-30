@@ -96,6 +96,11 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         if (path.startsWith("/support")) {
             return "admin.support." + (read ? "read" : "write");
         }
+        if (path.equals("/content/media") && !read) return "admin.content.media.write";
+        if (path.equals("/legal") || path.startsWith("/legal/")) {
+            if (path.endsWith("/publish") || path.endsWith("/withdraw")) return "admin.legal.publish";
+            return "admin.legal."+(read?"read":"write");
+        }
         if (path.startsWith("/announcements")) {
             if (path.endsWith("/publish") || path.endsWith("/withdraw")) {
                 return "admin.announcements.publish";

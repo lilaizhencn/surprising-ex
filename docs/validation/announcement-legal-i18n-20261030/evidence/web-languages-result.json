@@ -1,0 +1,80 @@
+{
+  "results": [
+    {
+      "code": "en",
+      "tag": "en-US",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "zh",
+      "tag": "zh-CN",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "zh-TW",
+      "tag": "zh-TW",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "es",
+      "tag": "es-ES",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "fr",
+      "tag": "fr-FR",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "de",
+      "tag": "de-DE",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "pt",
+      "tag": "pt-BR",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "ru",
+      "tag": "ru-RU",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "ar",
+      "tag": "ar-SA",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "ja",
+      "tag": "ja-JP",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "ko",
+      "tag": "ko-KR",
+      "documents": 10,
+      "layout": true
+    },
+    {
+      "code": "hi",
+      "tag": "hi-IN",
+      "documents": 10,
+      "layout": true
+    }
+  ],
+  "persistence": true,
+  "failedLoadRetry": true,
+  "consentReset": true,
+  "errors": []
+}

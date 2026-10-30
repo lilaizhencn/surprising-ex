@@ -68,10 +68,12 @@ public class GatewaySecurityConfiguration {
                             .access((authentication, context) -> new org.springframework.security.authorization.AuthorizationDecision(
                                     List.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(context.getRequest().getRemoteAddr())))
                         .requestMatchers("/api/v1/admin/**").hasAnyRole(properties.getSecurity().getAdminRoles().toArray(String[]::new))
+                        .requestMatchers(HttpMethod.HEAD,"/api/v1/content/media/{mediaId}").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/csrf", "/api/v1/auth/google/config", "/api/v1/auth/telegram/config", "/api/v1/auth/telegram/callback",
                                 "/api/v1/time", "/api/v1/runtime", "/api/v1/help/articles", "/api/v1/compliance/countries",
+                                "/api/v1/legal/current", "/api/v1/legal/documents/{slug}", "/api/v1/legal/revisions/{revisionId}",
                                 "/api/v1/c2c/status", "/api/v1/c2c/markets", "/api/v1/c2c/ads", "/api/v1/c2c/ads/{id}",
-                                "/api/v1/c2c/merchants/{id}", "/api/v1/c2c/help", "/api/v1/affiliate/preview", "/api/v1/announcements/**").permitAll()
+                                "/api/v1/c2c/merchants/{id}", "/api/v1/c2c/help", "/api/v1/affiliate/preview", "/api/v1/announcements/**", "/api/v1/content/media/{mediaId}").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google/challenge", "/api/v1/auth/google/login", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/login/verify",
                                 "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password", "/api/v1/auth/refresh", "/api/v1/auth/logout",
                                 "/api/v1/auth/browser/refresh", "/api/v1/auth/browser/logout", "/api/v1/auth/telegram/start", "/api/v1/auth/telegram/complete",
@@ -80,6 +82,7 @@ public class GatewaySecurityConfiguration {
                         // These adapters validate HMAC and scope against the exact wire body/query, or bearer for private operations.
                         .requestMatchers("/api/v1/gateway/**", "/api/v3/**", "/sapi/v1/**", "/fapi/v1/**", "/dapi/v1/**", "/eapi/v1/**").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/browser/revoke-others", "/api/v1/auth/verify-email", "/api/v1/auth/resend-email-verification",
+                                "/api/v1/legal/status", "/api/v1/legal/consents",
                                 "/api/v1/security/**", "/api/v1/users/scan", "/api/v1/notifications/**", "/api/v1/wallet/**",
                                 "/api/v1/realtime/**", "/api/v1/portfolio/**", "/api/v1/affiliate/**", "/api/v1/compliance/**", "/api/v1/c2c/**", "/api/v1/announcements/**").authenticated()
                         .anyRequest().denyAll());

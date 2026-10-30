@@ -30,7 +30,7 @@ class AnnouncementControllerTest {
     private final JsonMapper json=JsonMapper.builder().findAndAddModules().build();
     private final MockMvc mvc=MockMvcBuilders.standaloneSetup(new AdminAnnouncementController(service,approvals,json),new ClientAnnouncementController(service))
             .setControllerAdvice(new AnnouncementExceptionHandler()).build();
-    private SaveRequest valid() { return new SaveRequest("GENERAL",10,List.of("CENTER"),List.of("SPOT"),List.of("WEB"),Instant.parse("2026-10-01T00:00:00Z"),null,List.of(new TranslationInput("en-US","Title","Summary","Body")),null); }
+    private SaveRequest valid() { return new SaveRequest("GENERAL",10,List.of("CENTER"),List.of("SPOT"),List.of("WEB"),Instant.parse("2026-10-01T00:00:00Z"),null,List.of(new TranslationInput("en-US","Title","Summary","Body",null)),null); }
 
     @Test void malformedDraftsNeverReachBusinessAggregation() throws Exception {
         String valid=json.writeValueAsString(valid());
@@ -47,12 +47,12 @@ class AnnouncementControllerTest {
     }
     @Test void requestNormalizationProducesNativeImmutableContent() throws Exception {
         var request=new SaveRequest(" general ",null,List.of(" center ","CENTER"),List.of("spot"),null,valid().startsAt(),null,
-                List.of(new TranslationInput("zh_hans"," 标题 ",null," 正文 ")),null);
+                List.of(new TranslationInput("zh_hans"," 标题 ",null," 正文 ",null)),null);
         mvc.perform(post("/api/v1/admin/announcements").header("Authorization","admin").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(request))).andExpect(status().isOk());
         var content=ArgumentCaptor.forClass(Content.class);verify(service).create(eq("admin"),content.capture());
         assertThat(content.getValue().category()).isEqualTo("GENERAL");assertThat(content.getValue().priority()).isZero();
         assertThat(content.getValue().placements()).containsExactly("CENTER");assertThat(content.getValue().platforms()).containsExactly("ALL");
-        assertThat(content.getValue().translations()).containsExactly(new Translation("zh-CN","标题","","正文"));
+        assertThat(content.getValue().translations()).containsExactly(new Translation("zh-CN","标题","","正文",null));
         assertThatThrownBy(()->content.getValue().placements().add("BANNER")).isInstanceOf(UnsupportedOperationException.class);
     }
     @Test void validatesPaginationAndTargetsAndNormalizesClientScopeAtTheController() throws Exception {

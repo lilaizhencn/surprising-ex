@@ -1,0 +1,1337 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Surprising EX 公告媒体与协议接口",
+    "version": "2026-10-31",
+    "description": "已发布修订不可修改。必需用户协议和隐私政策在注册、密码/MFA/Google/Telegram 登录以及刷新前验证。X-Legal-Acceptance 只表示当前用户主动阅读后的选择，不能默认勾选或代替可选隐私同意。"
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/legal/current": {
+      "get": {
+        "summary": "获取当前公开协议",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "maxItems": 10,
+                  "items": {
+                    "$ref": "#/components/schemas/LegalDocument"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "security": [],
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en-US",
+                "zh-CN",
+                "zh-TW",
+                "es-ES",
+                "fr-FR",
+                "de-DE",
+                "pt-BR",
+                "ru-RU",
+                "ar-SA",
+                "ja-JP",
+                "ko-KR",
+                "hi-IN"
+              ],
+              "default": "en-US"
+            }
+          }
+        ]
+      }
+    },
+    "/legal/documents/{slug}": {
+      "get": {
+        "summary": "按 slug 获取当前协议",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "security": [],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en-US",
+                "zh-CN",
+                "zh-TW",
+                "es-ES",
+                "fr-FR",
+                "de-DE",
+                "pt-BR",
+                "ru-RU",
+                "ar-SA",
+                "ja-JP",
+                "ko-KR",
+                "hi-IN"
+              ],
+              "default": "en-US"
+            }
+          }
+        ]
+      }
+    },
+    "/legal/revisions/{revisionId}": {
+      "get": {
+        "summary": "读取已发布历史修订",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "security": [],
+        "parameters": [
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en-US",
+                "zh-CN",
+                "zh-TW",
+                "es-ES",
+                "fr-FR",
+                "de-DE",
+                "pt-BR",
+                "ru-RU",
+                "ar-SA",
+                "ja-JP",
+                "ko-KR",
+                "hi-IN"
+              ],
+              "default": "en-US"
+            }
+          }
+        ]
+      }
+    },
+    "/legal/status": {
+      "get": {
+        "summary": "查询当前用户缺失的协议确认",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en-US",
+                "zh-CN",
+                "zh-TW",
+                "es-ES",
+                "fr-FR",
+                "de-DE",
+                "pt-BR",
+                "ru-RU",
+                "ar-SA",
+                "ja-JP",
+                "ko-KR",
+                "hi-IN"
+              ],
+              "default": "en-US"
+            }
+          }
+        ]
+      }
+    },
+    "/legal/consents": {
+      "post": {
+        "summary": "主动确认当前必需修订并保留阅读语言",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en-US",
+                "zh-CN",
+                "zh-TW",
+                "es-ES",
+                "fr-FR",
+                "de-DE",
+                "pt-BR",
+                "ru-RU",
+                "ar-SA",
+                "ja-JP",
+                "ko-KR",
+                "hi-IN"
+              ],
+              "default": "en-US"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "documents"
+                ],
+                "properties": {
+                  "documents": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "$ref": "#/components/schemas/Acceptance"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/legal/revisions": {
+      "get": {
+        "summary": "admin.legal.read：摘要分页",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revisions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LegalRevisionRow"
+                      }
+                    },
+                    "offset": {
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 25
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "admin.legal.write：新建草稿",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalRevision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegalSave"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/legal/revisions/{revisionId}": {
+      "get": {
+        "summary": "admin.legal.read：完整修订",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalRevision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+            }
+          }
+        ]
+      },
+      "put": {
+        "summary": "admin.legal.write：只更新草稿，检查 version",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalRevision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegalSave"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/legal/revisions/{revisionId}/publish": {
+      "post": {
+        "summary": "admin.legal.publish：审批发布全部十二种译文，原子替换现行修订",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalRevision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/AdminApproval"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegalCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/legal/revisions/{revisionId}/withdraw": {
+      "post": {
+        "summary": "审批撤回可选协议；必需协议须先发布替代版本",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalRevision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/AdminApproval"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegalCommand"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/legal/revisions/{revisionId}/audit": {
+      "get": {
+        "summary": "admin.legal.read：查看修订审计",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LegalAudit"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "parameters": [
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+            }
+          }
+        ]
+      }
+    },
+    "/admin/content/media": {
+      "post": {
+        "summary": "admin.content.media.write：上传公告/协议的公开媒体",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentUpload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入无效"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "403": {
+            "description": "无权限或账户被限制"
+          },
+          "404": {
+            "description": "内容不存在"
+          },
+          "409": {
+            "description": "修订或并发版本已变化"
+          },
+          "428": {
+            "description": "LEGAL_CONSENT_REQUIRED 或管理员审批未完成；必须按 code 和请求路径区分"
+          },
+          "503": {
+            "description": "必需协议未发布或存储不可用"
+          }
+        },
+        "description": "multipart file：JPEG/PNG/GIF/WebP ≤20 MiB，MP3/M4A/WAV ≤32 MiB，MP4 ≤64 MiB；检查 MIME 与文件头。私有 C2C/KYC 附件禁止上传。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/content/media/{mediaId}": {
+      "get": {
+        "summary": "稳定受管媒体地址，重定向 CDN",
+        "security": [],
+        "parameters": [
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Location 指向 https://cdn.surprising.top/public/exchange/content/；媒体及 Range 由 CDN 提供",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不存在"
+          }
+        }
+      },
+      "head": {
+        "summary": "媒体地址 HEAD",
+        "security": [],
+        "parameters": [
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "同 GET，无响应体"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "parameters": {
+      "LegalAcceptance": {
+        "name": "X-Legal-Acceptance",
+        "in": "header",
+        "required": false,
+        "description": "注册/认证/刷新携带；例如 29:ar-SA,30:ar-SA。最多512字符、10项，不允许重复ID，必须是当前必需修订。Web/Admin 仍遵循既有独立 Cookie/CSRF 协议。",
+        "schema": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "AdminApproval": {
+        "name": "X-Admin-Approval-Id",
+        "in": "header",
+        "required": true,
+        "description": "既有审批流程批准且与本次方法、路径、查询和原始请求体哈希匹配的审批单。",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "LegalTranslation": {
+        "type": "object",
+        "required": [
+          "locale",
+          "title",
+          "bodyHtml"
+        ],
+        "properties": {
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en-US",
+              "zh-CN",
+              "zh-TW",
+              "es-ES",
+              "fr-FR",
+              "de-DE",
+              "pt-BR",
+              "ru-RU",
+              "ar-SA",
+              "ja-JP",
+              "ko-KR",
+              "hi-IN"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "bodyHtml": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64000,
+            "description": "清洗后的允许列表 HTML，正文最多 60000 字。后台媒体是 /api/v1/content/media/{uuid}；公开响应解析为限定 CDN 地址。"
+          }
+        }
+      },
+      "LegalRevisionRow": {
+        "type": "object",
+        "required": [
+          "revisionId",
+          "type",
+          "revisionLabel",
+          "status",
+          "version",
+          "createdAt",
+          "updatedAt",
+          "publishedAt"
+        ],
+        "properties": {
+          "revisionId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "USER_AGREEMENT",
+              "PRIVACY_POLICY",
+              "COOKIE_POLICY",
+              "TRADING_RISK",
+              "DERIVATIVES_RISK",
+              "FUNDS_AND_WITHDRAWALS",
+              "FEES",
+              "AML_KYC",
+              "COMPLAINTS",
+              "SECURITY_NOTICE"
+            ]
+          },
+          "revisionLabel": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "SUPERSEDED",
+              "WITHDRAWN"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "LegalRevision": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/LegalRevisionRow"
+          },
+          {
+            "type": "object",
+            "required": [
+              "translations"
+            ],
+            "properties": {
+              "translations": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 12,
+                "items": {
+                  "$ref": "#/components/schemas/LegalTranslation"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "LegalSave": {
+        "type": "object",
+        "required": [
+          "type",
+          "revisionLabel",
+          "translations"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "USER_AGREEMENT",
+              "PRIVACY_POLICY",
+              "COOKIE_POLICY",
+              "TRADING_RISK",
+              "DERIVATIVES_RISK",
+              "FUNDS_AND_WITHDRAWALS",
+              "FEES",
+              "AML_KYC",
+              "COMPLAINTS",
+              "SECURITY_NOTICE"
+            ]
+          },
+          "revisionLabel": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$"
+          },
+          "translations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "items": {
+              "$ref": "#/components/schemas/LegalTranslation"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          }
+        }
+      },
+      "LegalCommand": {
+        "type": "object",
+        "required": [
+          "version",
+          "reason"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      },
+      "LegalDocument": {
+        "type": "object",
+        "required": [
+          "revisionId",
+          "type",
+          "slug",
+          "revisionLabel",
+          "locale",
+          "title",
+          "bodyHtml",
+          "registrationRequired",
+          "publishedAt"
+        ],
+        "properties": {
+          "revisionId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "USER_AGREEMENT",
+              "PRIVACY_POLICY",
+              "COOKIE_POLICY",
+              "TRADING_RISK",
+              "DERIVATIVES_RISK",
+              "FUNDS_AND_WITHDRAWALS",
+              "FEES",
+              "AML_KYC",
+              "COMPLAINTS",
+              "SECURITY_NOTICE"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "revisionLabel": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en-US",
+              "zh-CN",
+              "zh-TW",
+              "es-ES",
+              "fr-FR",
+              "de-DE",
+              "pt-BR",
+              "ru-RU",
+              "ar-SA",
+              "ja-JP",
+              "ko-KR",
+              "hi-IN"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "bodyHtml": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64000,
+            "description": "清洗后的允许列表 HTML，正文最多 60000 字。后台媒体是 /api/v1/content/media/{uuid}；公开响应解析为限定 CDN 地址。"
+          },
+          "registrationRequired": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Acceptance": {
+        "type": "object",
+        "required": [
+          "revisionId",
+          "locale"
+        ],
+        "properties": {
+          "revisionId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en-US",
+              "zh-CN",
+              "zh-TW",
+              "es-ES",
+              "fr-FR",
+              "de-DE",
+              "pt-BR",
+              "ru-RU",
+              "ar-SA",
+              "ja-JP",
+              "ko-KR",
+              "hi-IN"
+            ]
+          }
+        }
+      },
+      "ConsentStatus": {
+        "type": "object",
+        "required": [
+          "documents",
+          "missingRevisionIds"
+        ],
+        "properties": {
+          "documents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LegalDocument"
+            }
+          },
+          "missingRevisionIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+            }
+          }
+        }
+      },
+      "ContentUpload": {
+        "type": "object",
+        "required": [
+          "mediaId",
+          "url",
+          "contentType",
+          "size"
+        ],
+        "properties": {
+          "mediaId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "description": "/api/v1/content/media/{uuid}，供编辑器保存；公开文章响应为受限 CDN 地址。"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "LegalAudit": {
+        "type": "object",
+        "required": [
+          "auditId",
+          "revisionId",
+          "action",
+          "adminUserId",
+          "reason",
+          "snapshot",
+          "createdAt"
+        ],
+        "properties": {
+          "auditId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          },
+          "revisionId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          },
+          "action": {
+            "type": "string"
+          },
+          "adminUserId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "正整数 int64；JavaScript 必须无损解析为字符串。"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

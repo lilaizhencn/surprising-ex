@@ -29,7 +29,7 @@ class AuthClientMetadataBoundaryTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"identifier\":\"user\",\"password\":\"password\"}"))
                 .andExpect(status().isOk());
         var metadata=ArgumentCaptor.forClass(AuthClientMetadata.class);verify(auth).login(any(),metadata.capture());
-        assertThat(metadata.getValue()).isEqualTo(new AuthClientMetadata("a".repeat(300),"203.0.113.7","a1111111-1111-4111-8111-111111111111"));
+        assertThat(metadata.getValue()).isEqualTo(new AuthClientMetadata("a".repeat(300),"203.0.113.7","a1111111-1111-4111-8111-111111111111", java.util.List.of(), false));
     }
 
     @ParameterizedTest

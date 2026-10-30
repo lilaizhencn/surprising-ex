@@ -1,0 +1,12 @@
+{
+  "authentication": "controlled",
+  "content": "real HTTP/PostgreSQL",
+  "attempts": [
+    {
+      "path": "/api/v1/auth/login",
+      "acceptance": "30:en-US,39:en-US",
+      "consentRecorded": true
+    }
+  ],
+  "errors": []
+}

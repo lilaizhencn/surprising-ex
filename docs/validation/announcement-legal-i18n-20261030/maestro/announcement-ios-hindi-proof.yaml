@@ -1,0 +1,21 @@
+appId: com.surprising.surprisingClient
+---
+- tapOn: Personal settings
+- tapOn:
+    id: client.language.select
+- scrollUntilVisible:
+    element:
+      id: client.language.option.hi
+    direction: DOWN
+- tapOn:
+    id: client.language.option.hi
+- takeScreenshot: ${QA_ARTIFACTS}/ios-final-hindi-profile
+- tapOn: '(?s).*अनुबंध और गोपनीयता.*'
+- scrollUntilVisible:
+    element: "(?s).*उपयोगकर्ता अनुबंध.*"
+    direction: DOWN
+- tapOn: "(?s).*उपयोगकर्ता अनुबंध.*"
+- extendedWaitUntil:
+    visible: "इस समझौते के बारे में"
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/ios-final-hindi-legal-proof

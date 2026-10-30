@@ -37,3 +37,12 @@ The single-node stack has six Java processes:
 | Realtime | Market data, candles, trade export, and realtime routing |
 | Derivatives lifecycle | Funding, risk scans, and liquidation workflows |
 | Maker | Reference-market-based quotes and trading |
+
+
+## 公告、媒体与协议
+
+公告支持富文本、图片、音频、视频及十二种语言。公开媒体复用 social 的 app-public / cdn.surprising.top，限定交易目录 public/exchange/content/；C2C、身份认证等私有附件保持原访问控制。后台上传检查格式、文件头和体积；保存草稿同事务保留引用，超过二十四小时的未引用上传由独立线程有界回收。配置示例见 [content-r2.env.example](deployment/content-r2.env.example)。
+
+管理后台提供十类协议的草稿、各语种预览、审批发布、历史修订与审计。用户协议和隐私政策发布后，普通用户须主动确认具体修订；后续发布新修订会在再次登录或刷新时要求确认。发布历史和阅读语言保留，不覆盖旧记录。运营主体与邮箱按用户要求复用 social，交易域名保持 https://ex.tokdou.com。
+
+首次上线须先执行三份 20261031-content-media / legal-documents / content-media-references 迁移，配置公共 R2，导入并复核协议草稿，再审批发布必需协议。步骤、地区限制和正文复核要求见 [协议内容与上线顺序](deployment/legal/README.md)。接口见 [公告媒体与协议 OpenAPI](docs/content-api.openapi.json)，验证范围见 [本轮验证](docs/validation/announcement-legal-i18n-20261030/PROGRESS.md)。

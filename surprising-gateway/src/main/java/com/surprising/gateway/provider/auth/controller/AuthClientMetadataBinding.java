@@ -42,7 +42,8 @@ public class AuthClientMetadataBinding implements CurrentAuthClient {
     }
 
     public AuthClientMetadata bind(HttpServletRequest request) {
-        return new AuthClientMetadata(userAgent(request), truncate(clientIpResolver.resolve(request),80), deviceId(request));
+        return new AuthClientMetadata(userAgent(request), truncate(clientIpResolver.resolve(request),80), deviceId(request),
+                LegalAcceptanceHeader.parse(request.getHeader(LegalAcceptanceHeader.NAME)),"admin".equals(request.getHeader("X-Auth-Client")));
     }
 
     @Override
@@ -50,7 +51,7 @@ public class AuthClientMetadataBinding implements CurrentAuthClient {
         var attributes = RequestContextHolder.getRequestAttributes();
         if (!(attributes instanceof ServletRequestAttributes servlet)) return null;
         // Bearer鉴权原来只检查请求IP；不得在此新增设备格式检查或改变权限判断顺序。
-        return new AuthClientMetadata(null, truncate(clientIpResolver.resolve(servlet.getRequest()),80), null);
+        return new AuthClientMetadata(null, truncate(clientIpResolver.resolve(servlet.getRequest()),80), null,java.util.List.of(),false);
     }
 
     @Override public void authenticated(long userId, String apiKey) {

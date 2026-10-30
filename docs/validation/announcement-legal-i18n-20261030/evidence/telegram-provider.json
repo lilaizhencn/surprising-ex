@@ -1,0 +1,48 @@
+{
+  "provider": "synthetic",
+  "scenarios": [
+    {
+      "width": 320,
+      "theme": "dark",
+      "password": "not entered",
+      "nickname": "小李 🚀",
+      "passed": true
+    },
+    {
+      "width": 320,
+      "theme": "light",
+      "password": "not entered",
+      "nickname": "小李 🚀",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "password": "not entered",
+      "nickname": "小李 🚀",
+      "passed": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "password": "not entered",
+      "nickname": "小李 🚀",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "dark",
+      "password": "not entered",
+      "nickname": "小李 🚀",
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "theme": "light",
+      "password": "not entered",
+      "nickname": "小李 🚀",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

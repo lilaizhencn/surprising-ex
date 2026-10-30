@@ -157,7 +157,7 @@ class GatewaySecurityBoundaryTest {
         @Bean AdminApprovalService approvals() { return mock(AdminApprovalService.class); }
         @Bean AuthService auth(GatewayProperties p, AuthPersistenceService rows, JwtTokenService jwt, AuthClientMetadataBinding client) {
             return spy(new AuthService(p, rows, mock(PasswordHasher.class), jwt, mock(EmailVerificationService.class),
-                    mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), client, mock(com.surprising.affiliate.service.AffiliateService.class)));
+                    mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), client, mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class)));
         }
     }
 }

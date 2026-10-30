@@ -1,0 +1,7 @@
+{
+  "ordinary_2MiB": 413,
+  "legal_draft_2MiB_reaches_gateway": 401,
+  "announcement_draft_2MiB_reaches_gateway": 401,
+  "legal_draft_above_3MiB": 413,
+  "media_above_68MiB": 413
+}

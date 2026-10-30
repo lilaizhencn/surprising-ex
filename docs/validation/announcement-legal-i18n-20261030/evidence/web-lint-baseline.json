@@ -1,0 +1,29 @@
+{
+  "baseline": {
+    "changed": 0,
+    "unchanged": 215,
+    "matches": 0,
+    "duration": 445718177,
+    "errors": 81,
+    "warnings": 0,
+    "infos": 704,
+    "skipped": 0,
+    "suggestedFixesSkipped": 0,
+    "diagnosticsNotPrinted": 0,
+    "scannerDuration": 2072359
+  },
+  "current": {
+    "changed": 0,
+    "unchanged": 238,
+    "matches": 0,
+    "duration": 359999601,
+    "errors": 78,
+    "warnings": 0,
+    "infos": 709,
+    "skipped": 0,
+    "suggestedFixesSkipped": 0,
+    "diagnosticsNotPrinted": 0,
+    "scannerDuration": 1839876
+  },
+  "newErrorsOrWarnings": []
+}

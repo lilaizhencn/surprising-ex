@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.announcement.controller;
 
 import com.surprising.gateway.provider.announcement.model.AnnouncementModels.*;
+import com.surprising.gateway.provider.content.model.ContentLocale;
+import com.surprising.gateway.provider.content.support.RichArticle;
 import java.util.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -42,10 +44,18 @@ final class AnnouncementParameters {
             String title = input.title() == null ? "" : input.title().trim();
             String summary = input.summary() == null ? "" : input.summary().trim();
             String body = input.body() == null ? "" : input.body().trim();
+            String bodyHtml = null;
+            if (input.bodyHtml() != null) {
+                try {
+                    var article = RichArticle.clean(input.bodyHtml());
+                    body = article.text();
+                    bodyHtml = article.html();
+                } catch (IllegalArgumentException invalid) { throw badRequest(invalid.getMessage()); }
+            }
             if (title.isBlank() || title.length() > 160) throw badRequest("translation title must contain 1 to 160 characters");
             if (summary.length() > 500) throw badRequest("translation summary must be at most 500 characters");
             if (body.isBlank() || body.length() > 12000) throw badRequest("translation body must contain 1 to 12000 characters");
-            if (byLocale.putIfAbsent(locale, new Translation(locale, title, summary, body)) != null) {
+            if (byLocale.putIfAbsent(locale, new Translation(locale, title, summary, body, bodyHtml)) != null) {
                 throw badRequest("duplicate translation locale: " + locale);
             }
         }
@@ -70,12 +80,8 @@ final class AnnouncementParameters {
     }
 
     static String normalizeLocale(String value) {
-        String locale = value == null ? "en-US" : value.trim().replace('_', '-');
-        return switch (locale.toLowerCase(Locale.ROOT)) {
-            case "zh", "zh-cn", "zh-hans" -> "zh-CN";
-            case "en", "en-us" -> "en-US";
-            default -> locale;
-        };
+        try { return ContentLocale.require(value).code(); }
+        catch (IllegalArgumentException invalid) { throw badRequest(invalid.getMessage()); }
     }
 
 

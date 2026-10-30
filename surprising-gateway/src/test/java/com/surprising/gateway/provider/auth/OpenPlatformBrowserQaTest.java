@@ -110,7 +110,7 @@ class OpenPlatformBrowserQaTest {
             var jwt = new JwtTokenService(properties, json);
             auth = new AuthService(properties, persistence, mock(PasswordHasher.class), jwt,
                     mock(EmailVerificationService.class), mock(LoginVerificationService.class), new GatewayUserAccessBlockRepository(jdbc), metadata,
-                    mock(com.surprising.affiliate.service.AffiliateService.class));
+                    mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class));
             var verification = mock(SensitiveActionVerificationService.class);
             when(verification.verify(anyLong(), eq("SECURITY_SETTINGS"), any(), any(), any()))
                     .thenAnswer(call -> "123456".equals(call.getArgument(2)));

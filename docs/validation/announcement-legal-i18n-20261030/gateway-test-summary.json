@@ -1,0 +1,1754 @@
+{
+  "com.surprising.gateway.provider.auth.MfaRecoveryServiceTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.service.ClientConnectionIsolationTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.LoginVerificationSettingsControllerTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.repository.MarketSummaryPostgresTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "com.surprising.gateway.provider.auth.TelegramOidcClientTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.ProductAccountAccessTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.LoginVerificationServiceTest": {
+    "tests": 27,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.controller.MakerQuoteInputsControllerTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.trigger.service.TriggerOrderProjectionPostgresTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5
+  },
+  "com.surprising.gateway.provider.auth.KycEvidenceReferenceTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.trigger.service.TriggerOrderIdentityTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.TradingFeeServiceTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.controller.InstrumentRequestHandlerTest": {
+    "tests": 21,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5
+  },
+  "com.surprising.trading.order.service.OrderServiceTest": {
+    "tests": 130,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.ApiKeyManagementPostgresTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 7
+  },
+  "com.surprising.websocket.provider.config.WebSocketPropertiesTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.controller.UserNotificationControllerPostgresTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5
+  },
+  "com.surprising.websocket.provider.handler.ClientWebSocketHandlerTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.affiliate.CommissionAllocationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.service.KafkaFanoutConsumerTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.local.AdminIntegerBindingTest": {
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.handler.WebSocketApiKeyAuthenticationTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.controller.OrderControllerTest": {
+    "tests": 15,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.KycDocumentStorageServiceTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.gateway.c2c.C2cOrdersPostgresTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.gateway.provider.controller.ReadViewHttpErrorsTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.api.cache.FeeScheduleSnapshotCacheTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.ClientIpResolverTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.service.InstrumentOutboxPublisherTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.InstrumentCoreSyncServiceTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.InstrumentInitializationConfigurationTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.provider.product.GatewayProductSelectionTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.controller.UserKycUploadBoundaryTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cAdminQueryPostgresTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "com.surprising.gateway.provider.config.GatewayInputLimitsTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.announcement.AnnouncementServiceTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.DailyIncomeCalculatorTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.service.AccountServiceLocalSnapshotTest": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.TelegramLoginControllerTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cR2GatewayLiveTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.instrument.provider.service.InstrumentStorageServiceTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.service.OpenInterestPublisherTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 7
+  },
+  "com.surprising.gateway.provider.auth.KycProviderHttpContractTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.repository.OrderFeeRepositoryTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 7
+  },
+  "com.surprising.affiliate.AffiliatePostgresTest": {
+    "tests": 16,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 16
+  },
+  "com.surprising.websocket.provider.service.DepthUpdateTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.service.InstrumentLifecycleServiceTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.config.TradingOrderKafkaConfigurationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.ExternalKycProviderTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.content.ContentLocaleTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.affiliate.AffiliateResourceTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.ScheduledBusinessTasksContextTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.affiliate.AffiliateHttpTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.ComplianceWritePostgresTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5
+  },
+  "com.surprising.affiliate.AffiliateSafetyPostgresTest": {
+    "tests": 19,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 19
+  },
+  "com.surprising.trading.order.service.InstrumentSnapshotRuleLookupTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.service.AccountAeronGatewayTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest": {
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.OrderValidatorTest": {
+    "tests": 24,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.controller.LegalAcceptanceHeaderTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.InternalLiquidityOperationsControllerTest": {
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.GoogleIdentityClientTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cConfigurationValidationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cCommandValidationTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.GatewayRequestLimitsRedisTest": {
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 13
+  },
+  "com.surprising.gateway.provider.product.AdminProductLinesLiveTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "com.surprising.gateway.provider.interceptor.ArticleRequestBodyLimitTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cFundsPostgresTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.gateway.c2c.C2cHttpBoundaryTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.GatewayHttpConfigurationTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.gateway.provider.service.PortfolioIncomeServicePostgresTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 12
+  },
+  "com.surprising.gateway.provider.auth.GoogleLoginHttpTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.client.CustodyWalletClientTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.client.SpotAccountClientTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.FeePolicyCoreImporterTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cQueryValidationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.WalletFundingServiceTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cAdsPostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.gateway.provider.service.KycNotificationTransactionPostgresTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.gateway.provider.service.ConstructorInjectionContextTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.controller.TradingFeeInternalControllerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cR2StorageLiveTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.instrument.provider.controller.InstrumentRequestHandlerBoundaryTest": {
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.controller.PerpetualAccountStateInternalControllerTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.OrderExecutionJsonTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.controller.LeverageRequestHandlerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.SecurityNotificationPostgresTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 7
+  },
+  "com.surprising.gateway.c2c.C2cChatValidationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.legal.LegalConsentServiceTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.service.InstrumentIdentityCacheTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5
+  },
+  "com.surprising.websocket.provider.handler.WebSocketLimitsRedisTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.gateway.provider.content.ContentMediaLifecyclePostgresTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5
+  },
+  "com.surprising.trading.trigger.config.TriggerPropertiesTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.service.ExpiringContractSettlementFanoutServiceTest": {
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.legal.LegalPostgresTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.gateway.provider.auth.AdminComplianceControllerTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8
+  },
+  "com.surprising.trading.order.service.OrderMarginMathTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.GatewaySecurityBoundaryTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.config.InstrumentKafkaConfigurationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.OrderBatchServiceTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.GoogleLoginDatabaseTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest": {
+    "tests": 35,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 35
+  },
+  "com.surprising.gateway.provider.auth.AuthPagePostgresTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.websocket.provider.config.WebSocketKafkaConfigurationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.UserSecurityControllerTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.AccountAssetsControllerTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandlerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.PasswordHasherTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.CustodyWalletControllerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest": {
+    "tests": 16,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 16
+  },
+  "com.surprising.gateway.provider.product.GatewayProductServicesTest": {
+    "tests": 17,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.UploadContentScannerTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.service.AccountCommandGatewayTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.ComplianceServiceTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.SpotMarketCommandTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.AdminSystemServiceTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.product.ProductCommandMediaDriverTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.PortfolioIncomeControllerTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.LeverageServiceTest": {
+    "tests": 17,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.content.RichArticleTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.BboOrderServiceTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.controller.AccountInputBoundaryTest": {
+    "tests": 48,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.AdminProductLinesControllerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.AdminPermissionFilterTest": {
+    "tests": 22,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.asset.service.WithdrawalQuoteTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cInputBoundaryPostgresTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 7
+  },
+  "com.surprising.trading.order.service.StableOrderIdentityTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.service.SubscriptionRegistryTest": {
+    "tests": 15,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.controller.BrowserCookieSecurityTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.FeeScheduleSnapshotInitializerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.affiliate.AffiliateTeamIsolationPostgresTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 9
+  },
+  "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.repository.AlgoOrderProjectionPostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.trading.order.service.InstrumentSnapshotInitializerTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cChatPersistencePostgresTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5
+  },
+  "com.surprising.gateway.provider.announcement.AnnouncementControllerTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.aeron.service.core.MaintenanceIntegrationTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 12
+  },
+  "com.surprising.gateway.provider.config.GatewayCorsConfigTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.CancelAllAfterServiceTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.AdminSupportControllerTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.TelegramLoginServiceTest": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.KycClosureBrowserQaTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.account.provider.controller.ProductTransferInternalControllerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.UserSecurityServiceTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.client.CustodySubmissionReceiptTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8
+  },
+  "com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest": {
+    "tests": 21,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cChatPostgresTest": {
+    "tests": 15,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 15
+  },
+  "com.surprising.gateway.c2c.C2cAdminQueryControllerTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.local.SixProductLineContractLiveTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.c2c.C2cAccessPostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.gateway.provider.controller.GatewayRuntimeTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.provider.service.UserAccessPostgresTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8
+  },
+  "com.surprising.gateway.provider.auth.ComplianceValidationTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.AuthServiceTest": {
+    "tests": 33,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.service.SubscriptionRegistryConcurrencyTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.product.ProductBusinessConfigurationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.content.ContentR2IntegrationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.provider.auth.UserCardControllerTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.AlgoOrderCancellationTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.AuthInputBoundaryPostgresTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 9
+  },
+  "com.surprising.trading.order.service.OrderAeronGatewayTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.AdminIpWhitelistFilterTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.local.LocalMoneyCommandsTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.service.RealtimeWebSocketBridgeLifecycleTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.repository.TradingMetricsPostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.trading.matching.MarketDataLocalTest": {
+    "tests": 24,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.announcement.AnnouncementPostgresTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.asset.AssetInputBoundaryPostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.gateway.provider.auth.OpenPlatformBrowserQaTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.provider.content.ContentMediaServiceTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.affiliate.CommittedPayoutTransferTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.AeronOrderCommandServiceTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.config.TradingOrderPropertiesTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.repository.InstrumentSingleTableRepositoryTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.repository.ProductLedgerJsonTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.local.SixProductLineRiskExpectationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.GatewayMediaDriverConfigurationTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.service.InstrumentValidatorTest": {
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.content.MediaFileTypeTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cHttpPostgresTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 9
+  },
+  "com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTaskTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.service.WebSocketSessionAuthorizationTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.AlgoOrderServiceTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.repository.ProjectionWatermarkWaiterTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.local.InternalBusinessContractTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.trigger.task.TriggerOrderMaintenanceTaskTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.legal.LegalCmsServiceTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.maintenance.controller.AdminMaintenanceRequestHandlerTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.AuthTableBoundariesPostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.gateway.provider.auth.controller.AuthClientMetadataBoundaryTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.repository.BalanceAdjustmentJournalPostgresTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.instrument.provider.repository.InstrumentLifecycleDrainPostgresTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.asset.service.WithdrawalQuotePostgresTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.gateway.provider.product.SharedCommandTransportIntegrationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.c2c.C2cProfileValidationTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.InstrumentOrderDrainServiceTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.GatewayApiKeyServiceTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.BinanceApiControllerTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.trigger.service.TriggerLifecycleDrainTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cQueryPostgresTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.gateway.provider.auth.GoogleAuthGateTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cNotificationsPostgresTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.gateway.provider.content.ArticleRenderingServiceTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "com.surprising.trading.order.repository.ProjectionReadAssociationPostgresTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.provider.auth.GoogleLoginServiceTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.KycApplicationValidationTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.controller.TradingFeeRequestHandlerTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.GatewayLimitPropertiesTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8
+  },
+  "com.surprising.trading.order.controller.FeeScheduleBoundaryPostgresTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8
+  },
+  "com.surprising.websocket.provider.service.KafkaFanoutConsumerTopicTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandlerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.ApiKeyHttpBoundaryTest": {
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.repository.TradeProjectionPostgresTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8
+  },
+  "com.surprising.gateway.provider.auth.AdminApprovalStatePostgresTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.gateway.provider.service.SupportTicketTransactionPostgresTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.gateway.provider.product.MultiProductMoneyIntegrationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.ApiKeyOrderPermissionTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.CompressionCompatibilityTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.asset.AssetConfigurationControllerTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.controller.AdminOrderRequestHandlerTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.product.ProductInternalMappingAvailabilityTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.local.ActiveOrderQueryBoundaryTest": {
+    "tests": 29,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.asset.AssetConfigurationIntegrationTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "com.surprising.gateway.provider.service.ProductTransferCoordinatorTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.KycProviderDatabaseTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.provider.auth.AdminApprovalHeaderTest": {
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.controller.AccountInternalControllerTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.service.RealtimePublicTradeTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.repository.InstrumentRepositoryTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.EmailVerificationServiceTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.repository.ProjectedOrderQueryRepositoryTest": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.AuditLogPagePostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.websocket.provider.service.SubscriptionTopicTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.instrument.provider.service.MarketSummaryServiceTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.service.ExpiringContractSettlementConsumerTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.trigger.controller.TriggerOrderRequestHandlerTest": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.repository.SingleTableRepositoryBoundaryTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cMeHttpPostgresTest": {
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 10
+  },
+  "com.surprising.gateway.provider.local.MergedBusinessHttpIntegrationTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.websocket.provider.service.SubscriptionRegistryMetricsTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.KycDocumentServiceTest": {
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 9
+  },
+  "com.surprising.gateway.provider.auth.KycProviderConcurrencyPostgresTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 9
+  },
+  "com.surprising.trading.order.repository.OrderMarkPriceRepositoryTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.websocket.provider.config.WebSocketServerConfigurationTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.service.InstrumentCurrentCacheTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.config.AccountKafkaConfigurationTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.account.provider.controller.AccountHistoryPagePostgresTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.gateway.provider.local.LocalTradingLifecycleLiveTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "com.surprising.gateway.provider.auth.client.GoogleIdentityFailureTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.LoginVerificationDatabaseTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.gateway.provider.controller.RuntimeProductsHttpTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cMoneyTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.service.OrderPlacementStateServiceTest": {
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.local.LocalBusinessApiTest": {
+    "tests": 37,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.GatewayUserMfaRepositoryTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "com.surprising.trading.api.model.MarketPriceProtectionTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.product.MultiProductGatewayHttpIntegrationTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "com.surprising.gateway.provider.auth.AdminCursorPageTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cBrowserQaTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "com.surprising.gateway.provider.controller.GatewayLimitHttpTest": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 11
+  },
+  "com.surprising.gateway.provider.auth.PasswordResetServiceTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.trading.order.repository.OrderHistoryPostgresTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "com.surprising.websocket.provider.config.WebSocketApplicationYamlTest": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.instrument.provider.service.InstrumentServiceTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.SupportBoundaryPostgresTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6
+  },
+  "com.surprising.gateway.provider.auth.TotpServiceTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.GatewayProxyControllerTest": {
+    "tests": 40,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest": {
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "com.surprising.instrument.provider.OkxInstrumentSeedContractTest": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.controller.ProductUnavailableHttpBoundaryTest": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

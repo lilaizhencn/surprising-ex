@@ -1,0 +1,15 @@
+appId: com.surprising.surprising_client
+---
+- tapOn:
+    point: 50%,67%
+- extendedWaitUntil:
+    visible: 'QA video [1-9][0-9]*\.[0-9] s; audio 0\.0 s'
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/android-video-clock-proof
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: 'QA video 0\.0 s; audio 0\.0 s'
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/android-resumed-media-paused

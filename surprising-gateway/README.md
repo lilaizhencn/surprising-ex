@@ -675,3 +675,12 @@ HTTP 额度耗尽返回 429 和 Retry-After；批次自身超过桶容量返回 
 ## 安全入口与会话
 
 SecurityFilterChain 统一路径、权限和状态检查；Web/Admin 使用独立 HttpOnly Cookie 与 CSRF，App 保留显式令牌协议。新密码不做旧规则迁移。生产上传依赖私网 ClamAV，异常保持拒绝；防护策略、Nginx snippet 安装和未覆盖的基础设施工作见 [网关安全](../docs/gateway-security.md)。
+
+
+## 公告媒体、法律文书与确认
+
+公告富文本与媒体在 provider/content，协议版本管理与确认在 provider/legal；入口、业务事务与数据库访问分别位于 controller/service/repository。十二语种内容按 BCP-47 规范化，资金请求保留原 1 MiB 限制，仅公告和协议草稿 JSON 放宽至 3 MiB，媒体走单独 multipart。
+
+普通认证统一在发 token 前核对现行用户协议和隐私政策；注册在创建账户前检查，缺失确认返回 428/LEGAL_CONSENT_REQUIRED，必需协议尚未发布返回 503。仅具备管理角色且明确使用 admin 客户端的认证可进入后台完成首次文书发布。确认列表由 X-Legal-Acceptance 传递，禁止默认代用户确认。
+
+权限包括 admin.content.media.write、admin.legal.read/write/publish，发布和撤回绑定既有审批原始请求体。媒体使用 app-public 的 public/exchange/content/，不公开私有附件。详细配置、迁移与发布顺序见 ../deployment/legal/README.md，接口定义见 ../docs/content-api.openapi.json。

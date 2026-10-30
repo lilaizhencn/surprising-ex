@@ -23,6 +23,7 @@ import com.surprising.gateway.provider.auth.service.TotpService;
 import com.surprising.trading.api.utils.AdminCursorPage;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.isNull;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,8 +56,45 @@ class AuthServiceTest {
     private final EmailVerificationService emailVerificationService = mock(EmailVerificationService.class);
     private final LoginVerificationService loginVerification = mock(LoginVerificationService.class);
     private final GatewayUserAccessBlockRepository accessBlocks = mock(GatewayUserAccessBlockRepository.class);
+    private final com.surprising.gateway.provider.legal.service.LegalConsentService legal = mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class);
+    private final com.surprising.affiliate.service.AffiliateService affiliate = mock(com.surprising.affiliate.service.AffiliateService.class);
     private final AuthService service = new AuthService(new GatewayProperties(), repository,
-            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), mock(com.surprising.affiliate.service.AffiliateService.class));
+            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), affiliate, legal);
+
+    @Test void registrationWithoutCurrentAcknowledgementsHasNoAccountOrReferralSideEffects() {
+        org.mockito.Mockito.doThrow(new com.surprising.gateway.provider.legal.exception.LegalProblem(
+                com.surprising.gateway.provider.legal.exception.LegalProblem.Kind.CONSENT_REQUIRED,"review required"))
+                .when(legal).validateRegistration(any());
+        var metadata=new com.surprising.gateway.provider.auth.model.AuthClientMetadata(null,"127.0.0.1",null,List.of(),false);
+        assertThatThrownBy(()->service.register(new RegisterRequest(null,"StrongPassword1!","user@example.com"),metadata))
+                .isInstanceOf(com.surprising.gateway.provider.legal.exception.LegalProblem.class);
+        verifyNoInteractions(repository,passwordHasher,jwtTokenService,emailVerificationService,affiliate);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"USER,false", "USER,true", "ADMIN,false"})
+    void missingAcknowledgementsCannotIssueTokensEvenWithAnAdminClientHeader(String role,boolean administrativeClient) {
+        var user=new AuthenticatedUser(42,"user",null,"NORMAL",List.of(role),Instant.now());
+        when(repository.user(42)).thenReturn(Optional.of(user));
+        when(repository.credential(42)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(42,"user",null,null,"NORMAL",Instant.now())));
+        org.mockito.Mockito.doThrow(new com.surprising.gateway.provider.legal.exception.LegalProblem(
+                com.surprising.gateway.provider.legal.exception.LegalProblem.Kind.CONSENT_REQUIRED,"review required"))
+                .when(legal).recordAndRequire(eq(42L),any(),any());
+        var metadata=new com.surprising.gateway.provider.auth.model.AuthClientMetadata(null,"127.0.0.1",null,List.of(),administrativeClient);
+        assertThatThrownBy(()->service.loginTelegram(42,metadata)).isInstanceOf(com.surprising.gateway.provider.legal.exception.LegalProblem.class);
+        verify(repository,org.mockito.Mockito.never()).saveRefreshSession(anyLong(),anyString(),any(),any(),any(),any(),any(),any());
+        verifyNoInteractions(jwtTokenService);
+    }
+
+    @Test void privilegedConsoleLoginCanManageLegalDocumentsBeforeConsumerPublication() {
+        var user=new AuthenticatedUser(42,"admin",null,"NORMAL",List.of("ADMIN"),Instant.now());
+        when(repository.user(42)).thenReturn(Optional.of(user));
+        when(repository.credential(42)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(42,"admin",null,null,"NORMAL",Instant.now())));
+        var metadata=new com.surprising.gateway.provider.auth.model.AuthClientMetadata(null,"127.0.0.1",null,List.of(),true);
+        service.loginTelegram(42,metadata);
+        verifyNoInteractions(legal);
+        verify(repository).saveRefreshSession(eq(42L),anyString(),any(),any(),any(),any(),any(),any());
+    }
 
     @Test
     void telegramLoginKeepsMfaRequiredForPasswordlessAccount() {

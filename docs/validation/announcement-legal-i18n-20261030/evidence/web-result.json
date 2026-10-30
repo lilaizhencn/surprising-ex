@@ -1,0 +1,12 @@
+[
+  {
+    "width": 1366,
+    "theme": "light",
+    "passed": true
+  },
+  {
+    "width": 390,
+    "theme": "dark",
+    "passed": true
+  }
+]

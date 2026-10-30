@@ -1,0 +1,27 @@
+appId: com.surprising.surprisingClient
+---
+- tapOn: الإعدادات الشخصية
+- tapOn:
+    id: client.language.select
+- tapOn:
+    id: client.language.option.en
+- tapOn: '(?s).*Legal and privacy.*'
+- scrollUntilVisible:
+    element: '(?s).*User Agreement.*'
+    direction: DOWN
+- tapOn: '(?s).*User Agreement.*'
+- extendedWaitUntil:
+    visible: About this agreement
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/ios-final-legal-body-proof
+- tapOn:
+    point: 7%,10%
+- tapOn:
+    point: 7%,10%
+- tapOn: Log In
+- extendedWaitUntil:
+    visible: '(?s).*I have read and agree to the User Agreement.*'
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/ios-final-consent-unchecked
+- tapOn: '(?s).*I have read and agree to the User Agreement.*'
+- takeScreenshot: ${QA_ARTIFACTS}/ios-final-consent-checked

@@ -1,0 +1,26 @@
+appId: com.surprising.surprisingClient
+---
+- launchApp:
+    stopApp: false
+- tapOn:
+    point: 7%,10%
+- assertVisible: 公告验证
+- tapOn: 深色
+- tapOn: 阅读完整公告
+- tapOn:
+    text: 播放
+    index: 0
+- extendedWaitUntil:
+    visible: 'QA video 0\.0 s; audio [1-9][0-9]*\.[0-9] s'
+    timeout: 25000
+- takeScreenshot: ${QA_ARTIFACTS}/ios-dark-audio-clock-proof
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: 'QA video 0\.0 s; audio 0\.0 s'
+    timeout: 20000
+- takeScreenshot: ${QA_ARTIFACTS}/ios-resumed-media-paused
+- tapOn:
+    point: 7%,10%
+- assertVisible: 公告验证

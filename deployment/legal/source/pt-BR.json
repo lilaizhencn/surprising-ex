@@ -1,0 +1,232 @@
+{
+  "USER_AGREEMENT": {
+    "title": "Contrato do usuário",
+    "sections": [
+      [
+        "Sobre este contrato",
+        "Estes termos regem o uso do Surprising EX no https://ex.tokdou.com e seus aplicativos oficiais.O operador e entidade de contacto é 河南朔望科技有限公司, registado na China.Entre em contato com support@surprising.top para questões jurídicas, de privacidade ou de serviço.Estes termos descrevem o software e as regras para qualquer serviço disponibilizado legalmente para você;eles não são prova de licença financeira ou permissão para oferecer um produto específico."
+      ],
+      [
+        "Elegibilidade e disponibilidade",
+        "Você deve ter pelo menos 18 anos e plena capacidade jurídica.Você não deve usar um serviço onde ele seja proibido, onde o operador não tenha a autorização necessária ou onde você não atenda aos requisitos locais de residência, identidade, sanções ou adequação.Os serviços de negociação de ativos virtuais não são oferecidos a pessoas na China continental.Uma interface traduzida, um mercado visível ou um website acessível não estabelecem elegibilidade.Não esconda sua localização nem ignore as restrições.Um ambiente de demonstração ou teste não deve ser tratado como um serviço de investimento real."
+      ],
+      [
+        "Sua conta e instruções",
+        "Forneça informações precisas e mantenha-as atualizadas.Proteja sua senha, dispositivo, métodos de verificação e chaves API.Não compartilhe contas, faça-se passar por outra pessoa ou permita acesso não autorizado.Relate suspeitas de comprometimento imediatamente.Você é responsável pelas instruções que autoriza;investigaremos atividades contestadas usando os registros disponíveis.A ativação de uma chave API concede apenas as permissões declaradas.O login de terceiros é opcional e não remove verificações de identidade ou segurança."
+      ],
+      [
+        "Pedidos, saldos e regras de produtos",
+        "Antes de confirmar uma instrução, verifique o produto, instrumento, lado, preço, quantidade, ativo, rede, precisão e taxas.Os contratos e opções de entrega à vista, lineares e inversos têm diferentes regras de liquidação e risco.Uma instrução enviada não é uma promessa de execução;um pedido pode ser rejeitado, parcialmente atendido, cancelado ou permanecer aberto.O cancelamento só é efetivo quando confirmado, e uma negociação já executada não pode ser cancelada por uma solicitação posterior.A ordem confirmada e os registros contábeis determinam o resultado, sujeito à correção do erro demonstrado e à legislação aplicável.Leia os avisos relevantes sobre riscos, taxas e fundos antes de usar."
+      ],
+      [
+        "Restrições aceitáveis de uso e serviço",
+        "Não utilize o serviço para fraude, lavagem de dinheiro, evasão de sanções, manipulação, ataques, uso indevido de dados de outra pessoa ou outras atividades ilegais.Podemos solicitar informações proporcionais, rejeitar instruções, restringir o acesso ou preservar registros relevantes quando exigido por lei, segurança, risco comprovado ou violação material.Quando permitido, explicaremos o motivo e o processo de revisão disponível.As restrições não transferem automaticamente sua propriedade para nós nem cancelam direitos que a lei obrigatória protege."
+      ],
+      [
+        "Mudanças e responsabilidades no serviço",
+        "Preços, liquidez, redes e serviços de terceiros podem mudar ou ficar indisponíveis.Não prometemos acesso ininterrupto, retorno, seguro de depósito ou que uma perda será reembolsada por um fundo de seguro.Tomaremos o cuidado razoável e lidaremos com um erro de serviço estabelecido de maneira justa.Nada exclui responsabilidades que não possam ser legalmente excluídas, incluindo direitos aplicáveis ​​do consumidor, fraude, má conduta intencional ou outras proteções obrigatórias.Seus recursos legais permanecem disponíveis."
+      ],
+      [
+        "Alterações, encerramento e registros",
+        "As alterações materiais são publicadas como uma nova revisão datada.Mantemos a revisão que você reconheceu e solicitamos confirmação renovada quando necessário.Uma nova revisão não reescreve uma transação anterior nem renuncia retroativamente a uma reclamação.Você pode solicitar o encerramento da conta por meio do suporte, sujeito à resolução de pedidos em aberto, posições, valores devidos e requisitos de retenção legal.Sempre que for legal e tecnicamente possível, os restantes activos elegíveis podem ser retirados após verificações de segurança."
+      ],
+      [
+        "Lei e disputas",
+        "Aplicam-se as leis da República Popular da China, sujeitas a qualquer lei obrigatória que proteja você em sua localidade.Entre em contato primeiro com support@surprising.top com os fatos e a resolução solicitada.Se o litígio não for resolvido, poderá ser levado ao tribunal competente do domicílio do operador, exceto quando a jurisdição obrigatória ou as regras de consumo exigirem outro foro.Esta cláusula não autoriza um serviço proibido nem renuncia ao direito de reclamar junto de uma autoridade competente."
+      ]
+    ]
+  },
+  "PRIVACY_POLICY": {
+    "title": "Política de Privacidade",
+    "sections": [
+      [
+        "Quem trata suas informações",
+        "河南朔望科技有限公司 é a entidade de contato para informações pessoais processadas por meio de Surprising EX e https://ex.tokdou.com. Gravar para support@surprising.top com uma solicitação de privacidade.Esta política explica o produto comercial;um produto social separado pode processar informações diferentes.O reconhecimento desta política registra que você a recebeu e não constitui consentimento total para publicidade, processamento não relacionado ou qualquer transferência internacional."
+      ],
+      [
+        "Informações que você fornece",
+        "Dependendo dos recursos que você escolher e de sua disponibilidade legal, processamos identificadores de conta, e-mail ou telefone, registros de autenticação e verificação, envios de verificação de identidade, detalhes de pagamento que você fornece para uma transação, registros de pedidos e contas, solicitações de suporte, mensagens C2C e anexos.Não coloque informações confidenciais desnecessárias em mensagens ou conteúdo público.Documentos de identidade e anexos de transações privadas não são meios de anúncio público."
+      ],
+      [
+        "Informações usadas para proteger e operar o serviço",
+        "O serviço processa endereços IP, identificadores de dispositivos ou sessões, informações de agente de usuário, eventos de login, configurações de segurança, permissões API, registros de transações e auditoria e informações de diagnóstico necessárias para detectar falhas ou abusos.As senhas são verificadas usando hashes de senha.Segredos de autenticação, chaves privadas e documentos de identidade completos não devem ser incluídos em registros comuns.O desbloqueio biométrico opcional no dispositivo usa o resultado da autenticação do sistema operacional;o aplicativo não recebe uma impressão digital ou modelo de rosto desse recurso."
+      ],
+      [
+        "Provedores opcionais e mídia pública",
+        "Se você escolher o login Google ou Telegram, receberemos os campos de identidade e perfil exigidos pela integração habilitada e a prova necessária para validar o login.Esses provedores também processam informações de acordo com suas próprias políticas.Usamos provedores de infraestrutura e segurança, incluindo Cloudflare R2 e seu CDN público para anúncios e mídia de artigos jurídicos.Carregar um arquivo de mídia pública revela informações de solicitação de rede ao provedor de entrega.A identidade privada e os anexos C2C usam armazenamento com acesso controlado e não são publicados por meio desse caminho de conteúdo público."
+      ],
+      [
+        "Finalidades e fundamentos legais",
+        "Processamos informações para estabelecer e proteger contas, executar instruções autorizadas, manter registros financeiros precisos, prevenir fraudes, atender aos requisitos legais e de identidade aplicáveis, responder a solicitações, investigar disputas e manter a confiabilidade.A base jurídica depende da atividade e da lei aplicável, incluindo a execução de um contrato, uma obrigação legal, um interesse legítimo permitido ou consentimento, quando necessário.O consentimento facultativo pode ser recusado ou retirado sem afetar o tratamento já efetuado licitamente ou as informações ainda necessárias para outra finalidade lícita.Não vendemos informações pessoais como um recurso de serviço."
+      ],
+      [
+        "Compartilhamento e processamento internacional",
+        "O acesso é limitado a funcionários autorizados e fornecedores contratados que necessitem das informações para a finalidade declarada.Poderemos partilhar as informações necessárias com uma contraparte da transação, um fornecedor selecionado para uma funcionalidade, consultores profissionais ou uma autoridade competente quando legalmente justificado.Por padrão, não disponibilizamos documentos de identidade para outros usuários.Os acordos de hospedagem, entrega ou suporte podem envolver outro país.Antes de uma transferência que exija notificação, consentimento ou salvaguarda separada, os requisitos aplicáveis ​​devem ser cumpridos;a seleção de um idioma não consente uma transferência ou estabelece um local de armazenamento."
+      ],
+      [
+        "Retenção e segurança",
+        "Mantemos as informações pelo tempo necessário para sua finalidade declarada e para os requisitos aplicáveis ​​de manutenção de registros, financeiros, de segurança e de disputa.Registros diferentes têm obrigações diferentes;o encerramento não exige necessariamente a eliminação imediata de um livro razão ou lançamento de auditoria legalmente retido.Excluímos ou desidentificamos dados quando a retenção não é mais justificada, com os backups expirando durante seu ciclo de retenção.Aplicamos controles de acesso, criptografia em trânsito e monitoramento de segurança.Nenhuma rede ou sistema de armazenamento pode ser totalmente seguro.Responderemos a um incidente com dados pessoais e forneceremos avisos sempre que a lei exigir."
+      ],
+      [
+        "Seus direitos e escolhas",
+        "Sujeito à lei aplicável e à verificação de identidade, você pode solicitar acesso, cópia, correção, exclusão, restrição, portabilidade, retirada de consentimento opcional ou informações sobre uma decisão automatizada que o afete significativamente.Entre em contato com support@surprising.top e descreva a solicitação sem enviar senha, código de recuperação ou chave privada.Poderemos precisar de verificação limitada e explicaremos qualquer limitação ou extensão legal.Você também pode reclamar junto à autoridade de privacidade competente.Não fornecemos contas intencionalmente a crianças menores de 18 anos."
+      ],
+      [
+        "Dispositivos, cookies e alterações",
+        "Os cookies necessários ou o armazenamento seguro do dispositivo protegem as sessões do navegador, evitam solicitações forjadas e lembram seu idioma, tema ou preferência de dispositivo.Leia a Política de Cookies para controles.Não tratamos um cookie de sessão necessária como permissão para rastreamento opcional.Publicamos alterações materiais nas políticas como novas revisões e buscamos uma escolha separada quando uma finalidade alterada assim o exigir legalmente.A versão exibida com sua confirmação permanece disponível para referência."
+      ]
+    ]
+  },
+  "COOKIE_POLICY": {
+    "title": "Política de Cookies e Armazenamento Local",
+    "sections": [
+      [
+        "Armazenamento necessário do navegador",
+        "Surprising EX usa cookies de sessão protegidos para restaurar o login do navegador e um token CSRF para proteger solicitações autenticadas.As credenciais de sessão não são dados de preferência comuns.Os identificadores de dispositivos ajudam a reconhecer sessões e investigar acessos suspeitos.Idioma, tema e outras preferências não secretas podem ser armazenadas localmente.A vida útil exata depende do cookie ou configuração e da sessão do seu navegador;um servidor pode revogar uma sessão antes que seu cookie expire."
+      ],
+      [
+        "Seus controles",
+        "Você pode sair, revogar outras sessões na segurança da conta, remover dados do site ou bloquear cookies através do seu navegador.A remoção ou o bloqueio dos cookies necessários pode impedir o login, a restauração da sessão ou ações protegidas.Limpar uma preferência local redefine essa preferência e não exclui uma conta ou seus registros de servidor.Os aplicativos nativos usam controles de armazenamento da plataforma em vez de cookies do navegador para cada recurso."
+      ],
+      [
+        "Serviços opcionais",
+        "O login Google ou Telegram opcional pode envolver os cookies e o armazenamento desse provedor quando você escolher.A entrega de mídia pública recebe informações normais de solicitação de rede.Esta política não autoriza publicidade não divulgada ou cookies analíticos.Se o rastreamento opcional for introduzido quando o consentimento for necessário, uma opção separada deverá ser fornecida antes de ser ativado.Leia a Política de Privacidade ou entre em contato com support@surprising.top para tirar dúvidas."
+      ]
+    ]
+  },
+  "TRADING_RISK": {
+    "title": "Divulgação de risco comercial",
+    "sections": [
+      [
+        "Você pode perder o valor total",
+        "Os ativos virtuais e produtos relacionados podem mudar drasticamente de valor, tornar-se ilíquidos ou perder todo o valor.Um preço, gráfico ou retorno passado exibido não é uma garantia ou conselho de investimento pessoal.Use apenas quantias que você pode perder e obtenha aconselhamento independente quando necessário.Não peça empréstimos para negociar sem compreender as obrigações adicionais.A elegibilidade e a disponibilidade legal do produto devem ser estabelecidas antes de uma transação."
+      ],
+      [
+        "Riscos de execução e de mercado",
+        "As ordens de mercado podem ser executadas a diversos preços.Ordens limitadas podem não ser executadas e uma ordem pode ser atendida enquanto o cancelamento estiver em trânsito.Uma ordem stop ou take-profit não é um preço de execução garantido.A escassez de liquidez, as diferenças de preços, as interrupções do mercado, os erros nos preços de referência e a extrema volatilidade podem causar derrapagens ou impedir a execução.Verifique o pedido final e os registros comerciais em vez de depender de uma animação de botão ou de uma cotação desatualizada."
+      ],
+      [
+        "Riscos de ativos, tecnologia e contrapartes",
+        "As redes podem falhar, reorganizar-se ou ficar congestionadas.Contratos inteligentes, emissores de tokens, stablecoins, pontes, custodiantes e contrapartes podem falhar ou ser atacados.Os ativos podem ser desestruturados ou removidos da lista.Erros envolvendo endereço, rede, memorando, precisão ou chave de segurança podem ser irreversíveis.O acesso pode ser afetado por manutenção, conectividade, falha do dispositivo ou restrição legal.Um fundo de seguro é limitado e não é um seguro de depósito ou uma promessa de reembolso de cada perda."
+      ],
+      [
+        "Sua decisão",
+        "Leia o Contrato do Usuário, Taxas, Regras de Fundos e Retiradas e a divulgação específica do produto.Monitore pedidos e avisos de conta, proteja credenciais e mantenha registros de transações independentes.Você permanece responsável pelas decisões que autoriza, sujeito aos deveres do operador e à lei obrigatória.Entre em contato com support@surprising.top imediatamente sobre uma suspeita de erro ou comprometimento."
+      ]
+    ]
+  },
+  "DERIVATIVES_RISK": {
+    "title": "Divulgação de riscos de derivativos e alavancagem",
+    "sections": [
+      [
+        "Produtos complexos e alavancagem",
+        "Contratos perpétuos, contratos de entrega e opções são complexos e podem estar indisponíveis ou proibidos em sua localidade.Eles exigem elegibilidade separada e uma compreensão da margem e da liquidação.A alavancagem amplia ganhos e perdas;um pequeno movimento adverso pode esgotar as garantias.Você pode perder toda a margem alocada e dever valores adicionais na medida em que as regras do produto aplicáveis ​​e a lei permitirem.Não assuma uma ordem stop ou garantias adicionais de proteção."
+      ],
+      [
+        "Margem, liquidação e referências de preços",
+        "Margem inicial e de manutenção, níveis de risco, preços de marcas e índices e elegibilidade de garantias afetam a conta.A liquidação pode ocorrer antes que o preço da última negociação exibido atinja o limite esperado.A margem isolada e a margem cruzada alocam o risco de forma diferente, e a margem cruzada pode afetar outras posições nessa conta.As regras aplicáveis ​​ao instrumento determinam qualquer comissão de liquidação, utilização de fundos de seguros e desalavancagem automática.Rever os avisos e manter margem disponível suficiente;a entrega da notificação não é garantida a tempo de evitar a liquidação."
+      ],
+      [
+        "Financiamento, liquidação e opções",
+        "O financiamento perpétuo pode ser pago ou recebido e pode mudar materialmente.O financiamento e as taxas reduzem o capital disponível.Os contratos lineares e inversos utilizam diferentes ativos e fórmulas de liquidação, portanto, o valor da garantia e o risco de conversão são importantes.Os contratos de entrega têm regras de vencimento e liquidação.As opções envolvem prêmio, redução de tempo, volatilidade e risco de exercício ou liquidação;a venda de opções pode criar obrigações maiores do que o prêmio recebido.Verifique o tamanho do contrato, unidades de quantidade, vencimento, estilo de exercício e método de liquidação antes de negociar."
+      ],
+      [
+        "Nenhuma saída garantida",
+        "Pode ser impossível fechar uma posição ao preço desejado durante a falta de liquidez, uma interrupção da negociação, um evento técnico ou uma restrição legal.Um pedido somente de redução pode ser rejeitado ou parcialmente atendido de acordo com a posição atual.Os dados de mercado podem sofrer atrasos.Leia as especificações atuais do mercado e as divulgações de risco, teste a sua compreensão sem fundos reais, quando houver uma demonstração disponível, e não negocie um produto que você não entende."
+      ]
+    ]
+  },
+  "FUNDS_AND_WITHDRAWALS": {
+    "title": "Regras de fundos, depósitos e retiradas",
+    "sections": [
+      [
+        "Verifique o ativo e a rede",
+        "Use apenas o endereço, ativo, rede e memorando mostrados para sua conta corrente e a rota de depósito suportada.Verifique os mínimos e a precisão antes de enviar.Um ativo sem suporte, uma rede errada, um memorando ausente ou um destino comprometido podem causar perda permanente.Uma transação blockchain geralmente não pode ser revertida.Não envie fundos para um endereço fornecido em uma mensagem não solicitada ou para um suposto agente de suporte."
+      ],
+      [
+        "Confirmações e saldos disponíveis",
+        "Uma transação transmitida para uma rede não é necessariamente confirmada ou creditada.Confirmações de rede, análise de segurança, taxas e regras de ativos suportados afetam o resultado.Os saldos disponíveis, congelados, de margem e totais têm significados diferentes.Ordens abertas, posições, saques pendentes ou restrições legais podem impedir a transferência ou saque de um valor.As transferências internas entre contas de produtos não geram lucro nem executam uma conversão de mercado."
+      ],
+      [
+        "Aprovação e rastreamento de retirada",
+        "Antes da confirmação, revise o destino, rede, valor, taxa, valor esperado de recebimento e qualquer proteção de endereço.As solicitações podem exigir verificação de identidade ou multifatorial, um atraso de segurança ou uma revisão proporcional.As alterações de status determinam se uma solicitação ainda pode ser cancelada;uma transferência já transmitida não pode ser cancelada alterando o site.Rastreie o ID da solicitação e, quando disponível, o hash da transação.O tempo da rede está fora do controle total da operadora."
+      ],
+      [
+        "Terceiros e reclamações",
+        "O pagamento da contraparte C2C é separado de um depósito em rede.Nunca marque um pagamento como recebido, a menos que sua própria conta mostre os fundos, e não libere ativos apenas com base em uma captura de tela.Use a rota de disputa no produto para o pedido relevante.Nenhum aviso garante termos de segregação, custódia, seguro ou resgate além dos acordos legais reais divulgados de um serviço.Em caso de erro, entre em contato com support@surprising.top com o ID da solicitação e os detalhes da transação não secreta."
+      ]
+    ]
+  },
+  "FEES": {
+    "title": "Taxas e encargos",
+    "sections": [
+      [
+        "Antes de confirmar",
+        "A tabela de taxas aplicável e a confirmação mostrada para o produto selecionado determinam a cobrança.As taxas de maker e taker, níveis de usuário, descontos, cobranças de retirada de rede, conversões, liquidação e exercício de opções ou taxas de liquidação podem ser diferentes.Este aviso não estabelece uma taxa universal nem promete um desconto.Verifique o ativo, percentual, base de cálculo, precisão, valor mínimo e esperado de recebimento antes de confirmar."
+      ],
+      [
+        "Financiamento e arredondamento",
+        "O financiamento perpétuo é uma transferência periódica determinada pelas regras do instrumento e pode ser pago ou recebido;é diferente da taxa de negociação.Arredondamentos e unidades de ativos inteiros afetam o valor final.Uma prévia é uma estimativa de quando o preço, a liquidez ou a cobrança da rede podem mudar;o razão confirmado e as regras do produto divulgadas determinam a cobrança final.Uma diferença inexplicável pode ser desafiada através do apoio."
+      ],
+      [
+        "Alterações e registros",
+        "As alterações nas taxas se aplicam de acordo com o horário de vigência publicado e os requisitos de aviso aplicáveis.Eles não reescrevem silenciosamente uma transação concluída.Promoções, indicações e termos negociados com formadores de mercado se aplicam somente quando sua elegibilidade e condições são atendidas.Revise os preenchimentos comerciais, os registros de financiamento e os livros contábeis para cobranças e descontos.Entre em contato com support@surprising.top com a referência da transação se uma taxa parecer incorreta."
+      ]
+    ]
+  },
+  "AML_KYC": {
+    "title": "Controles de identidade, elegibilidade e crimes financeiros",
+    "sections": [
+      [
+        "Identidade e elegibilidade",
+        "Quando legalmente exigido para um serviço disponível, poderemos verificar a identidade, idade, residência, propriedade ou controle de uma conta e a origem ou destino dos fundos.Forneça informações genuínas e atuais e use apenas contas e métodos de pagamento que você está autorizado a controlar.Uma verificação de identidade completa não estabelece que todos os produtos estão disponíveis ou que o operador possui uma licença específica.As restrições territoriais e de produto continuam a ser aplicadas."
+      ],
+      [
+        "Conduta proibida",
+        "Fraude, roubo de fundos, lavagem de dinheiro, financiamento do terrorismo, evasão de sanções, manipulação de mercado, evidências de pagamento enganosas e tentativas de contornar a verificação ou restrições de localização são proibidas.Podemos aplicar triagem e monitoramento com base no risco, solicitar evidências proporcionais e restringir ou rejeitar uma transação quando justificado.Informações e relatórios podem ser fornecidos a uma autoridade competente quando exigido ou legalmente permitido."
+      ],
+      [
+        "Revisão  e seus direitos",
+        "Uma revisão pode atrasar uma solicitação.Na medida do legalmente permitido, explicaremos quais informações são necessárias e forneceremos um caminho para contestar uma decisão.Alguns detalhes de investigação ou reportagem não podem ser divulgados.Um sinalizador de risco não é uma constatação pública de culpa.As informações de verificação são tratadas de acordo com a Política de Privacidade e controles de acesso;não é carregado como mídia de artigo público.Envie dúvidas pelo aplicativo ou support@surprising.top, nunca divulgando senha ou chave privada."
+      ]
+    ]
+  },
+  "COMPLAINTS": {
+    "title": "Reclamações e Resolução de Disputas",
+    "sections": [
+      [
+        "Como entrar em contato conosco",
+        "Use o suporte do produto ou entrada de disputa para a transação relevante ou envie um e-mail para support@surprising.top.Forneça o identificador da conta, o ID do pedido ou solicitação, o horário aproximado, uma descrição clara e a resolução que você busca.Anexe apenas evidências não secretas relevantes.Nunca envie uma senha, código único, frase de recuperação ou chave privada.Em caso de suspeita de comprometimento, proteja sua conta e denuncie imediatamente."
+      ],
+      [
+        "Como uma reclamação é tratada",
+        "Registraremos a reclamação, verificaremos a identidade apenas quando necessário, examinaremos o pedido relevante, o razão, a mensagem e os registros de segurança e responderemos por meio de um canal apropriado.Poderemos solicitar mais provas e explicar um atraso quando permitido.Uma captura de tela de pagamento por si só não é prova de que os fundos chegaram a uma contraparte.Preserve os registros originais e siga o processo de disputa do pedido, em vez de providenciar uma liberação não registrada de ativos."
+      ],
+      [
+        "Escalação e direitos legais",
+        "Se você discordar da resposta, responda com a referência e os motivos e solicite uma revisão adicional.Você também pode entrar em contato com um regulador competente, autoridade de privacidade, tribunal ou outro órgão onde a lei permitir.O Contrato do Usuário explica a lei e a jurisdição aplicáveis, sujeitas às proteções locais obrigatórias.Contactar o suporte não suspende automaticamente um prazo legal, congela uma posição de mercado ou garante uma compensação.Ações protetoras urgentes não devem esperar por uma resposta rotineira."
+      ]
+    ]
+  },
+  "SECURITY_NOTICE": {
+    "title": "Aviso de segurança e antifraude",
+    "sections": [
+      [
+        "Reconhecer canais oficiais",
+        "Use https://ex.tokdou.com e os canais oficiais de distribuição de aplicativos.O contato de serviço é support@surprising.top.Verifique o domínio completo, os avisos do certificado e o destino antes de fazer login ou transferir fundos.Um nome, anúncio de pesquisa, perfil social ou mensagem semelhante não é prova de afiliação.O suporte nunca precisará de sua senha, código único, frase de recuperação, chave privada ou controle remoto do seu dispositivo."
+      ],
+      [
+        "Proteger o acesso à conta",
+        "Use uma senha exclusiva, habilite a proteção multifator disponível e proteja seu e-mail e dispositivo.Revise dispositivos, sessões, permissões API e destinos de retirada.Conceda o menor escopo API necessário, proteja os segredos API e revogue chaves não utilizadas.O desbloqueio biométrico local protege o acesso nesse dispositivo e não substitui as verificações do servidor nem garante a recuperação se o dispositivo ou a conta for comprometida."
+      ],
+      [
+        "Evite fraudes em pagamentos e investimentos",
+        "Não transfira para um endereço pessoal para desbloquear uma conta, pagar antecipadamente um suposto imposto, recuperar fundos ou receber retorno garantido.Não confie em capturas de tela de pagamento, códigos QR ou links enviados fora do fluxo de trabalho registrado relevante.Para C2C, verifique o pagamento em sua própria conta e siga o processo oficial de disputa.Nenhum anúncio legítimo promete lucro sem risco ou faz de uma mensagem privada um destino de retirada aprovado."
+      ],
+      [
+        "Relatar incidentes e vulnerabilidades",
+        "Se você suspeitar de comprometimento, pare de autorizar instruções, proteja seu e-mail e dispositivo, revogue sessões afetadas ou chaves API sempre que possível e entre em contato com o suporte imediatamente.Forneça horários e referências não secretas.Relate uma vulnerabilidade de forma responsável por meio do support@surprising.top, sem acessar os dados de outra pessoa, interromper o serviço ou fazer transações não autorizadas.Este aviso não é uma promessa de recompensa ou imunidade;coordene o escopo permitido antes de mais testes."
+      ]
+    ]
+  }
+}

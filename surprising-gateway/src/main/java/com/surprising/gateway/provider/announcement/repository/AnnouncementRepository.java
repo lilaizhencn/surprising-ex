@@ -103,7 +103,7 @@ public class AnnouncementRepository {
         String where = clientWhere();
         String translationJoin = """
                 JOIN LATERAL (
-                    SELECT tr.locale, tr.title, tr.summary, tr.body
+                    SELECT tr.locale, tr.title, tr.summary, tr.body, tr.body_html
                       FROM gateway_announcement_translations tr
                      WHERE tr.announcement_id = a.announcement_id
                      ORDER BY CASE WHEN tr.locale = ? THEN 0
@@ -114,7 +114,7 @@ public class AnnouncementRepository {
                      LIMIT 1
                 ) t ON TRUE
                 """;
-        String sql = "SELECT a.*, t.locale AS content_locale, t.title, t.summary, t.body, r.read_at "
+        String sql = "SELECT a.*, t.locale AS content_locale, t.title, t.summary, t.body, t.body_html, r.read_at "
                 + "FROM gateway_announcements a " + translationJoin
                 + "LEFT JOIN gateway_announcement_reads r ON r.announcement_id = a.announcement_id AND r.user_id = ? "
                 + where + " ORDER BY a.priority DESC, a.starts_at DESC, a.announcement_id DESC LIMIT ? OFFSET ?";
@@ -148,10 +148,10 @@ public class AnnouncementRepository {
         String client = filter.platform();
         String slot = filter.placement();
         String sql = """
-                SELECT a.*, t.locale AS content_locale, t.title, t.summary, t.body, r.read_at
+                SELECT a.*, t.locale AS content_locale, t.title, t.summary, t.body, t.body_html, r.read_at
                   FROM gateway_announcements a
                   JOIN LATERAL (
-                    SELECT tr.locale, tr.title, tr.summary, tr.body
+                    SELECT tr.locale, tr.title, tr.summary, tr.body, tr.body_html
                       FROM gateway_announcement_translations tr
                      WHERE tr.announcement_id = a.announcement_id
                      ORDER BY CASE WHEN tr.locale = ? THEN 0 WHEN tr.locale = ? THEN 1
@@ -176,7 +176,7 @@ public class AnnouncementRepository {
     }
     private ClientRow clientRow(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new ClientRow(baseRow(rs),rs.getString("content_locale"),rs.getString("title"),rs.getString("summary"),
-                rs.getString("body"),instant(rs,"read_at"));
+                rs.getString("body"),rs.getString("body_html"),instant(rs,"read_at"));
     }
 
     private static BaseRow baseRow(ResultSet rs) throws SQLException {
