@@ -1,0 +1,16 @@
+{
+  "name": "ordinary-4",
+  "workers": 4,
+  "profile": false,
+  "startEpochMillis": 1793373508017,
+  "workload": "MATCH_STREAM",
+  "batchSize": 1,
+  "connections": 4,
+  "nodePid": 60481,
+  "clientPid": 60529,
+  "observerPid": 60528,
+  "status": "FAIL",
+  "error": "process failed 1 pid=60529",
+  "finishEpochMillis": 1793373565362,
+  "sourceCommit": "bbc948251816e6e3a60d7359fff9d5686645c16a"
+}

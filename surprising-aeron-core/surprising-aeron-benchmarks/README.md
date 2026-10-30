@@ -28,7 +28,7 @@
 
 冷状态通过 `users/orders` 的 Long 键映射读取；数据构造明确传入模式、进度及各子账，金额合计由本源集核对。索引规模在 Owner 工作完成后读取原表大小，不为观察在生产维护额外 ADL 计数；清理检查使用真实分页与候选入口。
 
-规模脚本的 Probe/Soak 入口均指向当前 `service.core` 包。本轮只编译并运行指定的夹具功能用例，未执行规模脚本或 JMH 场景。
+规模脚本的 Probe/Soak 入口均指向当前 `service.core` 包。验证范围以每次记录为准，最近一次单节点网络实测见下文。
 
 ## 结果要求
 
@@ -45,4 +45,7 @@
 mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test-compile -DskipTests
 ```
 
-当前清理仅运行相关功能测试和脚本检查，未执行压测、JMH/JFR。
+## 最近一次单节点永续观测
+
+2026-10-30 持续发压：普通单约3.97万单/秒，batch20约27.11–28.54万单/秒；资金、终态和两次快照恢复通过。
+本机存在CPU限频，部分档有系统换页，正式速度验收无效、Core业务饱和未确认；详见[本轮报告](../../docs/validation/perpetual-saturation-20261030/REPORT.md)。

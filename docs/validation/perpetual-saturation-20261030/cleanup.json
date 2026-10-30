@@ -1,0 +1,175 @@
+{
+  "epochMillis": 1793375170679,
+  "jpsBeforeCleanup": "5243 jdk.jcmd/sun.tools.jps.Jps\n",
+  "rawRecordingEvidence": [
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/diagnostic-8/node.jfr",
+      "bytes": 15262298,
+      "sha256": "30d933b8cee0972b403e99920e8f24e15f610608e66d999cc18f969b61a59574",
+      "dataLossEvents": 0
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/diagnostic-8/client.jfr",
+      "bytes": 8619121,
+      "sha256": "2e4de963271b130d709a907a9509b10fcb70c58d46fa7dc994c503b68794a358",
+      "dataLossEvents": 0
+    }
+  ],
+  "removed": [
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/batch-4/aeron-surprising-linear_perpetual-0",
+      "logicalBytes": 811405312,
+      "allocatedBytes": 810356736,
+      "files": 18
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/batch-4/aeron",
+      "logicalBytes": 0,
+      "allocatedBytes": 0,
+      "files": 0
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/batch-4/data",
+      "logicalBytes": 2152751360,
+      "allocatedBytes": 1886150656,
+      "files": 22
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/batch-4/tmp",
+      "logicalBytes": 1249227,
+      "allocatedBytes": 1286144,
+      "files": 16
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/batch-8/aeron-surprising-linear_perpetual-0",
+      "logicalBytes": 358383616,
+      "allocatedBytes": 358383616,
+      "files": 9
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/batch-8/aeron",
+      "logicalBytes": 0,
+      "allocatedBytes": 0,
+      "files": 0
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/batch-8/data",
+      "logicalBytes": 1884315712,
+      "allocatedBytes": 1822576640,
+      "files": 20
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/batch-8/tmp",
+      "logicalBytes": 33149,
+      "allocatedBytes": 49152,
+      "files": 7
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/diagnostic-8/aeron-surprising-linear_perpetual-0",
+      "logicalBytes": 811405312,
+      "allocatedBytes": 810356736,
+      "files": 18
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/diagnostic-8/client.jfr",
+      "logicalBytes": 8619121,
+      "allocatedBytes": 9437184,
+      "files": 1
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/diagnostic-8/aeron",
+      "logicalBytes": 0,
+      "allocatedBytes": 0,
+      "files": 0
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/diagnostic-8/node.jfr",
+      "logicalBytes": 15262298,
+      "allocatedBytes": 15728640,
+      "files": 1
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/diagnostic-8/data",
+      "logicalBytes": 2152751360,
+      "allocatedBytes": 1840472064,
+      "files": 22
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/diagnostic-8/tmp",
+      "logicalBytes": 624638,
+      "allocatedBytes": 643072,
+      "files": 8
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/ordinary-4/aeron-surprising-linear_perpetual-0",
+      "logicalBytes": 861741056,
+      "allocatedBytes": 860692480,
+      "files": 19
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/ordinary-4/aeron",
+      "logicalBytes": 0,
+      "allocatedBytes": 0,
+      "files": 0
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/ordinary-4/data",
+      "logicalBytes": 273702976,
+      "allocatedBytes": 249556992,
+      "files": 8
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/ordinary-4/tmp",
+      "logicalBytes": 33163,
+      "allocatedBytes": 49152,
+      "files": 7
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/ordinary-4-after-boundary-fix/aeron-surprising-linear_perpetual-0",
+      "logicalBytes": 358383616,
+      "allocatedBytes": 357335040,
+      "files": 9
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/ordinary-4-after-boundary-fix/aeron",
+      "logicalBytes": 0,
+      "allocatedBytes": 0,
+      "files": 0
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/ordinary-4-after-boundary-fix/data",
+      "logicalBytes": 810573888,
+      "allocatedBytes": 810577920,
+      "files": 12
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/ordinary-4-after-boundary-fix/tmp",
+      "logicalBytes": 33243,
+      "allocatedBytes": 49152,
+      "files": 7
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/SaturationObserver.class",
+      "logicalBytes": 9198,
+      "allocatedBytes": 12288,
+      "files": 1
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/SnapshotEvidence.class",
+      "logicalBytes": 1663,
+      "allocatedBytes": 4096,
+      "files": 1
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/__pycache__",
+      "logicalBytes": 45402,
+      "allocatedBytes": 49152,
+      "files": 2
+    }
+  ],
+  "removedAllocatedBytes": 9833766912,
+  "removedLogicalBytes": 10501325310,
+  "remainingSourceAndSummary": "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z",
+  "retainedRepositoryEvidence": "/Users/atomex/Desktop/surprising/surprising-ex/docs/validation/perpetual-saturation-20261030",
+  "productionAndOtherUserDataTouched": false
+}

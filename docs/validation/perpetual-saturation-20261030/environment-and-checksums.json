@@ -1,0 +1,18 @@
+{
+  "epochMillis": 1793373503268,
+  "java": "openjdk version \"27\" 2026-09-15\nOpenJDK Runtime Environment Corretto-27.0.0.33.1 (build 27+33-FR)\nOpenJDK 64-Bit Server VM Corretto-27.0.0.33.1 (build 27+33-FR, mixed mode, sharing)\n",
+  "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)\nMaven home: /usr/local/Cellar/maven/3.9.16/libexec\nJava version: 27, vendor: Amazon.com Inc., runtime: /Users/atomex/.sdkman/candidates/java/27.0.0-amzn\nDefault locale: zh_US_#Hans, platform encoding: UTF-8\nOS name: \"mac os x\", version: \"26.7.2\", arch: \"x86_64\", family: \"mac\"\n",
+  "cpu": "machdep.cpu.brand_string: Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz\nhw.physicalcpu: 8\nhw.logicalcpu: 16\nhw.memsize: 17179869184\nhw.cachelinesize: 64\n",
+  "disk": "Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk1s2   932Gi   388Gi   525Gi    43%    3.5M  5.5G    0%   /System/Volumes/Data\n",
+  "vm": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   441091.\nPages active:                                1155665.\nPages inactive:                              1099923.\nPages speculative:                            243565.\nPages throttled:                                   0.\nPages wired down:                             838852.\nPages purgeable:                               15868.\n\"Translation faults\":                     3719531806.\nPages copy-on-write:                       125141673.\nPages zero filled:                        2709163133.\nPages reactivated:                          98719447.\nPages purged:                                1823627.\nFile-backed pages:                           1336015.\nAnonymous pages:                             1163138.\nPages stored in compressor:                  1558181.\nPages occupied by compressor:                 414070.\nDecompressions:                             68638258.\nCompressions:                              101876437.\nPageins:                                    29347143.\nPageouts:                                     722928.\nSwapins:                                    46192175.\nSwapouts:                                   48389812.\n",
+  "swap": "vm.swapusage: total = 2048.00M  used = 729.75M  free = 1318.25M  (encrypted)\n",
+  "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\n2026-10-30 23:18:26 +0800 CPU Power notify\n\tCPU_Scheduler_Limit \t= 100\n\tCPU_Available_CPUs \t= 16\n\tCPU_Speed_Limit \t= 100\n",
+  "sourceStatus": "## master...origin/master\n?? AERON_CORE_REVIEW.md\n",
+  "sha256": {
+    "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": "b9c0f2bf01d1674e1c0b30be680c2b8202ac85656b8c21297771995ca3883c14",
+    "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar": "05a3845bb0976e2998a520207d19aa252a39f084ef3e28ce729fb6eba2d0e7cc",
+    "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/owner-commit-profile.jfc": "efdec70f679f81c7c748009fadcbc8269a4d4bbbfead387be8c05c5a0da3bc95",
+    "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/run.py": "16f213a1f686eef04de87f20e9506b769a2a6b7761e263385eab1018e109f7bd",
+    "/Users/atomex/.codex/artifacts/perpetual-saturation-20261030T151650Z/SaturationObserver.java": "2903a2123244fb456dd6d9c4e812dc05bd6ca1b1738566f8fd51bb997077c9b0"
+  }
+}

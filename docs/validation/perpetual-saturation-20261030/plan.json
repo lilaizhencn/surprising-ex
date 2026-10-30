@@ -1,0 +1,88 @@
+{
+  "runId": "perpetual-saturation-20261030T151650Z",
+  "sourceCommit": "b4fb82d0428f70d1013c347a0eb60dd19bafec4c",
+  "sourceBranch": "master",
+  "existingUntracked": [
+    "AERON_CORE_REVIEW.md"
+  ],
+  "product": "LINEAR_PERPETUAL",
+  "members": 1,
+  "matchers": 1,
+  "accountLanes": 2,
+  "globalInFlightRequests": 256,
+  "users": 10000,
+  "symbols": 256,
+  "seed": 9901,
+  "maker": "no external maker; symmetric GTC stream, 50% buy and 50% sell",
+  "warmupSeconds": 30,
+  "measurementSeconds": 60,
+  "drainTimeoutSeconds": 30,
+  "repeatsPerStage": 1,
+  "connections": 4,
+  "primary": {
+    "name": "ordinary-4",
+    "workload": "MATCH_STREAM",
+    "batchSize": 1,
+    "workers": 4
+  },
+  "saturationStages": [
+    {
+      "name": "batch-4",
+      "workload": "MATCH_BATCH_STREAM",
+      "batchSize": 20,
+      "workers": 4
+    },
+    {
+      "name": "batch-8",
+      "workload": "MATCH_BATCH_STREAM",
+      "batchSize": 20,
+      "workers": 8
+    }
+  ],
+  "pairedDiagnostic": "same parameters as fastest successful batch stage, separate JFR/GC run",
+  "recovery": "snapshot, stop owned node, wait driver expiry, restart same archive, audit business hash, all 10000 balances/positions/frozen amounts, book and queues",
+  "environmentGates": [
+    "measurement system swap-in/out deltas=0",
+    "CPU speed/scheduler limits=100",
+    "no transport loss or profiler DataLoss; complete measurement coverage"
+  ],
+  "correctnessGates": [
+    "offered=accepted=terminal after drain",
+    "no rejected/timed-out business operations",
+    "fundsDiff=0, matching long/short positions, frozen=margin",
+    "unfinished=backlog=0",
+    "snapshot recovery business hash identical"
+  ],
+  "saturationGates": [
+    "sustained server backlog plus business execution stacks and supply/throughput plateau",
+    "window=256 or busy-spin CPU alone does not prove saturation"
+  ],
+  "samplers": {
+    "resourcesSeconds": 2,
+    "coreQueueTargetSeconds": 0.1,
+    "jfrExecutionSampleMs": 20,
+    "clientBoundaryOneIn": 64
+  },
+  "limitations": [
+    "closed-loop window has coordinated omission, no fixed-arrival correction",
+    "one pass per stage, no confidence interval",
+    "hardware PMU, native allocation exact bytes/item and long soak may be unavailable",
+    "plain trading workload; funding/liquidation/ADL production mix not measured"
+  ],
+  "initialSourceCommit": "bbc948251816e6e3a60d7359fff9d5686645c16a",
+  "revision": {
+    "epochMillis": 1793373815702,
+    "reason": "initial warmup failed one-shot queue observation; preserve strict zero-queue guard with bounded 30s pre/post measurement drain polling",
+    "targetedHarnessTests": 17,
+    "primaryName": "ordinary-4-after-boundary-fix"
+  },
+  "selectedDiagnostic": {
+    "stage": "diagnostic-8",
+    "pairedMain": "batch-8",
+    "workers": 8,
+    "connections": 4,
+    "batchSize": 20,
+    "reason": "highest successful unprofiled batch steady throughput in this campaign",
+    "recovery": true
+  }
+}
