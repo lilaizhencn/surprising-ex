@@ -1,6 +1,6 @@
 # Surprising-EX 专用公共媒体 R2（2026-10-31）
 
-后续已改为本地 `application.yaml` 直接配置，当前方式见 [YAML 配置验证](../content-r2-yaml-20261031.md)。以下保留首次创建时的操作记录，其中环境变量方式已停止使用。
+当前敏感凭据按用户要求保存在仓库外的 `.env`，见 [环境变量凭据验证](../content-r2-env-20261031.md)。以下保留首次创建时的操作记录；期间的本地 YAML 方案也已归档，真实密钥始终未提交。
 
 ## 实际资源
 
@@ -8,7 +8,7 @@
 - 自定义域名：`https://ex-cdn.tokdou.com`，ownership / SSL 均为 active，最低 TLS 1.2。
 - r2.dev 保持关闭。对象路径仍为 `public/exchange/content/<UUID>.<扩展名>`。
 - CORS 配置与 `deployment/content-r2.cors.json` 一致：仅交易 Web / API 两个来源的 GET、HEAD，以及 Range / If-None-Match 请求头。
-- 已创建用户级专用 Token `surprising-ex-public-gateway`，仅含新桶的对象读写权限；S3 凭据首次保存在本机 `~/.config/surprising-ex/content-r2.env`，后续已迁移至本地 `application.yaml`（见上方记录）。配置和证据不包含密钥值。凭据格式及权限模型按 [Cloudflare R2 文档](https://developers.cloudflare.com/r2/api/tokens/) 核对，并已用实际 S3 请求验证。
+- 已创建用户级专用 Token `surprising-ex-public-gateway`，仅含新桶的对象读写权限；S3 凭据目前保存在仓库外的 `~/.config/surprising-ex/content-r2.env`（见上方记录）。配置和证据不包含密钥值。凭据格式及权限模型按 [Cloudflare R2 文档](https://developers.cloudflare.com/r2/api/tokens/) 核对，并已用实际 S3 请求验证。
 
 创建使用已登录的 `cloudflare` CLI，未修改 Social 的桶或公共域名，也未移动其对象。只新增交易媒体桶、自定义域名及桶级凭据；应用生产部署未执行。
 
@@ -43,4 +43,4 @@ Android 模拟器冷启动曾出现 System UI ANR，恢复后重新验证。另�
 
 ## 清理与使用
 
-本轮测试对象及临时环境的清理结果见 `evidence/cleanup.json`。专用桶、域名和受限上传凭据作为交付资源保留。当前部署使用受限本地 YAML（见上方配置验证），配套发布已更新 CSP 的两端及管理页配置。
+本轮测试对象及临时环境的清理结果见 `evidence/cleanup.json`。专用桶、域名和受限上传凭据作为交付资源保留。当前部署使用仓库外受限 `.env` 注入敏感凭据（见上方配置验证），配套发布已更新 CSP 的两端及管理页配置。

@@ -17,6 +17,6 @@
 
 公开 R2 媒体使用项目专用桶 `surprising-ex-public` 和 `https://ex-cdn.tokdou.com`，路径为 `public/exchange/content/`；私人附件不能移入此桶。桶位于默认 jurisdiction、APAC，Standard 存储，自定义域名最低 TLS 1.2，r2.dev 保持关闭。跨域规则在 `deployment/content-r2.cors.json`，只允许交易 Web 与 API 来源的 GET/HEAD 和媒体 Range 请求。
 
-Gateway 使用仅授予该桶“对象读写”的独立 S3 密钥，直接填入 `surprising-gateway/config/application.yaml` 的 `surprising.content.r2.access-key-id` / `secret-access-key`；不要复用 Social 或私有附件的密钥。已创建的桶级专用凭据已写入该本地 YAML（权限 `0600`），不使用环境变量。文件被 Git 忽略且位于资源目录之外，不进入 JAR；部署时复制到服务器同一模块相对路径，沿用现有以仓库目录为工作目录的启动方式。示例见 `deployment/content-r2.application.example.yaml`。该凭据属于创建它的用户；密钥不提交远端，CLI OAuth 登录令牌也不交给 Gateway。
+Gateway 使用仅授予该桶“对象读写”的独立 S3 密钥；不要复用 Social 或私有附件的密钥。真实凭据按用户要求暂存仓库外的 `~/.config/surprising-ex/content-r2.env`（权限 `0600`），运行时注入 `GATEWAY_CONTENT_R2_ACCESS_KEY_ID` / `GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY`，启用及 endpoint 同文件提供。桶和 CDN 域名仍直接配置在 `application.yml`；真实密钥不写入可提交的 YAML、示例或日志。空值示例见 `deployment/content-r2.env.example`，启动加载方法见 Gateway README。该凭据属于创建它的用户，CLI OAuth 登录令牌不交给 Gateway。
 
 保存文章时同事务保留引用，历史协议继续保留媒体。单独线程每小时最多回收二十个已超过二十四小时、没有文章引用的上传；数据库行锁与外键保护并发保存，删除失败留待重试，不扫描其他桶。后台、Web、App 必须配套使用新的 CDN 限制；本轮只创建专用存储资源及更新代码，未发布生产应用。

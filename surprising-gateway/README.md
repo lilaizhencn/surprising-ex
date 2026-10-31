@@ -233,7 +233,15 @@ gateway 中实现。后续财务运营模块必须配置独立数据源和独立
 
 ## 配置
 
-配置默认直接写入 YAML，并由配置类绑定，一般不使用环境变量占位符。公告媒体的真实上传凭据放在 Git 忽略的 `surprising-gateway/config/application.yaml`（从模块目录运行时为 `config/application.yaml`），文件权限 `0600`，不会进入 JAR 或远端仓库。从仓库目录启动时由主配置导入；从模块目录启动时使用 Spring Boot 的默认外部配置加载。示例见 `deployment/content-r2.application.example.yaml`。
+普通非敏感配置默认直接写入 YAML，并由配置类绑定。公开仓库的 R2 真实上传凭据按用户要求暂作为环境变量例外，保存在仓库外的 `~/.config/surprising-ex/content-r2.env`（权限 `0600`），不进入 JAR 或远端仓库。桶和公共 CDN 域名仍直接配置在 `application.yml`。空值示例见 `deployment/content-r2.env.example`。
+
+在启动 Gateway 的同一终端加载该私有文件，或由部署平台注入相同变量：
+
+```bash
+set -a
+. "$HOME/.config/surprising-ex/content-r2.env"
+set +a
+```
 
 ```yaml
 surprising:

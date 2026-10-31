@@ -13,21 +13,18 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
 import org.springframework.boot.context.properties.bind.Binder;
-import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
-import org.springframework.boot.env.YamlPropertySourceLoader;
-import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.env.StandardEnvironment;
 
 /** Opt-in real dedicated exchange R2/CDN round trip; deletes only new objects created by this test. */
 @EnabledIfSystemProperty(named="content.r2.test.enabled",matches="true")
 class ContentR2IntegrationTest {
     @Test void realImageAudioAndVideoAreUploadedReadableAndVideoSupportsByteRanges() throws Exception {
-        var config=new FileSystemResource(System.getProperty("content.r2.test.config"));
-        var sources=new YamlPropertySourceLoader().load("content-r2",config);
-        var properties=new Binder(ConfigurationPropertySources.from(sources))
-                .bind("surprising.content.r2",Bindable.of(ContentMediaProperties.class))
-                .orElseThrow(()->new IllegalStateException("R2 YAML configuration is missing"));
+        var environment=new StandardEnvironment();
+        ConfigDataEnvironmentPostProcessor.applyTo(environment);
+        var properties=Binder.get(environment).bind("surprising.content.r2",ContentMediaProperties.class)
+                .orElseThrow(()->new IllegalStateException("R2 configuration is missing"));
         assertThat(properties.enabled()).isTrue();
         var storage=new ContentR2Storage(properties);
         try(var http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build()) {

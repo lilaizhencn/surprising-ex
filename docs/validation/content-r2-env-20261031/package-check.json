@@ -1,0 +1,6 @@
+{
+  "artifact": "surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+  "credentialMatches": false,
+  "externalEnvMode": "0600",
+  "localSecretYamlAbsent": true
+}

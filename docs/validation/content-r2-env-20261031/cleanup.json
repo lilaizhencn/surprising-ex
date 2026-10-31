@@ -1,0 +1,19 @@
+{
+  "ownedSdkTestObjectsDeleted": 3,
+  "purgedOnlyOwnedUrls": [
+    {
+      "url": "https://ex-cdn.tokdou.com/public/exchange/content/eeba26ae-4efd-4949-9c6c-a16ff9e8478b.wav",
+      "status": 404
+    },
+    {
+      "url": "https://ex-cdn.tokdou.com/public/exchange/content/c9648fe1-b9b2-413e-95df-67b6a4fe1cc5.mp4",
+      "status": 404
+    },
+    {
+      "url": "https://ex-cdn.tokdou.com/public/exchange/content/0ca3df59-b239-481b-b609-04fb274ce9e1.png",
+      "status": 404
+    }
+  ],
+  "localSecretYamlRemoved": true,
+  "externalEnvRetained": true
+}

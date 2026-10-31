@@ -1,5 +1,7 @@
 # 公告媒体上传凭据改为 YAML 直配（2026-10-31）
 
+后续按用户要求，R2 敏感凭据已迁回仓库外的 `.env`；当前方式见 [环境变量凭据验证](content-r2-env-20261031.md)。本页保留当时本地 YAML 方案的验证记录，真实密钥始终未提交。
+
 - 实际凭据已写入 `surprising-gateway/config/application.yaml`，包含启用状态、endpoint、access-key-id、secret-access-key、bucket 和 public-base-url，所有值均直接配置，没有环境变量占位符。文件权限 `0600`，已被 Git 忽略。
 - 主 `application.yml` 保留可提交的非敏感默认值，并从仓库工作目录导入该本地文件；从 Gateway 模块目录启动时由 Spring Boot 默认的 `config/application.yaml` 位置加载。对应机制见 [Spring Boot 外部配置](https://docs.spring.io/spring-boot/reference/features/external-config.html)。
 - 使用 Spring ConfigData 和配置绑定检查器，移除环境变量配置源后，分别从仓库目录和 Gateway 模块目录运行，均成功绑定实际 YAML 的凭据与桶配置。检查器不启动业务服务、数据库、Core 或 wallet，也不输出密钥值。

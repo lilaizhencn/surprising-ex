@@ -20,7 +20,7 @@ spring:
     deserialization:
       accept-float-as-int: false
   config:
-    import: classpath:application-trading.yml,classpath:application-account.yml,classpath:application-instrument.yml,optional:file:./surprising-gateway/config/application.yaml
+    import: classpath:application-trading.yml,classpath:application-account.yml,classpath:application-instrument.yml
   application:
     name: surprising-gateway
   servlet:
@@ -64,10 +64,10 @@ management:
 surprising:
   content:
     r2:
-      enabled: false
-      endpoint: ""
-      access-key-id: ""
-      secret-access-key: ""
+      enabled: ${GATEWAY_CONTENT_R2_ENABLED:false}
+      endpoint: ${GATEWAY_CONTENT_R2_ENDPOINT:}
+      access-key-id: ${GATEWAY_CONTENT_R2_ACCESS_KEY_ID:}
+      secret-access-key: ${GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY:}
       bucket: surprising-ex-public
       public-base-url: https://ex-cdn.tokdou.com
   c2c:
