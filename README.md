@@ -41,7 +41,7 @@ The single-node stack has six Java processes:
 
 ## 公告、媒体与协议
 
-公告支持富文本、图片、音频、视频及十二种语言。公开媒体使用项目专用 R2 桶 `surprising-ex-public` 和 `https://ex-cdn.tokdou.com`，限定目录 `public/exchange/content/`；C2C、身份认证等私有附件保持原访问控制。后台上传检查格式、文件头和体积；保存草稿同事务保留引用，超过二十四小时的未引用上传由独立线程有界回收。配置示例见 [content-r2.env.example](deployment/content-r2.env.example)，跨域规则见 [content-r2.cors.json](deployment/content-r2.cors.json)。
+公告支持富文本、图片、音频、视频及十二种语言。公开媒体使用项目专用 R2 桶 `surprising-ex-public` 和 `https://ex-cdn.tokdou.com`，限定目录 `public/exchange/content/`；C2C、身份认证等私有附件保持原访问控制。后台上传检查格式、文件头和体积；保存草稿同事务保留引用，超过二十四小时的未引用上传由独立线程有界回收。上传凭据直接写入 Git 忽略的 `surprising-gateway/config/application.yaml`（权限 `0600`），不依赖环境变量。配置示例见 [content-r2.application.example.yaml](deployment/content-r2.application.example.yaml)，跨域规则见 [content-r2.cors.json](deployment/content-r2.cors.json)。
 
 管理后台提供十类协议的草稿、各语种预览、审批发布、历史修订与审计。用户协议和隐私政策发布后，普通用户须主动确认具体修订；后续发布新修订会在再次登录或刷新时要求确认。发布历史和阅读语言保留，不覆盖旧记录。运营主体与邮箱按用户要求复用 social，交易域名保持 https://ex.tokdou.com。
 

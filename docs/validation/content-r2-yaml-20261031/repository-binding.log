@@ -1,0 +1,1 @@
+R2 configuration loaded without environment variables from: Config resource 'file [surprising-gateway/config/application.yaml]' via location 'optional:file:./surprising-gateway/config/application.yaml'

@@ -233,6 +233,8 @@ gateway 中实现。后续财务运营模块必须配置独立数据源和独立
 
 ## 配置
 
+配置默认直接写入 YAML，并由配置类绑定，一般不使用环境变量占位符。公告媒体的真实上传凭据放在 Git 忽略的 `surprising-gateway/config/application.yaml`（从模块目录运行时为 `config/application.yaml`），文件权限 `0600`，不会进入 JAR 或远端仓库。从仓库目录启动时由主配置导入；从模块目录启动时使用 Spring Boot 的默认外部配置加载。示例见 `deployment/content-r2.application.example.yaml`。
+
 ```yaml
 surprising:
   gateway:
@@ -240,7 +242,7 @@ surprising:
       user-id-header: X-User-Id
       require-identity-for-private-routes: true
       require-admin-mfa: true
-      mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY}
+      mfa-secret-encryption-key: "" # 实际值放在本地 application.yaml
     http-client:
       connect-timeout: 1s
       read-timeout: 30s
