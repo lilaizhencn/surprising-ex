@@ -1,0 +1,25 @@
+Running on Exchange_R2_QA - iOS 26.5 - 2E7C176E-35BB-4CCF-B9D5-074C868553F8
+ > Flow ios-final-media-flow
+Launch app "com.surprising.surprisingClient" without stopping app... COMPLETED
+Assert that "Dedicated R2 media" is visible... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Tap on point (10%,52%)... COMPLETED
+Assert that "QA video 0\.0 s; audio [1-9][0-9]*\.[0-9] s" is visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/ios-final-audio-clock... COMPLETED
+Tap on point (10%,52%)... COMPLETED
+Tap on point (50%,65%)... COMPLETED
+Assert that "QA video [1-9][0-9]*\.[0-9] s; audio [0-9]+\.[0-9] s" is visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/ios-final-video-clock... COMPLETED
+Tap on "失败测试"... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/ios-real-media-error... COMPLETED
+Tap on "重试"... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Tap on "旧回调"... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/ios-error-recovered... COMPLETED
+Press Home key... COMPLETED
+Launch app "com.surprising.surprisingClient" without stopping app... COMPLETED
+Assert that "QA video 0\.0 s; audio 0\.0 s" is visible... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/ios-final-resume-paused... COMPLETED

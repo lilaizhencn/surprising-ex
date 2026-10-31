@@ -14,13 +14,13 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
-/** Opt-in real Social R2/CDN round trip; deletes only new objects created by this test. */
+/** Opt-in real dedicated exchange R2/CDN round trip; deletes only new objects created by this test. */
 @EnabledIfEnvironmentVariable(named="CONTENT_R2_TEST_ENABLED",matches="true")
 class ContentR2IntegrationTest {
     @Test void realImageAudioAndVideoAreUploadedReadableAndVideoSupportsByteRanges() throws Exception {
         var env=System.getenv();
         var properties=new ContentMediaProperties(true,env.get("GATEWAY_CONTENT_R2_ENDPOINT"),env.get("GATEWAY_CONTENT_R2_ACCESS_KEY_ID"),
-                env.get("GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY"),"app-public","https://cdn.surprising.top");
+                env.get("GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY"),"surprising-ex-public","https://ex-cdn.tokdou.com");
         var storage=new ContentR2Storage(properties);
         try(var http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build()) {
             for(var file:Map.of("image.png","image/png","audio.wav","audio/wav","video.mp4","video/mp4").entrySet()) {

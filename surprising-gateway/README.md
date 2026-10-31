@@ -683,4 +683,4 @@ SecurityFilterChain 统一路径、权限和状态检查；Web/Admin 使用独�
 
 普通认证统一在发 token 前核对现行用户协议和隐私政策；注册在创建账户前检查，缺失确认返回 428/LEGAL_CONSENT_REQUIRED，必需协议尚未发布返回 503。仅具备管理角色且明确使用 admin 客户端的认证可进入后台完成首次文书发布。确认列表由 X-Legal-Acceptance 传递，禁止默认代用户确认。
 
-权限包括 admin.content.media.write、admin.legal.read/write/publish，发布和撤回绑定既有审批原始请求体。媒体使用 app-public 的 public/exchange/content/，不公开私有附件。详细配置、迁移与发布顺序见 ../deployment/legal/README.md，接口定义见 ../docs/content-api.openapi.json。
+权限包括 admin.content.media.write、admin.legal.read/write/publish，发布和撤回绑定既有审批原始请求体。媒体使用专用桶 surprising-ex-public 的 public/exchange/content/，公开域名为 https://ex-cdn.tokdou.com，不公开私有附件。详细配置、迁移与发布顺序见 ../deployment/legal/README.md，接口定义见 ../docs/content-api.openapi.json。

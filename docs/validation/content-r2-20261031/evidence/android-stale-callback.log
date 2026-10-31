@@ -1,0 +1,4 @@
+Running on Exchange_R2_QA
+ > Flow android-stale-callback
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/android-stale-callback-ignored... COMPLETED

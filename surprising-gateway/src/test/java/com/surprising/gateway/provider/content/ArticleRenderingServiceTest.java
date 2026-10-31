@@ -19,12 +19,12 @@ import org.springframework.web.server.ResponseStatusException;
 class ArticleRenderingServiceTest {
     @Test void publicDeliveryUsesHttpsCdnWithOneLookupAndDoesNotNeedUploadCredentials() {
         var repository=mock(ContentMediaRepository.class);
-        var storage=new ContentR2Storage(new ContentMediaProperties(false,null,null,null,"app-public","https://cdn.surprising.top"));
+        var storage=new ContentR2Storage(new ContentMediaProperties(false,null,null,null,"surprising-ex-public","https://ex-cdn.tokdou.com"));
         UUID id=UUID.randomUUID();
         when(repository.findFor(List.of(id))).thenReturn(List.of(new ContentMedia(id,ContentR2Storage.PREFIX+id+".png","image/png",100,9,Instant.now())));
         String source="<p>Article</p><img src='"+RichArticle.MEDIA_PATH+id+"'>";
         var rendered=new ArticleRenderingService(repository,storage).render(Arrays.asList(source,source,null,"<p>Text</p>"));
-        assertThat(rendered.get(source)).contains("src=\"https://cdn.surprising.top/public/exchange/content/"+id+".png\"").doesNotContain("src=\"/api/");
+        assertThat(rendered.get(source)).contains("src=\"https://ex-cdn.tokdou.com/public/exchange/content/"+id+".png\"").doesNotContain("src=\"/api/");
         assertThat(rendered.get("<p>Text</p>")).isEqualTo("<p>Text</p>");
         verify(repository,times(1)).findFor(List.of(id));
         assertThatThrownBy(storage::requireAvailable).isInstanceOf(ResponseStatusException.class);
@@ -35,6 +35,16 @@ class ArticleRenderingServiceTest {
         when(repository.findFor(anyList())).thenReturn(List.of());
         var renderer=new ArticleRenderingService(repository,mock(ContentR2Storage.class));
         assertThatThrownBy(()->renderer.render(List.of("<img src='"+RichArticle.MEDIA_PATH+UUID.randomUUID()+"'>"))).isInstanceOf(ResponseStatusException.class);
-        assertThatThrownBy(()->renderer.render(List.of("<img src='https://cdn.surprising.top/private/c2c/file'>"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(()->renderer.render(List.of("<img src='https://ex-cdn.tokdou.com/private/c2c/file'>"))).isInstanceOf(IllegalArgumentException.class);
+    }
+    @Test void publicStorageRejectsSharedOrPrivateBucketsAndUnmanagedCdnOrigins() {
+        for (String bucket:List.of("app-public","app-private","app-chat")) {
+            assertThatThrownBy(()->new ContentR2Storage(new ContentMediaProperties(false,null,null,null,bucket,"https://ex-cdn.tokdou.com")))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        for (String origin:List.of("https://cdn.surprising.top","http://ex-cdn.tokdou.com","https://ex-cdn.tokdou.com.evil.test","https://ex-cdn.tokdou.com/private","https://ex-cdn.tokdou.com?private=true")) {
+            assertThatThrownBy(()->new ContentR2Storage(new ContentMediaProperties(false,null,null,null,"surprising-ex-public",origin)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 }

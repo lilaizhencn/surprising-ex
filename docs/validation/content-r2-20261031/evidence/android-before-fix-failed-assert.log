@@ -1,0 +1,19 @@
+Running on Exchange_R2_QA
+ > Flow android-refresh-flow
+Run flow when "重试" is visible...
+  Tap on "重试"... COMPLETED
+Run flow when "重试" is visible... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... FAILED
+
+Assertion is false: "部分媒体加载失败，可刷新后重试。" is not visible
+
+Assertion '"部分媒体加载失败，可刷新后重试。" is not visible' failed. Check the UI hierarchy in debug artifacts to verify the element state and properties.
+
+Possible causes:
+- Element selector may be incorrect - check if there are similar elements with slightly different names/properties.
+- Element may be temporarily unavailable due to loading state
+- This could be a real regression that needs to be addressed
+
+==== Debug output (logs & screenshots) ====
+
+/Users/atomex/.maestro/tests/2026-10-31_075239

@@ -1,0 +1,8 @@
+Running on Exchange_R2_QA
+ > Flow android-error-recovery
+Assert that "部分媒体加载失败，可刷新后重试。" is visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/android-real-media-error... COMPLETED
+Tap on "重试"... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Assert that "QA video 0\.0 s; audio 0\.0 s" is visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/android-error-recovered... COMPLETED

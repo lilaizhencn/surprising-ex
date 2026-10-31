@@ -1,0 +1,8 @@
+00:00 +0: loading /Users/atomex/Desktop/surprising/surprising-client/test/legal_content_test.dart
+00:00 +0: /Users/atomex/Desktop/surprising/surprising-client/test/legal_content_test.dart: legal boundary rejects invalid identifiers, language and content
+00:00 +1: /Users/atomex/Desktop/surprising/surprising-client/test/legal_content_test.dart: only authentication carries the explicit reviewed versions and clearing removes them
+00:00 +2: /Users/atomex/Desktop/surprising/surprising-client/test/client_messages_test.dart: every supported language has complete labels and matching placeholders
+00:02 +3: /Users/atomex/Desktop/surprising/surprising-client/test/client_messages_test.dart: every supported language has complete labels and matching placeholders
+00:08 +4: /Users/atomex/Desktop/surprising/surprising-client/test/client_messages_test.dart: every supported language has complete labels and matching placeholders
+00:10 +5: /Users/atomex/Desktop/surprising/surprising-client/test/client_messages_test.dart: labels translate while arbitrary user data remains exact
+00:11 +6: All tests passed!

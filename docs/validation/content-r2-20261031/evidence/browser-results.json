@@ -1,0 +1,22 @@
+[
+  {
+    "width": 1366,
+    "theme": "light",
+    "image": true,
+    "audio": true,
+    "video": true,
+    "csp": true,
+    "sharedOrPrivateMediaRemoved": true,
+    "errors": []
+  },
+  {
+    "width": 390,
+    "theme": "dark",
+    "image": true,
+    "audio": true,
+    "video": true,
+    "csp": true,
+    "sharedOrPrivateMediaRemoved": true,
+    "errors": []
+  }
+]

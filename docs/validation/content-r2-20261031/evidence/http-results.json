@@ -1,0 +1,37 @@
+[
+  {
+    "type": "image/png",
+    "status": 200,
+    "bytes": 608,
+    "sha256": "69cb01781554f733c31083c9b5513389869bac61cbc4459e97364bf2f421804e",
+    "cors": "https://ex.tokdou.com"
+  },
+  {
+    "type": "audio/wav",
+    "status": 200,
+    "bytes": 529244,
+    "sha256": "45a441439c6d2483022592b40464a87d87d48ca577dcdfed7eedd520c5de2a21",
+    "cors": "https://ex.tokdou.com"
+  },
+  {
+    "type": "video/mp4",
+    "status": 200,
+    "bytes": 350607,
+    "sha256": "f52af77c0c0447b68bc5db4fe96b6a342c3f5794dcf3b11e845479cea1ba8eb8",
+    "cors": "https://ex.tokdou.com"
+  },
+  {
+    "videoRange": 206,
+    "contentRange": "bytes 0-31/350607"
+  },
+  {
+    "head": 200
+  },
+  {
+    "unlistedOriginCors": false
+  },
+  {
+    "preflight": 204,
+    "methods": "GET, HEAD"
+  }
+]

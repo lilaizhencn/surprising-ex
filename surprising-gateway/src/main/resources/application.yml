@@ -68,8 +68,8 @@ surprising:
       endpoint: ${GATEWAY_CONTENT_R2_ENDPOINT:}
       access-key-id: ${GATEWAY_CONTENT_R2_ACCESS_KEY_ID:}
       secret-access-key: ${GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY:}
-      bucket: ${GATEWAY_CONTENT_R2_BUCKET:app-public}
-      public-base-url: ${GATEWAY_CONTENT_R2_PUBLIC_BASE_URL:https://cdn.surprising.top}
+      bucket: ${GATEWAY_CONTENT_R2_BUCKET:surprising-ex-public}
+      public-base-url: ${GATEWAY_CONTENT_R2_PUBLIC_BASE_URL:https://ex-cdn.tokdou.com}
   c2c:
     enabled: ${C2C_ENABLED:false}
     r2:

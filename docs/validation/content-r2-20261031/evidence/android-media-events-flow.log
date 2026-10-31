@@ -1,0 +1,20 @@
+Running on Exchange_R2_QA
+ > Flow android-final-flow
+Assert that "Dedicated R2 media" is visible... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Tap on point (11%,48%)... COMPLETED
+Assert that "QA video 0\.0 s; audio [1-9][0-9]*\.[0-9] s" is visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/android-audio-clock... COMPLETED
+Tap on point (11%,48%)... COMPLETED
+Tap on point (50%,61%)... COMPLETED
+Assert that "QA video [1-9][0-9]*\.[0-9] s; audio [0-9]+\.[0-9] s" is visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/android-video-clock... COMPLETED
+Tap on "Refresh"... COMPLETED
+Assert that "QA video 0\.0 s; audio 0\.0 s" is visible... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/android-refresh-clean... COMPLETED
+Press Home key... COMPLETED
+Launch app "com.surprising.surprising_client" without stopping app... COMPLETED
+Assert that "QA video 0\.0 s; audio 0\.0 s" is visible... COMPLETED
+Assert that "部分媒体加载失败，可刷新后重试。" is not visible... COMPLETED
+Take screenshot /Users/atomex/.cache/ex-r2-20261031/android-resume-paused... COMPLETED

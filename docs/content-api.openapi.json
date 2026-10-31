@@ -864,7 +864,7 @@
         ],
         "responses": {
           "302": {
-            "description": "Location 指向 https://cdn.surprising.top/public/exchange/content/；媒体及 Range 由 CDN 提供",
+            "description": "Location 指向 https://ex-cdn.tokdou.com/public/exchange/content/；媒体及 Range 由 CDN 提供",
             "headers": {
               "Location": {
                 "schema": {

@@ -28,9 +28,9 @@ public class ContentR2Storage {
     public ContentR2Storage(ContentMediaProperties properties) {
         this.properties = properties;
         URI base = URI.create(properties.publicBaseUrl());
-        if (!"https".equals(base.getScheme()) || !"cdn.surprising.top".equals(base.getHost()) || base.getUserInfo()!=null
+        if (!"https".equals(base.getScheme()) || !"ex-cdn.tokdou.com".equals(base.getHost()) || base.getUserInfo()!=null
                 || base.getPort()!=-1 || !(base.getPath().isEmpty() || base.getPath().equals("/"))
-                || base.getQuery()!=null || base.getFragment()!=null || !"app-public".equals(properties.bucket()))
+                || base.getQuery()!=null || base.getFragment()!=null || !"surprising-ex-public".equals(properties.bucket()))
             throw new IllegalArgumentException("public content CDN configuration is incomplete");
         publicBase = properties.publicBaseUrl().replaceAll("/+$", "");
         if (!properties.enabled()) { client = null; return; }

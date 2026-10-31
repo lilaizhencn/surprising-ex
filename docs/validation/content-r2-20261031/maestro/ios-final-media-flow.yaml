@@ -1,0 +1,42 @@
+appId: com.surprising.surprisingClient
+---
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: Dedicated R2 media
+    timeout: 30000
+- assertNotVisible: 部分媒体加载失败，可刷新后重试。
+- tapOn:
+    point: 10%,52%
+- extendedWaitUntil:
+    visible: 'QA video 0\.0 s; audio [1-9][0-9]*\.[0-9] s'
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/ios-final-audio-clock
+- tapOn:
+    point: 10%,52%
+- tapOn:
+    point: 50%,65%
+- extendedWaitUntil:
+    visible: 'QA video [1-9][0-9]*\.[0-9] s; audio [0-9]+\.[0-9] s'
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/ios-final-video-clock
+- tapOn: 失败测试
+- extendedWaitUntil:
+    visible: 部分媒体加载失败，可刷新后重试。
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/ios-real-media-error
+- tapOn: 重试
+- extendedWaitUntil:
+    notVisible: 部分媒体加载失败，可刷新后重试。
+    timeout: 30000
+- tapOn: 旧回调
+- assertNotVisible: 部分媒体加载失败，可刷新后重试。
+- takeScreenshot: ${QA_ARTIFACTS}/ios-error-recovered
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: 'QA video 0\.0 s; audio 0\.0 s'
+    timeout: 30000
+- assertNotVisible: 部分媒体加载失败，可刷新后重试。
+- takeScreenshot: ${QA_ARTIFACTS}/ios-final-resume-paused

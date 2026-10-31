@@ -48,7 +48,7 @@ class ContentMediaLifecyclePostgresTest {
     }
     @AfterEach void close() { if(base!=null && schema!=null)base.execute("DROP SCHEMA "+schema+" CASCADE"); }
     private ContentMediaCleanupService cleanup(boolean enabled) {
-        return new ContentMediaCleanupService(media,storage,new ContentMediaProperties(enabled,null,null,null,"app-public","https://cdn.surprising.top"),manager,references);
+        return new ContentMediaCleanupService(media,storage,new ContentMediaProperties(enabled,null,null,null,"surprising-ex-public","https://ex-cdn.tokdou.com"),manager,references);
     }
     private ContentMedia upload(boolean old) {
         UUID id=UUID.randomUUID();

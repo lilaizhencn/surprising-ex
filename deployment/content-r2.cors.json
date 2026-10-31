@@ -1,0 +1,12 @@
+[
+  {
+    "id": "exchange-public-media-read",
+    "allowed": {
+      "origins": ["https://ex.tokdou.com", "https://ex-api.tokdou.com"],
+      "methods": ["GET", "HEAD"],
+      "headers": ["Range", "If-None-Match"]
+    },
+    "exposeHeaders": ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag"],
+    "maxAgeSeconds": 3600
+  }
+]

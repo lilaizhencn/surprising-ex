@@ -15,4 +15,8 @@
 
 先在预发布环境完成上述发布与确认流程，再切换普通用户流量。未发布必需条款时返回 503；已发布但尚未确认当前修订时返回 428 `LEGAL_CONSENT_REQUIRED`。后台发布审批的 428 是另一种操作条件，客户端不能混为用户条款确认。
 
-公开 R2 媒体使用 social 的 `app-public` 和 `https://cdn.surprising.top`，交易专属路径为 `public/exchange/content/`；私人附件不能移入此路径。保存文章时同事务保留引用，历史协议继续保留媒体。单独线程每小时最多回收二十个已超过二十四小时、没有文章引用的上传；数据库行锁与外键保护并发保存，删除失败留待重试，不扫描或删除 social 的其他目录。
+公开 R2 媒体使用项目专用桶 `surprising-ex-public` 和 `https://ex-cdn.tokdou.com`，路径为 `public/exchange/content/`；私人附件不能移入此桶。桶位于默认 jurisdiction、APAC，Standard 存储，自定义域名最低 TLS 1.2，r2.dev 保持关闭。跨域规则在 `deployment/content-r2.cors.json`，只允许交易 Web 与 API 来源的 GET/HEAD 和媒体 Range 请求。
+
+Gateway 使用仅授予该桶“对象读写”的独立 S3 密钥，填入 `GATEWAY_CONTENT_R2_ACCESS_KEY_ID` / `GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY`；不要复用 Social 或私有附件的密钥。已通过 CLI 的 User API Token 接口创建桶级专用凭据，本机保存在 `~/.config/surprising-ex/content-r2.env`（权限 `0600`），部署时从秘密配置注入。该凭据属于创建它的用户；密钥不提交代码，CLI OAuth 登录令牌也不交给 Gateway。
+
+保存文章时同事务保留引用，历史协议继续保留媒体。单独线程每小时最多回收二十个已超过二十四小时、没有文章引用的上传；数据库行锁与外键保护并发保存，删除失败留待重试，不扫描其他桶。后台、Web、App 必须配套使用新的 CDN 限制；本轮只创建专用存储资源及更新代码，未发布生产应用。

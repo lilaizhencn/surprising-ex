@@ -1,0 +1,13 @@
+{
+  "changed": 0,
+  "unchanged": 238,
+  "matches": 0,
+  "duration": 704331213,
+  "errors": 78,
+  "warnings": 0,
+  "infos": 709,
+  "skipped": 0,
+  "suggestedFixesSkipped": 0,
+  "diagnosticsNotPrinted": 0,
+  "scannerDuration": 14319960
+}

@@ -1,0 +1,21 @@
+{
+  "deletedCliTestObjects": 3,
+  "sdkTestObjectsDeletedBySuccessfulIntegrationTest": 3,
+  "purgedOnlyHost": "ex-cdn.tokdou.com",
+  "afterDeleteChecks": [
+    {
+      "key": "public/exchange/content/9eeef11b-504a-4656-b8aa-42d48c492737.png",
+      "afterDeleteStatus": 404
+    },
+    {
+      "key": "public/exchange/content/bb713a37-3d32-44f8-a7af-510bf69f372f.wav",
+      "afterDeleteStatus": 404
+    },
+    {
+      "key": "public/exchange/content/f1ec2900-cc43-4fa4-b217-47fc9c1d9a83.mp4",
+      "afterDeleteStatus": 404
+    }
+  ],
+  "bucketRetained": true,
+  "restrictedCredentialsRetained": true
+}

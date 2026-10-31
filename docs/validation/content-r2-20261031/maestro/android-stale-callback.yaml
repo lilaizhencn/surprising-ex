@@ -1,0 +1,4 @@
+appId: com.surprising.surprising_client
+---
+- assertNotVisible: 部分媒体加载失败，可刷新后重试。
+- takeScreenshot: ${QA_ARTIFACTS}/android-stale-callback-ignored

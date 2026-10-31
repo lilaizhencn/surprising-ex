@@ -1,0 +1,12 @@
+appId: com.surprising.surprising_client
+---
+- extendedWaitUntil:
+    visible: 部分媒体加载失败，可刷新后重试。
+    timeout: 30000
+- takeScreenshot: ${QA_ARTIFACTS}/android-real-media-error
+- tapOn: 重试
+- extendedWaitUntil:
+    notVisible: 部分媒体加载失败，可刷新后重试。
+    timeout: 30000
+- assertVisible: 'QA video 0\.0 s; audio 0\.0 s'
+- takeScreenshot: ${QA_ARTIFACTS}/android-error-recovered

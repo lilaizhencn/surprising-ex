@@ -1,0 +1,15 @@
+{
+  "domains": [
+    {
+      "domain": "ex-cdn.tokdou.com",
+      "status": {
+        "ssl": "active",
+        "ownership": "active"
+      },
+      "zoneId": "123c4a83ed2b0dbd9ca2e61ba5d2251f",
+      "zoneName": "tokdou.com",
+      "minTLS": "1.2",
+      "enabled": true
+    }
+  ]
+}

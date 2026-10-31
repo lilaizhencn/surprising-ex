@@ -1,0 +1,12 @@
+
+> surprising-ex-web@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /Users/atomex/Desktop/surprising/surprising-ex-web
+
+
+ Test Files  67 passed (67)
+      Tests  586 passed (586)
+   Start at  07:39:26
+   Duration  8.15s (transform 19.84s, setup 0ms, import 59.15s, tests 7.55s, environment 142ms)

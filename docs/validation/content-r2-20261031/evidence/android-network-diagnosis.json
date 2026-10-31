@@ -1,0 +1,38 @@
+{
+  "requests": [
+    {
+      "event": "Network.responseReceived",
+      "url": "https://ex-cdn.tokdou.com/public/exchange/content/9eeef11b-504a-4656-b8aa-42d48c492737.png",
+      "status": 200
+    },
+    {
+      "event": "Network.responseReceived",
+      "url": "https://ex-cdn.tokdou.com/public/exchange/content/f1ec2900-cc43-4fa4-b217-47fc9c1d9a83.mp4",
+      "status": 206
+    },
+    {
+      "event": "Network.responseReceived",
+      "url": "https://ex-cdn.tokdou.com/public/exchange/content/bb713a37-3d32-44f8-a7af-510bf69f372f.wav",
+      "status": 206
+    },
+    {
+      "event": "Network.loadingFailed",
+      "url": "https://ex-cdn.tokdou.com/public/exchange/content/f1ec2900-cc43-4fa4-b217-47fc9c1d9a83.mp4",
+      "error": "net::ERR_ABORTED",
+      "canceled": true
+    },
+    {
+      "event": "Network.loadingFailed",
+      "url": "https://ex-cdn.tokdou.com/public/exchange/content/bb713a37-3d32-44f8-a7af-510bf69f372f.wav",
+      "error": "net::ERR_ABORTED",
+      "canceled": true
+    }
+  ],
+  "observedAndroidCallback": {
+    "errorCode": -1,
+    "description": "net::ERR_FAILED",
+    "isForMainFrame": false,
+    "errorType": "unknown"
+  },
+  "decision": "Use HTML image/media error state; WebView subresource errors also include normal preload cancellation."
+}
