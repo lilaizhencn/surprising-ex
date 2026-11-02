@@ -88,6 +88,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -138,8 +140,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /** Owner 采样到的账户队列高水位，不保证捕获每一次入队峰值。 */
     final int[] accountLaneQueueHighWaterMarks;
-    /** 每条 Lane 独立发布的提交序号槽，用 volatile 和前后填充隔开写入。 */
-    final PaddedCommittedSequenceSlot[] publishedLaneCommittedSlots;
+    /** 各 Lane 的提交序号按十六个 long 间隔存放，保留原 volatile 读写语义。 */
+    private static final int COMMITTED_SEQUENCE_STRIDE = 16;
+    private static final VarHandle COMMITTED_SEQUENCES = MethodHandles.arrayElementVarHandle(long[].class);
+    final long[] publishedLaneCommittedSlots;
     /** 每条 Lane 已派发的提交水位，与已完成水位一起防止乱序重复派发。 */
     final long[] dispatchedLaneCommitSequences;
     /** 各事件池 ArrayDeque 的初始容纳预算，固定为 1024，不是硬容量上限。 */
@@ -330,10 +334,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 this::assertOwner);
         this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
-        this.publishedLaneCommittedSlots = new PaddedCommittedSequenceSlot[topology.accountLaneCount()];
-        for (/* 当前预建对象或工作线程数组的下标 */ int i = 0; i < topology.accountLaneCount(); i++) {
-            this.publishedLaneCommittedSlots[i] = new PaddedCommittedSequenceSlot();
-        }
+        this.publishedLaneCommittedSlots = new long[Math.multiplyExact(topology.accountLaneCount(), COMMITTED_SEQUENCE_STRIDE)];
         this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (/* 当前按拓扑选中或从掩码取出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity(), configuration.laneInitialEntities());
@@ -1039,7 +1040,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         int laneId = lane.laneId();
         // 该 Lane 当前已经完成提交的 Core 序号，随后写入 volatile 槽
         long committed = lane.committedSequence();
-        publishedLaneCommittedSlots[laneId].sequence = committed;
+        COMMITTED_SEQUENCES.setVolatile(publishedLaneCommittedSlots, laneId * COMMITTED_SEQUENCE_STRIDE, committed);
     }
 
     /**
@@ -1420,7 +1421,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
             org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = laneUserScratch[laneId];
             if (users.isEmpty()) continue;
             if (coreSequence <= Math.max(
-                    publishedLaneCommittedSlots[laneId].sequence, dispatchedLaneCommitSequences[laneId])) {
+                    (long) COMMITTED_SEQUENCES.getVolatile(publishedLaneCommittedSlots,
+                            laneId * COMMITTED_SEQUENCE_STRIDE), dispatchedLaneCommitSequences[laneId])) {
                 throw new IllegalStateException("account lane apply is out of order");
             }
             laneMask |= 1L << laneId;

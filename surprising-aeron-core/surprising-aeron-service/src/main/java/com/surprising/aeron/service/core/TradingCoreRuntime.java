@@ -2577,7 +2577,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         public void start(CommandSlot command, java.util.List<com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder> orders) {
             if (command.crossShardCancellationStarted()) return;
             command.crossShardCancellationStarted(true);
-            pending.addLast(new Progress(command, orders));
+            pending.addLast(new Progress(owner, command, orders));
             poll();
         }
 
@@ -2606,9 +2606,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     // 当前准备派发或标记未提交的撤单描述
                     var order = progress.orders.get(progress.index);
                     progress.shard = owner.matchingAdapter.matcherShardId(order.instrumentId());
-                    progress.token = owner.matcherPipeline().submitControl(progress.shard,
-                            () -> owner.matchingAdapter.cancelControlOrder(progress.command.command().header().submittedAtEpochMillis(),
-                                    order.userId(), order.orderId(), order.instrumentId()));
+                    progress.currentOrder = order;
+                    progress.token = owner.matcherPipeline().submitControl(progress.shard, progress);
                     continue;
                 }
                 // 已经收齐本轮撤单证据的命令槽
@@ -2638,7 +2637,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
         /**
          * 一条跨分片撤单的推进状态，保存稳定订单描述、对应结果及当前控制任务身份；只由 Owner 修改。
          */
-        private static final class Progress {
+        private static final class Progress implements java.util.function.Supplier<com.surprising.aeron.service.matcher.CoreMatchingResult> {
+            /** 当前任务所属运行时；Matcher 只在已派发的任务中读取。 */
+            final TradingCoreRuntime owner;
             /** 本轮跨分片撤单所属命令槽，完成前保持引用有效。 */
             final CommandSlot command;
             /** 本轮按顺序借用的稳定撤单描述，列表生命周期由命令保证。 */
@@ -2652,6 +2653,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
             int index, shard;
             /** 当前控制任务身份，零表示没有等待中的控制任务。 */
             long token;
+            /** 当前已派发的撤单描述；收到回执后才会改为下一项。 */
+            com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder currentOrder;
             /** 是否已经出现撤单拒绝；为真时剩余描述不再派发。 */
             boolean failed;
             /**
@@ -2659,9 +2662,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
              * @param command 本次跨分片撤单所属的命令槽
              * @param orders 本次按顺序借用的撤单描述，调用方保持列表稳定
              */
-            Progress(CommandSlot command, java.util.List<com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder> orders) {
-                this.command = command; this.orders = orders;
+            Progress(TradingCoreRuntime owner, CommandSlot command, java.util.List<com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder> orders) {
+                this.owner = owner; this.command = command; this.orders = orders;
                 results = new java.util.ArrayList<>(orders.size());
+            }
+
+            @Override
+            public com.surprising.aeron.service.matcher.CoreMatchingResult get() {
+                var order = currentOrder;
+                return owner.matchingAdapter.cancelControlOrder(command.command().header().submittedAtEpochMillis(),
+                        order.userId(), order.orderId(), order.instrumentId());
             }
         }
     }

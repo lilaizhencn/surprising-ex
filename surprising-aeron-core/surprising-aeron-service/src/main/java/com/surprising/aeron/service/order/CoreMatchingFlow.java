@@ -196,7 +196,8 @@ public final class CoreMatchingFlow {
             orders.addAll(chunk.orders());
             remaining -= chunk.orders().size();
         }
-        return List.copyOf(orders);
+        // 本方法独占新建的列表；后续仅由当前命令槽借给 Matcher 读取。
+        return orders;
     }
 
     /**
@@ -233,7 +234,7 @@ public final class CoreMatchingFlow {
                 return;
             }
             owner.matcherPipeline().submit(shardId < 0 ? matcherShard(pending) : shardId,
-                    pending.sequence(), prepareMatchingCommand(pending, null), null);
+                    pending.sequence(), prepareControlCancellations(pending, orders), null);
             pending.matchingSubmitted();
             owner.matchingProgress.submissionCompleted(pending);
             return;
@@ -492,6 +493,11 @@ public final class CoreMatchingFlow {
             }
             default -> throw new IllegalStateException("unsupported cancellation control");
         }
+        return prepareControlCancellations(pending, orders);
+    }
+
+    /** 已选定撤单身份时直接准备控制任务，保留首次分片判定使用的同一列表。 */
+    private Supplier<?> prepareControlCancellations(CommandSlot pending, List<CancellationOrder> orders) {
         // 已准入确定要先执行的撤单路由列表。
         var prefix = preMatchingCancellationOrders(pending);
         if (!prefix.isEmpty()) {

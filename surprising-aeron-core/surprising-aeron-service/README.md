@@ -37,6 +37,8 @@
 
 账户提交明确传入变化用户、订单、触发取消及原日志元数据，空订单集合也使用同一提交任务。Lane 收据按物理缓冲交给 Owner，保留预计算槽与租约，Owner 使用现有键迭代器和槽位读取准备好的索引事实。持仓发布直接保留已准备的确定性身份键；衍生品杠杆读取使用所属 Lane 自己的复用探针。
 
+各 Lane 的已提交 Core 序号由 `TradingAccountRuntime` 在按十六个 `long` 间隔的数组槽中以 volatile 语义发布和读取；它与派发水位共同检查提交顺序。该数组只承载进度，不复制余额或订单状态。
+
 ## 幂等与恢复
 
 近期结果由 `CommandResultLedger` 保留；长期资金命令身份由 `FundsCommandIndex` 保存。Owner 在激活时绑定资金索引 I/O 所有权，冷导入可在启动线程完成。长期身份检查先于来源序号；资金索引故障属于系统故障。
@@ -52,6 +54,10 @@
 Matcher 管线装配后，由启动边界明确传入分片激活和 CPU 配置；关闭统一使用 `closeShards`。有序提交由 `OrderedCommitCoordinator` 收齐已有命令槽事实后推进。
 
 Matcher 直接消费真实准入结果或冻结订单，适配器在同一入口内应用产品滑点并转换原生订单。订单状态更新直接保留成交量、费用和累计成交值，只修改状态、版本及原日志元数据；完整订单输入明确携带指数和远期价格。
+
+强平批次的控制撤单列表由 `CoreMatchingFlow.batchCancellationOrders` 独占创建，交给当前命令槽后由 Matcher 只读消费；此路径不再对刚创建的列表做第二次复制。多 Matcher 场景先用该列表判断分片；若落在同一分片，直接用同一列表准备控制任务，不重复扫描候选。
+
+跨 Matcher 分片的强平撤单由 `TradingCoreRuntime.CrossShardCancellationCoordinator.Progress` 串行派发：上一项回执收齐后才更新当前订单并派发下一项，同一个任务对象跨项复用，不逐笔创建捕获 lambda。
 
 `CommandSlot` 为下单、撤单和替换/改单共用一个可复用的 `OrderMatchingContinuation`，按本次操作选择 Matcher 调用；任务在 Owner 准备后交给 Matcher，直到撮合完成及槽退休前不覆盖输入。准入等待任务仍单独保存原下单任务，控制命令续步保留各自的轮询状态。
 
