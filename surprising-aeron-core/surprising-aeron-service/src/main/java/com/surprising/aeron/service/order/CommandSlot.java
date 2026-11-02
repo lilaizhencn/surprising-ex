@@ -173,11 +173,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     /** 预构造的控制撤单 Matcher 任务。 */
     private final ControlMatchingContinuation controlMatching = new ControlMatchingContinuation(this);
     /** 预构造的普通或冻结批量项下单任务。 */
-    private final PlaceMatchingContinuation placeMatching = new PlaceMatchingContinuation(this);
-    /** 预构造的普通撤单任务。 */
-    private final CancelMatchingContinuation cancelMatching = new CancelMatchingContinuation(this);
-    /** 预构造的替换/改单撮合任务。 */
-    private final ReplaceMatchingContinuation replaceMatching = new ReplaceMatchingContinuation(this);
+    private final OrderMatchingContinuation orderMatching = new OrderMatchingContinuation(this);
     /**
      *  当前等待收集的 Lane 提交事件。
      * 返回待收集的账户 Lane 提交事件。
@@ -312,8 +308,8 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
             int matcherShard, long userId,
             ResolvedPlaceOrder resolvedOrder,
             MatcherSettlementEvent direct) {
-        placeMatching.prepare(owner, matcherShard, userId, resolvedOrder, null, direct);
-        return placeMatching;
+        orderMatching.preparePlace(owner, matcherShard, userId, resolvedOrder, null, direct);
+        return orderMatching;
     }
 
     /**
@@ -326,8 +322,8 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     java.util.function.Supplier<?> prepareAdmittedPlaceMatching(TradingCoreRuntime owner,
             int matcherShard, long userId, OrderRuntime admittedOrder, MatcherSettlementEvent direct) {
-        placeMatching.prepare(owner, matcherShard, userId, null, admittedOrder, direct);
-        return placeMatching;
+        orderMatching.preparePlace(owner, matcherShard, userId, null, admittedOrder, direct);
+        return orderMatching;
     }
 
     /**
@@ -341,8 +337,8 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     java.util.function.Supplier<?> prepareCancelMatching(TradingCoreRuntime owner,
             int matcherShard, long orderId, long userId, String instrumentId, MatcherSettlementEvent direct) {
-        cancelMatching.prepare(owner, matcherShard, orderId, userId, instrumentId, direct);
-        return cancelMatching;
+        orderMatching.prepareCancel(owner, matcherShard, orderId, userId, instrumentId, direct);
+        return orderMatching;
     }
 
     /**
@@ -360,9 +356,9 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
             int matcherShard, long orderId, long userId,
             long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
             MatcherSettlementEvent direct) {
-        replaceMatching.prepare(owner, matcherShard, orderId, userId,
+        orderMatching.prepareReplace(owner, matcherShard, orderId, userId,
                 originalOrderId, instrumentId, replacement, direct);
-        return replaceMatching;
+        return orderMatching;
     }
 
     /**
@@ -1216,9 +1212,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         admissionMatching.clear();
         settlementControl.clear();
         liquidationExecutionControl.clear();
-        placeMatching.clear();
-        cancelMatching.clear();
-        replaceMatching.clear();
+        orderMatching.clear();
         controlMatching.clear();
         matcherPreCancellations = List.of();
     }

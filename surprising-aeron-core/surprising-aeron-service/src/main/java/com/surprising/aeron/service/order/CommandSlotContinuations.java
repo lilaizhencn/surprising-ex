@@ -110,25 +110,31 @@ final class AdmissionMatchingContinuation implements Supplier<Object> {
     }
 }
 
-final class PlaceMatchingContinuation implements Supplier<Object> {
+final class OrderMatchingContinuation implements Supplier<Object> {
+    private enum Action { PLACE, CANCEL, REPLACE }
     private final CommandSlot slot;
     private TradingCoreRuntime owner;
+    private Action action;
     private int matcherShard;
     private long userId;
+    private long orderId;
+    private long originalOrderId;
+    private String instrumentId;
     private ResolvedPlaceOrder resolvedOrder;
     private OrderRuntime admittedOrder;
     private MatcherSettlementEvent direct;
 
-    PlaceMatchingContinuation(CommandSlot slot) {
+    OrderMatchingContinuation(CommandSlot slot) {
         this.slot = Objects.requireNonNull(slot);
     }
 
-    void prepare(TradingCoreRuntime owner, int matcherShard, long userId,
+    void preparePlace(TradingCoreRuntime owner, int matcherShard, long userId,
                  ResolvedPlaceOrder resolvedOrder, OrderRuntime admittedOrder, MatcherSettlementEvent direct) {
         if ((resolvedOrder == null) == (admittedOrder == null)) {
             throw new IllegalArgumentException("exactly one admitted PLACE order representation is required");
         }
         this.owner = Objects.requireNonNull(owner);
+        this.action = Action.PLACE;
         this.matcherShard = matcherShard;
         this.userId = userId;
         this.resolvedOrder = resolvedOrder;
@@ -136,48 +142,10 @@ final class PlaceMatchingContinuation implements Supplier<Object> {
         this.direct = Objects.requireNonNull(direct, "direct settlement");
     }
 
-    void clear() {
-        owner = null;
-        matcherShard = 0;
-        userId = 0;
-        resolvedOrder = null;
-        admittedOrder = null;
-        direct = null;
-    }
-
-    @Override
-    public Object get() {
-        long orderId = admittedOrder != null ? admittedOrder.orderId()
-                : resolvedOrder.orderId();
-        var failure = slot.applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
-        if (failure != null) return failure;
-        long msb = slot.command().header().commandIdMsb();
-        long lsb = slot.command().header().commandIdLsb();
-        if (admittedOrder != null) {
-            return owner.matchingAdapter().placeAdmittedDirect(matcherShard, slot.coreSequence, msb, lsb,
-                    slot.command().header().submittedAtEpochMillis(), userId, admittedOrder, direct);
-        }
-        return owner.matchingAdapter().placeDirect(matcherShard, slot.coreSequence, msb, lsb,
-                slot.command().header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
-    }
-}
-
-final class CancelMatchingContinuation implements Supplier<Object> {
-    private final CommandSlot slot;
-    private TradingCoreRuntime owner;
-    private int matcherShard;
-    private long orderId;
-    private long userId;
-    private String instrumentId;
-    private MatcherSettlementEvent direct;
-
-    CancelMatchingContinuation(CommandSlot slot) {
-        this.slot = Objects.requireNonNull(slot);
-    }
-
-    void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                 long userId, String instrumentId, MatcherSettlementEvent direct) {
+    void prepareCancel(TradingCoreRuntime owner, int matcherShard, long orderId,
+            long userId, String instrumentId, MatcherSettlementEvent direct) {
         this.owner = Objects.requireNonNull(owner);
+        this.action = Action.CANCEL;
         this.matcherShard = matcherShard;
         this.orderId = orderId;
         this.userId = userId;
@@ -185,71 +153,54 @@ final class CancelMatchingContinuation implements Supplier<Object> {
         this.direct = Objects.requireNonNull(direct, "direct settlement");
     }
 
-    void clear() {
-        owner = null;
-        matcherShard = 0;
-        orderId = 0;
-        userId = 0;
-        instrumentId = null;
-        direct = null;
-    }
-
-    @Override
-    public Object get() {
-        var failure = slot.applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
-        if (failure != null) return failure;
-        return owner.matchingAdapter().cancelDirect(matcherShard, slot.coreSequence,
-                slot.command().header().commandIdMsb(), slot.command().header().commandIdLsb(), orderId,
-                slot.command().header().submittedAtEpochMillis(), userId, instrumentId, direct);
-    }
-}
-
-final class ReplaceMatchingContinuation implements Supplier<Object> {
-    private final CommandSlot slot;
-    private TradingCoreRuntime owner;
-    private int matcherShard;
-    private long orderId;
-    private long userId;
-    private long originalOrderId;
-    private String instrumentId;
-    private ResolvedPlaceOrder resolvedReplacement;
-    private MatcherSettlementEvent direct;
-
-    ReplaceMatchingContinuation(CommandSlot slot) {
-        this.slot = Objects.requireNonNull(slot);
-    }
-
-    void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                 long userId, long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
-                 MatcherSettlementEvent direct) {
+    void prepareReplace(TradingCoreRuntime owner, int matcherShard, long orderId,
+            long userId, long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
+            MatcherSettlementEvent direct) {
         this.owner = Objects.requireNonNull(owner);
+        this.action = Action.REPLACE;
         this.matcherShard = matcherShard;
         this.orderId = orderId;
         this.userId = userId;
         this.originalOrderId = originalOrderId;
         this.instrumentId = Objects.requireNonNull(instrumentId);
-        this.resolvedReplacement = Objects.requireNonNull(replacement);
+        this.resolvedOrder = Objects.requireNonNull(replacement);
         this.direct = Objects.requireNonNull(direct);
     }
 
     void clear() {
         owner = null;
+        action = null;
         matcherShard = 0;
-        orderId = 0;
         userId = 0;
+        orderId = 0;
         originalOrderId = 0;
         instrumentId = null;
-        resolvedReplacement = null;
+        resolvedOrder = null;
+        admittedOrder = null;
         direct = null;
     }
 
     @Override
     public Object get() {
-        var failure = slot.applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
+        if (action == null) throw new IllegalStateException("matching task is not prepared");
+        long logicalOrderId = action == Action.PLACE
+                ? admittedOrder != null ? admittedOrder.orderId() : resolvedOrder.orderId() : orderId;
+        var failure = slot.applyMatcherPreCancellations(owner, matcherShard, logicalOrderId, direct);
         if (failure != null) return failure;
-        return owner.matchingAdapter().replaceDirect(matcherShard, slot.coreSequence,
-                slot.command().header().commandIdMsb(), slot.command().header().commandIdLsb(), orderId,
-                slot.command().header().submittedAtEpochMillis(), userId, originalOrderId, instrumentId, resolvedReplacement, direct);
+        long msb = slot.command().header().commandIdMsb();
+        long lsb = slot.command().header().commandIdLsb();
+        return switch (action) {
+            case PLACE -> admittedOrder != null
+                    ? owner.matchingAdapter().placeAdmittedDirect(matcherShard, slot.coreSequence, msb, lsb,
+                            slot.command().header().submittedAtEpochMillis(), userId, admittedOrder, direct)
+                    : owner.matchingAdapter().placeDirect(matcherShard, slot.coreSequence, msb, lsb,
+                            slot.command().header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
+            case CANCEL -> owner.matchingAdapter().cancelDirect(matcherShard, slot.coreSequence, msb, lsb,
+                    orderId, slot.command().header().submittedAtEpochMillis(), userId, instrumentId, direct);
+            case REPLACE -> owner.matchingAdapter().replaceDirect(matcherShard, slot.coreSequence, msb, lsb,
+                    orderId, slot.command().header().submittedAtEpochMillis(), userId, originalOrderId,
+                    instrumentId, resolvedOrder, direct);
+        };
     }
 }
 
