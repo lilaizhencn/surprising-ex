@@ -911,3 +911,7 @@ JFR 摘要/采样视图（使用 `jfr summary` 和 `jfr print --json --events jd
 最终功能验证：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test` 退出 0，14 个 Reactor 模块均成功。Aeron service 1572 项、0 失败、0 错误、1 跳过；benchmark 模块 314 项、0 失败、0 错误。资金幂等测试包含超过 13 万条历史身份后的快照恢复和重复入账拦截；资金账本、提交恢复、永续及交割/期权财务矩阵通过。基准功能测试的四档流水线校验均报告 `fundsDiff=0`、`unfinished=0`。首次跨模块运行因旧 `OrderAdmissionAllocationBenchmark` 调用已删除的准入接口而编译失败，修复后完整重跑通过。`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package -DskipTests` 退出 0。
 
 资金身份 JMH：使用 `product-core-benchmarks.jar`，筛选 `FundsCommandIndexBenchmark.(missingComparison|historicalComparison|repeatedWrite)`；1 fork、预热 2×1 秒、测量 3×1 秒、`-prof gc`，本机 Corretto 27 / macOS。三档分别为 55,964,620、15,437,661、14,977,255 ops/s；GC 归一化分配均约为 0.001 B/op 或更低，GC count 为 0。早期返回完整指纹对象的命中微基准记录约 112 B/op；生产幂等入口现直接比较四个 `long`，最终 `historicalComparison` 接近零分配。短窗口和宽置信区间只支持局部路径分配判断，不代表全交易链路零分配或生产吞吐提升。未测长期堆容量、真实 Aeron 网络/Archive 延迟、CPU 缓存竞争与三节点恢复。
+
+## 2026-11-03 M5 Pro 单成员永续持续满载
+
+部分验证：master 9088fc7cc，真实单节点、1 matcher、2 Lane、in-flight256；普通单97,599.983单/s，batch20 741,367.667单/s；各预热30s/稳定60s/排空，资金差0、终态一致、队列排空。JFR另测无DataLoss，等待/批推进热点突出，未证明Core物理饱和。恢复、长稳、精确分配及窗口对齐资源证据尚缺。详见 [报告](docs/validation/m5pro-perpetual-20261103/REPORT.md)。
