@@ -155,7 +155,9 @@ class ParallelRiskScanTest {
                 restored.startAccountLanes();
                 // 恢复状态上的持仓用户索引，使用恢复后的身份映射。
                 var restoredIndex = new PositionUserIndex(restoredState, TOPOLOGY);
+                var previousProgress = runtime.riskScan(ids.findSymbolIdValue(1)).laneProgress();
                 RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(2, 70), runtime, ids);
+                assertThat(runtime.riskScan(ids.findSymbolIdValue(1)).laneProgress()).isSameAs(previousProgress);
                 RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(2, 70), restored, restoredIds);
                 // 循环交替使用的 1、3、7 项预算，让不同 Lane 和用户阶段反复跨页。
                 int[] budgets = {1, 3, 7};

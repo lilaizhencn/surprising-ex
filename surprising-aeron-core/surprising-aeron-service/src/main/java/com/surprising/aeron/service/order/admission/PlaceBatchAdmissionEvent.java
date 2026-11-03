@@ -7,6 +7,7 @@ import com.surprising.aeron.service.account.LaneBalancePatches;
 import com.surprising.aeron.service.account.UserRuntime;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.order.OrderBatchPending;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
 import java.util.UUID;
@@ -33,7 +34,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     /** 本批业务命令 UUID，各项订单和冻结沿用该命令归属。 */
     private UUID commandId;
     /** Owner 交接的稳定批次输入及原命令槽入口，Lane 完成前不得复用。 */
-    private PlaceBatchIntentSource source;
+    private OrderBatchPending source;
     /** 调用方借出的逐项解析结果数组，Lane 按下标写入已决策订单输入。 */
     private ResolvedPlaceOrder[] orders;
     /** 与批项对齐的实际客户身份键，失败回退后逐项清零。 */
@@ -90,7 +91,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             long[] clientKeys,
             OrderRuntime[] admittedOrders,
             int itemCount, int laneId, int matcherShard,
-            TradingAccountRuntime runtime, MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
+            TradingAccountRuntime runtime, MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, OrderBatchPending source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || source == null || identities == null || clientKeys == null || admittedOrders == null || itemCount <= 0
                 || itemCount > orders.length || itemCount > clientKeys.length
@@ -162,7 +163,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                         if (position != null && position.signedQuantitySteps() != 0
                                 && (position.signedQuantitySteps() > 0) != (order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
                             // 当前方向的待成交量及只减仓占量汇总，用来识别必须走顺序撤单的冲突。
-                            var summary = lane.admissionOrderIndex(symbolId).inspect(userId, order.instrumentId(),
+                            var summary = lane.admissionSummary(symbolId, userId,
                                     order.positionSide(), order.side(), order.marginMode());
                             if (summary.reduceOnlyQuantity() > 0 && Math.addExact(Math.addExact(summary.pendingQuantity(), summary.reduceOnlyQuantity()), order.quantitySteps())
                                     > Math.absExact(position.signedQuantitySteps()))
@@ -172,7 +173,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     // 当前项通过统一账户准入后算出的所需冻结金额。
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                             runtime, lane, userId, order, decision.openInterestSteps(),
-                            lane.admissionOrderIndex(symbolId), key, positionKey,
+                            key, positionKey,
                             decision.context().lifecycleSettled(), decision.context().fundingInProgress());
                     runtime.placeOrderInLane(lane, userId, order, commandId,
                             requiredReservation, clientKeys[index], symbolId, assetId,
@@ -289,15 +290,4 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         return value;
     }
 
-    /**
-     * Owner 固定的批量下单输入与命令槽访问边界。
-     */
-    public interface PlaceBatchIntentSource {
-        com.surprising.aeron.protocol.PlaceOrderCommand intent(int index);
-        Decision decision(int index);
-        ResolvedPlaceOrder resolvedOrderSlot(int index);
-        OrderRuntime captureAdmittedOrder(int index, OrderRuntime order);
-        record Decision(RuntimeOrderAdmission.Context context, long openInterestSteps,
-                        int baseAssetId, int quoteAssetId, int settleAssetId) { }
-    }
 }

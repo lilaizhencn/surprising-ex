@@ -24,5 +24,16 @@ public class FundsCommandIndexBenchmark {
     }
     @Benchmark public void append() { index.put(new UUID(19, sequence++), fingerprint); }
     @Benchmark public Object historicalLookup() { return index.get(new UUID(19, (sequence++ & Long.MAX_VALUE) % 140_000)); }
+    @Benchmark public FundsCommandIndex.Match missingComparison() {
+        return index.match(20, sequence++, fingerprint);
+    }
+    @Benchmark public FundsCommandIndex.Match historicalComparison() {
+        long id = (sequence++ & Long.MAX_VALUE) % 140_000;
+        return index.match(19, id, fingerprint);
+    }
+    @Benchmark public void repeatedWrite() {
+        long id = (sequence++ & Long.MAX_VALUE) % 140_000;
+        index.put(19, id, fingerprint);
+    }
     @TearDown public void close() { index.close(); }
 }

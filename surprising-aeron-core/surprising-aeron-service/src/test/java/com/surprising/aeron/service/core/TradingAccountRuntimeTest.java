@@ -15,7 +15,8 @@ import com.surprising.aeron.service.core.change.RuntimeChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.admission.PendingReservationTracker;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
-import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource;
+import com.surprising.aeron.service.order.OrderBatchPending;
+import com.surprising.aeron.service.result.ResponseArena;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
@@ -89,29 +90,7 @@ class TradingAccountRuntimeTest {
                     new ResolvedPlaceOrder[1], new long[1],
                     new OrderRuntime[]{CoreStateTestFixtures.order(11, 7, 5, 2)},
                     1, lane, 0, state, changes, new RuntimeIdentityRegistry(),
-                    /* 所有方法调用都会失败的占位意图源，本测试只登记已完成批次回执，不能意外执行它。 */ new PlaceBatchIntentSource() {
-                        /**
-                         * 这个占位意图来源不应被执行，若调用立即失败。
-                         * @param index 占位意图源的方法下标，本测试不应真的执行该源
-                         */
-                        public com.surprising.aeron.protocol.PlaceOrderCommand intent(int index) { throw new AssertionError("unexpected execution"); }
-                        /**
-                         * 这个占位决策不应被求值，若调用立即失败。
-                         * @param index 占位意图源的方法下标，本测试不应真的执行该源
-                         */
-                        public Decision decision(int index) { throw new AssertionError("unexpected execution"); }
-                        /**
-                         * 本测试只登记完成回执，不应再索取解析槽，若调用立即失败。
-                         * @param index 占位意图源的方法下标，本测试不应真的执行该源
-                         */
-                        public ResolvedPlaceOrder resolvedOrderSlot(int index) { throw new AssertionError("unexpected execution"); }
-                        /**
-                         * 本测试不执行真实批次准入，不应捕获订单，若调用立即失败。
-                         * @param index 占位意图源的方法下标，本测试不应真的执行该源
-                         * @param order 占位捕获方法收到的原订单，或测试表 put 要写入的原订单
-                         */
-                        public OrderRuntime captureAdmittedOrder(int index, OrderRuntime order) { throw new AssertionError("unexpected execution"); }
-                    }, 0, 0);
+                    new OrderBatchPending(1, new ResponseArena()), 0, 0);
             // 通过反射仅用于本测试标记该原批次已完成的字段
             var complete = PlaceBatchAdmissionEvent.class.getDeclaredField("completed");
             complete.setAccessible(true);

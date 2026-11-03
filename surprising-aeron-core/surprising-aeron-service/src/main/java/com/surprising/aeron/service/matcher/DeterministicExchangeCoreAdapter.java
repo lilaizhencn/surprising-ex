@@ -530,16 +530,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      */
     public exchange.core2.core.common.MatcherResult cancelDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long aeronTimestamp, long userId, String instrumentId,
+            long aeronTimestamp, long userId, int symbolId,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
-                || instrumentId == null || instrumentId.isBlank() || target == null)
+                || symbolId <= 0 || target == null)
             throw new IllegalArgumentException("invalid direct matcher cancellation");
         validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp);
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, orderId, cancelNative(userId, orderId, instrumentId, target.nativeResultSlot(0)), target);
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, orderId, cancelNative(userId, orderId, symbolId, target.nativeResultSlot(0)), target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
@@ -565,11 +565,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      */
     public exchange.core2.core.common.MatcherResult replaceDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long aeronTimestamp, long userId, long originalOrderId, String instrumentId,
+            long aeronTimestamp, long userId, long originalOrderId, int symbolId,
             ResolvedPlaceOrder replacement,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
-                || instrumentId == null || instrumentId.isBlank() || replacement == null || target == null)
+                || symbolId <= 0 || replacement == null || target == null
+                || replacement.instrument().instrumentIdValue() != symbolId)
             throw new IllegalArgumentException("invalid direct matcher replacement");
         validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp);
         // 当前线程可使用的独占命令上下文。
@@ -577,7 +578,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         try {
             // 先撤旧单产生的原生结果，占用独立槽避免新单覆盖。
             exchange.core2.core.common.MatcherResult cancellation =
-                    cancelNative(userId, originalOrderId, instrumentId, target.replacementCancellationSlot());
+                    cancelNative(userId, originalOrderId, symbolId, target.replacementCancellationSlot());
             // 撤旧单接受后才产生的新单结果；旧单未接受时直接复用撤单结果。
             exchange.core2.core.common.MatcherResult result = nativeAccepted(cancellation)
                     ? placeNative(userId, replacement, target.nativeResultSlot(0)) : cancellation;
@@ -718,13 +719,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param instrumentId 外部永久数字品种字符串
      */
     public exchange.core2.core.common.MatcherResult cancelDirectPrefix(
-            long aeronTimestamp, long userId, long orderId, String instrumentId) {
-        if (instrumentId == null || instrumentId.isBlank())
+            long aeronTimestamp, long userId, long orderId, int symbolId) {
+        if (symbolId <= 0)
             throw new IllegalArgumentException("invalid direct matcher cancellation prefix");
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return cancelNative(userId, orderId, instrumentId, scope.prefixResult);
+            return cancelNative(userId, orderId, symbolId, scope.prefixResult);
         } finally {
             scope.aeronTimestamp = 0;
             scope.active = false;
@@ -1040,7 +1041,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 continue;
             }
             try {
-                var result = cancelNative(order.userId(), order.orderId(), order.instrumentId());
+                var result = cancelNative(order.userId(), order.orderId(), order.symbolId());
                 matcherEvidence.recordControlNative(topology.matcherShardId(result.symbol()), result.sequence());
                 boolean accepted = result.resultCode() == CommandResultCode.SUCCESS
                         || result.resultCode() == CommandResultCode.ACCEPTED;
@@ -1092,9 +1093,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param orderId 当前命令关联的订单号，证据校验允许零
      * @param instrumentId 外部永久数字品种字符串
      */
-    private CoreMatchingResult cancelControlNative(long userId, long orderId, String instrumentId) {
+    private CoreMatchingResult cancelControlNative(long userId, long orderId, int symbolId) {
         // 当前控制撤单的原生结果，先按真实引擎分片登记原生序号。
-        var result = cancelNative(userId, orderId, instrumentId);
+        var result = cancelNative(userId, orderId, symbolId);
         matcherEvidence.recordControlNative(topology.matcherShardId(result.symbol()), result.sequence());
         return CoreMatchingResult.fromNative(result);
     }
@@ -1105,9 +1106,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param orderId 当前命令关联的订单号，证据校验允许零
      * @param instrumentId 外部永久数字品种字符串
      */
-    private exchange.core2.core.common.MatcherResult cancelNative(long userId, long orderId, String instrumentId) {
-        // 当前品种的永久原生编号。
-        int symbolId = ensureSymbol(instrumentId);
+    private exchange.core2.core.common.MatcherResult cancelNative(long userId, long orderId, int symbolId) {
+        symbolId = ensureSymbol(symbolId);
         recordUser(userId);
         return engine(symbolId).cancel(currentCommandScope().aeronTimestamp, orderId, symbolId, userId);
     }
@@ -1121,8 +1121,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      */
     private exchange.core2.core.common.MatcherResult cancelNative(long userId, long orderId, String instrumentId,
             exchange.core2.core.common.MatcherResult target) {
-        // 当前品种的永久原生编号。
-        int symbolId = ensureSymbol(instrumentId);
+        return cancelNative(userId, orderId, permanentInstrumentId(instrumentId), target);
+    }
+
+    private exchange.core2.core.common.MatcherResult cancelNative(long userId, long orderId, int symbolId,
+            exchange.core2.core.common.MatcherResult target) {
+        symbolId = ensureSymbol(symbolId);
         recordUser(userId);
         return engine(symbolId).cancelInto(target, currentCommandScope().aeronTimestamp, orderId, symbolId, userId);
     }
@@ -1156,13 +1160,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param orderId 当前命令关联的订单号，证据校验允许零
      * @param instrumentId 外部永久数字品种字符串
      */
-    public CoreMatchingResult cancelControlOrder(long timestamp, long userId, long orderId, String instrumentId) {
+    public CoreMatchingResult cancelControlOrder(long timestamp, long userId, long orderId, int symbolId) {
         if (timestamp < 0 || userId <= 0 || orderId <= 0)
             throw new IllegalArgumentException("invalid control cancellation");
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(timestamp);
         try {
-            return cancelControlNative(userId, orderId, instrumentId);
+            return cancelControlNative(userId, orderId, symbolId);
         } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
             matcherFailure.compareAndSet(null, failure);
             throw failure;
@@ -1736,12 +1740,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param userId 请求或对账订单所属用户号
      * @param instrumentId 外部永久数字品种字符串
      */
-    public record CancellationOrder(long orderId, long userId, String instrumentId) {
+    public record CancellationOrder(long orderId, long userId, int symbolId) {
+        public CancellationOrder(long orderId, long userId, String instrumentId) {
+            this(orderId, userId, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId));
+        }
         /**
          * 检查订单号和用户号为正，品种字符串非空白；不在这里解析或规范品种编号。
          */
         public CancellationOrder {
-            if (orderId <= 0 || userId <= 0 || instrumentId == null || instrumentId.isBlank()) {
+            if (orderId <= 0 || userId <= 0 || symbolId <= 0) {
                 throw new IllegalArgumentException("invalid cancellation order");
             }
         }

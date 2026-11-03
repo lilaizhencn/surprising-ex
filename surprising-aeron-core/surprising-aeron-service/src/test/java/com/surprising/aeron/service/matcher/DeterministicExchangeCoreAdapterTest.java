@@ -98,10 +98,10 @@ class DeterministicExchangeCoreAdapterTest {
             var id = new java.util.UUID(7, 3);
             // 已按当前命令准备好的原结算事件目标。
             var target = preparePlace(adapter, 3, id, 1000, 7, order, List.of(1L, 2L));
-            adapter.cancelDirectPrefix(1000, 7, 1, "1");
+            adapter.cancelDirectPrefix(1000, 7, 1, 1);
             target.recordDirectPreCancellation(1);
             // 第二笔前置撤单失败时取得的原生回执。
-            var failure = adapter.cancelDirectPrefix(1000, 7, 2, "1");
+            var failure = adapter.cancelDirectPrefix(1000, 7, 2, 1);
             adapter.publishDirectPrefixFailure(adapter.matcherShardId("1"), 3, id, 3, failure, target);
             assertThat(target.accepted()).isFalse();
             assertThat(target.plan().preCancellationCount()).isEqualTo(1);
@@ -324,12 +324,12 @@ class DeterministicExchangeCoreAdapterTest {
             for (/* 原命令 UUID，或构造控制分片前置订单时的普通订单编号。 */ long id = 1; id <= 16; id++) placeDirect(adapter, 7, bid(id, first, 90));
             placeDirect(adapter, 8, bid(17, second, 90));
             // 第一实际订单簿分片上的控制撤单原生结果。
-            var firstNative = adapter.cancelControlOrder(1000, 7, 16, first);
+            var firstNative = adapter.cancelControlOrder(1000, 7, 16, Integer.parseInt(first));
             // 第一控制撤单完成后的业务证据回执。
             var a = adapter.completeControlCancellations(18, new java.util.UUID(7, 18), 1000,
                     List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(16, 7, first)), List.of(firstNative));
             // 另一实际订单簿分片上的控制撤单原生结果。
-            var secondNative = adapter.cancelControlOrder(1000, 8, 17, second);
+            var secondNative = adapter.cancelControlOrder(1000, 8, 17, Integer.parseInt(second));
             // 第二控制撤单完成后的业务证据回执。
             var b = adapter.completeControlCancellations(19, new java.util.UUID(8, 19), 1000,
                     List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(17, 8, second)), List.of(secondNative));
@@ -401,7 +401,7 @@ class DeterministicExchangeCoreAdapterTest {
             var id = new java.util.UUID(7, 3);
             // 已按当前命令准备好的原结算事件目标。
             var target = preparePlace(adapter, 3, id, 1000, 7, command, List.of(1L));
-            assertThat(adapter.cancelDirectPrefix(1000, 7, 1, "1").resultCode())
+            assertThat(adapter.cancelDirectPrefix(1000, 7, 1, 1).resultCode())
                     .isEqualTo(CommandResultCode.SUCCESS);
             target.recordDirectPreCancellation(1);
             adapter.placeDirect(adapter.matcherShardId("1"), 3, id.getMostSignificantBits(), id.getLeastSignificantBits(), 1000, 7, command, target);

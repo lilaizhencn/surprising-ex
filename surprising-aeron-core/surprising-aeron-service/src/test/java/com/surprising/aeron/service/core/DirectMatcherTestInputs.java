@@ -147,7 +147,7 @@ public final class DirectMatcherTestInputs {
                     adapter.matcherShardId(instrumentId), new RuntimeIdentityRegistry(), timestamp, 0);
             target.reserveMatcherPublication();
             adapter.cancelDirect(adapter.matcherShardId(instrumentId), sequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
-                    timestamp, userId, instrumentId, target);
+                    timestamp, userId, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), target);
             return target;
         }
     }

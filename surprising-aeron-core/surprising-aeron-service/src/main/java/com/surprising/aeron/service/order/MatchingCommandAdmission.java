@@ -35,7 +35,8 @@ public final class MatchingCommandAdmission {
     final TradingCoreRuntime owner;
 
     /** 按在途 Core 序号保留的强平或结算范围；普通订单不在此另存一份范围。 */
-    LongObjectHashMap<List<LifecycleScope>> pendingLifecycleScopes;
+    LongObjectHashMap<PendingLifecycleRanges> pendingLifecycleScopes;
+    private final java.util.ArrayDeque<PendingLifecycleRanges> lifecycleRangePool = new java.util.ArrayDeque<>();
 
     /** 当前已冻结而尚未正式登记的触发子单，不是权威订单表。 */
     final List<QueuedTriggerMatching> queuedMatching = new ArrayList<>();
@@ -558,9 +559,7 @@ public final class MatchingCommandAdmission {
             batchScopeUsers[batchScopeCount] = liquidation.userId();
             batchScopeSymbols[batchScopeCount++] = liquidationSymbol;
             ensureLifecycleScopeAvailable(liquidation.userId(), liquidationSymbol,
-                    new LifecycleScope(false, liquidation.userId(),
-                            liquidationSymbol,
-                            action.liquidationId(), true, false));
+                    false, action.liquidationId(), true, false);
             batchChangedUsers.add(liquidation.userId());
             if (remaining > 0) {
                 // 按剩余预算取得的当前强平撤单页
@@ -621,51 +620,45 @@ public final class MatchingCommandAdmission {
      */
     void rejectLifecycleOverlap(CoreMessage message, CommandSlot.Operation operation,
                                         DecodedMatchingCommand decodedCommand) {
-        if (operation == CommandSlot.Operation.LIQUIDATION || operation == CommandSlot.Operation.SETTLEMENT) {
-            // 本条生命周期命令解析出的完整冲突检查范围
-            LifecycleScope scope = lifecycleScope(message, operation, decodedCommand);
-            ensureLifecycleScopeAvailable(scope.userId(), scope.instrumentId(), scope);
-        } else {
-            ensureLifecycleScopeAvailable(message.header().userId(),
-                    matchingSymbol(operation, decodedCommand), null);
-        }
+        if (operation == CommandSlot.Operation.LIQUIDATION) {
+            var command = decodedCommand.liquidation();
+            var route = owner.liquidationIndex().route(command.liquidationId());
+            ensureLifecycleScopeAvailable(route == null ? 0 : route.userId(),
+                    route == null ? "" : route.instrumentId(), false,
+                    command.liquidationId(), true, false);
+        } else if (operation == CommandSlot.Operation.SETTLEMENT) {
+            var command = decodedCommand.settlement();
+            ensureLifecycleScopeAvailable(0, command.instrumentId(), true,
+                    command.settlementId(), true, false);
+        } else ensureLifecycleScopeAvailable(message.header().userId(),
+                matchingSymbol(operation, decodedCommand), false, 0, false, true);
     }
 
     /**
      * 空品种直接结束。生命周期操作检查全部在途命令，普通操作只查已保留生命周期索引；同时拒绝未完成资金费和不兼容结算，核对已提交强平冲突，允许同编号结算按原规则续页。
      * @param userId 操作所属用户，生命周期结算可用零代表全用户
      * @param instrumentId 待检查冲突的品种名称
-     * @param candidate 要检查的完整生命周期范围，普通订单原语入口传空
+     * @param settlement 是否覆盖整个品种
+     * @param lifecycleId 当前强平或交割编号
+     * @param lifecycle 当前命令是否为生命周期操作
+     * @param orderChanging 当前命令是否改变普通订单
      */
-    private void ensureLifecycleScopeAvailable(long userId, String instrumentId, LifecycleScope candidate) {
+    private void ensureLifecycleScopeAvailable(long userId, String instrumentId, boolean settlement,
+            long lifecycleId, boolean lifecycle, boolean orderChanging) {
         if (instrumentId.isBlank()) return;
-        // 当前候选是否属于生命周期操作
-        boolean lifecycle = candidate != null && candidate.lifecycle();
-        // 当前候选是否覆盖整个品种结算
-        boolean settlement = candidate != null && candidate.settlement();
-        // 当前候选生命周期编号，普通订单用零
-        long lifecycleId = candidate == null ? 0 : candidate.lifecycleId();
-        // 当前候选是否会改变普通订单
-        boolean orderChanging = candidate == null || candidate.orderChanging();
         if (lifecycle) {
             owner.pendingMatching().forEach(/* 当前新借、恢复或参与范围比较的命令槽 */ pending -> {
-                if (pendingLifecycleConflicts(candidate, pending)) {
+                if (pendingLifecycleConflicts(userId, instrumentId, settlement, pending)) {
                     throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                             "matching lifecycle scope is in progress");
                 }
             });
         } else if (!pendingLifecycleScopes.isEmpty()) {
-            for (List<LifecycleScope> /* 某个在途生命周期命令已经保留的范围列表 */ scopes : pendingLifecycleScopes.values()) {
-                for (/* 当前列表或范围缓冲下标 */ int i = 0; i < scopes.size(); i++) {
-                    // 当前被比较的单个生命周期范围
-                    LifecycleScope scope = scopes.get(i);
-                    if (instrumentId.equals(scope.instrumentId()) && scope.lifecycle()
-                            && (settlement || scope.settlement() || userId == scope.userId())) {
-                        throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
-                                "matching lifecycle scope is in progress");
-                    }
-                }
-            }
+            int permanentSymbolId = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
+            for (PendingLifecycleRanges scopes : pendingLifecycleScopes.values())
+                if (scopes.conflicts(permanentSymbolId, userId, settlement))
+                    throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
+                            "matching lifecycle scope is in progress");
         }
         // 品种名称查到的可空永久编号
         Integer candidateSymbolId = owner.identities().findSymbolId(instrumentId);
@@ -714,99 +707,107 @@ public final class MatchingCommandAdmission {
         return false;
     }
 
-    /**
-     * 普通待项比较一个范围，批次强平则逐动作比较所有范围，任一冲突即返回真。
-     * @param candidate 要检查的完整生命周期范围，普通订单原语入口传空
-     * @param pending 当前仍在槽池生命周期内的命令
-     */
-    boolean pendingLifecycleConflicts(LifecycleScope candidate, CommandSlot pending) {
-        if (pending.operation() != CommandSlot.Operation.LIQUIDATION_BATCH) {
-            return conflicts(candidate, lifecycleScope(pending));
-        }
-        // 当前槽内的已解码批次强平请求
-        var batch = pending.decodedCommand().liquidationBatch();
-        return batch.actions().stream().map(/* 当前批次强平动作，含用户、品种及撤单游标 */ action -> new LifecycleScope(false, action.userId(), action.instrumentId(),
-                        action.liquidationId(), true, false)).anyMatch(/* 当前被比较的单个生命周期范围 */ scope -> conflicts(candidate, scope));
-    }
-
-    /**
-     * 仅为强平和到期结算保留按 Core 序号索引的范围；批次登记全部动作，普通订单不复制成持久范围对象。
-     * @param pending 当前仍在槽池生命周期内的命令
-     */
-    void registerPendingLifecycle(CommandSlot pending) {
-        // 某个在途生命周期命令已经保留的范围列表
-        List<LifecycleScope> scopes = switch (pending.operation()) {
-            case LIQUIDATION, SETTLEMENT -> List.of(lifecycleScope(pending));
-            case LIQUIDATION_BATCH -> pending.decodedCommand().liquidationBatch()
-                    .actions().stream()
-                    .map(/* 当前批次强平动作，含用户、品种及撤单游标 */ action -> new LifecycleScope(false, action.userId(), action.instrumentId(),
-                            action.liquidationId(), true, false))
-                    .toList();
-            default -> List.of();
-        };
-        if (!scopes.isEmpty()) pendingLifecycleScopes.put(pending.sequence(), scopes);
-    }
-
-    /**
-     * 单笔强平从路由取得用户和合约，路由缺失用空范围；结算覆盖该品种全部用户；普通订单只描述用户和品种并标记会改订单。
-     * @param message 当前完整 Core 消息
-     * @param operation 当前撮合操作类别
-     * @param decodedCommand 已经解码的类型化命令输入
-     */
-    LifecycleScope lifecycleScope(CoreMessage message, CommandSlot.Operation operation,
-                                          DecodedMatchingCommand decodedCommand) {
-        return switch (operation) {
-            case LIQUIDATION -> {
-                // 当前原命令或按操作取出的解码请求，具体类型见声明
-                var command = decodedCommand.liquidation();
-                // 现有强平计划的可空路由
-                var liquidation = owner.liquidationIndex().route(command.liquidationId());
-                yield liquidation == null ? new LifecycleScope(false, 0, "", 0, true, false)
-                        : new LifecycleScope(false, liquidation.userId(), liquidation.instrumentId(),
-                                command.liquidationId(), true, false);
-            }
-            case SETTLEMENT -> new LifecycleScope(true, 0, decodedCommand.settlement().instrumentId(),
-                    decodedCommand.settlement().settlementId(), true, false);
-            default -> new LifecycleScope(false, message.header().userId(),
-                    matchingSymbol(operation, decodedCommand), 0, false, true);
-        };
-    }
-
-    /**
-     * 从命令槽生成范围；批次入口仅返回第一项，涉及全部动作的冲突判断须用 pendingLifecycleConflicts。
-     * @param pending 当前仍在槽池生命周期内的命令
-     */
-    LifecycleScope lifecycleScope(CommandSlot pending) {
+    /** 生命周期候选与在途命令比较；普通订单只需用户和品种，批次逐动作比较。 */
+    boolean pendingLifecycleConflicts(long userId, String instrumentId, boolean settlement, CommandSlot pending) {
+        if (instrumentId.isBlank()) return false;
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH) {
-            // 当前批次强平动作，含用户、品种及撤单游标
-            var action = pending.decodedCommand().liquidationBatch().actions().getFirst();
-            return new LifecycleScope(false, action.userId(), action.instrumentId(), action.liquidationId(), true, false);
+            for (var action : pending.decodedCommand().liquidationBatch().actions())
+                if (sameScope(userId, instrumentId, settlement,
+                        action.userId(), action.instrumentId(), false)) return true;
+            return false;
         }
-        return lifecycleScope(pending.command(), pending.operation(), pending.decodedCommand());
+        if (pending.operation() == CommandSlot.Operation.SETTLEMENT)
+            return sameScope(userId, instrumentId, settlement, 0,
+                    pending.decodedCommand().settlement().instrumentId(), true);
+        if (pending.operation() == CommandSlot.Operation.LIQUIDATION) {
+            var route = owner.liquidationIndex().route(pending.decodedCommand().liquidation().liquidationId());
+            return route != null && sameScope(userId, instrumentId, settlement,
+                    route.userId(), route.instrumentId(), false);
+        }
+        return sameScope(userId, instrumentId, settlement,
+                pending.command().header().userId(), matchingSymbol(pending.operation(), pending.decodedCommand()), false);
     }
 
-    /**
-     * 只有同非空品种且至少一方属于生命周期才可能冲突；全品种结算或同用户视为范围相交。
-     * @param left 左侧待比较资源范围
-     * @param right 右侧待比较资源范围
-     */
-    static boolean conflicts(LifecycleScope left, LifecycleScope right) {
-        if (left.instrumentId().isBlank() || !left.instrumentId().equals(right.instrumentId())
-                || (!left.lifecycle() && !right.lifecycle())) return false;
-        return left.settlement() || right.settlement() || left.userId() == right.userId();
+    private static boolean sameScope(long leftUser, String leftSymbol, boolean leftSettlement,
+            long rightUser, String rightSymbol, boolean rightSettlement) {
+        return leftSymbol.equals(rightSymbol) && (leftSettlement || rightSettlement || leftUser == rightUser);
     }
 
-    /**
-     * 用于判断在途操作能否交错的资源范围，只描述用户、品种和生命周期身份，不执行状态修改，也没有额外构造校验。
-     * @param settlement 是否为覆盖整个品种的到期结算
-     * @param userId 操作所属用户，生命周期结算可用零代表全用户
-     * @param instrumentId 待检查冲突的品种名称
-     * @param lifecycleId 当前强平或到期结算编号，普通订单为零
-     * @param lifecycle 是否属于强平或到期等生命周期操作
-     * @param orderChanging 是否属于会改变订单的普通操作
-     */
-    record LifecycleScope(boolean settlement, long userId, String instrumentId, long lifecycleId,
-                                  boolean lifecycle, boolean orderChanging) {
+    /** 只把强平和交割的原语范围登记到在途索引；普通订单按原命令槽读取。 */
+    void registerPendingLifecycle(CommandSlot pending) {
+        PendingLifecycleRanges ranges;
+        switch (pending.operation()) {
+            case LIQUIDATION -> {
+                var route = owner.liquidationIndex().route(pending.decodedCommand().liquidation().liquidationId());
+                if (route == null) return;
+                ranges = borrowLifecycleRanges(1);
+                ranges.add(route.userId(), route.instrumentId(), false);
+            }
+            case SETTLEMENT -> {
+                ranges = borrowLifecycleRanges(1);
+                ranges.add(0, pending.decodedCommand().settlement().instrumentId(), true);
+            }
+            case LIQUIDATION_BATCH -> {
+                var actions = pending.decodedCommand().liquidationBatch().actions();
+                ranges = borrowLifecycleRanges(actions.size());
+                for (var action : actions) ranges.add(action.userId(), action.instrumentId(), false);
+            }
+            default -> { return; }
+        }
+        if (ranges.count != 0) pendingLifecycleScopes.put(pending.sequence(), ranges);
+    }
+
+    private PendingLifecycleRanges borrowLifecycleRanges(int capacity) {
+        PendingLifecycleRanges ranges = lifecycleRangePool.pollFirst();
+        if (ranges == null) return new PendingLifecycleRanges(capacity);
+        ranges.ensureCapacity(capacity);
+        return ranges;
+    }
+
+    void releasePendingLifecycle(long sequence) {
+        PendingLifecycleRanges ranges = pendingLifecycleScopes.remove(sequence);
+        if (ranges == null) return;
+        ranges.clear();
+        if (lifecycleRangePool.size() < 128) lifecycleRangePool.addFirst(ranges);
+    }
+
+    /** 在途生命周期范围只存判冲突需要的原语列；同一 Core 序号退休时整体释放。 */
+    static final class PendingLifecycleRanges {
+        private int[] symbols;
+        private long[] users;
+        private boolean[] settlements;
+        private int count;
+
+        PendingLifecycleRanges(int capacity) {
+            symbols = new int[capacity];
+            users = new long[capacity];
+            settlements = new boolean[capacity];
+        }
+
+        void ensureCapacity(int capacity) {
+            if (symbols.length >= capacity) return;
+            symbols = java.util.Arrays.copyOf(symbols, capacity);
+            users = java.util.Arrays.copyOf(users, capacity);
+            settlements = java.util.Arrays.copyOf(settlements, capacity);
+        }
+
+        void clear() { count = 0; }
+
+        void add(long userId, String instrumentId, boolean settlement) {
+            if (instrumentId.isBlank()) return;
+            int symbolId = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
+            int index = count++;
+            symbols[index] = symbolId;
+            users[index] = userId;
+            settlements[index] = settlement;
+        }
+
+        boolean conflicts(int symbolId, long userId, boolean settlement) {
+            for (int index = 0; index < count; index++)
+                if (symbols[index] == symbolId
+                        && (settlement || settlements[index] || users[index] == userId)) return true;
+            return false;
+        }
     }
 
     /**
@@ -882,9 +883,18 @@ public final class MatchingCommandAdmission {
     /**
      * 新建空生命周期范围索引；会替换原索引，只能在初始化或恢复约定边界调用。
      */
-    public void initializeLifecycleScopes() { pendingLifecycleScopes = new LongObjectHashMap<>(); }
+    public void initializeLifecycleScopes() {
+        pendingLifecycleScopes = new LongObjectHashMap<>();
+        lifecycleRangePool.clear();
+    }
     /**
      * 清空已初始化的范围索引，保留容器供后续命令复用。
      */
-    public void clearLifecycleScopes() { pendingLifecycleScopes.clear(); }
+    public void clearLifecycleScopes() {
+        for (PendingLifecycleRanges ranges : pendingLifecycleScopes.values()) {
+            ranges.clear();
+            if (lifecycleRangePool.size() < 128) lifecycleRangePool.addFirst(ranges);
+        }
+        pendingLifecycleScopes.clear();
+    }
 }

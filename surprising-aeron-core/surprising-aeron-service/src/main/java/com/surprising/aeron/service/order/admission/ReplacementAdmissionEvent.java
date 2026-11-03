@@ -96,7 +96,7 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
             long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
             // 排除原订单占用后算出的新订单应预留金额，直接透传已核验原单，消除多余哈希表查找。
             long required = RuntimeOrderAdmission.requiredReplacementReservationPrepared(
-                    runtime, lane, userId, this, openInterestSteps, lane.admissionOrderIndex(symbolId()),
+                    runtime, lane, userId, this, openInterestSteps,
                     original, identities.findClientKeyValueInLane(lane, userId, clientOrderId()), positionKey,
                     decision.lifecycleSettled(), decision.fundingInProgress());
             if (amend != null && runtime.productLine() == com.surprising.product.api.ProductLine.SPOT) {

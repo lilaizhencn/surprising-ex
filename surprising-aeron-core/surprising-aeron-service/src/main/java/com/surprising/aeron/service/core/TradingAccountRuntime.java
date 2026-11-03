@@ -53,7 +53,7 @@ import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.order.admission.PendingReservationTracker;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
-import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource;
+import com.surprising.aeron.service.order.OrderBatchPending;
 import com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.LaneOrderResultTarget;
@@ -1665,7 +1665,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             long coreSequence, long userId, java.util.UUID commandId,
             ResolvedPlaceOrder[] orders, long[] clientKeys,
             OrderRuntime[] admittedOrders, int itemCount,
-            int matcherShard, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source,
+            int matcherShard, RuntimeIdentityRegistry identities, OrderBatchPending source,
             long timestamp, long position) {
         assertOwner();
         // 当前按拓扑选中或从掩码取出的账户 Lane 编号
@@ -6455,7 +6455,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         long positionKey = identities.findPositionKeyValueInLane(lane, userId,
                 command.instrument(), command.positionSide());
         long required = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.requiredReservationPrepared(this, lane, userId, command,
-                openInterestSteps, lane.admissionOrderIndex(command.symbolId()), clientKey, positionKey, lifecycleSettled, fundingInProgress);
+                openInterestSteps, clientKey, positionKey, lifecycleSettled, fundingInProgress);
         placePreparedOrder(userId, command, commandId, required, clientKey, command.symbolId(), assetId);
         lane.markPendingReservation(command.orderId(), coreSequence);
         com.surprising.aeron.service.order.state.OrderRuntime receipt = laneDelta(lane.laneId()).orders().get(command.orderId());

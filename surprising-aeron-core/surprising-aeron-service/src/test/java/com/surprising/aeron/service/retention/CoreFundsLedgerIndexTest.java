@@ -4,8 +4,6 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -21,8 +19,6 @@ import static org.assertj.core.api.Assertions.*;
 class CoreFundsLedgerIndexTest {
     /** 固定复制业务毫秒时间。 */
     private static final long TIME = 1_700_000_000_000L;
-    /** 当前测试临时修改的资金索引目录 JVM 属性名。 */
-    private static final String INDEX_DIRECTORY = "surprising.aeron.funds-index-directory";
     /** 本实例命令来源递增计数，在两个 Core 间也保持唯一。 */
     private long sequence;
 
@@ -197,48 +193,6 @@ class CoreFundsLedgerIndexTest {
             duplicate(core, request);
             assertThat(core.appliedCommandCount()).isZero();
             core.assertHealthy();
-        }
-    }
-
-    /**
-     * 临时将目录配置指向文件，制造 Owner 首次开库失败；要求无最终结果及应用计数、Core 健康失败，关闭传播记录的故障并清测试文件。不以此断言余额已经回滚。
-     */
-    @Test @Timeout(15)
-    void indexWriteFailureStopsBeforeTerminalResponseAndDoesNotBecomeBusinessRejection() throws Exception {
-        // 本次写库故障测试开始前的原目录属性
-        String previous = System.getProperty(INDEX_DIRECTORY);
-        // 创建故障文件的配置或系统临时根目录
-        Path root = Path.of(previous == null ? System.getProperty("java.io.tmpdir") : previous);
-        Files.createDirectories(root);
-        // 故意作为资金索引根使用的普通文件，finally 删除
-        Path invalidRoot = Files.createTempFile(root, "funds-index-invalid-root-", ".file");
-        try {
-            // 配置在构造时绑定，必须在创建 Core 前注入故障目录。
-            System.setProperty(INDEX_DIRECTORY, invalidRoot.toString());
-            var core = new TradingCoreRuntime(ProductLine.SPOT);
-            try {
-                core.activate();
-                long publicationBefore = core.commits.publication.publishedSequence();
-                // 当前要检查、重试或等待的真实命令
-                var request = command(core, CoreMessageType.ADJUST_BALANCE, 7,
-                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
-                assertThat(core.apply(request)).isNull();
-                assertThatThrownBy(() -> drain(core)).isInstanceOf(IllegalStateException.class)
-                        .hasMessageContaining("funds command index unavailable");
-                assertThat(core.appliedCommandCount()).isZero();
-                assertThat(core.commits.publication.publishedSequence()).isGreaterThan(publicationBefore);
-                assertThat(core.directCommand.active()).isTrue();
-                assertThat(core.resultLedger().get(request.header().commandId())).isNull();
-                assertThatThrownBy(core::assertHealthy).isInstanceOf(IllegalStateException.class);
-            } finally {
-                assertThatThrownBy(core::close).isInstanceOf(IllegalStateException.class)
-                        .hasMessageContaining("Core workers stopped with a failure")
-                        .hasRootCauseInstanceOf(java.nio.file.FileAlreadyExistsException.class);
-            }
-        } finally {
-            if (previous == null) System.clearProperty(INDEX_DIRECTORY);
-            else System.setProperty(INDEX_DIRECTORY, previous);
-            Files.deleteIfExists(invalidRoot);
         }
     }
 

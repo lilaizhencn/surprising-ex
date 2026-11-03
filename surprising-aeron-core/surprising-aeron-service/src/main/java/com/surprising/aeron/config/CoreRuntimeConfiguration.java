@@ -18,7 +18,6 @@ public record CoreRuntimeConfiguration(
         @DefaultValue("256") int matcherGroupSize,
         @DefaultValue("10000") int matcherGroupNanos,
         @DefaultValue("1024") int laneInitialEntities,
-        java.nio.file.Path fundsIndexDirectory,
         @DefaultValue SnapshotLimits snapshot) {
 
     public CoreRuntimeConfiguration {
@@ -34,8 +33,6 @@ public record CoreRuntimeConfiguration(
         requireRange("matcher-group-nanos", matcherGroupNanos, 1, Integer.MAX_VALUE);
         requireRange("lane-initial-entities", laneInitialEntities, 16, 1 << 20);
         if (snapshot == null) throw new IllegalArgumentException("snapshot limits are required");
-        if (fundsIndexDirectory == null)
-            fundsIndexDirectory = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"));
     }
 
     private static void requireRange(String name, int value, int min, int max) {

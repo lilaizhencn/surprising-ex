@@ -140,7 +140,7 @@ class LaneAdmissionReuseTest {
     private static void summary(AccountLaneState lane, long user, int symbol, CorePositionSide position,
             CoreOrderSide side, CoreMarginMode margin, long pending, long reduce, int count) {
         // 本次 inspect 的复用结果，下一次调用前立即完成三个断言。
-        var result = lane.admissionOrderIndex(symbol).inspect(user, "1", position, side, margin);
+        var result = lane.admissionSummary(symbol, user, position, side, margin);
         assertThat(result.pendingQuantity()).isEqualTo(pending);
         assertThat(result.reduceOnlyQuantity()).isEqualTo(reduce);
         assertThat(result.marginModeCount()).isEqualTo(count);

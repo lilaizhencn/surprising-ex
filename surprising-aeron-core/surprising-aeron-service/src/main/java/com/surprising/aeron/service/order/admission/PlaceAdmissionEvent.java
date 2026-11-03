@@ -169,7 +169,7 @@ public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
                 // 统一账户检查及产品公式算出的本订单应预留金额，随后交账户写入执行。
                 long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                         runtime, lane, userId, this, openInterestSteps,
-                        lane.admissionOrderIndex(symbolId), preparedClientKey, positionKey,
+                        preparedClientKey, positionKey,
                         lifecycleSettled, fundingInProgress);
                 // 当前已有持仓，逆向非只减仓新单可能需要先撤冲突平仓委托。
                 PositionRuntime currentPosition = positionKey == 0 ? null : lane.position(positionKey);

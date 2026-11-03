@@ -39,7 +39,6 @@ public final class SectionedCoreSnapshotParser {
      * @param expectedProductLine 调用方明确要求恢复或检查的产品线
      */
     static Components parse(byte[][] payloads, ProductLine expectedProductLine,
-            java.nio.file.Path fundsIndexDirectory,
             com.surprising.aeron.config.LaneTopology deploymentTopology) {
         // 从第一段读取且产品线已核对的内部元数据。
         HeaderManifest manifest = SectionedCoreSnapshotValidation.parseHeader(payloads[0], expectedProductLine);
@@ -72,7 +71,7 @@ public final class SectionedCoreSnapshotParser {
         long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
                 .order(ByteOrder.LITTLE_ENDIAN).getLong();
         // 最后解码的终态保留索引，恢复或查看清单的调用方负责结束其生命周期。
-        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7], fundsIndexDirectory);
+        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
         return new Components(manifest.productLine(), manifest.appliedCommandCount(),
                 commandResults, sourceSequences, matcherSnapshot, tradingState, feePolicies,
                 pendingTransfers, retention, accountLanes, manifest, checksum);

@@ -17,7 +17,6 @@ surprising:
     matcher-group-size: 256
     matcher-group-nanos: 10000
     lane-initial-entities: 1024
-    funds-index-directory: ${java.io.tmpdir}
     snapshot:
       max-bytes: 1073741824
     # 旧部署环境名只在此处显式映射，实际装配仍服从 Spring 配置优先级。

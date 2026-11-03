@@ -50,6 +50,7 @@ import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.result.CommandResultBuilder;
 import com.surprising.aeron.service.result.CommandResultLedger;
 import com.surprising.aeron.service.result.CommandResultLedger.StoredResult;
+import com.surprising.aeron.service.result.FundsCommandIndex;
 import com.surprising.aeron.service.result.ResponseArena;
 import com.surprising.aeron.service.result.SourceSequenceIndex;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
@@ -699,7 +700,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public TradingCoreRuntime(ProductLine productLine, LaneTopology startupTopology,
             CoreRuntimeConfiguration configuration) {
         this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
-                TradingCoreState.empty(productLine), new TerminalStateRetention(configuration.fundsIndexDirectory()), null,
+                TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(),
                 java.util.Objects.requireNonNull(startupTopology, "startupTopology"), configuration);
     }
@@ -1127,13 +1128,17 @@ public final class TradingCoreRuntime implements AutoCloseable {
             sourceKey = new SourceKey(message.header().source(), message.header().sourceId());
         }
         if (isFundsIdempotencyCommand(message.header().messageType())) {
-            CoreResponse fundsReplay = fundsReplayResponse(fingerprint, terminalRetention.fundsCommand(
-                    message.header().commandIdMsb(), message.header().commandIdLsb()));
+            CoreResponse fundsReplay = fundsReplayResponse(terminalRetention.fundsCommandMatch(
+                    message.header().commandIdMsb(), message.header().commandIdLsb(), fingerprint));
             if (fundsReplay != null) return fundsReplay;
         }
         // 来源序号或容量检查给出的拒绝响应，空时继续业务处理
         CoreResponse sourceSequenceResponse = checkSourceSequence(message, lastSourceSequence);
         if (sourceSequenceResponse != null) return sourceSequenceResponse;
+
+        if (isFundsIdempotencyCommand(message.header().messageType())) {
+            terminalRetention.reserveFundsCommandIdentity();
+        }
 
         if (isMatchingCommand(message.header().messageType())) {
             if (pendingMatching.size() >= pendingMatching.capacity()) {
@@ -1242,12 +1247,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 把长期资金身份查询结果转换为重试响应：未命中返回空，指纹不符拒绝，已完成的同一资金命令返回重复成功和当前计数，不重建原响应正文。
-     * @param fingerprint 与当前命令身份配套的内容指纹
-     * @param retained 长期资金索引查出的可空命令身份记录
+     * @param match 长期资金索引对完整 UUID 和指纹的匹配结果
      */
-    private CoreResponse fundsReplayResponse(CommandFingerprint fingerprint, CommandFingerprint retained) {
-        if (retained == null) return null;
-        if (!retained.equals(fingerprint)) {
+    private CoreResponse fundsReplayResponse(FundsCommandIndex.Match match) {
+        if (match == FundsCommandIndex.Match.ABSENT) return null;
+        if (match == FundsCommandIndex.Match.CONFLICT) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                     com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                     CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount,
@@ -2605,7 +2609,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     }
                     // 当前准备派发或标记未提交的撤单描述
                     var order = progress.orders.get(progress.index);
-                    progress.shard = owner.matchingAdapter.matcherShardId(order.instrumentId());
+                    progress.shard = owner.matchingAdapter.topology().matcherShardId(order.symbolId());
                     progress.currentOrder = order;
                     progress.token = owner.matcherPipeline().submitControl(progress.shard, progress);
                     continue;
@@ -2671,7 +2675,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             public com.surprising.aeron.service.matcher.CoreMatchingResult get() {
                 var order = currentOrder;
                 return owner.matchingAdapter.cancelControlOrder(command.command().header().submittedAtEpochMillis(),
-                        order.userId(), order.orderId(), order.instrumentId());
+                        order.userId(), order.orderId(), order.symbolId());
             }
         }
     }

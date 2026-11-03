@@ -94,7 +94,7 @@ final class AdmissionMatchingContinuation implements Supplier<Object> {
                     ? primitive.valueAt(index) : cancellations.get(index);
             var result = owner.matchingAdapter().cancelDirectPrefix(
                     slot.command().header().submittedAtEpochMillis(), slot.command().header().userId(),
-                    orderId, place.instrumentId());
+                    orderId, admission.matchingOrder().instrument().instrumentIdValue());
             if (result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_UNKNOWN_ORDER_ID) {
                 continue;
             }
@@ -119,7 +119,7 @@ final class OrderMatchingContinuation implements Supplier<Object> {
     private long userId;
     private long orderId;
     private long originalOrderId;
-    private String instrumentId;
+    private int permanentSymbolId;
     private ResolvedPlaceOrder resolvedOrder;
     private OrderRuntime admittedOrder;
     private MatcherSettlementEvent direct;
@@ -149,7 +149,7 @@ final class OrderMatchingContinuation implements Supplier<Object> {
         this.matcherShard = matcherShard;
         this.orderId = orderId;
         this.userId = userId;
-        this.instrumentId = Objects.requireNonNull(instrumentId);
+        this.permanentSymbolId = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         this.direct = Objects.requireNonNull(direct, "direct settlement");
     }
 
@@ -162,7 +162,7 @@ final class OrderMatchingContinuation implements Supplier<Object> {
         this.orderId = orderId;
         this.userId = userId;
         this.originalOrderId = originalOrderId;
-        this.instrumentId = Objects.requireNonNull(instrumentId);
+        this.permanentSymbolId = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         this.resolvedOrder = Objects.requireNonNull(replacement);
         this.direct = Objects.requireNonNull(direct);
     }
@@ -174,7 +174,7 @@ final class OrderMatchingContinuation implements Supplier<Object> {
         userId = 0;
         orderId = 0;
         originalOrderId = 0;
-        instrumentId = null;
+        permanentSymbolId = 0;
         resolvedOrder = null;
         admittedOrder = null;
         direct = null;
@@ -196,10 +196,10 @@ final class OrderMatchingContinuation implements Supplier<Object> {
                     : owner.matchingAdapter().placeDirect(matcherShard, slot.coreSequence, msb, lsb,
                             slot.command().header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
             case CANCEL -> owner.matchingAdapter().cancelDirect(matcherShard, slot.coreSequence, msb, lsb,
-                    orderId, slot.command().header().submittedAtEpochMillis(), userId, instrumentId, direct);
+                    orderId, slot.command().header().submittedAtEpochMillis(), userId, permanentSymbolId, direct);
             case REPLACE -> owner.matchingAdapter().replaceDirect(matcherShard, slot.coreSequence, msb, lsb,
                     orderId, slot.command().header().submittedAtEpochMillis(), userId, originalOrderId,
-                    instrumentId, resolvedOrder, direct);
+                    permanentSymbolId, resolvedOrder, direct);
         };
     }
 }

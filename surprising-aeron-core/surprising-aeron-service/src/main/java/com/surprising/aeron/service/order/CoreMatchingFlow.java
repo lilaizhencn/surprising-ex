@@ -73,7 +73,7 @@ public final class CoreMatchingFlow {
      * @param sequence 当前命令的完整 Core 序号
      */
     public CommandSlot removePendingMatching(long sequence) {
-        owner.admissions().pendingLifecycleScopes.remove(sequence);
+        owner.admissions().releasePendingLifecycle(sequence);
         // 当前静态 Matcher 分片号。
         int shard = owner.pendingMatching().submissionShard(sequence);
         // 退休项是否恰好占着该分片提交头，决定是否唤起后继。
@@ -263,7 +263,7 @@ public final class CoreMatchingFlow {
         int shardId = -1;
         for (var /* 当前撤单路由或遍历的撤单身份，具体类型见声明。 */ order : orders) {
             // 当前撤单品种实际路由到的 Matcher 分片。
-            int orderShard = owner.matchingAdapter().matcherShardId(order.instrumentId());
+            int orderShard = owner.matchingAdapter().topology().matcherShardId(order.symbolId());
             if (shardId == -1) shardId = orderShard;
             else if (shardId != orderShard) return -2;
         }

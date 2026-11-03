@@ -44,7 +44,7 @@ java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
 | 配置类 | 内容 |
 | --- | --- |
 | `CoreConfiguration` | 产品线、成员、路由拓扑和 CPU 绑定 |
-| `CoreRuntimeConfiguration` | 在途窗口、执行预算、快照限制和资金索引目录 |
+| `CoreRuntimeConfiguration` | 在途窗口、执行预算和快照限制 |
 | `CoreTransportConfiguration` | Driver、Archive、Consensus 和 Service |
 | `RealtimeConfiguration` | 可选实时输出及读取请求通道 |
 

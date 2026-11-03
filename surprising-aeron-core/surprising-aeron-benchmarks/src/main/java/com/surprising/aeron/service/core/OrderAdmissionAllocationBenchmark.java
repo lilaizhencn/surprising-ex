@@ -101,7 +101,7 @@ public class OrderAdmissionAllocationBenchmark {
     @Benchmark @OperationsPerInvocation(20)
     public long laneAdmissionOrderTurnover(AdmissionIndexState state) {
         for (var order : state.orders) state.lane.putOrder(order);
-        long pending = state.lane.admissionOrderIndex(0).inspect(4, "1", CorePositionSide.NET,
+        long pending = state.lane.admissionSummary(0, 4, CorePositionSide.NET,
                 CoreOrderSide.BUY, CoreMarginMode.CROSS).pendingQuantity();
         for (var order : state.orders) state.lane.removeOrder(order.orderId());
         return pending;

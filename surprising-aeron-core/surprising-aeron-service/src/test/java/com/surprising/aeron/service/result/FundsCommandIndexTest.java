@@ -1,69 +1,84 @@
 package com.surprising.aeron.service.result;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.*;
 
-/**
- * 验证资金身份磁盘索引的失败与清理边界。使用 JUnit 系统属性锁串行修改目录配置，测试结束恢复配置；只检查本索引，不启动交易集群或钱包。
- */
-@org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
+/** 资金身份完整 UUID、指纹冲突及快照顺序必须与旧格式一致。 */
 class FundsCommandIndexTest {
-    /** JUnit 提供并管理的临时根目录，仅供本测试构造索引与无关文件。 */
-    @TempDir Path directory;
-
-    /**
-     * 把目录配置指向普通文件，制造首次建库失败；随后查另一个 UUID 及健康检查都必须继续报已记录故障，不能当作没有历史。
-     */
     @Test
-    void storageFailurePoisonsFurtherReadsRatherThanTreatingHistoryAsAbsent() throws Exception {
-        // 当前测试要临时修改的资金索引根目录 JVM 属性名
-        String property = "surprising.aeron.funds-index-directory";
-        // 进入测试前的可空原属性，finally 按原值恢复
-        String previous = System.getProperty(property);
-        // 故意伪装成目录配置的普通文件
-        Path file = Files.createFile(directory.resolve("not-a-directory"));
-        System.setProperty(property, file.toString());
-        try (/* 真实资金命令磁盘索引，try 结束时关闭本实例资源 */ var index = new FundsCommandIndex()) {
-            assertThatThrownBy(() -> index.put(new UUID(1, 1),
-                    CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH])))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("stop processing");
-            assertThatThrownBy(() -> index.get(new UUID(2, 2)))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("stop processing");
-            assertThatThrownBy(index::assertHealthy).isInstanceOf(IllegalStateException.class);
-        } finally {
-            if (previous == null) System.clearProperty(property);
-            else System.setProperty(property, previous);
+    void fullUuidAndFingerprintRemainStableAfterSlotReuse() {
+        try (var index = new FundsCommandIndex()) {
+            byte[] firstBytes = new byte[CommandFingerprint.LENGTH];
+            firstBytes[0] = 1;
+            var first = CommandFingerprint.fromBytes(firstBytes);
+            var reusable = first.copyIntoSlot(null);
+            index.put(new UUID(1, 7), reusable);
+            byte[] secondBytes = new byte[CommandFingerprint.LENGTH];
+            secondBytes[0] = 2;
+            CommandFingerprint.fromBytes(secondBytes).copyIntoSlot(reusable);
+            assertThat(index.get(new UUID(1, 7))).isEqualTo(first);
+            assertThat(index.get(new UUID(2, 7))).isNull();
+            assertThat(index.match(1, 7, first)).isEqualTo(FundsCommandIndex.Match.SAME);
+            assertThat(index.match(1, 7, reusable)).isEqualTo(FundsCommandIndex.Match.CONFLICT);
+            assertThat(index.match(2, 7, first)).isEqualTo(FundsCommandIndex.Match.ABSENT);
+            assertThatThrownBy(() -> index.put(new UUID(1, 7), reusable))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("conflict");
+            index.put(new UUID(1, 7), first);
+            index.put(new UUID(2, 7), reusable);
+            assertThat(index.get(new UUID(2, 7))).isEqualTo(reusable);
         }
     }
 
-    /**
-     * 在配置根下先建无关文件，真实写一条资金身份并关闭索引；要求只删本实例子目录，根与无关文件仍保留，最后恢复原属性。
-     */
     @Test
-    void closeRemovesOnlyThisRuntimeIndexAndLeavesConfiguredRoot() throws Exception {
-        // 当前测试要临时修改的资金索引根目录 JVM 属性名
-        String property = "surprising.aeron.funds-index-directory";
-        // 进入测试前的可空原属性，finally 按原值恢复
-        String previous = System.getProperty(property);
-        System.setProperty(property, directory.toString());
-        // 配置根下预先存在的无关文件，索引关闭不得删除
-        Path unrelated = Files.createFile(directory.resolve("unrelated"));
-        try {
-            try (/* 真实资金命令磁盘索引，try 结束时关闭本实例资源 */ var index = new FundsCommandIndex()) {
-                index.put(new UUID(1, 1), CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]));
+    void snapshotKeepsUnsignedBigEndianUuidOrder() throws Exception {
+        try (var index = new FundsCommandIndex()) {
+            var fingerprint = CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]);
+            index.put(new UUID(-1, 0), fingerprint);
+            index.put(new UUID(1, -1), fingerprint);
+            index.put(new UUID(1, 0), fingerprint);
+            var bytes = new ByteArrayOutputStream();
+            index.write(new DataOutputStream(bytes));
+            var input = new java.io.DataInputStream(new java.io.ByteArrayInputStream(bytes.toByteArray()));
+            assertThat(input.readInt()).isEqualTo(3);
+            assertThat(new UUID(input.readLong(), input.readLong())).isEqualTo(new UUID(1, 0));
+            input.skipNBytes(CommandFingerprint.LENGTH);
+            assertThat(new UUID(input.readLong(), input.readLong())).isEqualTo(new UUID(1, -1));
+            input.skipNBytes(CommandFingerprint.LENGTH);
+            assertThat(new UUID(input.readLong(), input.readLong())).isEqualTo(new UUID(-1, 0));
+            input.skipNBytes(CommandFingerprint.LENGTH);
+            assertThat(input.available()).isZero();
+        }
+    }
+
+    @Test
+    void growthPreservesEveryIdentityAndSnapshotSortsUnsignedUuids() throws Exception {
+        try (var index = new FundsCommandIndex()) {
+            var fingerprint = CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]);
+            var expected = new java.util.ArrayList<UUID>();
+            for (int i = 0; i < 1500; i++) {
+                UUID id = new UUID(Long.rotateLeft(i * 0x9E3779B97F4A7C15L, i & 63),
+                        Long.reverse(i * 0xC2B2AE3D27D4EB4FL));
+                expected.add(id);
+                index.put(id, fingerprint);
             }
-            assertThat(Files.exists(unrelated)).isTrue();
-            try (/* 关闭索引后检查根目录内容的可关闭目录流 */ var children = Files.list(directory)) {
-                assertThat(children.toList()).containsExactly(unrelated);
+            expected.sort((left, right) -> {
+                int high = Long.compareUnsigned(left.getMostSignificantBits(), right.getMostSignificantBits());
+                return high != 0 ? high : Long.compareUnsigned(left.getLeastSignificantBits(), right.getLeastSignificantBits());
+            });
+            var bytes = new ByteArrayOutputStream();
+            index.write(new DataOutputStream(bytes));
+            var input = new java.io.DataInputStream(new java.io.ByteArrayInputStream(bytes.toByteArray()));
+            assertThat(input.readInt()).isEqualTo(expected.size());
+            for (UUID id : expected) {
+                assertThat(index.get(id)).isEqualTo(fingerprint);
+                assertThat(new UUID(input.readLong(), input.readLong())).isEqualTo(id);
+                input.skipNBytes(CommandFingerprint.LENGTH);
             }
-        } finally {
-            if (previous == null) System.clearProperty(property);
-            else System.setProperty(property, previous);
+            assertThat(input.available()).isZero();
         }
     }
 }

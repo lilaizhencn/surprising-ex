@@ -43,8 +43,8 @@ public final class RuntimeOrderAdmission {
      */
     public static long requiredReservation(
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId,
-            ResolvedPlaceOrder order, long openInterestSteps, AdmissionOrderIndex activeOrders) {
-        return requiredReservation(runtime, identities, userId, order, openInterestSteps, activeOrders, 0);
+            ResolvedPlaceOrder order, long openInterestSteps) {
+        return requiredReservation(runtime, identities, userId, order, openInterestSteps, 0);
     }
 
     /**
@@ -59,9 +59,9 @@ public final class RuntimeOrderAdmission {
      */
     public static long requiredReservation(
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId,
-            ResolvedPlaceOrder order, long openInterestSteps, AdmissionOrderIndex activeOrders,
+            ResolvedPlaceOrder order, long openInterestSteps,
             long excludedOrderId) {
-        if (runtime == null || identities == null || order == null || activeOrders == null || userId <= 0) {
+        if (runtime == null || identities == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission input");
         }
         AccountLaneState lane = runtime.accountLaneForUser(userId);
@@ -70,7 +70,7 @@ public final class RuntimeOrderAdmission {
         long positionKey = identities.findPositionKeyValue(userId, order.instrument(), order.positionSide());
         var settlement = runtime.treasury().settlementStatus(symbolId);
         OrderRuntime excluded = excludedOrderId == 0 ? null : lane.order(excludedOrderId);
-        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps,
                 excluded, clientKey, positionKey,
                 settlement.lifecycleSettled(), settlement.fundingInProgress(), null);
     }
@@ -80,13 +80,13 @@ public final class RuntimeOrderAdmission {
      */
     public static long requiredReservationPrepared(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
-            long openInterestSteps, AdmissionOrderIndex activeOrders,
+            long openInterestSteps,
             long clientKey, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress) {
-        if (runtime == null || order == null || activeOrders == null || userId <= 0) {
+        if (runtime == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid primitive prepared runtime order admission input");
         }
-        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps,
                 null, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
@@ -95,9 +95,9 @@ public final class RuntimeOrderAdmission {
      */
     public static long requiredReplacementReservationPrepared(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
-            long openInterestSteps, AdmissionOrderIndex activeOrders, OrderRuntime original,
+            long openInterestSteps, OrderRuntime original,
             long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
-        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps,
                 original, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
@@ -106,10 +106,10 @@ public final class RuntimeOrderAdmission {
      */
     static long requiredReplacementReservationPrepared(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
-            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
+            long openInterestSteps, long excludedOrderId,
             long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
         OrderRuntime original = excludedOrderId == 0 ? null : lane.order(excludedOrderId);
-        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps,
                 original, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
@@ -122,8 +122,9 @@ public final class RuntimeOrderAdmission {
         if (lane == null || runtime.topology().accountLaneId(userId) != lane.laneId()
                 || order == null || settlementStatus == null)
             throw new IllegalStateException("preflight query requires its owning Lane scope");
+        if (symbolId != order.symbolId()) throw new IllegalArgumentException("preflight symbol route mismatch");
         return requiredReservation(runtime, lane, userId, order, openInterestSteps,
-                lane.admissionOrderIndex(symbolId), null, clientKey,
+                null, clientKey,
                 positionKey, settlementStatus.lifecycleSettled(), settlementStatus.fundingInProgress(), order.instrument());
     }
 
@@ -132,7 +133,7 @@ public final class RuntimeOrderAdmission {
      */
     private static long requiredReservation(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
-            long openInterestSteps, AdmissionOrderIndex activeOrders, OrderRuntime excluded,
+            long openInterestSteps, OrderRuntime excluded,
             long clientKey, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, CoreInstrument queryInstrument) {
         lane.assertOwner();
@@ -174,8 +175,8 @@ public final class RuntimeOrderAdmission {
         CoreMarginMode conflictingMode = order.marginMode() == CoreMarginMode.CROSS
                 ? CoreMarginMode.ISOLATED : CoreMarginMode.CROSS;
         // 当前用户、币对、持仓腿和方向的挂单汇总，供容量及风险检查共用。
-        AdmissionSummary admissionSummary = activeOrders.inspect(
-                userId, order.instrumentId(), order.positionSide(), order.side(), conflictingMode);
+        AdmissionSummary admissionSummary = lane.admissionSummary(order.symbolId(), userId,
+                order.positionSide(), order.side(), conflictingMode);
         validatePositionIdentity(
                 positionMode, position, order, admissionSummary, conflictingMode, excluded);
         validateReduceOnly(instrument.contractType().productLine().isDerivative(), position, order,
@@ -408,17 +409,6 @@ public final class RuntimeOrderAdmission {
             this.reduceOnlyQuantity = reduceOnlyQuantity;
             this.marginModeCount = marginModeCount;
             return this;
-        }
-    }
-
-    /**
-     * 订单准入需要的挂单汇总读取边界。
-     */
-    public interface AdmissionOrderIndex {
-        AdmissionSummary inspect(long userId, String instrumentId, CorePositionSide positionSide,
-                                 CoreOrderSide side, CoreMarginMode conflictingMarginMode);
-
-        default void admitted(long userId, ResolvedPlaceOrder order) {
         }
     }
 

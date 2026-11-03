@@ -7,7 +7,6 @@ import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.service.matcher.CoreCancellationResult;
 import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
-import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.order.command.OrderBatchKind;
@@ -29,7 +28,9 @@ import lombok.experimental.Accessors;
 /**
  * 一条批量命令从准入到终态的复用上下文。它把各项输入、准入回执、撮合与账户结果、资金差额和分页游标放在同一生命周期里；Owner 管理顺序，Matcher 和账户按交接约定使用固定槽。结果编码直接读取本批，不另建同内容的订单结果表，整批退休后才清理复用。
  */
-public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatchIntentSource, TradingOrderBatchCodec.ResultSource {
+public final class OrderBatchPending implements LaneOrderResultTarget, TradingOrderBatchCodec.ResultSource {
+    public record Decision(com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context context,
+            long openInterestSteps, int baseAssetId, int quoteAssetId, int settleAssetId) { }
     /**
      * 按批内下标读取 PLACE 输入；仅在下单批次和有效下标范围使用。
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
@@ -41,9 +42,9 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
      * 借用该项已经准备的产品判断输入，账户准入前由 Owner 填写。
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
-    public PlaceBatchIntentSource.Decision decision(int index) { return preparedDecisions[index]; }
+    public Decision decision(int index) { return preparedDecisions[index]; }
     /** 每项引用的产品判断输入，可指向同品种共享上下文。 */
-    final com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[] preparedDecisions;
+    final Decision[] preparedDecisions;
 
     /**
      * 按有效下标取得本项可复用的解析订单槽，首次使用才创建；调用方遵守当前阶段的独占写权限。
@@ -339,7 +340,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     /** 本批准入已经准备的品种名称，和共享上下文列同下标。 */
     final ArrayList<String> preparedSymbols;
     /** 按品种共用的只读配置判断上下文，账户及 OI 判断仍逐项执行。 */
-    final com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[] preparedContextDecisions;
+    final Decision[] preparedContextDecisions;
 
     /** 已收集单项或撤单片段累计的参与账户位图。 */
     long observedSettlementLaneMask;
@@ -520,13 +521,13 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         preparedOrders = new ResolvedPlaceOrder[capacity];
-        preparedDecisions = new com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[capacity];
+        preparedDecisions = new Decision[capacity];
         preparedClientKeyValues = new long[capacity];
         preparedAdmittedOrders = new OrderRuntime[capacity];
         preparedCancellationOrderIds = new long[preparedAdmittedOrders.length];
         preparedSymbols = new ArrayList<>(capacity);
         preparedContextDecisions =
-                new com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[capacity];
+                new Decision[capacity];
     }
 
     /**
@@ -698,11 +699,11 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     public static final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object>, BooleanSupplier {
         private com.surprising.aeron.service.core.TradingAccountRuntime runtime;
         private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
-        private PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision decision;
+        private Decision decision;
         private long sequence, userId, openInterestSteps;
         private UUID commandId;
         private OrderRuntime admittedOrder;
-        private PlaceBatchAdmissionEvent.PlaceBatchIntentSource source;
+        private OrderBatchPending source;
         private int sourceIndex;
         @Accessors(fluent = true, chain = false)
         @Getter
@@ -713,8 +714,8 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         public void prepare(com.surprising.aeron.service.core.TradingAccountRuntime runtime,
                 com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities,
                 long sequence, long userId, UUID commandId, com.surprising.aeron.protocol.PlaceOrderCommand command,
-                PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision decision,
-                PlaceBatchAdmissionEvent.PlaceBatchIntentSource source, int sourceIndex) {
+                Decision decision,
+                OrderBatchPending source, int sourceIndex) {
             if (runtime == null || identities == null || sequence <= 0 || userId <= 0
                     || commandId == null || command == null || decision == null || source == null || sourceIndex < 0)
                 throw new IllegalArgumentException("invalid batch place reservation");
@@ -763,7 +764,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
                 long clientKey = com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.clientKeyValue(identity);
                 long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
                 long required = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.requiredReservationPrepared(runtime, lane, userId, this,
-                        openInterestSteps, lane.admissionOrderIndex(symbolId()), clientKey, positionKey,
+                        openInterestSteps, clientKey, positionKey,
                         decision.context().lifecycleSettled(), decision.context().fundingInProgress());
                 com.surprising.aeron.service.position.PositionRuntime position = positionKey == 0 ? null : lane.position(positionKey);
                 if (instrument().contractType().productLine().isDerivative() && !reduceOnly()

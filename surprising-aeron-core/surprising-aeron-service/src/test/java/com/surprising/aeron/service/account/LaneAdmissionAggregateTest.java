@@ -71,7 +71,9 @@ class LaneAdmissionAggregateTest {
                 var order = order(side, position, margin, reduce);
                 lane.putOrder(order);
                 // 已经选择合约三的复用准入汇总视图。
-                var index = lane.admissionOrderIndex(3);
+                var indexField = AccountLaneState.class.getDeclaredField("admissionOrderIndex");
+                indexField.setAccessible(true);
+                var index = indexField.get(lane);
                 // 用于读取索引内部用户分组表的反射字段。
                 var field = index.getClass().getDeclaredField("summariesByUser");
                 field.setAccessible(true);
@@ -86,16 +88,16 @@ class LaneAdmissionAggregateTest {
                 assertThat(users.get(7)).isSameAs(symbols);
                 assertThat(symbols.get(3)).isSameAs(aggregate);
                 // 这次 inspect 返回的复用汇总槽，只在下一次覆盖前断言。
-                var summary = index.inspect(7, "SYM", position, side, margin);
+                var summary = lane.admissionSummary(3, 7, position, side, margin);
                 assertThat(reduce ? summary.reduceOnlyQuantity() : summary.pendingQuantity()).isEqualTo(40);
                 assertThat(summary.marginModeCount()).isEqualTo(1);
                 lane.putOrder(order);
                 assertThat(symbols.get(3)).isSameAs(aggregate);
-                summary = index.inspect(7, "SYM", position, side, margin);
+                summary = lane.admissionSummary(3, 7, position, side, margin);
                 assertThat(reduce ? summary.reduceOnlyQuantity() : summary.pendingQuantity()).isEqualTo(100);
                 lane.putOrder(order.withStatus(CoreOrderStatus.CANCELED, 3, -1, -1));
                 assertThat(users.get(7)).isNull();
-                summary = index.inspect(7, "SYM", position, side, margin);
+                summary = lane.admissionSummary(3, 7, position, side, margin);
                 assertThat(summary.pendingQuantity()).isZero();
                 assertThat(summary.reduceOnlyQuantity()).isZero();
                 assertThat(summary.marginModeCount()).isZero();
@@ -116,13 +118,12 @@ class LaneAdmissionAggregateTest {
         lane.putOrder(CoreStateTestFixtures.order(2, 7, 3, 50));
         lane.putOrder(CoreStateTestFixtures.filledOrder(first, 60, 40, 0, CoreOrderStatus.OPEN, 2));
         // 已经选择合约三的复用准入汇总视图。
-        var index = lane.admissionOrderIndex(3);
         // 这次 inspect 返回的复用汇总槽，只在下一次覆盖前断言。
-        var summary = index.inspect(7, "SYM", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
+        var summary = lane.admissionSummary(3, 7, CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
         assertThat(summary.pendingQuantity()).isEqualTo(90);
         assertThat(summary.marginModeCount()).isEqualTo(2);
         lane.putOrder(first.withStatus(CoreOrderStatus.CANCELED, 3, -1, -1));
-        summary = index.inspect(7, "SYM", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
+        summary = lane.admissionSummary(3, 7, CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
         assertThat(summary.pendingQuantity()).isEqualTo(50);
         assertThat(summary.marginModeCount()).isEqualTo(1);
     }
@@ -138,13 +139,12 @@ class LaneAdmissionAggregateTest {
         lane.putOrder(order(CoreOrderSide.BUY, CorePositionSide.NET, CoreMarginMode.CROSS, false));
         lane.putOrder(order(CoreOrderSide.SELL, CorePositionSide.NET, CoreMarginMode.ISOLATED, true));
         // 已经选择合约三的复用准入汇总视图。
-        var index = lane.admissionOrderIndex(3);
         // 旧买入全仓分组的查询结果，在下一次 inspect 之前完成断言。
-        var before = index.inspect(7, "SYM", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
+        var before = lane.admissionSummary(3, 7, CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
         assertThat(before.pendingQuantity()).isZero();
         assertThat(before.marginModeCount()).isZero();
         // 替换后的卖出逐仓只减仓分组查询结果。
-        var after = index.inspect(7, "SYM", CorePositionSide.NET, CoreOrderSide.SELL, CoreMarginMode.ISOLATED);
+        var after = lane.admissionSummary(3, 7, CorePositionSide.NET, CoreOrderSide.SELL, CoreMarginMode.ISOLATED);
         assertThat(after.reduceOnlyQuantity()).isEqualTo(100);
         assertThat(after.marginModeCount()).isEqualTo(1);
     }

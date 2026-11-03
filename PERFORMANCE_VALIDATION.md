@@ -903,3 +903,11 @@ JFR 摘要/采样视图（使用 `jfr summary` 和 `jfr print --json --events jd
 硬件为 8 物理核/16 逻辑核、16 GiB 内存，`sysctl hw.cachelinesize` 为 64 字节，游标元素间隔为 128 字节。尚缺缓存行争用硬件计数、真实集群、三段延迟分位数、长期堆/堆外内存与 CPU/换页/限频对齐证据；本轮短样本不作为正式性能验收或长期无泄漏证明。余额/终态/恢复断言通过，不能外推未运行的部署场景。
 
 清理：所有本轮 Maven/JMH 进程已结束；摘要入档后已移除本轮 19 个 /tmp 日志、JMH JSON、JFR 及导出文件，共 110210829 字节，保留本节参数、数值、摘要和校验值。
+
+## 2026-11-03：资金身份索引与主链路冗余精简
+
+本轮范围：资金历史身份由 Owner 独占内存原语列保存，扩容先于资金业务变更；Lane 准入删除唯一实现接口，批量下单删除纯透传意图接口；生命周期在途范围复用原语数组；Matcher 撤改传永久整数品种号；标记价续扫复用旧 Lane 游标。审计确认订单的两份浅字段副本对应准入与结算后的不同时间点，Matcher 游标已有间隔布局，未强行删除。没有旧版本同条件完整链路基线，不报告提速比例。
+
+最终功能验证：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test` 退出 0，14 个 Reactor 模块均成功。Aeron service 1572 项、0 失败、0 错误、1 跳过；benchmark 模块 314 项、0 失败、0 错误。资金幂等测试包含超过 13 万条历史身份后的快照恢复和重复入账拦截；资金账本、提交恢复、永续及交割/期权财务矩阵通过。基准功能测试的四档流水线校验均报告 `fundsDiff=0`、`unfinished=0`。首次跨模块运行因旧 `OrderAdmissionAllocationBenchmark` 调用已删除的准入接口而编译失败，修复后完整重跑通过。`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package -DskipTests` 退出 0。
+
+资金身份 JMH：使用 `product-core-benchmarks.jar`，筛选 `FundsCommandIndexBenchmark.(missingComparison|historicalComparison|repeatedWrite)`；1 fork、预热 2×1 秒、测量 3×1 秒、`-prof gc`，本机 Corretto 27 / macOS。三档分别为 55,964,620、15,437,661、14,977,255 ops/s；GC 归一化分配均约为 0.001 B/op 或更低，GC count 为 0。早期返回完整指纹对象的命中微基准记录约 112 B/op；生产幂等入口现直接比较四个 `long`，最终 `historicalComparison` 接近零分配。短窗口和宽置信区间只支持局部路径分配判断，不代表全交易链路零分配或生产吞吐提升。未测长期堆容量、真实 Aeron 网络/Archive 延迟、CPU 缓存竞争与三节点恢复。

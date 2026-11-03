@@ -14,11 +14,11 @@ import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 
-/** 保存当前产品线近期终态身份和长期资金命令指纹；Owner 管理墓碑 FIFO 并同步执行资金索引 I/O。 */
+/** 保存当前产品线近期终态身份和长期资金命令指纹；Owner 顺序维护两份内存索引。 */
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TerminalStateRetention implements TradingAccountRuntime.TerminalOrderSink, AutoCloseable {
 
-    // 内存终态身份由当前产品 Owner 管理；资金 I/O 由同一 Owner 执行，快照输出为独立字节。
+    // 两份内存身份由当前产品 Owner 管理，快照输出为独立字节。
 
     /** 近期订单终态身份的六万五千五百三十六项保留上限。 */
     static final int MAX_TOMBSTONES = 65_536;
@@ -28,23 +28,19 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     private static final int MAX_CLIENT_ID_BYTES = 256;
     /** Owner 持有的近期终态身份 FIFO，客户号与实体索引引用同一槽。 */
     private final TerminalTombstoneStore tombstones;
-    /** 长期资金命令身份索引，活动 I/O 由 Owner 执行。 */
+    /** 长期资金命令身份索引，由 Owner 在内存中顺序维护。 */
     private final FundsCommandIndex fundsCommands;
 
     /**
-     * 创建空终态 FIFO 和尚未开库的资金身份索引。
+     * 创建空终态 FIFO 和资金身份索引。
      */
     public TerminalStateRetention() {
-        this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().fundsIndexDirectory());
+        this(new TerminalTombstoneStore(), new FundsCommandIndex());
     }
 
-    public TerminalStateRetention(java.nio.file.Path fundsIndexDirectory) {
-        this(new TerminalTombstoneStore(), new FundsCommandIndex(fundsIndexDirectory));
-    }
-
-    /** 冷阶段导入结束后，将活动资金索引 I/O 绑定到当前 Core Owner。 */
+    /** 冷阶段导入结束后，将活动资金索引绑定到当前 Core Owner。 */
     public void activate() {
-        fundsCommands.bindIoOwner();
+        fundsCommands.bindOwner();
     }
 
     /**
@@ -124,6 +120,11 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
         return fundsCommands.get(msb, lsb);
     }
 
+    /** 资金幂等入口直接比较已保留的原生指纹列。 */
+    public FundsCommandIndex.Match fundsCommandMatch(long msb, long lsb, CommandFingerprint fingerprint) {
+        return fundsCommands.match(msb, lsb, fingerprint);
+    }
+
     /**
      * 空 UUID 直接返回空，否则拆分 UUID 查长期资金指纹。
      * @param commandId 本次资金命令 UUID，具体入口按规定处理空值
@@ -143,6 +144,9 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
         fundsCommands.put(msb, lsb, fingerprint);
     }
 
+    /** 在进入资金业务计算前完成身份表扩容，避免扩容失败发生在账本提交之后。 */
+    public void reserveFundsCommandIdentity() { fundsCommands.reserveNext(); }
+
     /**
      * 拒绝空 UUID，拆分后保存资金指纹，沿用原索引线程归属。
      * @param commandId 本次资金命令 UUID，具体入口按规定处理空值
@@ -159,7 +163,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     public void assertHealthy() { fundsCommands.assertHealthy(); }
 
     /**
-     * 关闭本实例资金索引和它的本地目录，终态内存结构随实例释放。
+     * 关闭本实例资金索引，终态内存结构随实例释放。
      */
     @Override
     public void close() { fundsCommands.close(); }
@@ -188,10 +192,6 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      * @param encoded 完整终态保留快照段
      */
     public static TerminalStateRetention decode(byte[] encoded) {
-        return decode(encoded, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().fundsIndexDirectory());
-    }
-
-    public static TerminalStateRetention decode(byte[] encoded, java.nio.file.Path fundsIndexDirectory) {
         if (encoded == null) throw new IllegalArgumentException("terminal retention payload is required");
         try {
             // 读取本次独立快照字节的二进制流
@@ -204,7 +204,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
                 throw new IllegalArgumentException("invalid funds command retention count");
             }
             // 本次恢复新建的资金索引，失败时尝试关闭
-            FundsCommandIndex fundsCommands = new FundsCommandIndex(fundsIndexDirectory);
+            FundsCommandIndex fundsCommands = new FundsCommandIndex();
             try {
                 for (/* 当前回执槽或快照记录的遍历下标 */ int index = 0; index < fundsCommandCount; index++) {
                     // 当前资金快照记录的完整 UUID

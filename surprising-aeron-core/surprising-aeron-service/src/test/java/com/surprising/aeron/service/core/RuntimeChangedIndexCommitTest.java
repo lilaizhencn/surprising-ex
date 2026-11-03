@@ -111,8 +111,8 @@ class RuntimeChangedIndexCommitTest {
         runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
 
-        assertThat(runtime.onLane(7L, lane -> lane.admissionOrderIndex(symbolId)).inspect(7, "1", CorePositionSide.NET,
-                com.surprising.aeron.protocol.CoreOrderSide.BUY, CoreMarginMode.ISOLATED).pendingQuantity()).isEqualTo(5);
+        assertThat(runtime.onLane(7L, lane -> lane.admissionSummary(symbolId, 7, CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreOrderSide.BUY, CoreMarginMode.ISOLATED)).pendingQuantity()).isEqualTo(5);
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(3);
 
         runtime.clearChangedKeys();

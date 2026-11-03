@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.risk;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.model.RiskLaneProgress;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -48,15 +47,10 @@ public final class RuntimeDerivativeRiskProcessor {
                 ? currentScan.accountLaneId() : 0;
         // 当前风险扫描控制是否停用；停用时新扫描直接标为风险已完成。
         boolean disabled = !runtime.riskScanControl().enabled();
-        java.util.List<RiskLaneProgress> progress = java.util.List.of();
-        if (!disabled && currentScan != null && !currentScan.riskComplete() && !currentScan.laneProgress().isEmpty()) {
-            // 新价格使当前用户累计值失效；保留每个 Lane 已完成用户和轮次边界。
-            progress = new java.util.ArrayList<RiskLaneProgress>(
-                    currentScan.laneProgress().size());
-            for (var /* 当前复制的一个 Lane 旧游标，只沿用其最后完成用户与轮次完成标记。 */ lane : currentScan.laneProgress()) progress.add(
-                    new RiskLaneProgress(lane.lastUserId(), lane.complete(),
-                            0, 0, "-", 0, 0, 0, 0, 0));
-        }
+        // 旧游标是不可变值。新市场修订号使其中的用户部分累计失效，所属 Lane
+        // 在首次续扫时按 marketRevision 重置；这里沿用已完成用户边界，不逐 Lane 复制。
+        var progress = !disabled && currentScan != null && !currentScan.riskComplete()
+                ? currentScan.laneProgress() : java.util.List.<com.surprising.aeron.model.RiskLaneProgress>of();
         RiskScanRuntime nextScan = new RiskScanRuntime(symbolId, accountLaneId,
                 command.priceSequence(), scanStart, disabled,
                 true, 0, 0, 0, 0, 0, 0, 0, 0,

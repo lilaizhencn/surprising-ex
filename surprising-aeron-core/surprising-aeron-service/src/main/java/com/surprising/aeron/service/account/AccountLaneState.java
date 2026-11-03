@@ -9,7 +9,6 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.AdmissionOrderIndex;
 import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.AdmissionSummary;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -839,11 +838,12 @@ public final class AccountLaneState {
      * 选择本次准入的稠密合约编号并返回复用索引视图；下一次选择会改变该视图，不应跨调用保存。
      * @param symbolId 身份字典中的稠密合约编号
      */
-    public AdmissionOrderIndex admissionOrderIndex(int symbolId) {
+    public AdmissionSummary admissionSummary(int symbolId, long userId, CorePositionSide positionSide,
+            CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
         assertOwner();
         if (symbolId < 0) throw new IllegalArgumentException("invalid admission instrumentId");
         admissionOrderIndex.symbolId = symbolId;
-        return admissionOrderIndex;
+        return admissionOrderIndex.inspect(userId, positionSide, side, conflictingMarginMode);
     }
 
     /**
@@ -1036,7 +1036,7 @@ public final class AccountLaneState {
     /**
      * 从活跃订单增量维护准入需要的数量和模式条数，避免逐次扫描订单；视图中的目标合约和返回槽都由本 Lane 复用。
      */
-    private final class LaneAdmissionOrderIndex implements AdmissionOrderIndex {
+    private final class LaneAdmissionOrderIndex {
         /** 用户到稠密合约准入汇总的索引，和订单权威表按同一更新边界维护。 */
         private final Long2ObjectHashMap<Int2ObjectHashMap<AdmissionAggregate>> summariesByUser =
                 new Long2ObjectHashMap<>();
@@ -1055,9 +1055,8 @@ public final class AccountLaneState {
          * @param side 要选择的买入或卖出方向
          * @param conflictingMarginMode 需要统计是否冲突的保证金模式
          */
-        @Override
         public AdmissionSummary inspect(
-                long userId, String instrumentId, CorePositionSide positionSide,
+                long userId, CorePositionSide positionSide,
                 CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
             // 当前用户按稠密合约分组的准入统计表。
             Int2ObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(userId);

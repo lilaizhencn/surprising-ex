@@ -395,7 +395,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
             var cancellation = matcherPreCancellations.get(index);
             // 当前前置撤单的原生回执，用其状态决定记录事实或停止。
             var result = owner.matchingAdapter().cancelDirectPrefix(command.header().submittedAtEpochMillis(),
-                    cancellation.userId(), cancellation.orderId(), cancellation.instrumentId());
+                    cancellation.userId(), cancellation.orderId(), cancellation.symbolId());
             // 原生撤单是否返回 SUCCESS 或 ACCEPTED。
             boolean accepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
                     || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;

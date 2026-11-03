@@ -256,8 +256,7 @@ public final class SectionedCoreSnapshotRecovery {
             com.surprising.aeron.config.LaneTopology deploymentTopology) {
         ensureComplete();
         try {
-            return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine, configuration.fundsIndexDirectory(),
-                    deploymentTopology);
+            return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine, deploymentTopology);
         } catch (/* 解析组件抛出的异常，协议异常保留，其他运行异常带 cause 包装。 */ ProtocolException exception) {
             throw exception;
         } catch (/* 解析组件抛出的异常，协议异常保留，其他运行异常带 cause 包装。 */ RuntimeException exception) {
