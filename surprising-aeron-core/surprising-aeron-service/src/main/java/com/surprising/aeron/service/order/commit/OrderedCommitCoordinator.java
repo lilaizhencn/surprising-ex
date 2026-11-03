@@ -224,7 +224,7 @@ public final class OrderedCommitCoordinator {
                                 validAccountLaneMask());
                     pending.commitEvent(owner.runtimeState().dispatchLaneMutation(sequence,
                             owner.resultBuilder.commandChangedUserIds,
-                            publication.dirty() ? owner.resultBuilder.commandChangedOrderIds : List.of(), null,
+                            publication.dirty() ? owner.runtimeState().metadataOrderUsers(owner.resultBuilder.commandChangedOrderIds) : null, null,
                             clusterTimestamp, clusterPosition));
                 }
                 if (pending.commitEvent() != null) {
@@ -536,7 +536,7 @@ public final class OrderedCommitCoordinator {
             owner.resultBuilder.materializeChangeAccumulators();
             pending.commitEvent(owner.runtimeState().dispatchLaneMutation(sequence,
                     owner.resultBuilder.commandChangedUserIds,
-                    publication.dirty() ? owner.resultBuilder.commandChangedOrderIds : List.of(), null,
+                    publication.dirty() ? owner.runtimeState().metadataOrderUsers(owner.resultBuilder.commandChangedOrderIds) : null, null,
                     clusterTimestamp, clusterPosition));
             if (pending.commitEvent() != null) {
                 if (!owner.runtimeState().laneCommitComplete(pending.commitEvent())) {

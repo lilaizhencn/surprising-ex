@@ -5,6 +5,8 @@ import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
 import com.surprising.aeron.service.order.CommandSlot;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -19,6 +21,11 @@ import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
  */
 @Slf4j
 public final class MatcherCommandPipeline implements AutoCloseable {
+    /** 不同写线程的游标相隔 128 字节，保留原有 volatile 发布语义。 */
+    private static final VarHandle CURSORS = MethodHandles.arrayElementVarHandle(long[].class);
+    /** SUBMITTED、CONSUMED 由 Owner 写；COMPLETED 由 Matcher 写。 */
+    private static final int SUBMITTED = 0, CONSUMED = 16, COMPLETED = 32;
+    private final long[] cursors = new long[48];
     /** Owner 等启动或控制结果时先自旋的次数。 */
     private static final int IDLE_SPINS = 1_024;
     /** Owner 超过自旋次数后的单次短暂等待纳秒上限。 */
@@ -33,14 +40,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private volatile Thread worker;
     /** 独立 worker 开始接收命令前执行的分片激活动作。 */
     private Runnable startupAction;
-    /** Owner 写、Matcher 读的已发布提交位置。 */
-    private final PaddedSequence submittedPosition = new PaddedSequence();
-    /** Owner 写的已回收位置，发布方用来判断窗口是否满。 */
-    private final PaddedSequence consumedPosition = new PaddedSequence();
     /** Owner 缓存的消费位置，容量检查或峰值更新时刷新。 */
     private long cachedConsumedPosition;
-    /** Matcher 写、Owner 读的连续完成位置。 */
-    private final PaddedSequence completedPosition = new PaddedSequence();
     /** Owner 缓存的完成位置，减少反复读取共享游标。 */
     private long cachedCompletedPosition;
     /** 是否仍接收新命令，关闭或故障时清为 false，worker 仍按分支处理已提交任务。 */
@@ -83,7 +84,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         // 当前查询自己的完成 Future，信箱满时立即失败。
         var future = new java.util.concurrent.CompletableFuture<T>();
-        if (!backgroundReads.offer(new BackgroundRead<>(submittedPosition.value, read, future))) {
+        if (!backgroundReads.offer(new BackgroundRead<>((long) CURSORS.getVolatile(cursors, SUBMITTED), read, future))) {
             future.completeExceptionally(new RejectedExecutionException("matcher read mailbox unavailable"));
 
         }
@@ -207,9 +208,9 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         if (!accepting) throw new RejectedExecutionException("matcher pipeline is closed");
         skipReadyDirectSlots();
         // 当前传输游标位置，按所在方法区分提交、完成或消费。
-        long position = submittedPosition.value;
+        long position = (long) CURSORS.getVolatile(cursors, SUBMITTED);
         if (position - cachedConsumedPosition >= slots.length) {
-            cachedConsumedPosition = consumedPosition.value;
+            cachedConsumedPosition = (long) CURSORS.getVolatile(cursors, CONSUMED);
             if (position - cachedConsumedPosition >= slots.length) {
                 throw new RejectedExecutionException("matcher pipeline is full");
             }
@@ -224,11 +225,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         slot.settlement = settlement;
         slot.resultTarget = resultTarget;
         slot.directSettlement = settlement != null && settlement.direct();
-        submittedPosition.value = position + 1;
+        CURSORS.setVolatile(cursors, SUBMITTED, position + 1);
         // 当前提交位置与已回收位置之差，用于峰值统计。
         int depth = Math.toIntExact(position + 1 - cachedConsumedPosition);
         if (depth > submissionHighWaterMark) {
-            cachedConsumedPosition = consumedPosition.value;
+            cachedConsumedPosition = (long) CURSORS.getVolatile(cursors, CONSUMED);
             depth = Math.toIntExact(position + 1 - cachedConsumedPosition);
             if (depth > submissionHighWaterMark) {
                 submissionHighWaterMark = depth;
@@ -259,9 +260,9 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             rethrowPublicationFailure();
             skipReadyDirectSlots();
             // 当前传输游标位置，按所在方法区分提交、完成或消费。
-            long position = consumedPosition.value;
+            long position = (long) CURSORS.getVolatile(cursors, CONSUMED);
             if (position >= cachedCompletedPosition) {
-                cachedCompletedPosition = completedPosition.value;
+                cachedCompletedPosition = (long) CURSORS.getVolatile(cursors, COMPLETED);
                 if (position >= cachedCompletedPosition) return 0;
             }
             // 当前游标对应的固定传输槽，发布/消费由游标控制。
@@ -281,9 +282,9 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         rethrowPublicationFailure();
         if (expectedToken == 0) throw new IllegalArgumentException("matcher token must be non-zero");
         // 当前传输游标位置，按所在方法区分提交、完成或消费。
-        long position = consumedPosition.value;
+        long position = (long) CURSORS.getVolatile(cursors, CONSUMED);
         if (position >= cachedCompletedPosition) {
-            cachedCompletedPosition = completedPosition.value;
+            cachedCompletedPosition = (long) CURSORS.getVolatile(cursors, COMPLETED);
             if (position >= cachedCompletedPosition) return null;
         }
         // 当前游标对应的固定传输槽，发布/消费由游标控制。
@@ -297,7 +298,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         // 当前捕获或观察到的失败原因，按所在边界写入 Future、槽位或启动/发布故障标记。
         Throwable failure = slot.failure;
         slot.clear();
-        consumedPosition.value = position + 1;
+        CURSORS.setVolatile(cursors, CONSUMED, position + 1);
         if (failure != null) {
             if (failure instanceof RuntimeException /* 可直接按原类型传播的运行异常。 */ runtimeFailure) throw runtimeFailure;
             if (failure instanceof Error /* 可直接按原类型传播的 JVM Error。 */ error) throw error;
@@ -314,9 +315,9 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private void skipReadyDirectSlots() {
         while (true) {
             // 当前传输游标位置，按所在方法区分提交、完成或消费。
-            long position = consumedPosition.value;
+            long position = (long) CURSORS.getVolatile(cursors, CONSUMED);
             if (position >= cachedCompletedPosition) {
-                cachedCompletedPosition = completedPosition.value;
+                cachedCompletedPosition = (long) CURSORS.getVolatile(cursors, COMPLETED);
                 if (position >= cachedCompletedPosition) return;
             }
             // 当前游标对应的固定传输槽，发布/消费由游标控制。
@@ -329,7 +330,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 return;
             }
             slot.clear();
-            consumedPosition.value = position + 1;
+            CURSORS.setVolatile(cursors, CONSUMED, position + 1);
         }
     }
 
@@ -337,14 +338,14 @@ public final class MatcherCommandPipeline implements AutoCloseable {
      * 返回已提交但尚未执行完成的游标差。
      */
     public int submissionDepth() {
-        return Math.toIntExact(submittedPosition.value - completedPosition.value);
+        return Math.toIntExact((long) CURSORS.getVolatile(cursors, SUBMITTED) - (long) CURSORS.getVolatile(cursors, COMPLETED));
     }
 
     /**
      * 返回已完成但 Owner 尚未回收的传输槽数，含待回收直达槽。
      */
     public int completionDepth() {
-        return Math.toIntExact(completedPosition.value - consumedPosition.value);
+        return Math.toIntExact((long) CURSORS.getVolatile(cursors, COMPLETED) - (long) CURSORS.getVolatile(cursors, CONSUMED));
     }
 
     /**
@@ -389,20 +390,20 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         if (startupFailure != null) return;
         // 当前传输游标位置，按所在方法区分提交、完成或消费。
-        long position = completedPosition.value;
+        long position = (long) CURSORS.getVolatile(cursors, COMPLETED);
         // Matcher 本地缓存的已发布提交位置。
-        long cachedSubmitted = submittedPosition.value;
+        long cachedSubmitted = (long) CURSORS.getVolatile(cursors, SUBMITTED);
         // Matcher 本地缓存的 Owner 已回收位置，用于完成峰值统计。
-        long cachedConsumed = consumedPosition.value;
+        long cachedConsumed = (long) CURSORS.getVolatile(cursors, CONSUMED);
         // 连续空闲次数，决定自旋还是短暂等待。
         try {
-            while (accepting || position < (cachedSubmitted = submittedPosition.value)) {
+            while (accepting || position < (cachedSubmitted = (long) CURSORS.getVolatile(cursors, SUBMITTED))) {
                 // 读信箱队头请求，只有执行位置达到其提交栅栏才读取。
                 BackgroundRead<?> read = backgroundReads.peek();
                 if (read != null) {
                     // 判断读栅栏前先观察提交游标，让同一 Owner 先发布的读取
                     // 在其栅栏到达后执行，避免被后来提交的命令越过。
-                    cachedSubmitted = submittedPosition.value;
+                    cachedSubmitted = (long) CURSORS.getVolatile(cursors, SUBMITTED);
                     if (position >= read.fence()) {
                         backgroundReads.poll();
                         read.execute();
@@ -410,7 +411,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     }
                 }
                 if (position >= cachedSubmitted) {
-                    cachedSubmitted = submittedPosition.value;
+                    cachedSubmitted = (long) CURSORS.getVolatile(cursors, SUBMITTED);
                     if (position >= cachedSubmitted) {
                         Thread.onSpinWait();
                         continue;
@@ -457,12 +458,12 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     }
                 }
                 position++;
-                completedPosition.value = position;
+                CURSORS.setVolatile(cursors, COMPLETED, position);
                 // 当前读取的固定分片就绪通知。
                 Runnable signal = completionPublished;
                 if (signal != null) signal.run();
                 if (position - cachedConsumed > completionHighWaterMark) {
-                    cachedConsumed = consumedPosition.value;
+                    cachedConsumed = (long) CURSORS.getVolatile(cursors, CONSUMED);
                     // 当前已完成但 Owner 尚未回收的传输槽数。
                     int compDepth = Math.toIntExact(position - cachedConsumed);
                     if (compDepth > completionHighWaterMark) {
@@ -617,14 +618,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             settlement = null;
             directSettlement = false;
         }
-    }
-
-    /**
-     * 存放 volatile 游标的槽位，用作发布和消费可见性边界。
-     */
-    private static final class PaddedSequence {
-        /** volatile 游标值，用作发布和消费可见性边界。 */
-        protected volatile long value;
     }
 
 }

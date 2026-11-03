@@ -1030,41 +1030,32 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (size > 1_024) {
             return new CoreMatchingResult(false, "LIFECYCLE_BATCH_TOO_LARGE");
         }
-        if (size == 1) {
-            // 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。
-            CancellationOrder order = orders.get(0);
-            // 当前请求的结果值，签名或局部类型区分原生结果、结果码及盘口封装。
-            CoreMatchingResult result;
+        List<CoreCancellationResult> cancellations = new ArrayList<>(size);
+        List<exchange.core2.core.common.MatcherResult.MatcherEvent> events = new ArrayList<>(size);
+        String failureCode = null;
+        int successfulPrefix = 0;
+        for (CancellationOrder order : orders) {
+            if (failureCode != null) {
+                cancellations.add(new CoreCancellationResult(order.orderId(), false));
+                continue;
+            }
             try {
-                result = cancelControlNative(order.userId(), order.orderId(), order.instrumentId());
-            } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
+                var result = cancelNative(order.userId(), order.orderId(), order.instrumentId());
+                matcherEvidence.recordControlNative(topology.matcherShardId(result.symbol()), result.sequence());
+                boolean accepted = result.resultCode() == CommandResultCode.SUCCESS
+                        || result.resultCode() == CommandResultCode.ACCEPTED;
+                cancellations.add(new CoreCancellationResult(order.orderId(), accepted));
+                CoreMatchingResult.appendEvents(events, result.events());
+                if (accepted) successfulPrefix++;
+                else failureCode = result.resultCode().name();
+            } catch (RuntimeException failure) {
                 matcherFailure.compareAndSet(null, failure);
                 throw failure;
             }
-            return aggregateRoutedCancellationResults(orders, List.of(result));
         }
-        // 本次按请求顺序保存的撤单结果，首个拒绝后用未提交项补齐。
-        List<CoreMatchingResult> results = new ArrayList<>(size);
-        for (/* 当前批次项或盘口档位的下标。 */ int index = 0; index < size; index++) {
-            // 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。
-            CancellationOrder order = orders.get(index);
-            // 当前请求的结果值，签名或局部类型区分原生结果、结果码及盘口封装。
-            CoreMatchingResult result;
-            try {
-                result = cancelControlNative(order.userId(), order.orderId(), order.instrumentId());
-            } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
-                matcherFailure.compareAndSet(null, failure);
-                throw failure;
-            }
-            results.add(result);
-            if (!result.accepted()) {
-                while (results.size() < size) {
-                    results.add(notSubmitted());
-                }
-                break;
-            }
-        }
-        return aggregateRoutedCancellationResults(orders, results);
+        return new CoreMatchingResult(failureCode == null, failureCode == null ? "SUCCESS" : failureCode,
+                cancellations, failureCode != null && successfulPrefix != 0,
+                java.util.Collections.unmodifiableList(events));
     }
 
     /**
@@ -1756,12 +1747,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
-    /**
-     * 创建未提交撤单的占位结果，明确它被跳过而不是原生引擎拒绝。
-     */
-    private static CoreMatchingResult notSubmitted() {
-        return new CoreMatchingResult(false, "NOT_SUBMITTED");
-    }
+
 
     /**
      * 从非空模块列表读取最大原生持久化序号；空列表明确抛异常，不据此递增业务证据序号。

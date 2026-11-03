@@ -847,3 +847,59 @@ Archive conductor仅52次超过1ms的Java FileWrite，共1378496B，最大23.488
 未测生产混合Funding/强平/准备金/ADL、HTTP/WebSocket/前端、三节点、跨机网络、长稳、精确native和PMU；不填deficit=0或声称生产自愈通过。
 完整报告、计划、命令、代码、压缩采样及JFR摘要见[归档](docs/validation/perpetual-saturation-20261030/REPORT.md)。清理自有节点/data/mmap/Archive/JFR和临时类，实际状态见[cleanup.json](docs/validation/perpetual-saturation-20261030/cleanup.json)。
 后续正式容量需无换页/无限频环境及独立发压供给，保留相同拓扑与门槛，检查供给/窗口限制后再确认Core业务饱和。
+
+
+## 2026-11-03：Aeron Core 五项主链路精简
+
+本轮全部实现后统一验证。范围：元数据候选按账户 Lane 分组、订单/预留按槽冻结、同线程控制撤单一次聚合、事件引用列表扁平化、Matcher 发布游标间隔存放。仅测试当前 master 工作树，不回跑旧版本。
+
+验证计划与门槛：HotSpot Corretto 27+33、Maven 3.9.16，macOS x86_64；开始可用磁盘约 410 GiB。先对 service 及依赖执行 `mvn -pl surprising-aeron-core/surprising-aeron-service -am clean test`，要求失败与错误均为零。检查六产品线订单、资金、终态、快照重放和跨 Matcher 撤单已有覆盖，新增终态/未索引订单归属、分组后草稿复用、禁止跨 Lane 候选查表、冻结值隔离、空批次与首项失败边界。
+
+局部性能诊断计划：`AccountLaneCommitBenchmark.metadataAndSequenceFanout`，2/4 个账户 Lane、每 Lane 一笔订单、窗口 256、1 个 JMH 线程/1 个 fork，预热 2×1s、测量 3×1s；无 profiler 与 `-prof gc` 分开执行。`ContinuousOwnerBenchmark.placeCancelWithoutTimers` 固定 LINEAR_PERPETUAL、batchSize=1、DISTINCT 用户、1 个 Matcher、窗口 256，以相同短窗口另行录制 JFR；夹具结束核对资金、冻结、终态及快照恢复。诊断阈值为运行无异常、排空且终态/资金校验通过，未设置吞吐提升门槛。
+
+这些是局部/进程内诊断，不能替代真实 Aeron 成员网络、Consensus、Archive 的正式容量验收；没有旧版同条件基线，不据此报告提速百分比。JFR 无分配样本不代表零分配；缓存行硬件竞争、CPU 限频与换页未实测时必须标为缺口。
+
+验证结果：**功能通过，性能部分验证**。
+
+- 全量 `service -am clean test` 首次退出 1：service 1572 项中只有 `CoreOrderedOrderBatchTest` 对已删除 `submittedPosition` 私有字段的反射报错；没有业务断言失败。测试改为通过 VarHandle 读取新的数组槽，保留撤单合并数与结果顺序断言。
+- 补跑及基准构建命令：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=CoreOrderedOrderBatchTest,AccountLaneCommitBenchmarkTest,TriggerCommitBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false package`，退出 0，14 模块构建成功；批量订单 40 项及基准功能 6 项通过。最终 service XML 汇总 1572 项、0 失败、0 错误、1 跳过；protocol 全量 258 项、0 失败、0 错误。这里的最终汇总包含全量运行及该测试类补跑，并非声称首次完整命令退出 0。
+- 所有最终 JMH 命令均启用 `-foe true`，退出 0。首次元数据 JMH 因命令行 `-jvmArgsAppend` 覆盖注解中的 module exports 而启动失败，补齐参数后重跑；失败启动没有计入结果。
+
+实际 JMH 入口为 `java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar`，共同参数 `-f 1 -t 1 -wi 2 -i 3 -w 1s -r 1s -foe true -rf json -rff <本轮结果路径>`；fork 参数为 `-Xms512m -Xmx1g --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED`。
+
+分别执行：
+
+1. `AccountLaneCommitBenchmark.metadataAndSequenceFanout -p accountLanes=2,4 -p maxInFlight=256`，无 profiler；另一次添加 `-prof gc`。
+2. `ContinuousOwnerBenchmark.placeCancelWithoutTimers -p productLine=LINEAR_PERPETUAL -p batchSize=1 -p accountPattern=DISTINCT`，无 profiler；另一次 fork 添加 `-XX:StartFlightRecording=filename=/tmp/aeron-five-continuous.jfr,settings=profile,dumponexit=true,maxsize=64m`。
+3. `LifecyclePaginationBenchmark.settle -p productLine=LINEAR_DELIVERY -p maxInFlight=256`，fork 添加相同 JFR 参数、文件名为 `/tmp/aeron-five-lifecycle.jfr`。
+
+后两种场景都明确设置 `-Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.account-lanes=2`。JFR 为完整 fork 录制，包含准备、预热、测量和恢复，不能将全部采样归因于稳定测量阶段。
+
+
+补充控制撤单诊断：`LifecyclePaginationBenchmark.settle` 固定 LINEAR_DELIVERY、窗口 256，256 个持仓用户及挂单，按 16 项撤单/结算页推进，预热 2×1s、测量 3×1s、1 个 fork；单独录制 JFR，检查 32 页收敛、资金总额、冻结/持仓归零及快照恢复。该录制覆盖完整 fork（含初始化/恢复），仅用于栈观察，不把它当作纯测量窗口。
+
+当前观测（每档只有 3 个测量窗口，置信区间宽，不推导前后版本提升）：
+
+| 层次/场景 | 指标 | 当前值 | 口径 |
+| --- | --- | --- | --- |
+| 技术阶段：2 Lane 元数据提交 | 提交完成数、分配 | 1,753,024 次/秒；0.066077 B/次 | 每次触及 2 个订单，窗口 256；分配来自独立 GC run，该 run 记录 GC count=0，不等于零分配 |
+| 技术阶段：4 Lane 元数据提交 | 提交完成数、分配 | 881,741 次/秒；0.068861 B/次 | 每次触及 4 个订单，窗口 256；分配来自独立 GC run，该 run 记录 GC count=0，不等于零分配 |
+| 业务夹具：持续下单/撤单 | 报单与撤单完成率 | 各约 109,511 单/秒；合计 219,023 操作/秒 | 每个 JMH invocation 为 256 下单+256 撤单；进程内服务夹具，无真实网络/WAL |
+| 撮合成交 | 成交对/秒 | 未测 | 持续夹具使用挂单后撤单，不构造成交容量场景 |
+| 风控清算 | 交割分页终态 | 每轮 32 页收敛 | 仅用于真实控制撤单、资金与恢复诊断，不作为带 profiler 的主吞吐结果 |
+| 底座协议 | Aeron WAL 报文/秒、网络带宽 | 未测 | 本轮没有启动真实 Aeron 节点 |
+
+持续夹具无 profiler 的三次测量 accepted/terminal 均为 211968、234496、213504，累计 659968 次业务操作与同数 Core 消息，逐窗口相等；结束还核对全部挂单撤销、余额恢复、冻结及预留清空、快照恢复一致。交割夹具每次核对用户+财库资金总额不变、无开放订单、冻结/预留/持仓归零、恢复后的业务哈希相同及 accepted=terminal。
+
+JFR 摘要/采样视图（使用 `jfr summary` 和 `jfr print --json --events jdk.ExecutionSample,jdk.ObjectAllocationSample,jdk.DataLoss`）：
+
+| 录制 | 大小/时间 | 事件数 | SHA-256 |
+| --- | --- | --- | --- |
+| continuous | 1405777 B / 8 s | ExecutionSample=2251；ObjectAllocationSample=1912；GC=6；DataLoss=0 | `dc653e471249f8417493d46ea2ce2e79e0675eb609cdc306e15be969a13dcfb8` |
+| lifecycle | 1618231 B / 11 s | ExecutionSample=2314；ObjectAllocationSample=1679；GC=18；DataLoss=0 | `5478e483df0ca26644fa820f812b51bc4a6192dd291e7cf3ecacfc250b2bca1d` |
+
+持续夹具的首个应用栈采样：`SettlementLaneWorker.run` 874、`MatcherCommandPipeline.runMatching` 513、`SettlementLaneWorker.peekMatcherSettlement` 105；交割夹具分别为 1603、366、163。工作循环包含忙轮询，样本数量不能解释为业务计算耗时。两份录制分配样本最多均为 byte[]（1393、1384 个样本），混有协议夹具与快照分配；不能据此给核心对象分配定量结论。
+
+硬件为 8 物理核/16 逻辑核、16 GiB 内存，`sysctl hw.cachelinesize` 为 64 字节，游标元素间隔为 128 字节。尚缺缓存行争用硬件计数、真实集群、三段延迟分位数、长期堆/堆外内存与 CPU/换页/限频对齐证据；本轮短样本不作为正式性能验收或长期无泄漏证明。余额/终态/恢复断言通过，不能外推未运行的部署场景。
+
+清理：所有本轮 Maven/JMH 进程已结束；摘要入档后已移除本轮 19 个 /tmp 日志、JMH JSON、JFR 及导出文件，共 110210829 字节，保留本节参数、数值、摘要和校验值。

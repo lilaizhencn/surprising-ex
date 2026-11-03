@@ -40,6 +40,12 @@ public class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         return slot;
     }
 
+    /** 按已知槽更新业务值，同时撤销旧预计算事实。 */
+    @Override protected void replaceAt(int slot, V value) {
+        super.replaceAt(slot, value);
+        if (slot < prepared.length) prepared[slot] = null;
+    }
+
     /**
      * 要求业务变化已存在，再为同槽记录预计算值，null 也标记为已准备。
      * @param key 业务变化的原语 long 键

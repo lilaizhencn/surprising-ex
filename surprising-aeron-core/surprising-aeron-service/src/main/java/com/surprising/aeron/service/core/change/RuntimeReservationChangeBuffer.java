@@ -20,7 +20,15 @@ public final class RuntimeReservationChangeBuffer extends RuntimeChangeBuffer<Re
      * 逐有效项把当前预留复制进本缓冲自己的发布槽，null 删除项仍保留键。
      */
     public void freezeValues() {
-        for (/* 当前正在冻结、写入或清理的预留连续槽。 */ int slot = 0; slot < size; slot++) put(keyAt(slot), valueAt(slot));
+        if (size > copies.length) copies = java.util.Arrays.copyOf(copies, Math.max(size, copies.length * 2));
+        for (int slot = 0; slot < size; slot++) freezeAt(slot, valueAt(slot));
+    }
+
+    /** 已知槽位直接冻结；已属于本槽的后值不再复制自身。 */
+    private void freezeAt(int slot, ReservationRuntime value) {
+        if (value != null && value != copies[slot])
+            value = copies[slot] = value.copyIntoPublicationSlot(copies[slot]);
+        replaceAt(slot, value);
     }
 
     /**
@@ -30,12 +38,11 @@ public final class RuntimeReservationChangeBuffer extends RuntimeChangeBuffer<Re
      */
     public @Override int put(long key, ReservationRuntime value) {
         // 当前正在冻结、写入或清理的预留连续槽。
-        int slot = indexOf(key);
-        if (slot < 0) slot = super.put(key, null);
+        int slot = super.put(key, null);
         if (slot >= copies.length)
             copies = java.util.Arrays.copyOf(copies, Math.max(slot + 1, copies.length * 2));
-        if (value != null) value = copies[slot] = value.copyIntoPublicationSlot(copies[slot]);
-        return super.put(key, value);
+        freezeAt(slot, value);
+        return slot;
     }
 
     /**

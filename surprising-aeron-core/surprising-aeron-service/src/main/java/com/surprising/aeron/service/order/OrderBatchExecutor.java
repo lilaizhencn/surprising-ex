@@ -1051,7 +1051,7 @@ public final class OrderBatchExecutor {
                 owner.runtimeState().releaseOwnerLaneAccess();
                 batch.laneCommitEvent = owner.runtimeState().dispatchBatchCommit(batch.sequence,
                         batch.laneCommitCompleted() ? List.of() : batch.changedUserIds,
-                        batch.laneCommitCompleted() ? List.of() : batch.runtimeChangedOrderIds,
+                        batch.laneCommitCompleted() ? null : owner.runtimeState().metadataOrderUsers(batch.runtimeChangedOrderIds),
                         clusterTimestamp, clusterPosition, pending.command().header().userId(), batch, owner.identities());
             }
             if (batch.laneCommitEvent != null) {

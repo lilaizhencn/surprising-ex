@@ -102,7 +102,7 @@ public class TriggerCommitBenchmark {
         long before = runtime.revision();
         long next = ++sequence;
 
-        var event = runtime.dispatchLaneMutation(next, users, List.of(), triggerIds, next, next);
+        var event = runtime.dispatchLaneMutation(next, users, null, triggerIds, next, next);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!runtime.laneCommitComplete(event)) {
             if (System.nanoTime() > deadline) throw new IllegalStateException("trigger commit timeout");

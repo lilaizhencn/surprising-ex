@@ -70,7 +70,7 @@ public class AccountLaneCommitBenchmark {
         private TradingAccountRuntime runtime;
         private long[] users;
         private java.util.List<Long> metadataUsers;
-        private java.util.List<Long> metadataOrders;
+        private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap metadataOrders;
         private LaneCommitEvent[] commits;
         private OrderBatchPending[] responses;
         private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
@@ -103,7 +103,7 @@ public class AccountLaneCommitBenchmark {
                 runtime.putUser(new UserRuntime(users[laneId]));
             }
             var userList = new java.util.ArrayList<Long>(accountLanes);
-            var orderList = new java.util.ArrayList<Long>(accountLanes);
+            var orderUsers = new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(accountLanes);
             var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                     new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -124,10 +124,10 @@ public class AccountLaneCommitBenchmark {
                 runtime.putOrder(order);
                 runtime.putReservation(reservation);
                 userList.add(user);
-                orderList.add(orderId);
+                orderUsers.put(orderId, user);
             }
             metadataUsers = java.util.List.copyOf(userList);
-            metadataOrders = java.util.List.copyOf(orderList);
+            metadataOrders = orderUsers;
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
 
@@ -158,7 +158,7 @@ public class AccountLaneCommitBenchmark {
                 long next = ++sequence;
                 commits[index] = metadata
                         ? runtime.dispatchLaneMutation(next, metadataUsers, metadataOrders, null, next, next)
-                        : runtime.dispatchLaneMutation(next, metadataUsers, java.util.List.of(), null, 0, 0);
+                        : runtime.dispatchLaneMutation(next, metadataUsers, null, null, 0, 0);
             }
             for (int index = 0; index < commits.length; index++) {
                 LaneCommitEvent commit = commits[index];
@@ -166,9 +166,10 @@ public class AccountLaneCommitBenchmark {
                 runtime.releaseLaneCommit(commit);
                 commits[index] = null;
             }
-            if (metadata) for (long id : metadataOrders)
+            if (metadata) metadataOrders.forEachKey(id -> {
                 if (runtime.changedOrderValue(id).clusterPosition() != sequence)
                     throw new IllegalStateException("Lane metadata publication is not at the last sequence");
+            });
             return sequence;
         }
 

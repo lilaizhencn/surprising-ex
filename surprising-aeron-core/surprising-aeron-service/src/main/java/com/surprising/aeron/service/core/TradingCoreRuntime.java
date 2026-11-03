@@ -1330,7 +1330,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 runtimeState.releaseCompletedSequentialLaneStage();
                 directCommand.commitEvent(runtimeState.dispatchLaneMutation(
                         nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
-                        resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
+                        runtimeState.metadataOrderUsers(resultBuilder.commandChangedOrderIds), triggers.closingTriggerIds(),
                         clusterTimestamp, clusterPosition));
             }
             directCommand.markFinalizationPrepared();

@@ -17,10 +17,18 @@ public final class RuntimeOrderChangeBuffer extends RuntimeIndexedChangeBuffer<O
     public void putLive(long key, OrderRuntime value) { super.put(key, value); }
 
     /**
-     * 逐有效项通过 put 复制为本物理缓冲的命令槽值，使随后活订单变化不再影响本回执。
+     * 按连续槽复制为本物理缓冲的命令槽值，使随后活订单变化不再影响本回执。
      */
     public void freezeValues() {
-        for (/* 当前正在冻结、写入或清理的连续订单槽。 */ int slot = 0; slot < size; slot++) put(keyAt(slot), valueAt(slot));
+        if (size > copies.length) copies = java.util.Arrays.copyOf(copies, Math.max(size, copies.length * 2));
+        for (int slot = 0; slot < size; slot++) freezeAt(slot, valueAt(slot));
+    }
+
+    /** 已知槽位直接冻结；已属于本槽的后值不再复制自身。 */
+    private void freezeAt(int slot, OrderRuntime value) {
+        if (value != null && value != copies[slot])
+            value = copies[slot] = value.copyIntoCommandSlot(copies[slot]);
+        replaceAt(slot, value);
     }
 
     /**
@@ -30,11 +38,11 @@ public final class RuntimeOrderChangeBuffer extends RuntimeIndexedChangeBuffer<O
      */
     public @Override int put(long key, OrderRuntime value) {
         // 当前正在冻结、写入或清理的连续订单槽。
-        int slot = indexOf(key);
-        if (slot < 0) slot = super.put(key, null);
-        if (slot >= copies.length) copies = java.util.Arrays.copyOf(copies, Math.max(slot + 1, copies.length * 2));
-        if (value != null) value = copies[slot] = value.copyIntoCommandSlot(copies[slot]);
-        return super.put(key, value);
+        int slot = super.put(key, null);
+        if (slot >= copies.length)
+            copies = java.util.Arrays.copyOf(copies, Math.max(slot + 1, copies.length * 2));
+        freezeAt(slot, value);
+        return slot;
     }
 
     /**
@@ -60,7 +68,7 @@ public final class RuntimeOrderChangeBuffer extends RuntimeIndexedChangeBuffer<O
      * 清除当前有效命令槽内容后清基础缓冲，保留物理槽对象；调用方须已完成活引用冻结且消费者已经释放租约。
      */
     public @Override void clear() {
-        for (/* 当前正在冻结、写入或清理的连续订单槽。 */ int slot = 0; slot < size; slot++) if (copies[slot] != null) copies[slot].clearCommandSlot();
+        for (/* 当前正在冻结、写入或清理的连续订单槽。 */ int slot = 0, count = Math.min(size, copies.length); slot < count; slot++) if (copies[slot] != null) copies[slot].clearCommandSlot();
         super.clear();
     }
 }

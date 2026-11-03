@@ -2,11 +2,9 @@ package com.surprising.aeron.service.matcher;
 
 import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.cmd.CommandResultCode;
-import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.RandomAccess;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
@@ -47,7 +45,7 @@ public final class CoreMatchingResult implements MatchingResult {
     @Accessors(fluent = true, chain = false)
     @Getter
     private long nativeMatcherSequence;
-    /**  原生事件列表引用或组合片段视图，构造时不统一复制。 返回当前结果关联的原生成交、撤量或拒单事件序列；它是账户结算事实输入，不能据此再次撮合。 */
+    /**  原生事件列表引用或扁平引用列表，事件值不复制。 返回当前结果关联的原生成交、撤量或拒单事件序列；它是账户结算事实输入，不能据此再次撮合。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final List<MatcherResult.MatcherEvent> matcherEvents;
@@ -129,36 +127,17 @@ public final class CoreMatchingResult implements MatchingResult {
         nativeCoreSequence = 0;
     }
 
-    /**
-     * 按输入结果顺序收集并展开已有片段，空集合返回空列表、单片段直接借用，多片段创建索引视图。
-     * @param results 需要按当前迭代顺序拼接事件的结果集合
-     */
-    static List<MatcherResult.MatcherEvent> concatenateEvents(
-            Iterable<CoreMatchingResult> results) {
-        // 当前仅保存内层列表引用的片段构建器，随后固定外层列表。
-        ArrayList<List<MatcherResult.MatcherEvent>> segments = new ArrayList<>();
-        for (CoreMatchingResult /* 当前待收集其事件的普通撮合回执。 */ result : results) {
-            appendSegments(segments, result.matcherEvents());
-        }
-        if (segments.isEmpty()) return List.of();
-        if (segments.size() == 1) return segments.getFirst();
-        return new SegmentedEvents(segments);
+    /** 按结果顺序一次收集事件引用，不复制事件值，不保留分段二分索引。 */
+    static List<MatcherResult.MatcherEvent> concatenateEvents(Iterable<CoreMatchingResult> results) {
+        ArrayList<MatcherResult.MatcherEvent> events = new ArrayList<>();
+        for (CoreMatchingResult result : results) appendEvents(events, result.matcherEvents());
+        return java.util.Collections.unmodifiableList(events);
     }
 
-    /**
-     * 跳过空来源，已有 SegmentedEvents 就把其片段展开一层加入目标，否则加入来源列表引用，避免片段视图递归嵌套。
-     * @param destination 仅本次构造使用的可写片段列表
-     * @param source 保持稳定的来源事件列表，可能本身已经是片段视图
-     */
-    private static void appendSegments(
-            List<List<MatcherResult.MatcherEvent>> destination,
-            List<MatcherResult.MatcherEvent> source) {
-        if (source.isEmpty()) return;
-        if (source instanceof SegmentedEvents /* 已经存在的片段视图，直接展开它的外层引用。 */ segmented) {
-            destination.addAll(segmented.segments);
-        } else {
-            destination.add(source);
-        }
+    /** 直接追加稳定事件引用，避免 addAll 对来源列表的临时数组物化。 */
+    static void appendEvents(List<MatcherResult.MatcherEvent> destination,
+                             List<MatcherResult.MatcherEvent> source) {
+        for (int index = 0; index < source.size(); index++) destination.add(source.get(index));
     }
 
     /**
@@ -196,57 +175,4 @@ public final class CoreMatchingResult implements MatchingResult {
         return List.copyOf(values);
     }
 
-    /**
-     * 共享原生事件段的只读索引视图。只固定外层段列表和长度，内层列表及事件引用不深拷贝；来源必须在使用期间保持稳定。
-     */
-    private static final class SegmentedEvents extends AbstractList<MatcherResult.MatcherEvent>
-            implements RandomAccess {
-        /** 只读复制的外层事件片段列表，内层各段仍保留原引用。 */
-        private final List<List<MatcherResult.MatcherEvent>> segments;
-        /** 每个片段的全局排他结束下标，用于二分定位。 */
-        private final int[] ends;
-        /**  全部事件片段的固定总长度。 返回构造时固定的所有片段事件总数。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(onMethod_ = {@Override})
-        private final int size;
-
-        /**
-         * 复制外层片段列表并精确累计每片段结束下标，内部事件列表仍共享；总长度超过 int 范围时精确加法抛异常。
-         * @param segments 按事件顺序排列的内层列表引用
-         */
-        private SegmentedEvents(List<List<MatcherResult.MatcherEvent>> segments) {
-            this.segments = List.copyOf(segments);
-            this.ends = new int[segments.size()];
-            // 已累计的事件数量，使用精确 int 加法建立结束下标。
-            int total = 0;
-            for (/* 当前正在登记累计结束位置的片段下标。 */ int index = 0; index < segments.size(); index++) {
-                total = Math.addExact(total, segments.get(index).size());
-                ends[index] = total;
-            }
-            this.size = total;
-        }
-
-        /**
-         * 先检查全局下标，再二分累计结束位置定位片段，换算片段内下标后取原事件；实现 RandomAccess 标记不代表这里使用常数时间寻址。
-         * @param index 当前查询的全局事件下标
-         */
-        @Override
-        public MatcherResult.MatcherEvent get(int index) {
-            Objects.checkIndex(index, size);
-            // 二分搜索尚未排除的最左片段下标。
-            int low = 0;
-            // 二分搜索尚未排除的最右片段下标。
-            int high = ends.length - 1;
-            while (low < high) {
-                // 本次比较的中间片段下标。
-                int middle = (low + high) >>> 1;
-                if (index < ends[middle]) high = middle;
-                else low = middle + 1;
-            }
-            // 目标片段之前的累计事件数，用来换算局部下标。
-            int offset = low == 0 ? 0 : ends[low - 1];
-            return segments.get(low).get(index - offset);
-        }
-
-    }
 }

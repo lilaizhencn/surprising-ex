@@ -8,6 +8,32 @@ import static org.assertj.core.api.Assertions.*;
  * 检验业务值和预计算列对齐、已准备删除与未准备的区别、专用订单值冻结和回收；未使用第二列的测试只核对数组为空，不替代分配采样。
  */
 class RuntimeIndexedChangeBufferTest {
+    @Test void freezesLiveAndAlreadyFrozenOrdersWithoutLosingDeletesOrReusingLiveValues() {
+        var orders = new RuntimeOrderChangeBuffer();
+        var live = CoreStateTestFixtures.order(11, 7, 0, 10).laneValue();
+        live.applyCommitMetadataInPlace(10, 20);
+        orders.putLive(11, live);
+        orders.putPrepared(11, null);
+        for (int id = 12; id < 50; id++) orders.putLive(id, null);
+        orders.freezeValues();
+        var frozen = orders.get(11);
+        assertThat(frozen).isNotSameAs(live);
+        assertThat(orders.hasPreparedAt(0)).isFalse();
+        live.applyCommitMetadataInPlace(30, 40);
+        orders.freezeValues();
+        assertThat(orders.get(11)).isSameAs(frozen);
+        assertThat(frozen.clusterPosition()).isEqualTo(20);
+        assertThat(orders.containsKey(49)).isTrue();
+        assertThat(orders.get(49)).isNull();
+        orders.put(11, live);
+        assertThat(orders.get(11)).isSameAs(frozen);
+        assertThat(frozen.clusterPosition()).isEqualTo(40);
+        orders.clear();
+        for (int id = 0; id < 100; id++) orders.putLive(id, null);
+        orders.clear(); // 未冻结的增长也允许释放
+        assertThat(orders.isEmpty()).isTrue();
+    }
+
     /**
      * 多轮以 Void 预计算类型写入并接管，反射核对未使用 prepared 列始终为空、源已交空，Owner 仍可读取全部值。
      */

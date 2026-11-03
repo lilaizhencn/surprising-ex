@@ -6,7 +6,7 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.LaneOrderResultTarget;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.support.collection.PrimitiveLongView;
+import org.eclipse.collections.api.map.primitive.LongLongMap;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import lombok.Getter;
@@ -47,9 +47,8 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     /** 负责捕获最终订单响应的参与 Lane 编号。 */
     private int resultLaneId;
 
-    // 仅需要在最终提交补订单元数据时创建候选列表；各参与 Lane 在自己的表中定位，Owner 不跨账户表查找归属。
-    /** 可选的提交元数据候选订单编号列表，参与 Lane 各查自己的权威表。 */
-    private LongArrayList metadataOrderIds;
+    /** 准备阶段按已捕获的用户归属分组，只向所属 Lane 发送候选编号。 */
+    private LongArrayList[] metadataOrderIds;
     /** 各 Lane 已独立冻结的元数据订单后值物理缓冲，完成后交 Owner 接管。 */
     private RuntimeOrderChangeBuffer[] metadataOrders;
     /**
@@ -111,49 +110,38 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         } finally { runtime.exitLaneCommandScope(lane); }
     }
 
+    /** 随事件复用的分组回调，不逐命令创建捕获函数。 */
+    private final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure collectMetadataOrder = (orderId, userId) -> {
+        if (userId == 0) return;
+        int laneId = runtime.topology().accountLaneId(userId);
+        if ((requiredLaneMask & (1L << laneId)) == 0)
+            throw new IllegalStateException("metadata order has no account commit Lane");
+        if (metadataOrderIds[laneId] == null) metadataOrderIds[laneId] = new LongArrayList(4);
+        metadataOrderIds[laneId].add(orderId);
+    };
+
     /**
-     * 非空候选输入要求时间和日志位置非负，追加需要补提交元数据的订单编号；所有参与 Lane 各自准备容量并在执行时查自己的订单表，Owner 不跨 Lane 查表定位。
-     * @param orderIds 需要补写提交元数据的候选订单编号，可为 null，null 项跳过
-     * @param timestamp 本次提交时间，候选输入非空时要求非负
-     * @param position 本次 Cluster 日志位置，候选输入非空时要求非负
+     * 复制已捕获的订单及用户归属，按 Lane 准备实际候选容量；零用户表示候选已退休。
+     * 归属来自 Owner 已收集的冻结后值或请求明确身份，不读取 Lane 活订单表。
      */
-    public void prepareMetadata(Iterable<Long> orderIds, long timestamp, long position) {
-        if (orderIds == null) return;
+    public void prepareMetadata(LongLongMap orderUsers, long timestamp, long position) {
+        if (orderUsers == null || orderUsers.isEmpty()) return;
         if (timestamp < 0 || position < 0) throw new IllegalArgumentException("invalid commit metadata");
         metadataTimestamp = timestamp;
         metadataPosition = position;
-        if (orderIds instanceof PrimitiveLongView view) {
-            int viewSize = view.primitiveSize();
-            if (viewSize > 0) {
-                if (metadataOrderIds == null) {
-                    metadataOrderIds = new LongArrayList(viewSize);
-                    metadataOrders = new RuntimeOrderChangeBuffer[usersByLane.length];
-                }
-                for (int i = 0; i < viewSize; i++) {
-                    metadataOrderIds.add(view.primitiveValueAt(i));
-                }
-            }
-        } else {
-            for (Long /* 输入迭代到的订单编号，null 项跳过。 */ orderId : orderIds) {
-                if (orderId == null) continue;
-                if (metadataOrderIds == null) {
-                    metadataOrderIds = new LongArrayList(4);
-                    metadataOrders = new RuntimeOrderChangeBuffer[usersByLane.length];
-                }
-                metadataOrderIds.add(orderId);
-            }
+        if (metadataOrderIds == null) {
+            metadataOrderIds = new LongArrayList[usersByLane.length];
+            metadataOrders = new RuntimeOrderChangeBuffer[usersByLane.length];
         }
-        if (metadataOrderIds == null) return;
-        // 尚未处理的参与 Lane 位图，每次清除最低有效位。
+        orderUsers.forEachKeyValue(collectMetadataOrder);
         long lanes = requiredLaneMask;
         while (lanes != 0) {
-            // 当前候选或位图对应的实际账户 Lane 编号。
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            // 当前准备、扩容或汇总的有效候选数量，触发发布时按实际关闭数精确累加。
-            int count = metadataOrderIds.size();
+            LongArrayList ids = metadataOrderIds[laneId];
+            if (ids == null || ids.isEmpty()) continue;
             if (metadataOrders[laneId] == null) metadataOrders[laneId] = new RuntimeOrderChangeBuffer();
-            metadataOrders[laneId].ensureCapacity(count);
+            metadataOrders[laneId].ensureCapacity(ids.size());
         }
     }
 
@@ -164,17 +152,16 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     private void stampMetadata(AccountLaneState lane) {
         // 当前候选或位图对应的实际账户 Lane 编号。
         int laneId = lane.laneId();
-        if (metadataOrderIds == null) return;
-        // 当前 Lane 的触发列表或共享元数据候选列表，只访问本事件有效项。
-        LongArrayList ids = metadataOrderIds;
+        if (metadataOrderIds == null || metadataOrderIds[laneId] == null) return;
+        LongArrayList ids = metadataOrderIds[laneId];
         runtime.enterLaneCommandScope(lane);
         try {
             for (/* 当前候选列表中的连续下标。 */ int index = 0; index < ids.size(); index++) {
                 // 当前触发或元数据候选的业务编号。
                 long id = ids.get(index);
-                // 当前 Lane 在自己的订单表查到的权威记录，缺失可能属于另一参与分区或已退休。
+                // 当前 Lane 的权威记录，候选在执行前可能已退休。
                 OrderRuntime order = lane.order(id);
-                if (order == null) continue; // 可能由另一参与 Lane 持有，也可能已经退休。
+                if (order == null) continue;
                 if (order.updatedAtEpochMillis() == metadataTimestamp && order.clusterPosition() == metadataPosition)
                     continue;
                 runtime.accountRollback().captureUserBefore(order.userId());
@@ -212,7 +199,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             // 当前候选或位图对应的实际账户 Lane 编号。
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            if (metadataOrders[laneId].isEmpty()) continue;
+            if (metadataOrders[laneId] == null || metadataOrders[laneId].isEmpty()) continue;
             runtime.orderChanges().adopt(laneId, metadataOrders[laneId]);
             usersByLane[laneId].forEach(runtime::changedUser);
         }
@@ -373,8 +360,8 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
                 int laneId = Long.numberOfTrailingZeros(metadataLanes);
                 metadataLanes &= metadataLanes - 1;
                 if (metadataOrders[laneId] != null) metadataOrders[laneId].clear();
+                if (metadataOrderIds[laneId] != null) metadataOrderIds[laneId].clear();
             }
-            metadataOrderIds.clear();
         }
         metadataTimestamp = metadataPosition = 0;
 

@@ -85,7 +85,7 @@ class TriggerOrderIndexTest {
 
             // 携带两个跨 Lane 用户关联触发撤销的首个可复用提交事件
             var event = runtime.dispatchLaneMutation(1, java.util.List.of(7L, second),
-                    java.util.List.of(), java.util.List.of(901L, 902L), 100, 200);
+                    null, java.util.List.of(901L, 902L), 100, 200);
             awaitCommit(runtime, event);
             assertThat(runtime.revision()).isEqualTo(10);
             assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
@@ -96,7 +96,7 @@ class TriggerOrderIndexTest {
             assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
             assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).revision())).isEqualTo(2);
             // 再次派发的普通无触发撤销提交事件，必须复用原 event 对象
-            var plain = runtime.dispatchLaneMutation(2, java.util.List.of(7L, second), java.util.List.of(), null, 0, 0);
+            var plain = runtime.dispatchLaneMutation(2, java.util.List.of(7L, second), null, null, 0, 0);
             assertThat(plain).isSameAs(event);
             awaitCommit(runtime, plain);
             runtime.releaseLaneCommit(plain);

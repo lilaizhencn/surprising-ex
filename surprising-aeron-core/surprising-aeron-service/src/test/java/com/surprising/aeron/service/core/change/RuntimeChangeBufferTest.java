@@ -7,6 +7,29 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 核对变化缓冲的首次插入顺序、覆盖、null 删除、极值键、扩容及跨命令清理；反射只用于验证引用释放，不是全链路分配采样。
  */
 class RuntimeChangeBufferTest {
+    @Test void reservationPublicationRemainsStableAcrossLiveUpdatesAndReuse() {
+        var reservations = new RuntimeReservationChangeBuffer();
+        var live = new com.surprising.aeron.service.order.state.ReservationRuntime(11, 7, 0,
+                com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 100, 0, 0, 10).laneValue();
+        reservations.putLive(11, live);
+        for (int id = 12; id < 50; id++) reservations.putLive(id, null);
+        reservations.freezeValues();
+        var frozen = reservations.get(11);
+        live.releaseInPlace(30);
+        reservations.freezeValues();
+        assertThat(reservations.get(11)).isSameAs(frozen);
+        assertThat(frozen.reservedUnits()).isEqualTo(100);
+        assertThat(reservations.containsKey(49)).isTrue();
+        assertThat(reservations.get(49)).isNull();
+        reservations.put(11, live);
+        assertThat(frozen.reservedUnits()).isEqualTo(70);
+        reservations.clear();
+        reservations.putLive(11, live);
+        reservations.freezeValues();
+        assertThat(reservations.get(11)).isSameAs(frozen);
+        assertThat(frozen.reservedUnits()).isEqualTo(70);
+    }
+
     /**
      * 以长短交替前缀登记 null 预留删除，部分轮次冻结、部分不物化，要求清理都不越过发布槽长度并移除旧索引。
      */

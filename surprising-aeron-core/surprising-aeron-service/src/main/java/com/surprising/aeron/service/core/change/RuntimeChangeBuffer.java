@@ -149,6 +149,12 @@ public class RuntimeChangeBuffer<V> {
         return (V) values[index];
     }
 
+    /** 在已定位的有效槽替换值，不改变键或重新查询索引。 */
+    protected void replaceAt(int slot, V value) {
+        if (slot < 0 || slot >= size) throw new IndexOutOfBoundsException(slot);
+        values[slot] = value;
+    }
+
     /**
      * 按键读取当前值，缺失与已记录 null 都返回 null，需要区分时使用 containsKey。
      * @param key 原语 long 业务键，允许零与负数

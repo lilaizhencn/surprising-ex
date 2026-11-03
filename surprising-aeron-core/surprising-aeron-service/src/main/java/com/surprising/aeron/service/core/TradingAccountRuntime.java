@@ -224,6 +224,19 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final LongHashSet changedUsers = new LongHashSet();
     /** 本次 Owner 提交是否涉及余额变化，明细仍由 Lane 余额补丁保存。 */
     private boolean balancesChanged;
+    /** Owner 准备提交时复用的订单归属草稿，事件复制分组后即可清空；不作为持久路由索引。 */
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap metadataOrderUsers =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
+    private final org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<OrderRuntime>
+            captureMetadataUser = (id, order) -> {
+                if (order != null && metadataOrderUsers.containsKey(id)) metadataOrderUsers.put(id, order.userId());
+            };
+    private final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure
+            captureActiveMetadataUser = (id, userId) -> {
+                if (userId != 0) return;
+                var route = factIndexes.activeOrders().activeOrderRoute(id);
+                if (route != null) metadataOrderUsers.put(id, route.userId());
+            };
     /** 当前命令的订单变化及索引信息，空值可表示删除，不替代账户订单表。 */
     final OwnerIndexedChanges<OrderRuntime, Void> changedOrders =
             new OwnerIndexedChanges<>(new RuntimeOrderChangeBuffer());
@@ -1319,22 +1332,42 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean workersStopped() { return laneLifecycle.workersStopped(); }
 
     /**
+     * 从当前命令的冻结后值捕获候选归属，活动索引只补未产生后值的仍活动订单。
+     * 后值包含已终态和未入活动索引的订单；两处均无身份的候选已退休，不派发盖章。
+     * 返回 Owner 复用草稿，调用方必须立即交给 dispatch，不能跨命令保存。
+     */
+    public org.eclipse.collections.api.map.primitive.LongLongMap metadataOrderUsers(Iterable<Long> orderIds) {
+        assertOwner();
+        metadataOrderUsers.clear();
+        if (orderIds instanceof PrimitiveLongView ids) {
+            for (int i = 0; i < ids.primitiveSize(); i++) metadataOrderUsers.put(ids.primitiveValueAt(i), 0);
+        } else {
+            for (Long id : orderIds) if (id != null) metadataOrderUsers.put(id, 0);
+        }
+        if (metadataOrderUsers.isEmpty()) return metadataOrderUsers;
+        // 只扫描一次已收集变化，不按每个候选遍历全部 Lane 缓冲。
+        changedOrders.forEach(captureMetadataUser);
+        if (factIndexes != null) metadataOrderUsers.forEachKeyValue(captureActiveMetadataUser);
+        return metadataOrderUsers;
+    }
+
+    /**
      * 校验提交序号和原日志元数据，按变化用户派发账户提交任务，同时携带订单盖章和可选触发取消信息。
      * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
-     * @param orderIds 本次需要在同一 Lane 提交任务中盖章的订单身份
+     * @param orderUsers 订单到用户的已捕获归属，null 表示无需补订单元数据
      * @param triggerIds 可空的待取消触发单身份集合
      * @param timestamp 原复制日志业务时间，不用当前机器时间替代
      * @param position 原复制日志位置，随同提交元数据交给账户任务
      */
     public LaneCommitEvent dispatchLaneMutation(long coreSequence, Iterable<Long> userIds,
-            Iterable<Long> orderIds, Iterable<Long> triggerIds, long timestamp, long position) {
+            org.eclipse.collections.api.map.primitive.LongLongMap orderUsers, Iterable<Long> triggerIds, long timestamp, long position) {
         assertOwner();
-        if (coreSequence <= 0 || userIds == null || orderIds == null || timestamp < 0 || position < 0)
+        if (coreSequence <= 0 || userIds == null || timestamp < 0 || position < 0)
             throw new IllegalArgumentException("invalid account metadata commit");
         clearLaneUserScratch();
         addLaneUsers(userIds);
-        return dispatchLaneMutationFromScratch(coreSequence, orderIds, triggerIds, timestamp, position,
+        return dispatchLaneMutationFromScratch(coreSequence, orderUsers, triggerIds, timestamp, position,
                 null, null, -1);
     }
 
@@ -1342,7 +1375,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 最终批次响应与账户提交使用同一任务；即使批次没有账户变化，也把响应用户 Lane 加入读取范围，不把纯拒绝批次伪装成账户写入。
      * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
-     * @param orderIds 本次需要在同一 Lane 提交任务中盖章的订单身份
+     * @param orderUsers 订单到用户的已捕获归属，null 表示无需补订单元数据
      * @param timestamp 原复制日志业务时间，不用当前机器时间替代
      * @param position 原复制日志位置，随同提交元数据交给账户任务
      * @param responseUserId 最终批次响应所属用户，决定没有账户写入时仍需读取的 Lane
@@ -1350,15 +1383,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param identities 与本产品线状态配套的身份注册表
      */
     public LaneCommitEvent dispatchBatchCommit(long coreSequence, Iterable<Long> userIds,
-            Iterable<Long> orderIds, long timestamp, long position, long responseUserId,
+            org.eclipse.collections.api.map.primitive.LongLongMap orderUsers, long timestamp, long position, long responseUserId,
             LaneOrderResultTarget target, RuntimeIdentityRegistry identities) {
         assertOwner();
-        if (coreSequence <= 0 || userIds == null || orderIds == null || timestamp < 0 || position < 0
+        if (coreSequence <= 0 || userIds == null || timestamp < 0 || position < 0
                 || responseUserId <= 0 || target == null || identities == null)
             throw new IllegalArgumentException("invalid final batch account task");
         clearLaneUserScratch();
         addLaneUsers(userIds);
-        return dispatchLaneMutationFromScratch(coreSequence, orderIds, null, timestamp, position,
+        return dispatchLaneMutationFromScratch(coreSequence, orderUsers, null, timestamp, position,
                 target, identities, topology.accountLaneId(responseUserId));
     }
 
@@ -1403,7 +1436,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 按临时用户列表校验每条写入 Lane 的提交顺序，必要时加入只读响应 Lane，检查容量并借用事件；准备元数据或触发取消失败则归还事件，成功后按掩码内联执行或派发，并仅推进写入 Lane 的派发水位。
      * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param orderIds 本次需要在同一 Lane 提交任务中盖章的订单身份
+     * @param orderUsers 订单到用户的已捕获归属，null 表示无需补订单元数据
      * @param triggerIds 可空的待取消触发单身份集合
      * @param timestamp 原复制日志业务时间，不用当前机器时间替代
      * @param position 原复制日志位置，随同提交元数据交给账户任务
@@ -1412,7 +1445,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param responseLaneId 最终批次响应读取所在的 Lane，没有响应目标时为负一
      */
     private LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence,
-            Iterable<Long> orderIds, Iterable<Long> triggerIds, long timestamp, long position,
+            org.eclipse.collections.api.map.primitive.LongLongMap orderUsers, Iterable<Long> triggerIds, long timestamp, long position,
             LaneOrderResultTarget target, RuntimeIdentityRegistry identities, int responseLaneId) {
         // 本轮实际涉及的账户 Lane 位集合
         long laneMask = 0;
@@ -1439,7 +1472,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         event.prepare(coreSequence, laneMask, laneUserScratch, this);
         try {
             if (target != null) event.prepareResponse(target, identities, responseLaneId, commitMask);
-            event.prepareMetadata(orderIds, timestamp, position);
+            event.prepareMetadata(orderUsers, timestamp, position);
             event.prepareTriggerCancellations(triggerIds);
         }
         catch (/* 准备提交元数据或触发取消失败，丢弃内容并归还事件后继续抛出 */ RuntimeException failure) {

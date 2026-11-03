@@ -661,7 +661,10 @@ class CoreOrderedOrderBatchTest {
             // 实际 Matcher 分片工作队列数组
             var shards = (MatcherCommandPipeline[]) shardsField.get(group);
             // 撤单批次前分片零的提交位置，用差值检查合并片段数
-            long submittedBefore = field(field(shards[0], "submittedPosition"), "value");
+            long[] cursors = field(shards[0], "cursors");
+            java.lang.invoke.VarHandle cursorHandle = field(shards[0], "CURSORS");
+            int submittedIndex = field(shards[0], "SUBMITTED");
+            long submittedBefore = (long) cursorHandle.getVolatile(cursors, submittedIndex);
             // 含自有、重复或缺失订单的待测撤单命令
             CoreMessage cancel = command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
@@ -686,7 +689,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(items.get(1).resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
             assertThat(items.get(3).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
             assertThat(items).extracting(CoreOrderBatchResult.Item::index).containsExactly(0, 1, 2, 3, 4, 5);
-            long submittedAfter = field(field(shards[0], "submittedPosition"), "value");
+            long submittedAfter = (long) cursorHandle.getVolatile(cursors, submittedIndex);
             assertThat(submittedAfter - submittedBefore).isEqualTo(2);
             assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.tradingState().users().get(1001L).balances()).isEqualTo(before);

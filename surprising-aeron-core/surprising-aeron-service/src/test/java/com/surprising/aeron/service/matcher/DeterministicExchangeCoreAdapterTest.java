@@ -34,6 +34,45 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class DeterministicExchangeCoreAdapterTest {
 
+    @Test void controlBatchPreservesEmptySuccessAndFailureBeforeAnyMutation() {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            placeDirect(adapter, 7, bid(3, 80));
+            var empty = adapter.cancelControlOrders(2, new java.util.UUID(7, 2), 1000, List.of());
+            assertThat(empty.accepted()).isTrue();
+            assertThat(empty.cancellations()).isEmpty();
+            assertThat(empty.matcherEvents()).isEmpty();
+            var rejected = adapter.cancelControlOrders(3, new java.util.UUID(7, 3), 1000, List.of(
+                    new DeterministicExchangeCoreAdapter.CancellationOrder(2, 7, "1"),
+                    new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
+            assertThat(rejected.outcome()).isEqualTo(MatchingResult.Outcome.REJECTED_UNCHANGED);
+            assertThat(rejected.resultCode()).isEqualTo("MATCHING_UNKNOWN_ORDER_ID");
+            assertThat(rejected.cancellations()).containsExactly(
+                    new CoreCancellationResult(2, false), new CoreCancellationResult(3, false));
+            var single = adapter.cancelControlOrders(4, new java.util.UUID(7, 4), 1000, List.of(
+                    new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
+            assertThat(single.accepted()).isTrue();
+            assertThat(single.cancellations()).containsExactly(new CoreCancellationResult(3, true));
+            assertThat(single.matcherEvents()).hasSize(1);
+        }
+    }
+
+    @Test void aggregateEventsPreserveOrderAndReferencesAcrossNestedControlResults() {
+        var first = MatcherEventFixtures.trade(1, 7, 100, 1, false, true);
+        var second = MatcherEventFixtures.trade(2, 8, 100, 1, true, true);
+        var source = new ArrayList<MatcherResult.MatcherEvent>(List.of(first));
+        var one = new CoreMatchingResult(true, "SUCCESS", List.of(), false, source);
+        var two = new CoreMatchingResult(true, "SUCCESS", List.of(), false, List.of(second));
+        var events = CoreMatchingResult.concatenateEvents(List.of(one, result(true, "SUCCESS"), two));
+        source.clear();
+        assertThat(events).containsExactly(first, second);
+        assertThat(events.get(0)).isSameAs(first);
+        assertThat(events.get(1)).isSameAs(second);
+        assertThatThrownBy(() -> events.add(first)).isInstanceOf(UnsupportedOperationException.class);
+        var combined = new CoreMatchingResult(true, "SUCCESS", List.of(), false, events);
+        assertThat(CoreMatchingResult.concatenateEvents(List.of(combined, two)))
+                .containsExactly(first, second, second);
+    }
+
     /**
      * 直接下单缺少结算事件目标时必须拒绝，随后查询本币对订单簿仍为空。
      */
