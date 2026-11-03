@@ -1,0 +1,17 @@
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.1.2)
+
+17:08:28.719 [main] INFO com.surprising.aeron.bootstrap.SurprisingCoreApplication -- Starting SurprisingCoreApplication v1.0.0-SNAPSHOT using Java 27.0.1.0.3 with PID 72059 (/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar started by atomex in /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/aeron-async-stages/m5pro-20261103-window-sweep/MATCH_BATCH_STREAM-core256-client1024)
+17:08:28.721 [main] INFO com.surprising.aeron.bootstrap.SurprisingCoreApplication -- No active profile set, falling back to 1 default profile: "default"
+17:08:28.994 [main] INFO com.surprising.aeron.bootstrap.SurprisingCoreApplication -- Started SurprisingCoreApplication in 0.373 seconds (process running for 0.575)
+17:08:29.176 [main] INFO com.surprising.aeron.bootstrap.AeronCoreLifecycle -- Aeron core started productLine=LINEAR_PERPETUAL nodeId=0 clusterId=101 host=127.0.0.1
+17:08:29.253 [clustered-service-101-0] INFO com.surprising.aeron.service.core.TradingCoreOwner -- Aeron core role productLine=LINEAR_PERPETUAL role=FOLLOWER
+17:08:29.354 [clustered-service-101-0] INFO com.surprising.aeron.service.core.TradingCoreOwner -- Aeron core role-change productLine=LINEAR_PERPETUAL role=LEADER
+17:10:11.000 [clustered-service-101-0] INFO com.surprising.aeron.service.core.TradingCoreOwner -- Aeron core command-window productLine=LINEAR_PERPETUAL highWaterMark=64 pending=0

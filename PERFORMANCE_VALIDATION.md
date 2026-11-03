@@ -915,3 +915,7 @@ JFR 摘要/采样视图（使用 `jfr summary` 和 `jfr print --json --events jd
 ## 2026-11-03 M5 Pro 单成员永续持续满载
 
 部分验证：master 9088fc7cc，真实单节点、1 matcher、2 Lane、in-flight256；普通单97,599.983单/s，batch20 741,367.667单/s；各预热30s/稳定60s/排空，资金差0、终态一致、队列排空。JFR另测无DataLoss，等待/批推进热点突出，未证明Core物理饱和。恢复、长稳、精确分配及窗口对齐资源证据尚缺。详见 [报告](docs/validation/m5pro-perpetual-20261103/REPORT.md)。
+
+## 2026-11-03 扩窗诊断
+
+六档窗口诊断正确性通过；出现系统swap增长，性能比较按无效处理，未确认Core饱和或256最优。详见 [扩窗报告](docs/validation/m5pro-perpetual-20261103/window-sweep/REPORT.md)。生产配置未改。
