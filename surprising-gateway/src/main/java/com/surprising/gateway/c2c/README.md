@@ -1,68 +1,46 @@
-# C2C 业务实现与验收边界
+# C2C Business and Acceptance Boundaries
 
-服务端代码放在本包，复用 Gateway 的认证、KYC、资产精度、资金指令、后台审批与审计，不新增服务或产品线。Web、Flutter 和运营后台消费同一 REST 契约。截图仅用于布局和交互参考；不导入第三方商户、姓名、收款账号或报价。
+C2C runs inside Gateway and reuses authentication, KYC, exact asset units, funds commands, approval, and audit. It does not add a product line or an independent SQL wallet. Web, mobile, and administration consume the same REST contracts.
 
-## 入口与主流程
+## Business flow
 
-1. 自选市场按购买/出售、币种、法币、金额、收款方式、认证商家、完成率、付款窗口与排序查询。快捷区使用同一报价流程选择符合金额及用户条件的报价；VIP 资格由真实配置和用户资格决定。
-2. 商家申请经审核后发布广告。卖出广告先从卖家的资金账户转入内部托管账户，收到完整资金提交结果后才能上架；买入广告在卖家吃单时托管。广告可暂停、恢复、关闭，进行中的订单不受广告关闭影响。
-3. 按金额或数量生成短效报价，服务端固定价格、数量、费用、限额和收款条件。确认以报价 ID 及幂等键创建订单；SQL 行锁分配广告库存，拒绝过期报价、自己成交、黑名单、未认证/受限账户及超额订单。
-4. 待付款订单只向买卖双方显示不可变收款信息快照。买家确认已付款后仍不移动托管资产；卖家实际核实到账、通过安全验证并确认放币后，资金指令将净额与手续费转往指定账户。
-5. 付款前取消或到期可归还广告库存或退款；已付款订单不得超时自动退款。双方可提交申诉、证据和订单消息，客服按权限查看并处理。申诉放币/退款需要不同管理员审批，且在资金意图固定后不能改判。
-6. 订单、消息、关注/黑名单/举报、收款账户、快捷回复和价格预警按本人/双方/客服权限隔离。统计来自真实已终态订单，页面不生成占位商户或虚假成交率。
+1. Market lookup filters real advertisements by side, asset, fiat, amount, payment method, merchant status, limits, and ordering. Quick trading uses the same quote eligibility path.
+2. Approved merchants publish advertisements. Sell inventory is backed by a completed transfer to escrow before listing. Buy advertisements escrow the seller's assets when matched. Closing an advertisement does not invalidate active orders.
+3. Short-lived quotes freeze price, quantity, fee, limits, and payment conditions. Order creation uses quote ID and an idempotency key; SQL row locks allocate advertisement inventory. Reject expired quotes, self-trading, blocked/restricted users, and invalid limits.
+4. Payment details are immutable order snapshots visible only to authorized participants. Buyer payment confirmation does not release escrow. Seller verification and protected release initiate the actual funds transfer.
+5. Cancellation/expiry before payment can restore inventory or refund. Paid orders must not auto-refund merely due to timeout. Appeals require protected evidence access and independent administrative approval; fixed funds intent cannot later be redirected.
+6. Messages, relationships, payment details, evidence, and reports are scoped to the owner, participants, or authorized support. Statistics come from actual terminal orders.
 
-## 资金边界
+## Financial invariants
 
-- 资金/现货当前共享 SPOT Core 余额，C2C 不新建一份 SQL 钱包余额。总览不得把该余额累加两次。
-- 托管 ID 从 `gateway_users` 现有序列保留，但不创建可登录用户记录；公共跨用户划转因收款用户不存在而拒绝内部托管 ID。必须验证这一隔离，不能仅靠前端隐藏。
-- 复用 `ProductAccountClient.transferOut/transferIn/completeTransfer` 完成同产品跨用户资金移动。不得将目的地直接设为买家并依赖 pending 作为冻结，现有转账对账器会续办该指令。
-- 每个广告冻结、订单冻结、放币、手续费、退款都有已持久化、不可变的资金意图及稳定 transferId。未知结果同标识续办，确认提交后才进入业务终态，不创建新指令替代原指令，不用 SQL 修改余额。
-- 广告库存/订单分配属于 C2C 的 SQL 业务状态，Core 持有实际托管资产。广告库存、在途订单、待退款、待放币、在途转账和实际托管余额必须对账。
-- 所有资产数量为 int64 最小单位；报价、法币金额和手续费采用精确十进制。法币精度、限额和手续费由市场配置提供，不能使用 double。
+Funding and spot currently share SPOT Core balance; do not count it twice. Reserved escrow IDs come from the existing user sequence but do not create login users. Public cross-user transfer rejects internal destinations without a real receiving user.
 
-## 收款与身份
+Use `ProductAccountClient.transferOut/transferIn/completeTransfer`. Never treat an unfinished transfer directly to the buyer as a freeze: the transfer reconciler can complete it. Every advertisement/order escrow, release, fee, and refund retains persisted immutable funds intent and a stable transfer ID. Unknown results resume the original identity and become business-terminal only after Core confirmation.
 
-首次启用时，先配置市场，再由有 `admin.c2c.write` 权限的管理员调用无正文的 `POST /api/v1/admin/c2c/initialization`。`C2cAdminInitialization` 先提交现有后台审批及审计，再向 SPOT Core 对固定托管/手续费 ID 发送金额为 0 的 `ADJUST_BALANCE`，不接受客户端金额、账户或资产。原命令身份按账户和资产固定；未知结果重试沿用原身份。它不增加资金，不创建可登录用户，不自动开放市场。Core 必须先升级到接受零金额建账的版本；旧 Core 拒绝时初始化显示拒绝，市场继续关闭。
+Reconcile SQL inventory, open orders, pending refunds/releases/transfers, and actual escrow balance. Asset quantities use int64 smallest units. Quotes, fiat values, and fees use exact decimals; public int64 identifiers, units, versions, and event IDs are decimal strings. Do not convert them to floating point.
 
-`GET /api/v1/admin/c2c/reconciliation` 必须实际从 realtime 查到两个账户，并与已提交资金意图一致，配置接口才允许开放。查询未就绪为 `UNAVAILABLE`，在途为 `PENDING`，不一致为 `MISMATCH`，不能按 0 放行。部署开关 `surprising.c2c.enabled` 默认关闭，此时仅状态接口报告未开放，交易接口和结算任务不注册。数据库业务开关仅停止新交易，不停止原订单结算。
+## Initialization and security
 
-`AdminPermissionFilter` 与本包服务共同检查普通读写、敏感资料读取和资金裁决权限。收款明文仅在专门接口返回，审计失败不返回明文。裁决与强制退款关闭始终消费绑定完整请求的双人审批；操作者及审批人不得为本笔交易参与方。资金金额和目的地只取自原订单/广告。
+`POST /api/v1/admin/c2c/initialization` accepts no arbitrary account, amount, or asset body. `C2cAdminInitialization` applies existing approval/audit before stable zero-amount Core adjustments initialize fixed escrow/fee accounts. It creates no funds or login user and does not open the market. An older Core rejecting zero initialization keeps initialization rejected and trading closed.
 
-C2C JSON 中用户 ID、最小单位数量、版本及事件 ID 使用十进制字符串，价格与法币金额同样使用精确十进制字符串。客户端不得转换成浮点参与计算。订单费用、收款信息及付款窗口以订单快照为准。
+Reconciliation must actually read both accounts and match committed intent. UNAVAILABLE, PENDING, and MISMATCH are not zero balances or permission to open trading. `surprising.c2c.enabled` defaults off; the deployment switch disables transaction endpoints/tasks. The database business switch stops new trading while existing orders can still settle.
 
-站外实名转账不等于支付平台扣款接口，不自动认定银行/支付宝/微信到账。收款方式及适用地区由后台配置，付款证明不是资金到账凭证。已有 KYC 状态用于准入；当前 KYC 公共契约不提供可核对的法定姓名，因此收款账户必须经实名核验流程，不能把用户自填姓名当成认证结果。在途订单保留当时的已审核收款快照，后续编辑账户不得改变付款对象。
+`AdminPermissionFilter` and services enforce ordinary, sensitive-data, and funds-decision permissions. Failed audit must not disclose payment plaintext. Approval binds the complete action; operator and approver cannot participate in the affected trade. Funds destinations and amounts come from the original business state.
 
-## 截图页面覆盖
+External bank/payment transfers are not automatically verified by screenshots or a buyer assertion. KYC admission does not establish a verified legal-name match when the shared contract lacks that field. Payment accounts require their own review; later edits cannot change an active order's approved payment snapshot.
 
-- 市场：自选/快捷/VIP、购买/出售、币种/法币、金额/支付方式/更多筛选、商家统计与详情。
-- 下单：金额/数量、最大可买卖、限额、支付方式、商家条件、报价有效期、卖出确认。
-- 订单：未完成/已结束、进行中/申诉中、条件查询、详情、付款、放币、取消、申诉及历史。
-- 消息：会话列表、搜索、未读、订单会话、系统事件、快捷回复和证据。
-- 我的：认证状态、可交易/托管金额、成交统计、收款账户、设置、关注/拉黑/举报、商家申请、帮助和预警。
-- 后台：市场/费率/支付方式、实名收款审核、商家审核/停用、广告上下架、订单与资金意图、申诉审批、举报、审计与对账。
+## Delivery scope and evidence
 
-## 实施与验收清单
+The initial 2026-10-20 scope covered exact quoting, funds intent/escrow, order/payment/release/cancel/timeout/appeal backend paths, PostgreSQL concurrency/security/unknown outcomes, and real SPOT FUSED funds checks. It did not establish all merchant/payment, message/evidence, advanced market, relationship, alert, or three-client UI flows. Two existing protocol fingerprint vector failures were reproduced on the earlier protocol source and were not changed to manufacture passing results.
 
-- [x] SQL 迁移、领域状态及精确报价
-- [x] 资金意图与 Core 实际托管、幂等和 Gateway 崩溃续办
-- [ ] 收款方式/实名核验、商家/广告、市场查询/报价
-- [x] 下单、付款确认、放币、取消、超时、申诉资金审批的服务端链路
-- [ ] 消息/证据、个人设置、关系/举报、价格预警/统计
-- [ ] Web、Flutter、管理后台全部页面及契约接入
-- [x] PostgreSQL 并发、越权、竞态、未知结果与 Gateway 崩溃测试
-- [x] 单产品 SPOT FUSED + maker 实际资金守恒
-- [ ] Web、Flutter、管理后台的完整交互验收
+The later 2026-10-21 work added actual merchant staking, original-amount unstaking, and primary three-client trading operations with local Core validation. Do not interpret the earlier checklist as the latest delivery state, or expand the later scope to every advanced page.
 
-未勾选项不能作为已交付功能对外宣称。测试材料不包含真实收款信息；APK、截图、临时数据库和运行集群不提交。
+Chat, private attachments, temporary R2 access, and support audit reuse exchange identity and `/ws/v1`. Backend verification is distinct from complete three-client interaction acceptance.
 
-2026-10-20 首轮：86 项 C2C/账户/安全回归、43 项协议/六产品账户定向回归通过；实栈 18 个核对阶段逐资产差额 0，5 个广告、8 笔订单和 22 笔资金意图全部终态。关闭本轮做市挂单后冻结归零，托管 0，手续费 600000 USDT 最小单位。市场价输入为隔离 QA 输入，经真实 Kafka、maker、HTTP 与 Core；本轮不验证外部指数/价格计算。完整协议回归 250 项中有 2 个历史指纹向量失败，隔离编译改动前全部协议源码后复现同样失败，未改动向量或指纹算法。[验证与清理记录](../../../../../../../../docs/validation/c2c-foundation-20261020.json)。
+The earlier foundation, chat, and merchant-acceptance documents are not present in this checkout. Consult Git history for those recorded runs; do not interpret the historical scope above as current end-to-end acceptance.
 
-`scripts/c2c-fused-live.py` 仅接受带本轮 owner 标识、时间戳专用数据库、真实本轮 Gateway PID/监听端口的本地环境。`check` 只验证归属；`users/market/trading/funds/advanced/unknown/finish/crash` 是有状态的顺序验收动作，财务动作已开始后不得通过改 fixture 绕过防重保护。网络或重启异常时先查原凭据，不能重建订单。真实站外付款、消息/附件和三端 C2C 页面仍在后续工作内；服务端尚未发布。
+`scripts/c2c-fused-live.py` is a stateful local QA tool with explicit run ownership, dedicated database identity, and real Gateway PID/port checks. Do not bypass duplicate-action protections by changing fixtures after funds operations start. Retain original credentials and query original operations after connection/restart failures. Real payment data, temporary databases, screenshots, APKs, and runtime clusters are not source artifacts.
 
-## 聊天整合进度
+## Architecture reference
 
-聊天后端、私有附件、R2 临时凭证和客服审计已按交易身份整合，复用行情 `/ws/v1`，不注册独立聊天连接。接口、产品边界、受保护运行配置及留存规则见 [C2C 聊天整合](../../../../../../../../docs/c2c-chat.md)。[本轮后端验证记录](../../../../../../../../docs/validation/c2c-chat-backend-20261020.json) 包含定向回归、真实 R2 上传/确认/越权读取和清理情况；Web、Flutter、管理端页面仍在接入，不能将后端验证作为三端已交付的证明。
-
-## 商家质押与三端交易进展（2026-10-21）
-
-本轮已补齐实际商家质押、原额退押及三端主要交易操作，并经本地 Core 实栈验证。上文首轮清单和“页面仍在接入”是历史状态；不能据此否认本轮已交付的主要交易链路，也不能将本轮验收扩大为全部高级筛选、关系、预警页面已完成。详见 [商家买卖与质押业务验收](../../../../../../../../docs/c2c-business-live.md)。
+See the [project architecture and class-level trading flows](../../../../../../../../README.md). Historical validation notes describe their recorded versions, not guarantees for the current implementation.

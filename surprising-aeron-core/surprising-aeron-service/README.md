@@ -1,74 +1,64 @@
-# aeron-service 源码导航
+# Aeron Core Service
 
-本模块是每条产品线的交易权威节点，采用入口 → 业务服务 → 状态及外部边界的方向。启动、命令处理、查询和恢复都围绕同一个 `TradingCoreRuntime`，账户和 Matcher 保持各自所有权。
+This is the authoritative trading node for one product line. Startup, commands, queries, and recovery share `TradingCoreRuntime`. Paths below are relative to `src/main/java/com/surprising/aeron/`.
 
-## 阅读顺序
+## Source map
 
-路径相对于 `src/main/java/com/surprising/aeron/`。
-
-| 业务步骤 | 包与关键类 |
+| Step | Main classes / packages |
 | --- | --- |
-| 节点装配与关闭 | `config`；`bootstrap.AeronCoreLifecycle`、`bootstrap.SurprisingCoreApplication` |
-| Cluster 消息入口 | `controller.AeronTradingClusterService` |
-| 输入推进、控制命令及有序完成 | `service.core.TradingCoreOwner`、`TradingCoreRuntime`；`support.ingress.OwnerIngressRing` |
-| 下单、改单、撤单与批次 | `service.order.MatchingCommandAdmission`、`CoreMatchingFlow`、`OrderBatchExecutor`、`CommandSlot` |
-| 账户准入与订单状态 | `service.order.admission`、`service.order.state`、`service.account.AccountLaneState` |
-| 撮合与线程交接 | `service.matcher.DeterministicExchangeCoreAdapter`、`service.matcher.pipeline` |
-| 成交结算 | `service.settlement.MatcherSettlementEvent` 及各产品结算处理器 |
-| 财库、资金费及保险 | `service.treasury`、`service.funding`、`service.insurance` |
-| 风控、强平及 ADL | `service.risk`、`service.liquidation`、`service.adl` |
-| 条件单与算法单 | `service.trigger`、`service.algo` |
-| 交割与期权生命周期 | `service.settlement.lifecycle` |
-| 提交、结果和终态保留 | `service.order.commit`、`service.result`、`service.retention` |
-| 查询与实时输出 | `service.query`、`service.realtime`、`support.egress` |
-| 快照与恢复 | `service.snapshot`、`service.snapshot.state` |
+| Startup and shutdown | `config`, `bootstrap.AeronCoreLifecycle`, `SurprisingCoreApplication` |
+| Cluster callback | `controller.AeronTradingClusterService` |
+| Input scheduling | `service.core.TradingCoreOwner`, `TradingCoreRuntime`, `support.ingress.OwnerIngressRing` |
+| Order admission | `service.order.MatchingCommandAdmission`, `CoreMatchingFlow`, `CommandSlot`, `OrderBatchExecutor` |
+| Account ownership | `service.account.AccountLaneState`, `service.order.admission.RuntimeOrderAdmission` |
+| Matching | `service.matcher.DeterministicExchangeCoreAdapter`, `service.matcher.pipeline` |
+| Settlement | `service.settlement.MatcherSettlementEvent`, product-specific match processors |
+| Treasury and funding | `service.treasury`, `service.funding`, `service.insurance` |
+| Risk and resolution | `service.risk`, `service.liquidation`, `service.adl` |
+| Triggers and algorithms | `service.trigger`, `service.core.index` |
+| Delivery and exercise | `service.settlement.lifecycle` |
+| Commit and retention | `service.order.commit`, `service.result`, `service.retention` |
+| Queries and output | `service.query`, `service.realtime`, `support.egress` |
+| Snapshots | `service.snapshot`, `service.snapshot.state` |
 
-## 命令处理
+## Command lifecycle
 
-1. `AeronTradingClusterService` 接收原日志时间、位置与请求租约，交入 Owner 输入环。
-2. Owner 检查产品线、命令身份和来源水位，解析为控制命令或交易命令。
-3. 交易命令由账户 Lane 执行准入，Matcher 发布真实撮合事实，相关账户完成结算。
-4. Owner 收齐账户结果，同步应用 Treasury、核对资金守恒并更新业务持仓索引。
-5. 有序提交器按原日志顺序提交，保留终态、生成响应与实时输出，最后归还输入及响应租约。
+```mermaid
+flowchart LR
+    Callback[AeronTradingClusterService] --> Owner[TradingCoreOwner]
+    Owner --> Runtime[TradingCoreRuntime]
+    Runtime --> Admission[MatchingCommandAdmission]
+    Admission --> Flow[CoreMatchingFlow / CommandSlot]
+    Flow --> Matcher[MatcherCommandPipeline]
+    Matcher --> Lanes[SettlementLaneWorker / Account Lanes]
+    Lanes --> Commit[OrderedCommitCoordinator]
+    Commit --> Output[CommitPublication / terminal response]
+```
 
-控制命令可跨真实账户阶段保留财务作用域。保险预留尚未结束时不能验证或提交；财库前值和持仓索引撤销信息保留到提交/回滚结束。资金验证失败立即传播并保留运行时故障。系统故障与业务拒绝分别处理。
+The callback preserves original log time, position, and input leases. Owner checks identity, source progress, dependencies, and capacity. Lanes perform authoritative admission; Matcher publishes actual matching facts; Lanes settle affected users. Owner collects acknowledgements, applies Treasury work, validates funds, and publishes in order. A business rejection is not a runtime fault. A failed funds audit propagates and leaves the runtime fault visible.
 
-同一用户的资产与全仓状态归属于一个账户 Lane；Matcher 按标的划分。热路径不物化完整状态，完整冷状态只在查询、快照或受控恢复边界构造。
+Same-user assets and cross-margin state belong to one Account Lane. Matcher ownership is by instrument. Full cold state is materialized only at query, snapshot, or controlled recovery boundaries. `CommandSlot.OrderMatchingContinuation` is reused across place/cancel/replace operations and cannot be overwritten before matching completion and retirement.
 
-账户提交明确传入变化用户、订单、触发取消及原日志元数据，空订单集合也使用同一提交任务。Lane 收据按物理缓冲交给 Owner，保留预计算槽与租约，Owner 使用现有键迭代器和槽位读取准备好的索引事实。持仓发布直接保留已准备的确定性身份键；衍生品杠杆读取使用所属 Lane 自己的复用探针。
+## Commit details
 
-各 Lane 的已提交 Core 序号由 `TradingAccountRuntime` 在按十六个 `long` 间隔的数组槽中以 volatile 语义发布和读取；它与派发水位共同检查提交顺序。该数组只承载进度，不复制余额或订单状态。
+`TradingAccountRuntime` dispatches changed users/orders and original log metadata. Lane receipts retain prepared slots and leases until Owner consumes them. Published position identities are deterministic. Lane progress and dispatch watermarks enforce commit order; progress arrays are not copies of account state. Cross-shard cancellation advances serially after each receipt and reuses its progress object.
 
-## 幂等与恢复
+## Idempotency and recovery
 
-近期结果由 `CommandResultLedger` 保留；长期资金命令身份由 Owner 独占的内存 `FundsCommandIndex` 保存。冷导入可在启动线程完成，激活后只允许 Owner 查写。完整 UUID 与不可变指纹按旧快照格式编码，重启从 Core 快照和 Cluster 日志恢复；长期身份检查先于来源序号。身份数量随已提交资金命令增长，容量耗尽属于系统故障，不得将历史误判为不存在。
+`CommandResultLedger` retains recent results. `FundsCommandIndex` retains durable funds identities and immutable fingerprints; Owner alone accesses it after activation. Funds identity checks precede source-sequence checks. Capacity exhaustion is a system fault. Snapshots preserve complete UUID/fingerprint identities and cluster-log replay restores later work.
 
-`CoreSnapshotLifecycle` 等待真实账户和 Matcher 完成，冻结同一水位，完整审计后直接编码。捕获边界核对配对信息与完整业务哈希，资金哈希从冻结状态计算一次；Writer 只编码已捕获镜像。分片进度按完整有序编号检查，模块按数量、范围和唯一实例检查。恢复器验证格式、CRC、字节预算、产品线、业务/资金哈希和 Matcher 配对，再激活候选状态。
+`CoreSnapshotLifecycle` waits for real Lane and Matcher completion, freezes one consistent state, audits it, then encodes it. `SectionedCoreSnapshotRecovery` validates the envelope, sections, CRC, limits, product, topology, and business/funds hashes before activating candidate state.
 
-## 配置与资源
+## Configuration and verification
 
-[application.yml](src/main/resources/application.yml) 定义启动默认值。`CoreConfiguration` 装配拓扑，`CoreRuntimeConfiguration` 绑定执行及快照预算，`CoreTransportConfiguration` 装配 Aeron 资源，`RealtimeConfiguration` 装配可选输出。
+Defaults are in [application.yml](src/main/resources/application.yml). `CoreConfiguration` defines topology; `CoreRuntimeConfiguration` defines execution/snapshot budgets; `CoreTransportConfiguration` defines Aeron resources; `RealtimeConfiguration` defines optional output. Default topology is one Matcher and two Account Lanes; recovered routing comes from the snapshot.
 
-默认一个 Matcher、两个账户 Lane；恢复使用快照路由。Owner 在 Cluster 服务线程推进，没有独立账本线程。FUSED 内联交易计算；PIPELINED 使用 Matcher 和账户工作线程。关闭先停止借用命令状态的工作资源，再释放槽、索引和输入租约；异常保留首个原因和 suppressed 信息。
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-service -am test
+```
 
-Matcher 管线装配后，由启动边界明确传入分片激活和 CPU 配置；关闭统一使用 `closeShards`。有序提交由 `OrderedCommitCoordinator` 收齐已有命令槽事实后推进。
+Keep test-only copying, observation, and fault injection out of production APIs. Verify actual rollback, funds, Lane ownership, leases, ordered completion, and current-format recovery. Shut down workers before releasing borrowed slots and input leases; retain the first exception and suppressed failures.
 
-Matcher 直接消费真实准入结果或冻结订单，适配器在同一入口内应用产品滑点并转换原生订单。订单状态更新直接保留成交量、费用和累计成交值，只修改状态、版本及原日志元数据；完整订单输入明确携带指数和远期价格。
+## Architecture reference
 
-强平批次的控制撤单列表由 `CoreMatchingFlow.batchCancellationOrders` 独占创建，交给当前命令槽后由 Matcher 只读消费；此路径不再对刚创建的列表做第二次复制。多 Matcher 场景先用该列表判断分片；若落在同一分片，直接用同一列表准备控制任务，不重复扫描候选。
-
-跨 Matcher 分片的强平撤单由 `TradingCoreRuntime.CrossShardCancellationCoordinator.Progress` 串行派发：上一项回执收齐后才更新当前订单并派发下一项，同一个任务对象跨项复用，不逐笔创建捕获 lambda。
-
-`CommandSlot` 为下单、撤单和替换/改单共用一个可复用的 `OrderMatchingContinuation`，按本次操作选择 Matcher 调用；任务在 Owner 准备后交给 Matcher，直到撮合完成及槽退休前不覆盖输入。准入等待任务仍单独保存原下单任务，控制命令续步保留各自的轮询状态。
-
-算法与触发候选路由保存调度、筛选和反向移除所需字段，客户端号查重读取所属账户 Lane 的权威正文。订单、ADL、算法和触发索引在构造时装载已提交冷状态，后续跟随提交增量更新。订单分页与候选查询使用现有 Owner 索引；指标走现有编码/查询路径。
-
-冷模型保存快照与恢复所需的完整数据及客户端索引。用户快照精确汇总预留与持仓锁定额，再核对真实冻结余额；各不可变值构造负责资产规范和非负金额。正常退休、索引撤销和失败回滚在各自业务边界执行。
-
-## 测试与清理规则
-
-生产代码不保留只用于测试/基准的对象复制、状态观察或故障注入接口。测试夹具、原生结果观察和故障注入放在 `src/test` 或基准源集，使用真实回滚与 Lane 操作准备事实；索引数量在工作交接完成后读取原表大小核对。财库差额测试检查真实入账结果，资金费分页测试检查已发布进度；生产结算不维护测试专用计数。已有的资金、所有权、租约、顺序和恢复约束必须通过相关功能用例验证。
-
-旧快照版本在外层封套检查时拒绝；版本测试使用六产品线的当前快照覆盖旧版本号及下一版本号，真实恢复由当前格式的非空业务场景覆盖。
-
-验证命令与未测范围统一记在 [当前清理记录](validation/cleanup-20261028.md)。旧轮次报告不再充当源码导航；历史证据保存在 Git 历史中。
+See the [project architecture and class-level trading flows](../../README.md). Historical validation notes describe their recorded versions, not guarantees for the current implementation.

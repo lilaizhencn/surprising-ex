@@ -1,185 +1,36 @@
-# 衍生品后台
+# Derivatives Lifecycle
 
-`surprising-derivatives-lifecycle-provider` 统一运行资金费、风险、强平、保险基金和 ADL。
-默认端口 `9087`，启动类 `SurprisingDerivativesLifecycleApplication`，Core 保持独立。
+The API/provider modules combine funding, risk, liquidation, insurance, and ADL orchestration. Provider HTTP defaults to 9087. Core remains the authority for actual funds and positions; this process schedules work and persists workflow progress.
 
-ADL 保留 Core 候选顺序，只处理同合约、反向且不属于源用户的盈利持仓；`COMPLETED` 表示本笔已确认亏空归零，盈利对手可保留余仓。`clearing PnL` 是已实现结算的现金对手项，不表示合约净头寸。
+## Funding flow
 
-本目录包含 API 与 provider，保留聚合 POM 供 Maven/IDE 分组。
-两个子模块沿用直接继承 `surprising-parent` 的关系和已有 artifactId。
-下方构建命令均从仓库根目录执行。
+1. `FundingRateInputRepository` loads product instrument/mark inputs and validates versions.
+2. `FundingService.publishRates` acquires the database lease, calculates rates, and publishes product-scoped facts.
+3. `FundingService.settleDueRates` verifies maintenance state and advances a stable settlement ID/cursor in Core.
+4. `FundingAeronGateway` uses `DerivativesAeronClient`; rejected and unknown outcomes remain distinct.
 
-## 资金费业务顺序
+A completed older Core period permits the current period to begin at cursor zero. An incomplete older period or a newer Core period must not be silently overwritten. Keep historical predicted-rate inputs needed to settle downtime windows. Cache consumption progress does not itself represent funds settlement.
 
-用户资金费流水由 `FundingController.payments` 接收可选合约 ID、`cursor` 和 `sort`，交给 `FundingService.payments` 与 `FundingPaymentRepository.corePage` 按当前产品线查询。账户流水页因此能按永续产品线分页查看资金费，不需逐币对发请求。
+## Shared resources and scheduling
 
-1. `FundingRateInputRepository` 读取当前产品共享的合约快照和标记价，按合约版本校验输入。
-2. `FundingService.publishRates` 获取原有数据库租约、计算费率并发布产品专属资金费事件。
-3. 到结算时间后，`FundingService.settleDueRates` 校验维护状态、使用原有结算 ID 分页发起 Core 命令，保存进度。
-   Core 查询可能返回上一期的进度；上一期已完成且结算 ID 更小时，本期从游标 0 开始。上一期未完成或 Core 进度比本期更新时继续拒绝，避免重复扣款。
-4. `FundingAeronGateway` 使用 `DerivativesAeronClient`，保留资金费拒绝码和幂等结果处理。网络结果未知继续向上传递，不盲目重试或当成成功。
+The process shares a datasource, instrument snapshot cache, and mark-price cache. Risk, liquidation, ADL, funding, and insurance share `DerivativesAeronClient`; it is closed by the application owner, not individual adapters. Product identity is validated at startup. Existing funding tables/migrations must be present in the shared database.
 
-合并不改变费率公式、结算 ID、数据库租约、产品 topic 和 Core 资金记账边界。
-`com.surprising.funding.provider` 保留为业务包；共享 funding API 模块保留。
+Lifecycle scheduling and funding scheduling use separate pools so funding waits do not consume every lifecycle scheduler thread. They still share JVM, client, database, CPU, and memory resources. Funding components load only for linear/inverse perpetual products; a product mismatch fails startup.
 
-预测费率缓存保留从历史恢复的范围，不能直接改为 latest 而漏掉停机期间应结算的窗口。缓存监听器逐条校验并按 sequence 更新，offset 使用 BATCH：一个 poll 的记录处理完成后统一确认，避免启动时每条历史预测都同步提交 offset。失败仍交由原监听容器处理；重读不会覆盖更新的缓存版本。这个提交仅表示派生缓存消费进度，实际资金结算仍由 Core 命令、冻结输入及幂等结算 ID 决定。确认语义见 [Spring Kafka 官方说明](https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html#committing-offsets)。
+## Core execution boundaries
 
-## 共享资源及隔离
+`DerivativesLifecycleMaintenanceTask` coordinates bounded risk and lifecycle work. Core's `RiskScanCoordinator`, derivative risk processor, liquidation processor, insurance/Treasury, ADL, and lifecycle settlement classes perform actual ordered state transitions. Preserve resumable cursors, cancellation budgets, frozen funding inputs, exact amounts, command IDs, and unknown-result handling.
 
-- 一套数据库连接池，仍使用各业务原有表；原 funding 表须部署到此实例的数据源，不能遗漏原有迁移。
-- 一份 `derivativesInstrumentSnapshotCache`，资金费不再自行初始化或创建一份缓存。
-- risk、强平、ADL、funding 和保险基金共用 `DerivativesAeronClient`，连接参数统一取 `surprising.risk.aeron` / `AERON_*`。`InsuranceAeronGateway` 不再创建和关闭独立客户端池，已删除 `surprising.insurance.aeron` 配置；共享池由生命周期服务统一关闭。启动时继续校验产品线一致，资金命令的 ID、顺序和未知结果处理保持原语义。
-- 一份标记价消费缓存，保留衍生品后台 5 秒的新鲜度要求。
-- `taskScheduler` 负责强平、保险、ADL，默认 6 线程；`fundingScheduler` 独立 2 线程负责费率发布和结算，避免资金费等待占用生命周期调度线程。共享客户端、数据库和 JVM 仍可能产生资源竞争。
-- `FundingConfiguration` 只对 U/币本位永续加载资金费组件；交割、期权不创建资金费任务、消费者或接口。资金费产品配置与生命周期产品不一致时启动失败。
+Funding payment/history and liquidation queries use committed facts and product-scoped cursors. Do not manufacture missing history from a current mark price. Administrative int64 values require exact parsing and no floating-point conversion.
 
-## 构建和部署
-
-使用 HotSpot JDK 27：
+## Build and verification
 
 ```bash
-mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am package -DskipTests
+mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am test
 ```
 
-设置 `PRODUCT_LINE=LINEAR_PERPETUAL`（或其他目标衍生品）、数据源、Kafka和 Aeron。
-`/api/v1/funding` 保留，网关及 FundingRpcApi 默认目标改为 `9087`；自定义 `GATEWAY_ROUTE_FUNDING_BASE_URL` /
-`surprising.clients.funding.base-url` 需同步指向此实例。停用原 funding 进程，避免两套部署并存。
+Configure product, datasource, Kafka, and Aeron endpoints. Verify funding periods, risk continuation, cancellation/trigger progression, insolvency convergence, funds conservation, and restart/resume for the affected scope.
 
-启动脚本 `scripts/start-product-line-providers.sh` 不再包含独立 funding 进程。
-每个产品实例与对应 Core、数据库 schema、topic 隔离；本轮合并不将不同产品账户混合。
+## Architecture reference
 
-## 2026-09-22 合并验证
-
-基线 `9ebdc0c1`（Core admission 回收修复已先提交），HotSpot JDK 27、Maven 3.9.16。
-
-| 范围 | 通过 | 跳过 |
-| --- | ---: | ---: |
-| 合并后的 lifecycle provider | 34 | 0 |
-| Aeron client | 50 | 0 |
-| 业务网关 | 513 | 34 |
-| W4 联调工具 | 7 | 0 |
-
-共享 funding/lifecycle API 编译通过，当前无测试类。六产品启动 dry-run 和 production-chain-preflight 合约检查通过。
-五条衍生品使用生产 YAML 和完整组件扫描启动 Spring Web 测试上下文，验证资金费接口在永续返回 200，交割/期权返回 404。
-外部 Aeron、JDBC、合约快照启动使用测试替身，Kafka 消费关闭，定时业务执行关闭；独立调度测试实际占满资金费线程，确认生命周期线程仍能推进。
-资金费测试保留分页进度、维护拒绝、结算 ID 幂等和失败处理；共享客户端适配另外验证业务身份、拒绝及未知结果不重试。
-
-网关 34 项跳过包括需要 PostgreSQL、原生业务服务等环境的集成测试；本轮未重跑完整 HTTP → 数据库 → Aeron 的资金费端到端、三节点故障、长稳或饱和吞吐。
-Core 六产品资金/快照回归在前一修复提交已通过。不能把组件装配/MockMvc 验证表述为所有产品实际交易验收。
-逐类结果和跳过原因见 [验证摘要](../docs/validation/funding-lifecycle-merge-20260922.json)。
-
-主要命令：
-
-```bash
-mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am -DskipTests install
-mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway test
-mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -Dtest=LifecycleApplicationContextTest test
-mvn -pl surprising-aeron-core/surprising-aeron-client,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api test
-mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -Dtest=W4LifecycleQaMainTest test
-mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-aeron-core/surprising-aeron-benchmarks -DskipTests package
-PRODUCT_LINE=LINEAR_PERPETUAL RUN_ID=funding-merge-review ACTION=dry-run AERON_CLUSTER_HOSTNAMES=127.0.0.1 bash scripts/start-product-line-providers.sh
-TASK1_TEST_ROOT="$PWD/.local-logs/funding-merge-preflight-20260922" bash scripts/test-production-chain-preflight.sh
-```
-
-最终可执行包检查通过：包含资金费入口和条件装配，只有 lifecycle 启动类，不包含旧 funding 启动类、重复合约初始化或 Core service 运行依赖。测试/JMH 进程已退出，本轮 preflight 数据、原始 JFR、日志及已汇总报告已清理，保留构建产物与验证摘要。
-
-
-## 合并后的初始化与配置清理（2026-09-22）
-
-只保留 `SurprisingDerivativesLifecycleApplication` 启动入口，删除原 risk/liquidation/insurance/ADL 四个 Application
-及专门排除它们的扫描配置；funding 的产品条件扫描仍保留。
-
-`DerivativesInstrumentSnapshotInitializer` 仍从 gateway 加载当前产品快照，不能删除。
-ADL 与保险原先消费同一 Instrument topic 并更新同一个 `derivativesInstrumentSnapshotCache`；
-现在保留保险包的消费者/工厂作为共享更新入口，沿用原 consumer group，删除 ADL 的重复消费者/工厂。
-risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事件 key 校验和快照版本规则不变。
-
-已删除的无效配置：`surprising.adl.aeron`、ADL 旧风险索引 Kafka 参数/`redis-index`、
-`surprising.liquidation.aeron` 的 hostnames/egress-hostname/response-timeout、
-固定按 ProductLine 生成却仍暴露 setter 的 funding-rate-topic / insurance group-id / liquidation-fee-events-topic，
-以及本进程没有 Feign 调用者的 `surprising.clients.derivatives-lifecycle.base-url`。
-强平已使用原生批量命令，旧本地异步扇出及 `surprising.liquidation.aeron.client-connections` 已删除；真实共享连接参数仍取 risk.aeron。
-保险消费并发、资金费调度/协调租约、数据库迁移及标记价新鲜度配置均保留。
-
-本轮 lifecycle 34 项测试全部通过，含五产品完整组件配置与共享快照实际更新；gateway 537 通过、34 外部环境测试跳过。
-完整外部数据库/Kafka/Core 重启和吞吐未测。详见 [清理验证摘要](../docs/validation/merged-config-cleanup-20260922.json)。
-
-资金费 API 类型已直接归入本模块 `src/main/java/com/surprising/funding/api`；旧 funding 聚合 POM、API 模块及无调用的 `FundingRpcApi` 已删除。网关继续按原 HTTP 路径转发资金费查询，不依赖资金费 DTO JAR。
-
-## 风险续扫与止盈止损调度（2026-09-26）
-
-`RiskService.latestPositions` 为线性和反向永续、交割合约返回 `liquidationPriceTicks`。
-`LiquidationPriceCalculator` 以 Core 风险快照的全仓权益或逐仓保证金为基准，用当前合约精度和维持保证金档位搜索价格边界；
-无持仓、期权和无法形成单一边界的仓位返回 `null`。页面在进入持仓或账户风险区域时读取该查询字段，实时风险状态继续由私有 WebSocket 更新。
-
-`LiquidationService.processWorkInternal` 按 Core 的扫描开关、间隔和工作预算，先提交
-`CONTINUE_RISK_SCAN`，由 Core 在执行时选择当前游标并推进风险及止盈止损；完成后再查询强平任务，
-通过原有批量命令执行强平，不携带查询时的风险游标。只有触发扫描未完成、没有强平候选时也会继续推进。
-原先强平批次只续扫风险，不能执行触发扫描；查询后的价格变化也会使其风险游标失效。
-续扫失败向上传递，下轮仍可重试，不提前更新时间限制。已有仓位保护、只减仓、OCO 单腿触发取消另一腿
-均由 Core 保持。没有新增账户状态、资金副本或执行框架。
-
-定向测试覆盖仅有触发工作、先扫描后强平、扫描关闭与失败后重试；HotSpot JDK 27 下 provider 及依赖
-`mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am package` 通过。
-
-
-## 生命周期维护调度（2026-10-08）
-
-`LifecycleMaintenanceScheduling` 按已安装业务配置的实际期限安排强平、保险、ADL，替代每项任务每 25ms 调用后自行判断间隔。资金费发布与结算仍只在永续产品装配，并沿用独立 `fundingScheduler`；不会与强平等任务争用同一调度池，也不增加线程。
-
-`LifecycleBusinessSettingsService.install` 安装属性与当前版本后发布现有 Settings。间隔变化只重排对应任务；执行中的任务完成后采用新间隔，旧回调通过代次检查失效。间隔从上次执行开始计算，并保留完成后至少 25ms 的原调度间隙；业务异常后继续安排下一轮，不中断资金费结算，也不改变业务幂等、产品线隔离或 Core 资金状态。
-
-新增调度组件仅拥有定时句柄、期限和执行状态，业务动作仍由既有 maintenance task/service 承担。HotSpot JDK 27 测试覆盖五条衍生产品装配、永续专属资金费及独立调度池、热更新与取消回调；资金费、强平、保险和生命周期相关回归通过。需要外部 PostgreSQL 的业务配置集成测试本轮跳过，未对五产品运行实际 HTTP → Core 交易及资金费结算的端到端或长稳测试。
-
-## 资金费输入冻结与真实历史（2026-10-09）
-
-结算先查询 Core 维护状态和最新资金费游标：已完成或已被后续窗口覆盖的预测仅从本地待结算缓存移除，不能再次发布 FINAL。Core 状态不可用时停止本次结算并重试，不能当作新窗口开始。
-
-`FundingService` 调用 `FundingSettlementRateRepository.reserve`，在首次提交 Core 前按产品线、合约、结算时间冻结完整费率输入到 `funding_settlement_rates`；后续分页、进程重启及预测重放继续使用首次费率。该表是尚未执行命令的持久输入，不是结算成功凭据。已完成历史只读取 realtime 从 Archive 实际支付构建的 `core_funding_settlement_projection` 和 `core_funding_payment_projection`。`FundingRateRepository` 不再把内存中的预测写成 FINAL，也不读旧 `funding_rate_ticks` 作为结算历史。
-
-旧核心命令未保存预测的溢价、利息和周期；回放得到的真实费率仍可显示，但未知组成项通过 `FundingRateHistoryResponse` 返回 null，只有与实际费率一致的冻结输入才能补齐组成项。不根据当前仓位或重复预测推算过去扣款，旧预测记录留存供审计。
-
-部署前执行 `init.sql` 中新增的 `funding_settlement_rates`、`core_funding_page_projection` DDL，并对既有 `core_funding_settlement_projection.instrument_change_id` 执行 `DROP NOT NULL`；核心资金费命令没有合约配置版本，不能伪造该值。先准备表，再更新 realtime 与 lifecycle；在线 Core 不需要重启。真实历史补入程序和隔离边界见 [realtime README](../surprising-realtime/README.md)。
-
-验证包含 U/币本位核心真实资金费、重启续页、已完成预测重放、冻结输入在数据库重启读取和产品线隔离、真实历史排序与游标分页，以及数据库未知组成项。真实 PostgreSQL 测试需要 `INSTRUMENT_TEST_JDBC_URL`、`INSTRUMENT_TEST_DB_USER`、`INSTRUMENT_TEST_DB_PASSWORD`，使用随机 schema 并清理；不启动 wallet。
-
-资金费选率与历史读取按表分工：FundingSettlementRateRepository只冻结funding_settlement_rates，
-FundingSettlementProjectionRepository只读确定性提交的结算投影。FundingService检查标记价新鲜度和结算身份，
-冻结首选率后再驱动原确定性Core分页；FundingRateRepository的历史关联仅在完整身份与费率匹配时补充组成，
-未知组成保持NULL。验证见 [资金费表职责验证](../docs/validation/java-mvc-funding-tables-20261021.json)。
-
-生命周期基础设施、调度器、合约快照与资金费配置统一归derivatives.lifecycle.config；保留两个永续产品才装配资金费的条件和原调度器名称。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。
-
-ADL、保险、强平、风险和资金费的AdminCursorPage工具归对应api.utils；API源文件位置与package统一，分页游标和排序行为保持。验证见 [工具归包记录](../docs/validation/java-mvc-utils-packages-20261021.json)。
-
-DerivativesInstrumentSnapshotInitializer归derivatives.lifecycle.service；初始化仍只安装当前生命周期产品，快照Bean名称与产品限定保持。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。
-
-资金费历史与支付分页由 `funding.provider.controller.FundingController` 校验请求并解析原生 `FundingPageQuery`；Service保持结果聚合，Repository选择固定SQL列和产品隔离条件。历史费率仍以已提交APPLIED结算为权威，冻结费率仅在完整身份与费率匹配时补充组成，关联用途在Repository方法注释说明。
-
-Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。
-
-陈旧资金费的原生失败位于 `funding.provider.exception.StaleFundingRateException`，缓存新鲜度和资金费业务判断保持。
-
-历史ADL事件、保险赔付及保险账本的分页/筛选由对应Controller绑定，Service决定产品范围，三个单表Repository只接受原生时间/ID/方向。查询limit仍要求1..1000，默认createdAt.desc；不透明游标保留完整ISO Instant及long主键，客户端直接回传，避免微秒被截断后重复/漏项。
-
-风控候选分页和规则格式由 `risk.provider.controller.RiskRequestBinding` 为公开/管理入口绑定，Service接收原生 `LiquidationCandidatePageQuery` 与 `RiskRuleModels`。Core仍裁决全局保证金策略所有权和运行参数版本冲突，Service保留风险聚合及内部范围约束；候选列表按Core清算ID续页，默认eventTime.asc，limit要求1..1000。
-
-### 管理请求的整数精度
-
-金额单位和64位ID可用十进制JSON字符串传递，绑定到原有long/Long及ID列表后保持精确。应用YAML关闭 `spring.jackson.deserialization.accept-float-as-int`，小数数值、非整数字符串和超出目标整数范围的值在绑定时拒绝，不截断或饱和；未新增wire模型或改变请求路径。
-
-共享生命周期API的Feign/Spring Web依赖为optional，模型注解保留；实际生命周期应用显式依赖Web/OpenFeign starter，纯模型消费者不引入HTTP框架。
-
-### 强平查询的已提交事实（2026-10-24）
-
-强平历史及风险候选读取realtime从已提交Archive生成的`core_liquidation_projection`。候选保证金模式取存储事实，当前风险补充信息同时按合约、持仓腿和保证金模式匹配；删除无Core来源的`instrumentChangeId`及三个无人调用的默认产品构造入口。Web/Client没有该候选版本字段的调用方，其持仓和试单接口中另有实际用途的版本字段不改动。
-
-查询与`core_liquidation_projection_initialization`在同一SQL快照关联，区分尚未就绪和真实空页；未就绪/读取异常以原HTTP入口返回503。使用realtime-api既有`ReadViewUnavailableException`表达读取状态，HTTP状态转换仍由本模块controller负责。公开强平费率、执行价及实收费继续来自已提交事实。按当前约定只做相关模块编译，没有执行数据库或UI交互验证。
-
-候选的`snapshotId`与`markPriceTicks/equityUnits/maintenanceMarginUnits/marginRatioPpm`只表示查询时的Core风险补充值，不表示历史候选发生时的风险。没有匹配快照时为null（JSON配置也可能省略该键），不会用强平ID或固定0冒充；真实零权益仍返回0。候选自身的保证金模式、资产、原持仓数量和时间始终取已提交投影。响应不再补默认全仓、NET或固定产品类型；删除从未生产或消费、携带15字段及旧版本约束的`LiquidationCandidateEvent`。账户/持仓风险推送沿用Core原生Aeron链路；旧Kafka风险事件及其无生产者的消费分支已删除，HTTP风险模型和真实Core字段保留。
-
-强平历史响应删除没有来源且始终填0的`bankruptcyPriceTicks`，从16项字段减为15项；删除4个无人调用的短构造及默认CROSS/NET兜底，唯一完整映射直接传入已提交的保证金模式和持仓腿。实际执行价、执行费率、实收费及历史数量保留。Web/Client没有读取破产价的调用方，当前页面无需字段替换。本项只做相关模块编译，未执行查询或交易场景。
-
-强平提交只保留`LiquidationService.processWork → LiquidationAeronGateway.executeBatch → EXECUTE_LIQUIDATION_BATCH`原生路径；删除无业务调用的单条同步执行、Future扇出、原子计数和递归续页，以及仅服务旧扇出的本地Aeron配置、绑定与范围约束。产品线由共享risk配置传入，不再在YAML重复声明无人读取的强平产品键。实际连接池、超时和连接数仍由`RiskProperties.Aeron`及`DerivativesAeronClient`管理；Gateway没有自有连接，空`close`钩子一并删除。风险扫描、批量游标与命令ID规则保留。只编译相关模块，未执行测试或实际交易。
-
-风险和ADL Gateway也不声明空`close`/`AutoCloseable`，共享连接由`DerivativesAeronClient`释放。风险只读查询重试直接在成功时返回、不可重试或第三次失败时抛出，删除无消费的`last`异常副本及不可达尾部；仍最多3次，前两次可重试失败等待25ms，原异常分类和传播不变。本项只编译相关模块，未运行重试或关闭场景。
+See the [project architecture and class-level trading flows](../README.md). Historical validation notes describe their recorded versions, not guarantees for the current implementation.

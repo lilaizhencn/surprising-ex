@@ -1,23 +1,48 @@
-# 永续单节点测试部署
+# Single-Node Perpetual Test Deployment
 
-这个目录描述 `surprising-ex` 在 `surprising-ex` 测试服务器上的第一阶段部署：只启用 `LINEAR_PERPETUAL`，Core 使用一个节点，PostgreSQL、Redis/Valkey 和 Kafka 使用服务器已有实例。
+This deployment starts `LINEAR_PERPETUAL` with one real Core member and existing PostgreSQL, Redis/Valkey, and Kafka. It is a test topology, not high availability.
 
-## 业务启动顺序
+## Startup order
 
-1. 连接现有数据库、Kafka 和 Redis，确认依赖可用并初始化缺失 schema。
-2. 启动一个 Aeron Core 节点；节点成为单节点 Leader 后，ClusterProbe 才算就绪。
-3. 启动 gateway（身份/订单/账户/合约），由它内嵌启动应用侧共享 Aeron MediaDriver。
-4. gateway 就绪后，按 `price → realtime（成交导出/K 线/路由）→ derivatives-lifecycle（含 funding）→ maker` 启动永续服务。
+1. Verify infrastructure and apply missing schema/migrations.
+2. Start Core and wait for the single member to become Leader and pass ClusterProbe.
+3. Start Gateway, including its application-side MediaDriver and local trading/account/instrument services.
+4. Start Price, Realtime, Derivatives Lifecycle (including funding), then Maker.
 
-Gateway、行情、衍生品后台和 Core 分别运行；funding 已并入衍生品后台。资金权威状态仍由独立 Core 持有，各业务的 Kafka consumer group 和资金费/强平调度边界保留。单节点模式会把同一个真实的一节点 host 列表传给 Core client；不能把一个 host 复制成三个成员，否则客户端会等待不存在的成员 endpoint。
+The current complete backend has six JVMs: Core, Gateway, Price, Realtime, Lifecycle, and Maker. Export runs inside Realtime; the application driver runs inside Gateway. Pass a one-host member list to clients; do not duplicate one host into three nonexistent members.
 
-## 服务器条件
+## Build
 
-已检查的服务器条件：JDK 27、Maven 3.8.7、约 47 GiB 内存、根盘约 254 GiB 可用；PostgreSQL 在 `127.0.0.1:5432`，Redis 在 `127.0.0.1:6379`，Kafka 容器在 `127.0.0.1:9092`。Nginx 已将 `ex-api.tokdou.com` 的 HTTP 和 `/ws/v1` WebSocket 请求转发到 Gateway `9094`。
+Use HotSpot JDK 27 and install the matching exchange-core dependency first.
 
-此测试部署的 Nginx 与 Gateway 同机，生产配置默认信任 `127.0.0.1` 和 `::1`，无需手动填写代理地址。若把 Gateway 放到独立云负载均衡之后，再通过 `GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST` 指定实际代理网段；只填写网关实际连接到的可信代理，不要设为全网。
+```bash
+java -version
+mvn -version
+mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-price/surprising-price-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-realtime/surprising-realtime-provider,surprising-gateway,surprising-maker -am package -DskipTests
+```
 
-更新入口配置时同时安装两份安全 snippet，再检查配置：
+Ship source and artifacts from the same revision. Do not mix matching-library versions. Internal local business invocation does not remove public authentication, permissions, or validation.
+
+## Installation and secrets
+
+```bash
+install -d -m 0750 /var/lib/surprising/linear-perpetual/runtime
+install -d -m 0750 /etc/surprising
+cp deployment/test-single-node/linear-perpetual.env.example /etc/surprising/linear-perpetual.env
+chmod 600 /etc/surprising/linear-perpetual.env
+```
+
+Set real database credentials and `GATEWAY_JWT_SECRET`, including in test environments. Business Kafka topics are product-scoped via `ProductTopicNames`; the global instrument topic is `surprising.instrument.events.v1`. Check broker auto-creation policy before starting.
+
+Heap ceilings can be set separately with `JVM_CORE_XMX`, `JVM_GATEWAY_XMX`, and `JVM_PROVIDER_XMX`; otherwise `JVM_XMX` applies. `JVM_XMS` sets the initial heap. Count native buffers, mapped recordings, thread stacks, and Kafka memory separately. Validate actual JVM arguments and system free memory after changes.
+
+Maker startup is YAML-based, disabled/empty by default; persist wanted hot settings before restart and verify real funds/books before enabling. See [Maker](../../surprising-maker/README.md).
+
+## Network and proxy boundary
+
+Gateway public traffic uses 9094 behind HTTPS; WebSocket is `/ws/v1`. Realtime 9095 and Core/Archive/realtime UDP endpoints stay local/private. `/healthz` is a local ingress probe of Gateway readiness, not a public rate-limit bypass.
+
+When changing Nginx configuration, install both security snippets and validate:
 
 ```bash
 install -d -m 0755 /etc/nginx/snippets
@@ -26,114 +51,36 @@ install -m 0644 deployment/test-single-node/surprising-admin-headers.conf /etc/n
 nginx -t
 ```
 
-生产 Gateway 默认启用 ClamAV 上传扫描，需通过私有地址配置扫描服务并更新病毒库；服务不可用时拒绝上传。浏览器必须使用 HTTPS，管理页面来源登记到 `security.admin-browser-allowed-origins`。部署前核对 [网关安全与部署](../../docs/gateway-security.md) 中的源站防绕过、可信代理和私有探针要求。
+Trust only actual proxy addresses. Same-host loopback is the default deployment case; configure `GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST` for actual remote proxies. Configure admin browser origins, HTTPS, private probes, and ClamAV scanning. Upload scanning fails closed if unavailable. See [Gateway security](../../docs/gateway-security.md).
 
-Kafka 当前没有业务 topic。启动前应确认 broker 的自动建 topic 策略；若关闭了自动建 topic，需要按 `ProductTopicNames` 为 `LINEAR_PERPETUAL` 创建 topic，并额外创建全局 `surprising.instrument.events.v1`。不能把其他产品线的 topic 或 consumer group 混用过来。
+## Upgrade, startup, and shutdown
 
-## 构建与安装
-
-所有 Java/Maven 操作使用 JDK 27：
+Stop writes/tasks, allow committed export to stop, snapshot the old Core, and shut down normally. Back up Archive, database, and checkpoints; retain balances, positions, and identities. An optional temporary `CORE_EXPECTED_STATE_HASH` checks the paused 16-character lowercase state hash before HTTP services start. Remove it after successful upgrade validation.
 
 ```bash
-java -version
-mvn -version
-mvn -pl \
-  surprising-aeron-core/surprising-aeron-service,\
-  surprising-aeron-core/surprising-aeron-tools,\
-  surprising-price/surprising-price-provider,\
-  surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,\
-  surprising-realtime/surprising-realtime-provider,\
-  surprising-gateway,\
-  surprising-maker \
-  -am package -DskipTests
-```
-
-`gateway` 现在包含身份、订单、账户、合约四个业务包，不再部署三个 provider 进程。
-内部服务调用无需配置业务 token 或账户签名密钥。公共 gateway 登录、管理员权限和业务校验继续生效。
-Core 先启动，随后业务应用完成 liveness，再启动价格和其他后台服务。
-
-做市配置从 YAML 初始化，后台公共设置、策略及参考盘口的热更新只保留在当前 maker 进程，重启后丢弃；历史做市配置表不再读取。
-部署前将需要保留的参数写入启动 YAML（可用 `SPRING_CONFIG_ADDITIONAL_LOCATION=file:/绝对路径/maker.yml` 加载），或在重启后通过后台重新配置。默认引擎关闭、策略为空；启用前核对账户资金，重启后检查实际双边盘口。详见 [做市配置与迁移](../../surprising-maker/README.md#单实例部署与配置迁移)。
-
-将同一 Git 提交的代码和 `target` 产物放到服务器 `/opt/surprising-ex`，并创建：
-
-```bash
-install -d -m 0750 /var/lib/surprising/linear-perpetual/runtime
-install -d -m 0750 /etc/surprising
-cp deployment/test-single-node/linear-perpetual.env.example \
-  /etc/surprising/linear-perpetual.env
-chmod 600 /etc/surprising/linear-perpetual.env
-```
-
-Core 只按 `exchange-core.version` 解析 Maven 依赖，不再在 `surprising-ex` 内校验 exchange-core provenance。服务器仍应使用已确认可运行的 exchange-core 构建产物；依赖缺失时让 Maven 正常解析或先安装对应版本，不要把不同版本的 jar 混入同一 release。
-
-必须把数据库密码和 `GATEWAY_JWT_SECRET` 改成服务器实际值。测试环境也不要继续使用默认 JWT secret。
-
-需要充值、提现和划转时，增加 SPOT Core，并在后台“产品与市场”启用现货接入。Gateway 从数据库热加载产品线；不再配置 GATEWAY_PRODUCT_LINES 或划转对账开关，也不部署 9194 Gateway。已有环境先执行 `deployment/migrations/20261008-gateway-product-lines.sql`。完整拓扑与验证见 [单 Gateway 接入多产品线](../../docs/multi-product-gateway.md)。
-
-测试服务器的堆上限通过 `JVM_CORE_XMX=8g`、`JVM_GATEWAY_XMX=4g`、`JVM_PROVIDER_XMX=2g` 分别设置 Core、Gateway 和 price/realtime/derivatives-lifecycle/maker；统一初始堆为 `JVM_XMS=512m`。未配置分组上限时沿用 `JVM_XMX`。这些是 Java 堆上限，Aeron、Kafka、线程栈及映射内存仍需计入服务器总内存。调整后应重启 unit，并检查每个进程的 `-Xmx`、服务就绪和可用内存。
-
-## 启停与验收
-
-有旧状态的升级先停止交易写入和后台任务，等待成交导出退出，再由旧 Core 生成快照并正常关闭。保留 Archive、数据库和投影 checkpoint 的备份，不删除余额、持仓或幂等记录。可在本次启动环境中设置 `CORE_EXPECTED_STATE_HASH`（停写后的 `STATE_HASH_QUERY` 返回的 16 位小写十六进制哈希）；启动器会在 Core 就绪后、任何 HTTP 服务启动前核对恢复哈希，不一致则停止启动。成功验收后移除此临时环境变量，避免后续正常重启仍拿历史状态作比较。
-
-先在服务器上执行只读预检：
-
-```bash
-cd /opt/surprising-ex
 ACTION=dry-run ./scripts/linear-perpetual-single-node.sh
-```
-
-通过后安装 unit：
-
-```bash
-cp deployment/test-single-node/surprising-linear-perpetual.service \
-  /etc/systemd/system/surprising-linear-perpetual.service
+cp deployment/test-single-node/surprising-linear-perpetual.service /etc/systemd/system/surprising-linear-perpetual.service
 systemctl daemon-reload
 systemctl start surprising-linear-perpetual
 systemctl status surprising-linear-perpetual --no-pager
-```
-
-测试服务器首次启动会按顺序拉起多个独立 JVM，unit 的启动超时为 15 分钟；服务进入 `active (exited)` 后才表示整条产品线启动完成。
-
-启动器会在 `/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/` 保存 PID、日志、Core 数据、JFR 和成交导出 checkpoint。检查顺序：
-
-```bash
 ./scripts/linear-perpetual-single-node.sh status
 curl -fsS http://127.0.0.1:9094/actuator/health/readiness
-curl -fsS --resolve ex-api.tokdou.com:443:127.0.0.1 https://ex-api.tokdou.com/healthz
 ```
 
-Gateway 对外仍只走 9094；realtime 行情应用在内网 9095 提供 K 线 HTTP 查询，Core 的 21001–21005、实时 UDP 21010/21020/21030 只绑定本机/内网，不应暴露到公网。
-
-`/healthz` 仅接受入口服务器本机探测，并透传 Gateway readiness；外部监控通过受控私网或本机代理探测。不要把此路径重新开放为公网免限流入口。
-
-停止服务：
+The unit allows 15 minutes for ordered multi-JVM startup. `active (exited)` means the launcher finished. Runtime PID/log/Core/JFR/checkpoint files are under `/var/lib/surprising/linear-perpetual/runtime/linear-perpetual-single-node/`.
 
 ```bash
 systemctl stop surprising-linear-perpetual
 ```
 
-## 当前不包含的验收
+Stop Realtime/export before Core/Archive. Preserve the old exporter checkpoint (`TRADE_EXPORT_CHECKPOINT`) when moving directories. The Core Archive path is not the application MediaDriver path. Stop any previous driver owner before reusing `APP_AERON_DIR`; do not overwrite an active directory.
 
-这套 unit 只解决单节点测试启动，不等于生产高可用。尚未完成三节点切主、长期容量、真实外部指数源稳定性、完整下单/成交/持仓/强平/资金费资金守恒验收；在这些验收完成前，不应把该服务器当作生产交易节点。
+Deposits, withdrawals, and cross-product transfers require appropriate SPOT Core/account access registered through administration. Product containers hot-load database configuration; do not deploy a second legacy Gateway or reintroduce removed product-list switches. Apply existing-environment migrations, including product registration changes, as required.
 
+## Acceptance limits
 
-### 成交导出合入行情进程（2026-09-22）
+A running unit does not establish three-member failover, sustained capacity, external-feed reliability, or full order/position/liquidation/funding conservation. Validate those separately before treating the deployment as production-ready.
 
-`TRADE_EXPORT_ENABLED=true` 现在在 realtime 内启动独立导出线程，不再创建 trade-export PID/JAR 进程。
-U 永续单 Core 成员的完整部署为 7 个 JVM：Core、gateway、price、realtime、derivatives-lifecycle、maker、app-media-driver。
-基础部署为 6 个，开启成交导出不再增加 JVM；不计 PostgreSQL/Kafka/Valkey。
-脚本使用原 `$RUN_DIR/trade-export/checkpoint.bin`，迁移运行目录时必须显式指定旧 `TRADE_EXPORT_CHECKPOINT`。
-先停止旧 exporter，再开启合并后的实例；保持原产品线、数据库、Kafka Streams application-id 和状态目录。
-停机先等待 realtime 关闭导出，再停止 Core/Archive。行情和回放共享内存，原独立 exporter 的状态内存不会凭空消失。
-详细配置及恢复边界见 [realtime README](../../surprising-realtime/README.md)。
+## Architecture reference
 
-
-### 应用侧 Driver 合入 gateway（2026-09-22）
-
-当前完整部署继续减少到 6 个 JVM：Core、gateway、price、realtime、derivatives-lifecycle、maker。
-`REALTIME_ENABLED=true` 时 gateway 管理共享 Driver，`APP_AERON_DIR` 的目录含义不变；
-不再有 app-media-driver PID/log，Driver 诊断进入 gateway 日志。
-迁移先停止旧 Driver，再启动新 gateway；旧进程仍占有目录时启动会失败，不会强制覆盖。
-此变更不合并 Core 的 Driver，也不改变成交导出连接的 Core Archive 目录。
+See the [project architecture and class-level trading flows](../../README.md). Historical validation notes describe their recorded versions, not guarantees for the current implementation.

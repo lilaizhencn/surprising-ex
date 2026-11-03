@@ -1,34 +1,25 @@
-# 实时查询视图 API
+# Realtime Contracts and Read Views
 
-K 线跨进程契约 `CandleUpdatedEvent` 和 `CandleStatus` 统一位于本工程的
-`src/main/java/com/surprising/candlestick/api/model`，供行情应用和 Gateway WebSocket 共用。
-原 `surprising-market-data-api` 及其聚合 POM 已移除；Java 包名、字段、枚举值和事件 JSON 均保持不变。
-本工程继续承担既有 realtime 编码、路由目录和 Valkey 查询视图接入，不承接交易裁决或价格计算。
+Shared realtime codecs, routing directory contracts, Valkey query adapters, and candle events. `CandleUpdatedEvent`/`CandleStatus` remain in `com.surprising.candlestick.api.model`. This library does not own trading decisions or price calculations.
 
-## Lua 批量传输（2026-10-08）
+## Valkey writes
 
-`ValkeyReadViewStore.applyCommits` 保留逐用户、逐提交的原子 DELTA 脚本与版本/快照屏障。只有一条用户更新时仍使用 EVAL；多条更新在同一个 pipeline、同一连接上先 SCRIPT LOAD 一次，再逐条 EVALSHA。完整脚本从每次用户更新发送一次，减少为每批一次，没有新增连接、线程、跨批业务缓存或共享资金状态。
+`ValkeyReadViewStore.applyCommits` preserves per-user/per-commit atomic DELTA scripts and version/snapshot fences. A single update uses EVAL. Multiple updates share a connection/pipeline: SCRIPT LOAD once, followed by EVALSHA per update. It does not introduce a cross-batch financial cache, new connection, or new thread.
 
-每批加载避免脚本在两批之间被清空、淘汰或服务重启后失效，且没有增加单独的同步往返。外部 SCRIPT FLUSH 若恰好穿插在加载和执行之间，仍可能失败；当前 Spring/Lettuce 的部分 pipeline 异常没有逐条回执，不能安全重放。异常继续交给既有来源恢复和快照机制，不猜测哪些更新成功，也不推进正常路由流程。未改变 Lua 的业务内容、用户 hash slot 或产品隔离。
+Loading once per batch tolerates script eviction/flush between batches. A concurrent external SCRIPT FLUSH inside the batch can still fail. Partial pipeline errors must not be guessed or blindly replayed; use the existing source/snapshot recovery path and do not advance normal routing on an unknown result.
 
-HotSpot JDK 27、独立真实 Redis，本轮修改前的本地源码为基线，其余编码逻辑相同；预热后采样 200 用户 × 20 批、共 4,000 条更新，用 INFO total_net_input_bytes 统计输入，并录制最多 16MiB 的 JFR：4,201,105 字节降至 1,643,485 字节，约减少 60.9%。这不是每个 Redis 命令都独立等待的串行测试。两次本地总耗时为 261.282ms / 277.166ms，本样本不能证明吞吐或延迟改善。
+## Targeted reads
 
-真实 Redis 测试覆盖两批之间 SCRIPT FLUSH 后继续执行、重复/旧版本、快照屏障、查询水位、用户和产品隔离；Mock 测试验证每批只加载一次、加载先于摘要执行、单条不增加加载，以及异常不重放。本轮未测试 Redis Cluster 的拓扑变化或脚本在批内被外部并发清空的长稳场景。原始 JFR、程序及日志汇总后清理。
+`ValkeyUserQueries.balance/position` uses `readFields`/HMGET for the baseline snapshot, target BALANCE/POSITION delta, source epoch, snapshot time, invalid flag, fence, and export watermark. Preserve freshness and `minExportSequence` checks. Missing snapshots or unavailable data return 503, not a database/Core fallback. Do not decode unrelated order fields for a targeted balance query.
 
-### 单项余额与持仓读取（2026-10-08）
+## Verification
 
-`ValkeyUserQueries.balance/position` 使用 `ValkeyReadViewStore.readFields`，一次 `HMGET` 同时读取
-`USER:user` 快照基线、目标 `BALANCE:<asset>` / `POSITION:<instrumentId>:<side>` 增量，以及
-fence、来源 epoch、快照时间、invalid 标记和导出水位。沿用来源 epoch 校验、15 秒新鲜度检查和
-`minExportSequence` 门槛；缺失快照或数据不可用时返回 503，不回查数据库或 Core。
-读取结果只在本次请求内物化，不新增长期缓存或 Redis 状态副本。全量订单/账户查询继续使用原读视图。
+```bash
+mvn -pl surprising-realtime/surprising-realtime-api -am test
+```
 
-真实 Redis 集成测试覆盖六条产品线、目标增量覆盖基线、余额归零、持仓归零、缺失用户、过期快照、
-来源 epoch 切换和水位落后；单项查询不传输、不解码无关订单字段。快照基线仍包含原有账户数据，
-本次并未改变实时协议或快照布局。
+Check version ordering, duplicate/stale commits, snapshot fences, script failures, zeroed balances/positions, source switches, export lag, and six-product isolation. Local single-user byte/CPU savings are not whole-system throughput claims.
 
-同机真实 Redis 对比：用户含 1,000 个开放订单，预热两条路径各 50 次，再分别查询余额 200 次。
-旧全量 `require(...).account().balances()` 与新 `balance(...)` 返回相同余额；Redis `INFO stats`
-记录的返回字节为 71,850,960 → 64,164，调用线程分配 453.672 → 1.744 MB，调用线程 CPU
-250.452 → 32.135 ms，墙钟 532.193 → 88.199 ms。JFR 上限 16 MiB、堆上限 256 MiB。
-该测量是单用户有大量订单时的局部查询成本，不代表生产吞吐量、网络尾延迟或整机 CPU 降幅。
+## Architecture reference
+
+See the [project architecture and class-level trading flows](../../README.md). Historical validation notes describe their recorded versions, not guarantees for the current implementation.

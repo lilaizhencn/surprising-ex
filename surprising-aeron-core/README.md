@@ -1,98 +1,47 @@
-# Aeron 交易核心
+# Aeron Trading Core
 
-本目录包含 protocol、client、service、tools 和 benchmarks 五个 Maven 模块。现货、U 本位永续、币本位永续、U 本位交割、币本位交割和期权分别运行独立 Cluster、账户与订单簿。
+The module group contains protocol, client, service, tools, and benchmarks. Each of the six product lines runs an isolated Cluster, account state, and order books. Core consumes the replicated command log and owns matching, account settlement, idempotency, snapshots, and recovery. HTTP, database workflows, quote generation, price production, and lifecycle scheduling live outside Core.
 
-Core 消费复制日志中的命令，完成业务校验、撮合、账户结算、幂等和恢复。HTTP、数据库接入、做市、价格生产与生命周期调度由外围服务负责。
+## Modules
 
-## 模块入口
-
-| 模块 | 职责 |
+| Module | Responsibility |
 | --- | --- |
-| [protocol](surprising-aeron-protocol/README.md) | 命令、响应、查询及实时帧协议 |
-| [client](surprising-aeron-client/README.md) | Cluster 连接、请求身份、响应关联和实时传输 |
-| [service](surprising-aeron-service/README.md) | 节点资源、业务运行时、撮合、账户与恢复 |
-| [tools](surprising-aeron-tools) | 集群探针、诊断与离线回放 |
-| [benchmarks](surprising-aeron-benchmarks/README.md) | 局部基准和真实 Cluster 验证工具 |
+| [Protocol](surprising-aeron-protocol/README.md) | Commands, responses, queries, and realtime frames |
+| [Client](surprising-aeron-client/README.md) | Cluster sessions, identities, response correlation, and realtime transport |
+| [Service](surprising-aeron-service/README.md) | Runtime ownership, admission, matching, accounting, and recovery |
+| [Tools](surprising-aeron-tools/README.md) | Probes, diagnostics, and replay utilities |
+| [Benchmarks](surprising-aeron-benchmarks/README.md) | Local benchmarks and real-Cluster qualification |
 
-## 启动
+## Build and startup
 
-使用 HotSpot JDK 27。构建命令：
+Use HotSpot JDK 27; run Maven from the repository root.
 
 ```bash
-mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package
+mvn -pl surprising-aeron-core/surprising-aeron-service -am package -DskipTests
 ```
 
-首次启动需明确产品线、成员与目录；例如本地现货单成员：
+Prefer the [single-node launcher](../deployment/test-single-node/README.md) for an integrated environment. Explicitly configure product line, member hosts, node ID, and separate data directories. `SurprisingCoreApplication` → configuration → `AeronCoreLifecycle` → `AeronTradingClusterService.onStart` → `TradingCoreOwner.start` forms the startup path.
+
+## Ownership and execution
+
+Owner schedules commands and retires them in original log order. Matcher shards own native books. Account Lanes own user balances, holds, reservations, orders, positions, and risk. Treasury and control funds verification run on Owner. `PIPELINED` uses worker handoffs; `FUSED` performs matching/account calculation inline.
+
+`ClusterCommandWindow` retains command leases, decoded slots, dependency indices, and response metadata. Account commits route frozen after-values to the relevant Lanes. Order metadata uses captured command changes before consulting active indices; terminal orders must not depend on still being active. Matcher and Account Lane progress use padded slots with explicit publication semantics.
+
+## Snapshots and recovery
+
+Drain the required prefix, establish a snapshot barrier, freeze consistent account and business state, and capture Matcher state at its fence. Audit the complete frozen image before encoding. Releasing a waiting barrier does not cancel a Matcher capture already running; do not admit new trading or snapshots before capture finishes.
+
+`SectionedCoreSnapshotRecovery` validates format, CRC, byte budgets, product line, topology, business/funds hashes, and Matcher pairing. Restore books, Treasury, command identities, source progress, and business cursors from one boundary. Unsupported formats fail explicitly. Application databases are not the recovery authority.
+
+## Verification
 
 ```bash
-java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
-  --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \
-  --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED \
-  --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED \
-  --add-opens=java.base/java.util.zip=ALL-UNNAMED \
-  -jar surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar \
-  --surprising.aeron.product-line=SPOT \
-  --surprising.aeron.node-id=0 \
-  --surprising.aeron.hostnames=localhost \
-  --surprising.aeron.data-dir=data/aeron-local
+mvn -pl surprising-aeron-core/surprising-aeron-service -am test
 ```
 
-启动链路为 `SurprisingCoreApplication` → `CoreConfiguration` → `AeronCoreLifecycle` → `AeronTradingClusterService.onStart` → `TradingCoreOwner.start`。首次启动通过命令注册标的、余额和价格；重启从快照及后续日志恢复，不从数据库重建交易权威状态。
+See [performance requirements](../AGENTS-performance.md). Check funds, holds, positions, ownership, ordering, leases, terminal results, and snapshot/log recovery for the affected path.
 
-配置来源见 [application.yml](surprising-aeron-service/src/main/resources/application.yml)：
+## Architecture reference
 
-| 配置类 | 内容 |
-| --- | --- |
-| `CoreConfiguration` | 产品线、成员、路由拓扑和 CPU 绑定 |
-| `CoreRuntimeConfiguration` | 在途窗口、执行预算和快照限制 |
-| `CoreTransportConfiguration` | Driver、Archive、Consensus 和 Service |
-| `RealtimeConfiguration` | 可选实时输出及读取请求通道 |
-
-配置在启动边界绑定；已有账户按快照保存的拓扑恢复。不同产品线使用独立数据目录，不通过删除节点数据代替恢复。
-
-## 交易与状态归属
-
-```mermaid
-flowchart LR
-    C[Cluster 复制日志] --> O[服务线程内的 Owner]
-    O --> A[账户准入]
-    A --> M[Matcher 撮合]
-    M --> L[账户 Lane 结算]
-    L --> T[Owner 财库与资金校验]
-    T --> P[按日志顺序提交]
-    P --> R[终态响应与实时输出]
-```
-
-| 执行者 | 权威状态与完成条件 |
-| --- | --- |
-| Cluster 服务线程中的 Owner | 命令生命周期、来源水位、近期结果、终态身份、Treasury 和资金身份索引；按日志顺序完成终态 |
-| Matcher 分片 | 订单簿和原生证据；PIPELINED 模式由 `core-matcher-<id>` 执行 |
-| Account Lane | 按用户路由的余额、冻结、订单、预留、持仓与风险；PIPELINED 模式由 `core-account-lane-<id>` 执行 |
-| 可选实时发送/接收线程 | 传输已提交帧与读取请求，不修改交易权威状态 |
-
-FUSED 在服务线程执行 Matcher 与账户计算；PIPELINED 保留真实的 Matcher/账户交接。两种模式的财库记账和控制资金验证都由 Owner 同步执行。资金守恒、整数溢出、冻结释放、幂等、所有权和回滚前值由各自业务边界负责。
-
-提交元数据通过 `TradingAccountRuntime.metadataOrderUsers` 从本命令已收集的冻结订单后值捕获归属，再以活动索引补仍活动候选；终态与尚未入活动索引的订单不依赖活动路由。归属草稿仅在 Owner 准备期间复用，`LaneCommitEvent` 在派发前复制为各 Lane 的编号列表，执行时每个 Lane 只查自己的候选，并按实际候选数准备后值容量。没有订单变化的提交不创建元数据列表。
-
-订单和预留后值缓冲按连续槽冻结，不再通过订单编号重新查询索引；已冻结到本槽的值跳过自身复制，活权威对象仍复制到独立发布槽。`MatcherCommandPipeline` 的提交、回收和完成游标放在间隔 16 个 long 的数组位置，使用 VarHandle 保留 volatile 发布与读取语义。
-
-同线程控制撤单在原生撤单循环中直接收集逐项接受状态、首个失败及事件引用，首个拒绝后的订单不再提交，也不创建 `NOT_SUBMITTED` 中间包装。跨 Matcher 撤单仍保留异步结果交接。聚合事件按原顺序一次收集到只读引用列表，删除分段累计下标与逐次二分定位，不深拷贝事件；代价是按事件数量保存引用。
-
-账户与盘口查询通过所属线程；财库、OI 与维护页在 Owner 上读取。对外查询使用协议响应，不暴露工作线程和测试状态访问器。
-
-## 快照与恢复
-
-Owner 完成前缀命令后建立快照屏障，冻结业务状态、费率和待划转，等待各 Matcher 在提交栅栏捕获原生模块，再完整审计并同步编码。释放等待屏障不取消正在执行的 Matcher 捕获；捕获结束前拒绝新交易和新快照。
-
-`SectionedCoreSnapshotRecovery` 负责增量接收、CRC、字节预算与恢复校验。业务状态、账户 Lane、订单簿、Treasury、命令结果、来源水位、身份、拓扑和业务游标必须来自同一冻结点。只接受当前格式；旧样本用于验证明确拒绝。
-
-## 验证与维护
-
-按改动选择相关功能用例：
-
-```bash
-mvn -pl surprising-aeron-core/surprising-aeron-service -am test \
-  -Dtest=<相关测试类> -Dsurefire.failIfNoSpecifiedTests=false
-```
-
-类或接口删除使用干净构建，性能工作遵循根 [性能规范](../AGENTS-performance.md)。本轮记录见 [service 验证记录](surprising-aeron-service/validation/cleanup-20261028.md)。过时轮次报告、旧线程设计说明和失效脚本已从当前目录移除，历史变更可从 Git 查看。
+See the [project architecture and class-level trading flows](../README.md). Historical validation notes describe their recorded versions, not guarantees for the current implementation.

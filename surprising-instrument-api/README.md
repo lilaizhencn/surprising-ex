@@ -1,263 +1,36 @@
-# surprising-instrument-api
+# Instrument and Product Contracts
 
-## 产品与币对共享契约
+Shared product identity, permanent instrument IDs, configuration snapshots, risk brackets, source definitions, and contract mathematics. `com.surprising.product.api` is part of this module; there is no separate `surprising-product-api` reactor module.
 
-原 `surprising-product-api` 已合并到本模块，根 POM 和所有调用方统一依赖
-`surprising-instrument-api`。本次只调整 Maven 归属，原 Java 包名、产品线枚举、
-永久币对 ID 格式和 Kafka topic 名称保持原契约；不保留旧 Maven 模块或兼容转发层。
-
-| 源码包 | 共享内容 |
+| Package | Responsibility |
 | --- | --- |
-| `com.surprising.product.api` | `ProductLine` 六产品线身份、`ProductLineConfiguration` 产品线配置校验 |
-| `com.surprising.product.api.utils` | `InstrumentIds` 永久 ID 编解码校验、`ProductTopicNames` topic 与消费组命名 |
-| `com.surprising.instrument.api.model` | 合约类型、当前币对配置、风险档位、指数源、配置变更和生命周期事件 |
-| `com.surprising.instrument.api.math` | `PerpetualContractMath` 线性/反向合约的名义金额、盈亏和保证金公式 |
-| `com.surprising.instrument.api.cache` | 每个使用方进程持有的合约配置快照，以及共享启动加载模板 |
-| `com.surprising.instrument.api.client` / `kafka` / `utils` | Feign 查询契约、消费者参数和快照加载/事件校验适配；不启动独立服务 |
+| `com.surprising.product.api` | Six product identities and product configuration validation |
+| `com.surprising.product.api.utils` | `InstrumentIds`, product topics, and consumer-group names |
+| `com.surprising.instrument.api.model` | Contract configuration, risk brackets, price sources, and change/lifecycle events |
+| `com.surprising.instrument.api.math` | Pure linear/inverse notional, PnL, and margin formulas |
+| `com.surprising.instrument.api.cache` | Per-process snapshots and startup loading |
+| `client`, `kafka`, `utils` | Query contracts and snapshot/event adapters |
 
-核心依赖方向为 `Aeron protocol / client / service、业务 API、应用 → instrument-api`，
-本模块不依赖 Aeron 协议、Aeron Service 或 Gateway。产品线身份仍是所有缓存、路由和事件校验的边界。
+## Configuration lifecycle
 
-Feign、Spring Web、Kafka、Jackson、Jakarta Annotation 依赖均为 Maven `optional`：
-只使用产品线、模型或公式的调用方不传递引入这些框架。使用 RPC 或快照消息适配的应用
-需显式引入对应依赖；共享适配保留单份，进程内的缓存实例、监听器、消费组和启停仍由使用方管理。
+Instrument administration is implemented inside Gateway. Persist accepted configuration, publish versioned product-scoped facts, load consumer snapshots, and synchronize canonical configuration into the relevant Core. Core trading rules operate on the bound canonical instrument. Administrative persistence is not direct mutation of Core trading state.
 
-### Aeron 币对计算的共享边界评估
+Permanent instrument IDs, version/revision ordering, product identity, trading status, integer precision, fee policies, and lifecycle state must remain consistent across producers and consumers. Existing instruments must not be silently reassigned to a different identity or product. Retain the distinction between availability for new trading and historical/public lookup after delivery expiry.
 
-“不写账户”不足以证明一个类可以直接放入共享 API，还要检查其参数、异常和调用依赖。
-共享公式应只依赖整数参数或共享不可变模型，不得引入 Aeron 运行时、协议和线程所有权。
+## Mathematics boundary
 
-| 当前代码 | 结论及原因 |
-| --- | --- |
-| [`PerpetualContractMath`](src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java) | 已在共享模块，Aeron 的 `CoreContractMath` 已复用名义金额、盈亏、初始/维持保证金公式。 |
-| [`CoreArithmetic`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreArithmetic.java) | 只依赖整数和 `BigInteger`，可以迁为共享整数工具；本轮只做评估，不扩大到金融计算调用点改造。迁移时保留舍入、符号、溢出和异常契约。 |
-| [`CoreContractMath`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java) | 部分金额、费用、资金费公式适合提取；整类依赖 `CoreInstrument`、`CoreOrderSide`、`CoreRiskLimitBracket` 和 `CoreStateRejectedException`，直接迁入会形成反向依赖。Aeron 保留参数适配与拒绝语义。 |
-| [`OptionContractMath`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/OptionContractMath.java) | 权利金、虚值和到期现金等公式可按共享参数提取；当前方法签名和风险价格异常仍依赖 Core，不整类搬迁。 |
-| `CoreContractMath`（含防分片费用与期货开仓保证金） | 依赖已解析订单、行情、用户杠杆和成交后持仓口径，属于订单准入/结算业务，留在 Aeron service。 |
-| [`CoreInstrument`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/CoreInstrument.java)、注册/状态转换和产品交易规则 | 持有或管理 Core 配置、维护状态及执行约束，继续由 Aeron 运行时拥有，不成为共享 API 状态。 |
+`PerpetualContractMath` contains shared pure formulas. Core-specific adaptation and rejection behavior remain in Aeron service. Classes depending on `CoreInstrument`, Core state, account data, or runtime policy must not be moved wholesale into a shared API. Preserve signs, rounding, overflow, and exception contracts when extracting pure arithmetic.
 
-后续若提取公式，应按具体业务需求迁移实际复用部分，保持 ticks、steps、ppm、资产单位、
-风险选档和舍入规则，验证六产品线的资金与恢复边界；不为共用公式创建逐订单参数副本或反向依赖。
-本次合并不调整任何交易公式、状态、协议字节、topic 或执行阶段，不宣称性能变化。
+Display price = `priceTicks * priceTickUnits / quoteAssetScale`; display quantity = `quantitySteps * quantityStepUnits / baseAssetScale`. Convert decimal external input once at the boundary. Do not mix linear and inverse multiplier meanings.
 
-本模块直接位于仓库根目录，由根 POM 聚合并继承 `surprising-parent`。
-原 `surprising-instrument/surprising-instrument-api` 的外层目录已移除，artifactId、Java 包名和 API 契约不变。
-
-本目录只构建共享 API。币对业务实现和测试位于 `../surprising-gateway/src/`，不再启动独立 provider；应用入口见 [Gateway README](../surprising-gateway/README.md)。
-
-
-Surprising Exchange 产品基础配置模块。它是现货、永续、交割和期权交易系统的产品规则中心，后续撮合、风控、账户、K 线、指数价格、标记价格、资金费率、交割和行权都应该从这里获取 symbol 和交易规则。
-
-## 模块
-
-- `surprising-instrument-api`：RPC 合约、DTO 和事件模型。
-- `surprising-gateway` 中的 合约业务包：配置持久化、查询、管理接口和 Kafka 变更事件发布。
-
-## 核心职责
-
-- 产品基础信息：`symbol`、产品线、instrument 类型、base/quote/settle asset、合约类型、合约面值。
-- 价格/数量规则：tick size、step size、最小/最大下单数量、notional 限制、精度。
-- 下单规则：支持的订单类型、time in force、post-only、reduce-only、market order 开关。
-- 风险规则：最大杠杆、初始保证金率、维持保证金率、风险限额档位；期权档位额外携带
-  `optionMarginFactorPpm`，由 Aeron Core 与 snapshot 原样消费。
-- 交易手续费默认配置：maker/taker 费率使用 ppm。正数表示向用户收费，负数表示返佣；用户/VIP/做市/活动覆盖由 trading provider 的 `trading_fee_schedules` 解析后写入订单快照。
-- 资金费率配置：永续产品的 funding interval、interest rate、cap/floor、impact notional。
-- 生命周期字段：交割和期权产品的到期时间、交割时间、结算方式、标的 symbol、行权价、期权类型和行权风格。
-- 指数价格成分源：外部现货源 REST/WS 配置、权重、USD/USDT 换算规则。
-- 当前配置：每条产品线每个币对只有一份可执行配置，无历史配置查询或切换。
-- 修改审计：`instrument_change_log` 保存操作人、时间、原因与修改前后内容，配置和 outbox 同事务提交。
-- 并发修改：`InstrumentStorageService` 锁定币对登记行后更新当前配置、风险档位和指数源。
-
-## long 单位模型
-
-instrument 配置按 exchange-core 友好的 long 单位保存：
-
-- `price_tick_units`：一个价格 tick 对应的 quote asset 最小单位。
-- `quantity_step_units`：一个数量 step 对应的 base asset 最小单位。
-- `min_quantity_steps` / `max_quantity_steps`：下单数量边界，已经是 step。
-- `min_notional_units` / `max_notional_units`：long notional 边界。`LINEAR_PERPETUAL` 使用结算资产最小单位；`INVERSE_PERPETUAL` 使用报价币合约面值单位。
-- `notional_multiplier_units`：`LINEAR_PERPETUAL` 表示每个 `priceTick * quantityStep` 对应的结算资产最小单位；`INVERSE_PERPETUAL` 表示每个合约 step 的报价币面值单位。
-- `contract_type` 不只是展示字段，账户、风控、资金费、强平和 ADL 的公式都会按它分支。
-- `maker_fee_rate_ppm` / `taker_fee_rate_ppm`：产品默认手续费。订单入口会叠加 `trading_fee_schedules` 覆盖后固化到 Aeron Core 订单事实；账户结算按订单事实写入 `TRADE_FEE` ledger。OKX 初始化基线为现货 maker/taker `800/1000 ppm`、永续和交割 `200/500 ppm`、期权 `200/300 ppm`。实际用户费率仍以账户等级覆盖为准。
-- `user_open_interest_limit_rate_ppm` / `user_open_interest_limit_floor_units`：单用户动态持仓量上限配置。trading provider 使用 `max(平台 OI notional * rate, floor)` 并再受 `max_position_notional_units` 限制。默认 BTC/ETH 为 `300000 ppm`，固定下限 `25000000000000`，即 250,000 USDT。
-- `*_rate_ppm`、`max_leverage_ppm`、`weight_ppm`：费率、杠杆、权重统一使用 ppm。
-
-`surprising-instrument-api` 同时提供 `PerpetualContractMath`，作为线性/反向合约 notional、未实现 PnL、每 step notional 和维持保证金的共享 long 公式实现。risk、funding、liquidation、ADL 应调用这个共享 math，不要在各自 SQL 里重复实现合约公式。
-
-admin API 应直接提交这些整数字段。人类可读的小数格式放在后台 UI 或 API gateway 边界转换。
-
-## 动态配置链路
-
-```text
-gateway 内的 instrument 业务包
-  -> PostgreSQL instruments / instrument_change_log
-  -> PostgreSQL instrument_outbox_events
-  -> surprising.instrument.events.v1
-  -> 各业务 JVM 的不可变合约快照（order / matching / account / risk / price / candlestick / market-maker）
-```
-
-当前已接入：
-
-- 下游服务启动时通过 `GET /internal/v1/instruments/snapshot?productLine=...` 一次性加载完整聚合快照。
-- Instrument 变更通过 `surprising.instrument.events.v1` 广播；每个产品线使用独立 consumer group，在本 JVM 内原子替换快照。
-- 下单、撮合、账户、风控、指数价、标记价、K 线和做市热路径只读 JVM 快照；数据库仅用于 Instrument 服务写入、启动恢复和审计回源。
-- 启动加载统一由 `AbstractInstrumentSnapshotInitializer` 执行，增量事件统一由 `InstrumentSnapshotSupport.consume` 解析、校验并更新缓存；模块只保留产品线、消费组和派生配置刷新动作。
-- JVM 缓存仅按 `ProductLine + symbol` 保存当前配置，按 `lastChangeId` 拒绝迟到事件。
-
-## 状态语义
-
-- `PRE_TRADING`：允许行情预热，通常不允许真实撮合。
-- `TRADING`：正常交易和行情计算。
-- `HALT`：暂停撮合，行情历史服务仍可识别该 symbol。
-- `SETTLING`：结算中。
-- `CLOSED`：下线，不再处理新业务。
-
-## 接口
-
-查询当前配置：
+## Build and verification
 
 ```bash
-curl 'http://localhost:9094/api/v1/gateway/instrument/latest?symbol=BTC-USDT'
+mvn -pl surprising-instrument-api -am test
 ```
 
-查询列表：
+Shared contract changes require testing every affected consumer, including Gateway, Core, Price, Realtime, Lifecycle, and Maker. Verify startup snapshots, version continuity, dynamic changes, and product isolation.
 
-```bash
-curl 'http://localhost:9094/api/v1/gateway/instrument/list?type=PERPETUAL&status=TRADING'
-```
+## Architecture reference
 
-服务间初始化（业务模块使用内部入口，不应由网关公开）：
-
-```bash
-curl -H 'X-Product-Line: LINEAR_PERPETUAL' \
-  'http://localhost:9094/internal/v1/instruments/snapshot?productLine=LINEAR_PERPETUAL'
-```
-
-后台分页查询当前产品：
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" 'http://localhost:9094/api/v1/admin/gateway/instrument-admin/list?type=PERPETUAL&status=TRADING&limit=100&sort=symbol.asc'
-```
-
-后台查询当前产品详情和操作日志：
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" 'http://localhost:9094/api/v1/admin/gateway/instrument-admin/BTC-USDT'
-curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" 'http://localhost:9094/api/v1/admin/gateway/instrument-admin/BTC-USDT/changes?productLine=SPOT&limit=50&beforeId=0'
-```
-
-后台列表支持 `limit/cursor/sort` 游标分页。当前配置列表排序白名单为 `symbol.asc`、`symbol.desc`、`updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`；日志按操作 ID 倒序，使用 `beforeId` 继续读取。响应保留 `count/instruments`，并返回 `nextCursor`、`hasMore`、`sort`、`limit`。
-
-更新状态：
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -X POST 'http://localhost:9094/api/v1/admin/gateway/instrument-admin/BTC-USDT/status?status=HALT'
-```
-
-完整 upsert 使用 `POST /api/v1/admin/gateway/instrument-admin/upsert`，body 为 `InstrumentUpsertRequest`。生产应只允许后台管理系统通过 gateway 后台代理调用 admin API，产品配置和状态变更必须经过审批流、权限校验和操作审计。
-
-## Kafka 事件
-
-```text
-surprising.instrument.events.v1
-```
-
-事件 key 固定使用 `PRODUCT_LINE:SYMBOL`，事件内容必须包含产品线、序列和完整
-`InstrumentResponse` 快照，下游通过操作日志 ID 丢弃旧事件，再以不可变引用整体替换本地缓存。
-producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`，让合约配置变更事件和交易、价格链路保持一致的可靠 Kafka 基线。
-
-## 数据库
-
-根目录 [init.sql](../init.sql) 创建：
-
-- `instruments`
-- `instrument_symbols`（仅登记币对存在性）
-- `instrument_change_log`（操作日志）
-- `instrument_risk_brackets`
-- `instrument_index_sources`
-- `instrument_outbox_events`
-
-根目录 `init.sql` 包含全部结构、币对和资产精度数据，不依赖迁移文件或其他 SQL。币对数据来自
-2026-08-20 UTC 从 OKX V5 Public API 生成的快照，每条产品线最多保留 512 个币对：SPOT 512、LINEAR_PERPETUAL 430、
-INVERSE_PERPETUAL 15、LINEAR_DELIVERY 148、INVERSE_DELIVERY 16、OPTION 30。不足 512 个的产品线全部保留。
-现货优先 USDT 报价，其次 BTC-USDT / ETH-USDT，再按 symbol 排序；期权仅保留行权价可精确表示的稳定币结算合约，按到期时间、symbol 排序；本快照共 30 个合格币对；其他产品线按到期时间（空值优先）、symbol 排序选取。
-筛选依据固定快照，不随初始化时间变化。每个 symbol
-按产品线保存唯一当前配置、三档风险限额和指数源；29 个单字符资产因现有账户资产约束被跳过。
-
-`LINEAR_PERPETUAL` 的 `BTC-USDT-SWAP` 在生成快照后应用产品线专用覆盖：`min_valid_index_sources=3`，
-并配置 OKX `index-tickers`（`BTC-USDT`）、Binance Spot `btcusdt@ticker` 和 Bybit Spot
-`tickers.BTCUSDT` 三个相互独立的公共 WebSocket 指数源。价格服务默认关闭 REST fallback，市场探针只将
-来源为 `PUBLIC_WEBSOCKET`、连接健康、时间新鲜且 exchange 唯一的组件计入三源 quorum。
-
-初始化期权统一使用项目的 USDT 结算路径，不加载与当前线性期权核心计量方式不一致的币本位期权。OKX 的交割费、行权费和强平费不等同于 maker/taker 默认费率，现有 `instruments` 字段只
-承载交易默认费率；交割固定费和期权行权费仍需由对应生命周期结算规则读取官方账户费率后处理。
-
-## 本地运行
-
-```bash
-brew services start postgresql@18
-brew services start kafka
-psql postgresql://surprising:surprising@localhost:5432/surprising_exchange -f init.sql
-# Topic 初始化命令待验证脚本重新整理后补回
-mvn -pl surprising-gateway -am package -DskipTests
-java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
-```
-
-## 生产注意事项
-
-- Instrument 是全系统唯一产品配置源，不要在撮合、风控、行情服务里再维护第二套 symbol 规则。
-- 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过币对登记行锁串行修改，并在同一事务写入操作日志与 outbox 事件。
-- instrument 配置、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
-- 到期合约进入 `SETTLING` 后，trading 接入沿 Core 命令排空普通委托和条件单；订单、成交和预占释放由同一交易 Core 提交完成。`InstrumentLifecycleDrainRepository` 只接受当前产品线、合约和 SETTLING 版本的 `ORDER` 确认；已移除的 account reducer 不再发布 `ACCOUNT`，历史 ACCOUNT 确认不能替代当前 ORDER。到期时间、排空确认及明确的结算价格均满足后，双人审批的结算入口才可进入 `CLOSED` 并发布交割事件。自动时钟只推进到 SETTLING，不推测结算价。
-- 生命周期清理确认使用既有 topic 和产品线/合约身份；重复确认按 `(product_line, instrument_id, instrument_change_id, component)` 幂等。
-- Instrument Service 才负责聚合当前主表、风险档位、指数源和资产精度；单表 Repository 不执行跨表 JOIN。
-- 下游核心服务启动时加载快照，运行中消费 Kafka 增量事件；不要在每笔请求、撮合或风控计算时查询主库。
-- 状态修改保留交易计算引用；修改 tick/step、费率或风险参数会关联新的审计记录，Core 在有挂单或持仓时拒绝替换计算配置。
-- 已接受订单继续使用订单费率快照；旧成交的计量单位从审计记录只读查询，不允许用该入口取回可执行历史配置。
-- 影响撮合和风控的配置变更需要审批流、审计日志和灰度生效时间。
-- 新增 symbol 时，先写 instrument，再创建/确认 Kafka partition，再启动外部价格源，最后开放交易。
-
-## 验证
-
-```bash
-# 产品线、topic、永久 ID、币对模型和共享公式
-mvn -pl surprising-instrument-api -am clean test
-# 修改共享契约或模块依赖时覆盖全部调用方
-mvn -B -ntp clean test
-```
-
-## Core 同步与审计引用
-
-`changeId` 是当前交易计算参数对应的操作日志引用，`lastChangeId` 是最近一次配置操作的日志引用。
-纯状态修改只推进后者，因此已有订单、持仓、价格和资金费计算不会因暂停/恢复而引用失效。
-这两个标识不提供历史配置执行或回滚功能。内部 `/trade-encoding` 仅返回已提交成交的四个计量单位，供 K 线和价格消费者正确解码延迟事件。
-
-Trading Provider 的 `InstrumentCoreSyncService` 每 250 ms 检查当前配置缓存；首次注册和后续变更都使用同一条 `REGISTER_INSTRUMENT` 命令应用 Core 配置，包括交易状态、订单类型与 TIF 支持范围、市价单、Post Only 和 Reduce Only 开关。
-它使用独立维护客户端队列；确认成功后后台显示当前配置已应用，数据库保存成功不等于 Core 已应用。失败后退避 5 秒，未知结果重试时复用原命令 ID。
-Gateway 根据 Kafka 快照前置校验，Core 在订单准入时再次校验这些开关。暂停、恢复与维护门控分别保存，普通恢复交易不能解除维护任务的限制。状态和开关随 Core 快照恢复。
-启动快照和 Kafka 增量都从当前配置缓存收敛。合约类型、资产、乘数、tick、结算尺度、到期和期权行权价属于注册身份，注册后不能修改；费率、保证金、杠杆上限和风险档位等计算参数可更新。
-
-Pre-launch databases use only the root `init.sql`. Instruments retain one executable configuration per product line and symbol.
-Operational audit entries preserve actor, reason, time and before/after values. Status-only changes keep existing trading calculation references valid.
-
-初始化期权数量为 30（上限 512）：旧快照其余稳定币期权存在行权价无法按配置 tick 精确表示的问题。
-本次未改动其金融数值；补足数量需另行校准源数据。全部保留币对由 `InstrumentSeedCoreContractTest` 校验 Core 命令编码和配置约束。
-
-
-合并后初始化说明：账户包原先无人读取的独立 Instrument 快照已删除；订单规则缓存、
-`InstrumentCoreSyncService` 注册及独立行情/价格/衍生品进程的快照加载仍保留。
-服务间内部查询无需凭证；公共及管理查询通过 gateway 入口，管理操作仍需要管理员登录和权限。
-数据库建表和种子数据初始化不是重复的 JVM 缓存初始化，不能一并删除。
-
-API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gateway（保留 Java 包名）；删除无调用的旧 Feign 接口及废弃模型。仍用于跨进程调用、共享事件和 Core 的类型继续留在 API 模块。
-
-### 交割合约结束后的公开查询
-
-`InstrumentRequestService.latest` 允许通过明确的 LINEAR_DELIVERY/INVERSE_DELIVERY 合约 ID 查询 CLOSED 元数据；默认公开目录仍排除 CLOSED。Web 与 client 在当前合约从目录消失时按 ID 重新读取，保留历史查询页面并禁止新委托及杠杆修改。杠杆 GET 沿 realtime 用户投影读取，Core 不承担该用户查询。其他产品线的可见性限制保持原契约。
-
-到期清理中的 TP/SL 由 `InstrumentOrderDrainService` 调用 `TriggerOrderService.cancelLifecycleOrders`，从 Core 交易控制状态分批撤销原生条件单，并再次确认条件单、算法单及普通单均无活动记录后才发 ORDER 确认。只排空算法单与普通单会遗漏 PENDING 的 TP/SL；真实到期回归同时覆盖一组未触发 OCO 和运行中的做市报价。
-
-
-`PerpetualContractMath.proportionalUnits` 统一强平、ADL 和成交结算的整数比例分摊：
-全部数量直接返回原值，部分数量使用精确乘法后整数除法，保留有符号截断与溢出拒绝；调用方继续负责数量范围。
-公式不读取账户、容器或时钟，不改变各产品的保证金、盈亏和结算规则。
+See the [project architecture and class-level trading flows](../README.md). Historical validation notes describe their recorded versions, not guarantees for the current implementation.
