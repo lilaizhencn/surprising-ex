@@ -77,6 +77,8 @@ public class GatewaySecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google/challenge", "/api/v1/auth/google/login", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/login/verify",
                                 "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password", "/api/v1/auth/refresh", "/api/v1/auth/logout",
                                 "/api/v1/auth/browser/refresh", "/api/v1/auth/browser/logout", "/api/v1/auth/telegram/start", "/api/v1/auth/telegram/complete",
+                                "/api/v1/auth/telegram/webapp/login",
+                                "/api/v1/telegram/bot/webhook",
                                 "/api/v1/compliance/kyc/webhooks/{provider}", "/api/v1/internal/wallet/webhooks/custody").permitAll()
                         .requestMatchers(HttpMethod.GET, "/ws/v1").permitAll()
                         // These adapters validate HMAC and scope against the exact wire body/query, or bearer for private operations.

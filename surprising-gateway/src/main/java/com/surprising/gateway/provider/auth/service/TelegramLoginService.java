@@ -23,16 +23,30 @@ public class TelegramLoginService {
     private final GatewayUserRepository userRows;
     private final AuthPersistenceService users;
     private final AuthService auth;
+    private final com.surprising.gateway.provider.telegram.bot.service.TelegramWebAppInitDataVerifier webAppVerifier;
+    private final com.surprising.gateway.provider.telegram.bot.config.TelegramBotProperties botProperties;
     private final SecureRandom random = new SecureRandom();
 
     public TelegramLoginService(TelegramLoginFlowRepository flows, TelegramIdentityRepository identities, GatewayUserRepository userRows, TelegramOidcClient oidc,
                                 AuthPersistenceService users, AuthService auth) {
+        this(flows, identities, userRows, oidc, users, auth, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TelegramLoginService(TelegramLoginFlowRepository flows, TelegramIdentityRepository identities, GatewayUserRepository userRows, TelegramOidcClient oidc,
+                                AuthPersistenceService users, AuthService auth,
+                                @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                com.surprising.gateway.provider.telegram.bot.service.TelegramWebAppInitDataVerifier webAppVerifier,
+                                @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                com.surprising.gateway.provider.telegram.bot.config.TelegramBotProperties botProperties) {
         this.flows = flows;
         this.identities = identities;
         this.userRows = userRows;
         this.oidc = oidc;
         this.users = users;
         this.auth = auth;
+        this.webAppVerifier = webAppVerifier;
+        this.botProperties = botProperties;
     }
 
     public boolean enabled() { return oidc.enabled(); }
@@ -119,6 +133,28 @@ public class TelegramLoginService {
     private static void requireDevice(String deviceId) {
         if (deviceId == null || deviceId.isBlank() || deviceId.length() > 128)
             throw new IllegalArgumentException("device identifier is required");
+    }
+
+    @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
+    public AuthModels.LoginResult loginWebApp(String initData, AuthClientMetadata request) {
+        if (webAppVerifier == null || botProperties == null || !botProperties.isConfigured()) {
+            throw new IllegalStateException("Telegram bot token is not configured");
+        }
+        var verifiedOpt = webAppVerifier.verify(initData, botProperties.getToken());
+        if (verifiedOpt.isEmpty()) {
+            throw new IllegalArgumentException("invalid Telegram WebApp initData");
+        }
+        var user = verifiedOpt.get();
+        String subject = String.valueOf(user.telegramId());
+        Instant now = Instant.now();
+        long userId = identities.lockIdentity(subject).orElseGet(() -> {
+            var newUser = users.createUser(null, null, null, now);
+            users.ensureDefaultRole(newUser.userId(), now);
+            identities.bind(subject, newUser.userId(), now);
+            return newUser.userId();
+        });
+        userRows.updateNickname(userId, user.getDisplayName(), now);
+        return auth.loginTelegram(userId, request);
     }
 
     public record Callback(boolean success, String returnUrl) {}

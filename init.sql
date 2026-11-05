@@ -4899,6 +4899,18 @@ CREATE TABLE IF NOT EXISTS gateway_telegram_login_flows (
 CREATE INDEX IF NOT EXISTS gateway_telegram_login_flows_expiry_idx
     ON gateway_telegram_login_flows(expires_at);
 
+CREATE TABLE IF NOT EXISTS gateway_user_telegram_security_settings (
+    user_id BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),
+    security_mode VARCHAR(32) NOT NULL DEFAULT 'CONFIRM_ONLY',
+    trade_pin_hash TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_telegram_sec_mode_idx
+    ON gateway_user_telegram_security_settings(security_mode);
+
+
 -- 安全结果邮件的事务通知意图；不保存 OTP 或身份文件。
 CREATE TABLE IF NOT EXISTS gateway_security_email_notifications (
     notification_id UUID PRIMARY KEY,

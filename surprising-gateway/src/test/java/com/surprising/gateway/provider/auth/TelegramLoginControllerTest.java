@@ -89,4 +89,22 @@ class TelegramLoginControllerTest {
         verify(service).start("device", true);
     }
 
+    @Test
+    void webAppLoginValidatesInitData() throws Exception {
+        var service = mock(TelegramLoginService.class);
+        var mvc = MockMvcBuilders.standaloneSetup(new TelegramLoginController(service, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)))).build();
+
+        mvc.perform(post("/api/v1/auth/telegram/webapp/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        mvc.perform(post("/api/v1/auth/telegram/webapp/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"initData\":\"query_id=123&hash=abc\"}"))
+                .andExpect(status().isOk());
+
+        verify(service).loginWebApp(eq("query_id=123&hash=abc"), any());
+    }
+
 }

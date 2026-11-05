@@ -50,6 +50,7 @@ public class UserSecurityController {
     private final AuthPersistenceService persistence;
     private final UserAccessService access;
     private final ClientIpResolver clientIpResolver;
+    private final com.surprising.gateway.provider.telegram.bot.service.TelegramBotSecurityService telegramSecurity;
 
     public UserSecurityController(AuthService authService,
                                   UserSecurityService securityService,
@@ -58,6 +59,19 @@ public class UserSecurityController {
                                   AuthPersistenceService persistence,
                                   UserAccessService access,
                                   com.surprising.gateway.provider.config.GatewayProperties properties) {
+        this(authService, securityService, loginVerification, verificationService, persistence, access, properties, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public UserSecurityController(AuthService authService,
+                                  UserSecurityService securityService,
+                                  LoginVerificationService loginVerification,
+                                  SensitiveActionVerificationService verificationService,
+                                  AuthPersistenceService persistence,
+                                  UserAccessService access,
+                                  com.surprising.gateway.provider.config.GatewayProperties properties,
+                                  @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                  com.surprising.gateway.provider.telegram.bot.service.TelegramBotSecurityService telegramSecurity) {
         this.authService = authService;
         this.securityService = securityService;
         this.loginVerification = loginVerification;
@@ -65,6 +79,7 @@ public class UserSecurityController {
         this.persistence = persistence;
         this.access = access;
         this.clientIpResolver = new ClientIpResolver(properties);
+        this.telegramSecurity = telegramSecurity;
     }
 
     @GetMapping("/mfa")
@@ -347,6 +362,33 @@ public class UserSecurityController {
     public record MfaChangeConfirmation(@jakarta.validation.constraints.Size(max = 128) String currentPassword,
                                         @Valid @jakarta.validation.constraints.NotNull
                                         LoginVerificationModels.VerifyRequest codes) {}
+    public record TelegramSecurityUpdateRequest(String mode, String pin) {}
+
+    @GetMapping("/telegram-bot")
+    public com.surprising.gateway.provider.telegram.bot.model.TelegramSecuritySettings telegramSecuritySettings(
+            @RequestHeader("Authorization") String authorization) {
+        if (telegramSecurity == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Telegram bot security not configured");
+        }
+        return telegramSecurity.getSettings(principal(authorization).userId());
+    }
+
+    @PostMapping("/telegram-bot")
+    public com.surprising.gateway.provider.telegram.bot.model.TelegramSecuritySettings updateTelegramSecuritySettings(
+            @RequestHeader("Authorization") String authorization,
+            @RequestBody TelegramSecurityUpdateRequest request) {
+        if (telegramSecurity == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Telegram bot security not configured");
+        }
+        long userId = principal(authorization).userId();
+        if (request != null && request.pin() != null && !request.pin().isBlank()) {
+            telegramSecurity.setTradePin(userId, request.pin());
+        }
+        if (request != null && request.mode() != null && !request.mode().isBlank()) {
+            telegramSecurity.updateSecurityMode(userId, com.surprising.gateway.provider.telegram.bot.model.TelegramSecurityMode.fromString(request.mode()));
+        }
+        return telegramSecurity.getSettings(userId);
+    }
     @org.springframework.web.bind.annotation.ExceptionHandler(LoginVerificationService.VerificationFailure.class)
     public org.springframework.http.ResponseEntity<java.util.Map<String, String>> mfaFailure(
             LoginVerificationService.VerificationFailure ex) {

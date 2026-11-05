@@ -94,9 +94,20 @@ public class TelegramLoginController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore());
     }
 
+    @PostMapping("/webapp/login")
+    public ResponseEntity<?> loginWebApp(@RequestBody WebAppLoginRequest request, HttpServletRequest http) {
+        if (request == null || request.initData() == null || request.initData().isBlank()) {
+            return ResponseEntity.badRequest().cacheControl(CacheControl.noStore())
+                    .body(java.util.Map.of("message", "initData is required"));
+        }
+        var result = login.loginWebApp(request.initData(), clients.bind(http));
+        return noStore().body(result);
+    }
+
     public record Start(Boolean returnToApp) {}
     public record Config(boolean enabled) {}
     public record Pending(boolean pending) {}
+    public record WebAppLoginRequest(String initData) {}
     public record Complete(
             @jakarta.validation.constraints.NotNull @Pattern(regexp = "[A-Za-z0-9_-]{43}") String flowId,
             @jakarta.validation.constraints.NotNull @Pattern(regexp = "[A-Za-z0-9_-]{43}") String verifier) {}

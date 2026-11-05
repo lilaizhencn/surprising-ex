@@ -38,6 +38,9 @@ public final class GatewayLimitRequestBinding {
 
     public boolean isLogin(HttpServletRequest request) {
         String path = request.getRequestURI();
+        if (path.startsWith("/api/v1/telegram/bot/")) {
+            return false;
+        }
         return !"GET".equals(request.getMethod()) && (path.startsWith("/api/v1/auth/") || path.startsWith("/api/v1/telegram/"));
     }
 
