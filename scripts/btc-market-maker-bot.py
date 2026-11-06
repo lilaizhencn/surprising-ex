@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
 Continuous High-Fidelity Two-Sided BTC Market Maker & Matcher Daemon for Surprising EX.
-Maintains two-sided order book depth around live mark/index price and continuously
-executes alternating matched micro-trades to drive live order books, chart candles, and ticks
-while maintaining net delta near zero to prevent margin exhaustion.
+Maintains continuous two-sided order book depth without flickering/wiping,
+and continuously executes matched micro-trades to drive live order books, chart candles, and ticks.
 """
 import json
 import random
@@ -15,7 +14,7 @@ GATEWAY_BASE = "http://127.0.0.1:9094"
 INSTRUMENT_ID = "604"  # BTC-USDT Linear Perpetual
 USER_MAKER_BUY = 2
 USER_MAKER_SELL = 3
-LEVELS = 6
+LEVELS = 8
 
 
 def http_post(path, data):
@@ -62,133 +61,91 @@ def get_current_mark_ticks():
     return 758000
 
 
+def place_order(user_id, side, price_ticks, qty_steps=1, tif="GTC", client_order_id=None):
+    return http_post("/api/v1/trading/orders", {
+        "userId": user_id,
+        "clientOrderId": client_order_id or f"m-{user_id}-{int(time.time()*1000)%10000000}",
+        "instrumentId": INSTRUMENT_ID,
+        "side": side,
+        "orderType": "LIMIT",
+        "timeInForce": tif,
+        "priceTicks": price_ticks,
+        "quantitySteps": qty_steps,
+        "marginMode": "CROSS",
+        "positionSide": "NET",
+        "reduceOnly": False,
+        "postOnly": False
+    })
+
+
+def refresh_ladder(anchor_ticks, nonce):
+    """Place continuous 8-level buy and sell depth ladder around anchor."""
+    for i in range(1, LEVELS + 1):
+        buy_price = anchor_ticks - (i * 2)
+        qty = random.randint(1, 4)
+        place_order(USER_MAKER_BUY, "BUY", buy_price, qty, "GTC", f"b-{i}-{nonce}")
+
+        sell_price = anchor_ticks + (i * 2)
+        qty = random.randint(1, 4)
+        place_order(USER_MAKER_SELL, "SELL", sell_price, qty, "GTC", f"s-{i}-{nonce}")
+
+
 def run_market_maker():
-    print("BTC Market Maker Daemon running: active depth ladder and balanced matched fills.", flush=True)
+    print("BTC Market Maker Daemon running with flicker-free continuous depth.", flush=True)
     nonce = int(time.time() * 1000) % 10000000
     turn = 0
 
+    # Initial setup: clear and place ladder
+    cancel_maker_orders()
+    anchor_ticks = get_current_mark_ticks()
+    if anchor_ticks <= 0:
+        anchor_ticks = 758000
+    refresh_ladder(anchor_ticks, nonce)
+    last_refresh_time = time.time()
+    last_anchor = anchor_ticks
+
     while True:
         try:
-            # 1. Clear previous open depth orders to release margin
-            cancel_maker_orders()
-            time.sleep(0.05)
-
-            # 2. Get current price anchor
-            anchor_ticks = get_current_mark_ticks()
-            if anchor_ticks <= 0:
-                anchor_ticks = 758000
-
-            # 3. Micro price drift (-1 to +1 tick)
-            drift = random.choice([-1, 0, 1])
-            mid_ticks = anchor_ticks + drift
-
-            # 4. Place buy ladder (USER_MAKER_BUY)
-            for i in range(1, LEVELS + 1):
-                price = mid_ticks - (i * 2)
-                http_post("/api/v1/trading/orders", {
-                    "userId": USER_MAKER_BUY,
-                    "clientOrderId": f"b-{i}-{nonce}",
-                    "instrumentId": INSTRUMENT_ID,
-                    "side": "BUY",
-                    "orderType": "LIMIT",
-                    "timeInForce": "GTC",
-                    "priceTicks": price,
-                    "quantitySteps": 1,
-                    "marginMode": "CROSS",
-                    "positionSide": "NET",
-                    "reduceOnly": False,
-                    "postOnly": False
-                })
-
-            # 5. Place sell ladder (USER_MAKER_SELL)
-            for i in range(1, LEVELS + 1):
-                price = mid_ticks + (i * 2)
-                http_post("/api/v1/trading/orders", {
-                    "userId": USER_MAKER_SELL,
-                    "clientOrderId": f"s-{i}-{nonce}",
-                    "instrumentId": INSTRUMENT_ID,
-                    "side": "SELL",
-                    "orderType": "LIMIT",
-                    "timeInForce": "GTC",
-                    "priceTicks": price,
-                    "quantitySteps": 1,
-                    "marginMode": "CROSS",
-                    "positionSide": "NET",
-                    "reduceOnly": False,
-                    "postOnly": False
-                })
-
-            # 6. Balanced Alternating Matched Micro-Trade
-            match_price = mid_ticks
-            if turn % 2 == 0:
-                # Maker: USER_MAKER_SELL posts Limit Sell, Taker: USER_MAKER_BUY hits Limit Buy
-                http_post("/api/v1/trading/orders", {
-                    "userId": USER_MAKER_SELL,
-                    "clientOrderId": f"ms-{nonce}",
-                    "instrumentId": INSTRUMENT_ID,
-                    "side": "SELL",
-                    "orderType": "LIMIT",
-                    "timeInForce": "GTC",
-                    "priceTicks": match_price,
-                    "quantitySteps": 1,
-                    "marginMode": "CROSS",
-                    "positionSide": "NET",
-                    "reduceOnly": False,
-                    "postOnly": False
-                })
-                http_post("/api/v1/trading/orders", {
-                    "userId": USER_MAKER_BUY,
-                    "clientOrderId": f"tb-{nonce}",
-                    "instrumentId": INSTRUMENT_ID,
-                    "side": "BUY",
-                    "orderType": "LIMIT",
-                    "timeInForce": "IOC",
-                    "priceTicks": match_price,
-                    "quantitySteps": 1,
-                    "marginMode": "CROSS",
-                    "positionSide": "NET",
-                    "reduceOnly": False,
-                    "postOnly": False
-                })
-            else:
-                # Maker: USER_MAKER_BUY posts Limit Buy, Taker: USER_MAKER_SELL hits Limit Sell
-                http_post("/api/v1/trading/orders", {
-                    "userId": USER_MAKER_BUY,
-                    "clientOrderId": f"mb-{nonce}",
-                    "instrumentId": INSTRUMENT_ID,
-                    "side": "BUY",
-                    "orderType": "LIMIT",
-                    "timeInForce": "GTC",
-                    "priceTicks": match_price,
-                    "quantitySteps": 1,
-                    "marginMode": "CROSS",
-                    "positionSide": "NET",
-                    "reduceOnly": False,
-                    "postOnly": False
-                })
-                http_post("/api/v1/trading/orders", {
-                    "userId": USER_MAKER_SELL,
-                    "clientOrderId": f"ts-{nonce}",
-                    "instrumentId": INSTRUMENT_ID,
-                    "side": "SELL",
-                    "orderType": "LIMIT",
-                    "timeInForce": "IOC",
-                    "priceTicks": match_price,
-                    "quantitySteps": 1,
-                    "marginMode": "CROSS",
-                    "positionSide": "NET",
-                    "reduceOnly": False,
-                    "postOnly": False
-                })
-
             nonce += 1
             turn += 1
+
+            curr_mark = get_current_mark_ticks()
+            if curr_mark <= 0:
+                curr_mark = last_anchor
+
+            # Check if ladder needs realignment (drift > 12 ticks or every 60s)
+            now = time.time()
+            if abs(curr_mark - last_anchor) >= 12 or (now - last_refresh_time) > 60:
+                cancel_maker_orders()
+                last_anchor = curr_mark
+                refresh_ladder(last_anchor, nonce)
+                last_refresh_time = now
+
+            # Execute alternating matched micro-trade to drive candles & trades
+            match_drift = random.choice([-1, 0, 1])
+            match_price = last_anchor + match_drift
+            qty = 1
+
+            if turn % 2 == 0:
+                # Sell Maker, Buy Taker (IOC)
+                place_order(USER_MAKER_SELL, "SELL", match_price, qty, "GTC", f"ms-{nonce}")
+                place_order(USER_MAKER_BUY, "BUY", match_price, qty, "IOC", f"tb-{nonce}")
+                # Reinforce inner bid ladder
+                place_order(USER_MAKER_BUY, "BUY", match_price - 2, 1, "GTC", f"rb-{nonce}")
+            else:
+                # Buy Maker, Sell Taker (IOC)
+                place_order(USER_MAKER_BUY, "BUY", match_price, qty, "GTC", f"mb-{nonce}")
+                place_order(USER_MAKER_SELL, "SELL", match_price, qty, "IOC", f"ts-{nonce}")
+                # Reinforce inner ask ladder
+                place_order(USER_MAKER_SELL, "SELL", match_price + 2, 1, "GTC", f"rs-{nonce}")
+
             if turn % 10 == 0:
-                print(f"[Maker] Completed {turn} cycles. Current mid={mid_ticks/10.0:.1f}", flush=True)
+                print(f"[Maker] Cycle {turn}. Mid price={last_anchor/10.0:.1f}, matched at {match_price/10.0:.1f}", flush=True)
+
         except Exception as err:
             print("[Maker] Error in cycle:", err, flush=True)
 
-        time.sleep(1.5)
+        time.sleep(1.0)
 
 
 if __name__ == "__main__":
