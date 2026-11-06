@@ -18,8 +18,18 @@ public class UserNotificationService {
     }
 
     @Transactional(readOnly = true)
+    public List<NotificationView> list(long userId, boolean unreadOnly, String category, int limit) {
+        return repository.findForUser(userId, unreadOnly, category, limit);
+    }
+
+    @Transactional(readOnly = true)
     public List<NotificationView> list(long userId, boolean unreadOnly, int limit) {
-        return repository.findForUser(userId, unreadOnly, limit);
+        return repository.findForUser(userId, unreadOnly, null, limit);
+    }
+
+    @Transactional(readOnly = true)
+    public long countUnread(long userId) {
+        return repository.countUnread(userId);
     }
 
     @Transactional

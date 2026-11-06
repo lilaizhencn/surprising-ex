@@ -48,6 +48,7 @@ public class AuthPersistenceService {
     private final GatewayLoginLogRepository loginLogRepository;
     private final GatewayUserMfaRepository mfaRepository;
     private final GatewayRefreshSessionRepository refreshSessionRepository;
+    private final org.springframework.beans.factory.ObjectProvider<com.surprising.gateway.provider.notification.service.DeviceLoginAlertService> deviceLoginAlertProvider;
 
     public AuthPersistenceService(GatewayUserRepository userRepository,
                                   GatewayRoleRepository roleRepository,
@@ -57,6 +58,19 @@ public class AuthPersistenceService {
                                   GatewayLoginLogRepository loginLogRepository,
                                   GatewayUserMfaRepository mfaRepository,
                                   GatewayRefreshSessionRepository refreshSessionRepository) {
+        this(userRepository, roleRepository, permissionRepository, userRoleRepository,
+                rolePermissionRepository, loginLogRepository, mfaRepository, refreshSessionRepository, null);
+    }
+
+    public AuthPersistenceService(GatewayUserRepository userRepository,
+                                  GatewayRoleRepository roleRepository,
+                                  GatewayPermissionRepository permissionRepository,
+                                  GatewayUserRoleRepository userRoleRepository,
+                                  GatewayRolePermissionRepository rolePermissionRepository,
+                                  GatewayLoginLogRepository loginLogRepository,
+                                  GatewayUserMfaRepository mfaRepository,
+                                  GatewayRefreshSessionRepository refreshSessionRepository,
+                                  org.springframework.beans.factory.ObjectProvider<com.surprising.gateway.provider.notification.service.DeviceLoginAlertService> deviceLoginAlertProvider) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.permissionRepository = permissionRepository;
@@ -65,6 +79,7 @@ public class AuthPersistenceService {
         this.loginLogRepository = loginLogRepository;
         this.mfaRepository = mfaRepository;
         this.refreshSessionRepository = refreshSessionRepository;
+        this.deviceLoginAlertProvider = deviceLoginAlertProvider;
     }
 
     public AuthenticatedUser createUser(String username, String email, String passwordHash, Instant now) {
@@ -283,6 +298,10 @@ public class AuthPersistenceService {
 
     public void loginLog(long userId, String result, String reason, String userAgent, String ipAddress, Instant now) {
         loginLogRepository.append(userId, result, reason, userAgent, ipAddress, now);
+        if ("SUCCESS".equalsIgnoreCase(result) && deviceLoginAlertProvider != null) {
+            deviceLoginAlertProvider.ifAvailable(alertService ->
+                    alertService.checkAndAlertNewDeviceLogin(userId, ipAddress, userAgent));
+        }
     }
 
     private List<AuthenticatedUser> attachRoles(List<UserRecord> users) {

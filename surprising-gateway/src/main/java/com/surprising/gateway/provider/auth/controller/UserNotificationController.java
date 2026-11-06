@@ -1,11 +1,11 @@
 package com.surprising.gateway.provider.auth.controller;
 
-import com.surprising.gateway.provider.auth.service.UserNotificationService;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.NotificationView;
 import com.surprising.gateway.provider.auth.service.AuthService;
-
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.service.UserNotificationService;
 import java.util.List;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,12 +32,19 @@ public class UserNotificationController {
     public List<NotificationView> list(
             @RequestHeader("Authorization") String authorization,
             @RequestParam(value = "unreadOnly", defaultValue = "false") boolean unreadOnly,
+            @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "limit", defaultValue = "50") int limit) {
         try {
-            return notifications.list(principal(authorization).userId(), unreadOnly, Math.max(1, Math.min(limit, 100)));
+            return notifications.list(principal(authorization).userId(), unreadOnly, category, Math.max(1, Math.min(limit, 100)));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
+    }
+
+    @GetMapping("/unread-count")
+    public Map<String, Object> unreadCount(@RequestHeader("Authorization") String authorization) {
+        long userId = principal(authorization).userId();
+        return Map.of("unreadCount", notifications.countUnread(userId));
     }
 
     @PostMapping("/{notificationId}/read")

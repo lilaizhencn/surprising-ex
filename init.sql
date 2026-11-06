@@ -2929,10 +2929,12 @@ CREATE TABLE IF NOT EXISTS gateway_user_notifications (
     category        VARCHAR(32) NOT NULL,
     title           VARCHAR(160) NOT NULL,
     body            VARCHAR(4000) NOT NULL,
+    route           VARCHAR(255),
+    route_params    TEXT,
     read_at         TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT gateway_user_notifications_category_check CHECK (
-        category IN ('SYSTEM', 'SECURITY', 'TRADING', 'FUNDING', 'ACCOUNT', 'COMPLIANCE')
+        category IN ('SYSTEM', 'SECURITY', 'TRADING', 'FUNDING', 'ACCOUNT', 'COMPLIANCE', 'MARKET')
     )
 );
 
@@ -2942,6 +2944,70 @@ CREATE INDEX IF NOT EXISTS gateway_user_notifications_user_time_idx
 CREATE INDEX IF NOT EXISTS gateway_user_notifications_unread_idx
     ON gateway_user_notifications (user_id, notification_id)
     WHERE read_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS gateway_user_device_tokens (
+    token_id        BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL REFERENCES gateway_users(user_id) ON DELETE CASCADE,
+    device_token    TEXT NOT NULL,
+    platform        VARCHAR(32) NOT NULL CHECK (platform IN ('IOS', 'ANDROID', 'WEB', 'DESKTOP')),
+    device_name     VARCHAR(128),
+    locale          VARCHAR(32) DEFAULT 'en-US',
+    enabled         BOOLEAN NOT NULL DEFAULT true,
+    last_active_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_user_device_tokens_uidx UNIQUE (user_id, device_token)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_device_tokens_user_idx
+    ON gateway_user_device_tokens(user_id) WHERE enabled = true;
+
+CREATE INDEX IF NOT EXISTS gateway_user_device_tokens_token_idx
+    ON gateway_user_device_tokens(device_token);
+
+CREATE TABLE IF NOT EXISTS gateway_user_notification_preferences (
+    user_id                         BIGINT PRIMARY KEY REFERENCES gateway_users(user_id) ON DELETE CASCADE,
+    market_volatility_push          BOOLEAN NOT NULL DEFAULT true,
+    market_volatility_in_app        BOOLEAN NOT NULL DEFAULT true,
+    market_volatility_threshold_pct NUMERIC(5,2) NOT NULL DEFAULT 5.00,
+    security_login_push             BOOLEAN NOT NULL DEFAULT true,
+    security_login_email            BOOLEAN NOT NULL DEFAULT true,
+    trading_fill_push               BOOLEAN NOT NULL DEFAULT true,
+    trading_fill_in_app             BOOLEAN NOT NULL DEFAULT true,
+    liquidation_risk_push           BOOLEAN NOT NULL DEFAULT true,
+    liquidation_risk_in_app         BOOLEAN NOT NULL DEFAULT true,
+    asset_transfer_push             BOOLEAN NOT NULL DEFAULT true,
+    asset_transfer_in_app           BOOLEAN NOT NULL DEFAULT true,
+    c2c_order_push                  BOOLEAN NOT NULL DEFAULT true,
+    c2c_order_in_app                BOOLEAN NOT NULL DEFAULT true,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS gateway_push_notification_outbox (
+    push_id         UUID PRIMARY KEY,
+    user_id         BIGINT NOT NULL REFERENCES gateway_users(user_id) ON DELETE CASCADE,
+    device_token    TEXT NOT NULL,
+    platform        VARCHAR(32) NOT NULL,
+    category        VARCHAR(32) NOT NULL,
+    title           VARCHAR(200) NOT NULL,
+    body            VARCHAR(4000) NOT NULL,
+    route           VARCHAR(255),
+    route_params    TEXT,
+    status          VARCHAR(32) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SENDING', 'SENT', 'FAILED')),
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_error      TEXT,
+    idempotency_key TEXT UNIQUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sent_at         TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS gateway_push_outbox_pending_idx
+    ON gateway_push_notification_outbox(next_attempt_at, push_id) WHERE status = 'PENDING';
+
+CREATE INDEX IF NOT EXISTS gateway_push_outbox_user_idx
+    ON gateway_push_notification_outbox(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS gateway_admin_operation_logs (
     operation_id          BIGSERIAL PRIMARY KEY,
@@ -5386,3 +5452,6 @@ FROM gateway_legal_translations t
 CROSS JOIN LATERAL regexp_matches(t.body_html,'/api/v1/content/media/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})','g') AS m(matches)
 JOIN gateway_content_media media ON media.media_id=(m.matches)[1]::uuid
 ON CONFLICT DO NOTHING;
+
+COMMIT;
+
