@@ -117,13 +117,17 @@ build() {
   java -version 2>&1 | grep -Eq 'version "27([."]|$)' || fail 'HotSpot JDK 27 is required'
   java -version 2>&1 | grep -Eq 'OpenJDK.*Server VM|HotSpot' || fail 'HotSpot JDK 27 is required'
   mvn -version
-  mvn -f "$ROOT/pom.xml" -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-price/surprising-price-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-realtime/surprising-realtime-provider,surprising-gateway,surprising-maker -am package -DskipTests
+  if [[ "${SKIP_BUILD:-false}" != true ]]; then
+    mvn -f "$ROOT/pom.xml" -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-price/surprising-price-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-realtime/surprising-realtime-provider,surprising-gateway -am package -DskipTests
+  fi
 }
 case "$ACTION" in
   build) build; exit ;;
   status)
     backend status
-    for port in 9094 9082 9095 9087 9096; do
+    check_ports=(9094 9082 9095 9087)
+    [[ "${MAKER_ENABLED:-true}" == true ]] && check_ports+=(9096)
+    for port in "${check_ports[@]}"; do
       curl --fail --silent --max-time 5 "http://127.0.0.1:$port/actuator/health" >/dev/null || fail "unhealthy service on port $port"
     done
     # HTTP health alone does not prove the restarted Core has finished replay.

@@ -167,6 +167,7 @@ detect_jvm_campaign_support() {
 service_enabled() {
   if [[ "$CORE_ONLY" == true && "$1" != core && "$1" != tools ]]; then return 1; fi
   case "$1" in
+    maker) [[ "${MAKER_ENABLED:-true}" == true ]] ;;
     derivatives-lifecycle) [[ "$PRODUCT_LINE" != SPOT ]] ;;
     *) return 0 ;;
   esac
@@ -438,6 +439,19 @@ if [[ -n "${SPRING_CONFIG_ADDITIONAL_LOCATION:-}" ]]; then
   COMMON_ENV+=(SPRING_CONFIG_ADDITIONAL_LOCATION="$SPRING_CONFIG_ADDITIONAL_LOCATION")
 fi
 
+if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+  COMMON_ENV+=(
+    TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
+    TELEGRAM_BOT_POLLING_ENABLED="${TELEGRAM_BOT_POLLING_ENABLED:-true}"
+  )
+fi
+if [[ -n "${TELEGRAM_BOT_WEBHOOK_URL:-}" ]]; then
+  COMMON_ENV+=(TELEGRAM_BOT_WEBHOOK_URL="$TELEGRAM_BOT_WEBHOOK_URL")
+fi
+if [[ -n "${TELEGRAM_BOT_USERNAME:-}" ]]; then
+  COMMON_ENV+=(TELEGRAM_BOT_USERNAME="$TELEGRAM_BOT_USERNAME")
+fi
+
 if [[ "$REALTIME_ENABLED" == true ]]; then
   COMMON_ENV+=(
     SURPRISING_REALTIME_ENABLED=true
@@ -554,7 +568,7 @@ start_stack() {
     start_http_service price
     start_realtime_service
     service_enabled derivatives-lifecycle && start_http_service derivatives-lifecycle
-    start_http_service maker
+    service_enabled maker && start_http_service maker
   fi
   trap - EXIT ERR INT TERM
   printf 'PRODUCT_LINE_RUNTIME=PASS productLine=%s runId=%s wallet=ABSENT\n' "$PRODUCT_LINE" "$RUN_ID"
