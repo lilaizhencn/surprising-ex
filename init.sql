@@ -5453,5 +5453,19 @@ CROSS JOIN LATERAL regexp_matches(t.body_html,'/api/v1/content/media/([0-9a-f]{8
 JOIN gateway_content_media media ON media.media_id=(m.matches)[1]::uuid
 ON CONFLICT DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS gateway_sub_account_relations (
+    id                  BIGSERIAL PRIMARY KEY,
+    parent_user_id      BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    sub_user_id         BIGINT NOT NULL UNIQUE REFERENCES gateway_users(user_id),
+    sub_account_name    TEXT NOT NULL,
+    permissions         TEXT NOT NULL DEFAULT 'TRADE_SPOT,TRADE_CONTRACT',
+    status              TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gateway_sub_account_parent
+    ON gateway_sub_account_relations(parent_user_id);
+
 COMMIT;
 

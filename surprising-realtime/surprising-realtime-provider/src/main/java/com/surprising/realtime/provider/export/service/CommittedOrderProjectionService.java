@@ -133,11 +133,21 @@ public class CommittedOrderProjectionService {
 
     /** Finite history repair writes executions only, without the normal order watermark. */
     public void repairExecutions(ProductLine product, List<RealtimeFrame> frames) {
-        var writes = committedExecutions(product, frames);
+        var writes = committedExecutions(product, frames, makerAccounts.marketMakerAccounts(product));
         transaction.executeWithoutResult(tx -> executionRows.persistExecutions(product, writes));
     }
 
-    private List<ExecutionWrite> committedExecutions(ProductLine product, List<RealtimeFrame> frames) {
+    private static final Set<Long> DEFAULT_INTERNAL_MAKER_IDS = Set.of(2L, 3L);
+
+    private boolean isInternalMakerSelfTrade(long takerUserId, long makerUserId, Set<Long> makerAccounts) {
+        boolean takerIsMaker = DEFAULT_INTERNAL_MAKER_IDS.contains(takerUserId)
+                || (makerAccounts != null && makerAccounts.contains(takerUserId));
+        boolean makerIsMaker = DEFAULT_INTERNAL_MAKER_IDS.contains(makerUserId)
+                || (makerAccounts != null && makerAccounts.contains(makerUserId));
+        return takerIsMaker && makerIsMaker;
+    }
+
+    private List<ExecutionWrite> committedExecutions(ProductLine product, List<RealtimeFrame> frames, Set<Long> makerAccounts) {
         if (frames.stream().noneMatch(f -> f.kind() == RealtimeFrame.Kind.TRADE)) return List.of();
         var writes = new ArrayList<ExecutionWrite>();
         // Metadata belongs to the command which produced this fill. A later amend must not
@@ -179,6 +189,9 @@ public class CommittedOrderProjectionService {
                 if (price <= 0 || quantity <= 0 || side < 0 || side > 1) throw new IllegalArgumentException("invalid committed trade value");
                 var taker = executionOrder(pair[0], states, trade, price, quantity, side);
                 var maker = executionOrder(pair[1], states, trade, price, quantity, 1 - side);
+                if (isInternalMakerSelfTrade(taker.userId(), maker.userId(), makerAccounts)) {
+                    continue; // 内部做市商自成交：不持久化到个人成交历史，但公共 TRADE 帧已正常广播给行情
+                }
                 writes.add(new ExecutionWrite(trade.entityId(), position, index++, taker.orderId(), maker.orderId(),
                         taker.userId(), maker.userId(), trade.instrumentId(), taker.side().name(), taker.positionSide().name(),
                         maker.positionSide().name(), taker.takerFeeRatePpm(), maker.makerFeeRatePpm(), price, quantity, trade.timestamp()));
@@ -341,7 +354,7 @@ public class CommittedOrderProjectionService {
                 latest.put(order.orderId(), new OrderWrite(order, raw));
         }
         if (!executions.isEmpty()) throw new IllegalArgumentException("incomplete execution pair");
-        var fills = committedExecutions(product, orders);
+        var fills = committedExecutions(product, orders, marketMakerAccounts);
         transaction.executeWithoutResult(status -> {
             for (var fee : feeObservations) fees.observe(product, fee, orderRows.feeBaseline(product, fee.orderId()));
             statistics.persist(product,commandResults);

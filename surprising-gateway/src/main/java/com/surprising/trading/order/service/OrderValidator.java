@@ -81,6 +81,12 @@ public class OrderValidator {
         if (request.reduceOnly() && !rule.reduceOnlyEnabled()) {
             return ValidationResult.reject("reduce-only is disabled", rule.changeId(), rule.instrumentType());
         }
+        if (request.hasBracketOrders()) {
+            ValidationResult bracketValidation = validateBracketOrders(request, rule);
+            if (!bracketValidation.accepted()) {
+                return bracketValidation;
+            }
+        }
         if (request.postOnly() && !rule.postOnlyEnabled()) {
             return ValidationResult.reject("post-only is disabled", rule.changeId(), rule.instrumentType());
         }
@@ -94,6 +100,37 @@ public class OrderValidator {
             return validateMarket(request, rule);
         }
         return validateLimit(request, rule);
+    }
+
+    private ValidationResult validateBracketOrders(PlaceOrderRequest request, InstrumentRule rule) {
+        if (request.reduceOnly()) {
+            return ValidationResult.reject("bracket orders cannot be set on reduce-only orders", rule.changeId(), rule.instrumentType());
+        }
+        long referencePriceTicks = request.priceTicks();
+        if (referencePriceTicks <= 0) {
+            OptionalLong markOpt = markPriceLookup.latestMarkPriceTicks(request.instrumentId(), rule.changeId(), properties.getRisk().getMarketMaxMarkAgeMs());
+            if (markOpt.isPresent()) {
+                referencePriceTicks = markOpt.getAsLong();
+            }
+        }
+        if (referencePriceTicks > 0) {
+            if (request.side() == OrderSide.BUY) {
+                if (request.takeProfitPriceTicks() > 0 && request.takeProfitPriceTicks() <= referencePriceTicks) {
+                    return ValidationResult.reject("take-profit price must be greater than entry price for BUY orders", rule.changeId(), rule.instrumentType());
+                }
+                if (request.stopLossPriceTicks() > 0 && request.stopLossPriceTicks() >= referencePriceTicks) {
+                    return ValidationResult.reject("stop-loss price must be less than entry price for BUY orders", rule.changeId(), rule.instrumentType());
+                }
+            } else {
+                if (request.takeProfitPriceTicks() > 0 && request.takeProfitPriceTicks() >= referencePriceTicks) {
+                    return ValidationResult.reject("take-profit price must be less than entry price for SELL orders", rule.changeId(), rule.instrumentType());
+                }
+                if (request.stopLossPriceTicks() > 0 && request.stopLossPriceTicks() <= referencePriceTicks) {
+                    return ValidationResult.reject("stop-loss price must be greater than entry price for SELL orders", rule.changeId(), rule.instrumentType());
+                }
+            }
+        }
+        return ValidationResult.ok(rule.changeId(), rule.instrumentType(), rule.contractType());
     }
 
     private ValidationResult validateInstrumentTradingMode(PlaceOrderRequest request, InstrumentRule rule) {

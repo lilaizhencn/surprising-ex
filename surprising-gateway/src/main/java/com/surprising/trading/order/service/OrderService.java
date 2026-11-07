@@ -88,6 +88,16 @@ public class OrderService {
     private final OrderPlacementStateService placementStateService;
     private final AeronOrderCommandService aeronOrders;
     private final AeronOrderProjectionRepository aeronOrderProjection;
+    private final BracketOrderCoordinator bracketOrderCoordinator;
+
+    public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
+                        OrderPlacementStateService placementStateService, AeronOrderCommandService aeronOrders,
+                        AeronOrderProjectionRepository aeronOrderProjection, com.surprising.trading.matching.service.MatchingMarketDataService bboOrderBook,
+                        com.surprising.trading.order.service.TradingMetricsService tradingMetrics,
+                        com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection,
+                        com.surprising.realtime.api.ValkeyUserQueries realtimeQueries) {
+        this(properties, orderValidator, placementStateService, aeronOrders, aeronOrderProjection, bboOrderBook, tradingMetrics, tradeProjection, realtimeQueries, null);
+    }
 
     @Autowired
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
@@ -95,7 +105,8 @@ public class OrderService {
                         AeronOrderProjectionRepository aeronOrderProjection, com.surprising.trading.matching.service.MatchingMarketDataService bboOrderBook,
                         com.surprising.trading.order.service.TradingMetricsService tradingMetrics,
                         com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection,
-                        com.surprising.realtime.api.ValkeyUserQueries realtimeQueries) {
+                        com.surprising.realtime.api.ValkeyUserQueries realtimeQueries,
+                        @Autowired(required = false) BracketOrderCoordinator bracketOrderCoordinator) {
         this.tradingMetrics = tradingMetrics;
         this.tradeProjection = tradeProjection;
         this.realtimeQueries = realtimeQueries;
@@ -105,6 +116,7 @@ public class OrderService {
         this.placementStateService = placementStateService;
         this.aeronOrders = aeronOrders;
         this.aeronOrderProjection = aeronOrderProjection;
+        this.bracketOrderCoordinator = bracketOrderCoordinator;
     }
 
 
@@ -116,7 +128,12 @@ public class OrderService {
 
     public OrderResponse place(PlaceOrderRequest request) {
         requireAeron();
-        return aeronOrders.place(prepareOrder(request));
+        PlaceOrderRequest prepared = prepareOrder(request);
+        OrderResponse response = aeronOrders.place(prepared);
+        if (bracketOrderCoordinator != null && prepared.hasBracketOrders() && response != null) {
+            bracketOrderCoordinator.registerBracket(prepared, response);
+        }
+        return response;
     }
 
     OrderResponse placeAlgoChild(PlaceOrderRequest request) {

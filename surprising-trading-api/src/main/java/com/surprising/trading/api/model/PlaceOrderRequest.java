@@ -19,11 +19,25 @@ public record PlaceOrderRequest(
         PositionSide positionSide,
         boolean reduceOnly,
         boolean postOnly,
-        BboPriceMode bboPriceMode) {
+        BboPriceMode bboPriceMode,
+        @Min(0) long takeProfitPriceTicks,
+        @Min(0) long stopLossPriceTicks,
+        TriggerPriceSource tpSlPriceSource,
+        SelfTradePreventionMode stpMode) {
 
     public PlaceOrderRequest {
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
+        tpSlPriceSource = tpSlPriceSource != null ? tpSlPriceSource : TriggerPriceSource.MARK;
+        stpMode = SelfTradePreventionMode.defaultIfNull(stpMode);
+    }
+
+    public PlaceOrderRequest(long userId, String clientOrderId, String instrumentId, OrderSide side,
+                             OrderType orderType, TimeInForce timeInForce, long priceTicks,
+                             long quantitySteps, MarginMode marginMode, PositionSide positionSide,
+                             boolean reduceOnly, boolean postOnly, BboPriceMode bboPriceMode) {
+        this(userId, clientOrderId, instrumentId, side, orderType, timeInForce, priceTicks, quantitySteps,
+                marginMode, positionSide, reduceOnly, postOnly, bboPriceMode, 0L, 0L, TriggerPriceSource.MARK, SelfTradePreventionMode.NONE);
     }
 
     public PlaceOrderRequest(long userId, String clientOrderId, String instrumentId, OrderSide side,
@@ -31,7 +45,7 @@ public record PlaceOrderRequest(
                              long quantitySteps, MarginMode marginMode, PositionSide positionSide,
                              boolean reduceOnly, boolean postOnly) {
         this(userId, clientOrderId, instrumentId, side, orderType, timeInForce, priceTicks, quantitySteps,
-                marginMode, positionSide, reduceOnly, postOnly, null);
+                marginMode, positionSide, reduceOnly, postOnly, null, 0L, 0L, TriggerPriceSource.MARK, SelfTradePreventionMode.NONE);
     }
 
     public PlaceOrderRequest(long userId,
@@ -61,5 +75,9 @@ public record PlaceOrderRequest(
                              boolean postOnly) {
         this(userId, clientOrderId, instrumentId, side, orderType, timeInForce, priceTicks, quantitySteps,
                 MarginMode.CROSS, PositionSide.NET, reduceOnly, postOnly);
+    }
+
+    public boolean hasBracketOrders() {
+        return takeProfitPriceTicks > 0 || stopLossPriceTicks > 0;
     }
 }
