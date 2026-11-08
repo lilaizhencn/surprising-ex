@@ -58,6 +58,13 @@ surprising:
         instrument-snapshot-group-id: surprising-market-maker-instrument-snapshot-v1
     # 单实例；业务配置与策略由 YAML 初始化，后台热更新只保留在当前进程。
     engine:
-      enabled: false
-      trade-interval: 1s
+      enabled: ${MM_ENGINE_ENABLED:false}
+      trade-interval: ${MM_TRADE_INTERVAL:1s}
+    reference-market:
+      enabled: ${REFERENCE_MARKET_ENABLED:false}
+      max-age: 3s
+      request-timeout: 2s
+      reconnect-backoff: 5s
+      depth-levels: 20
+      sources: []
     strategies: []
