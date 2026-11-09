@@ -7,6 +7,30 @@ spring:
       accept-float-as-int: false
   application:
     name: surprising-derivatives-lifecycle
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+      client:
+        config:
+          default:
+            connect-timeout: 2000
+            read-timeout: 5000
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50.0
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+        slowCallRateThreshold: 70.0
+        slowCallDurationThreshold: 3s
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 5s
   task:
     scheduling:
       pool:
@@ -59,3 +83,9 @@ surprising:
       allowed-future-skew: 1s
       concurrency: 1
       max-poll-records: 500
+  clients:
+    gateway:
+      name: ${SURPRISING_GATEWAY_NAME:surprising-gateway}
+      url: ${SURPRISING_GATEWAY_URL:}
+    instrument:
+      base-url: ${SURPRISING_INSTRUMENT_URL:${SURPRISING_GATEWAY_URL:http://localhost:9094}}

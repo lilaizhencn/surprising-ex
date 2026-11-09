@@ -10,10 +10,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-gateway",
+        name = "${surprising.clients.matching.name:${surprising.clients.gateway.name:surprising-gateway}}",
         contextId = "marketDataRpcApi",
         path = TradingApiPaths.MARKET_BASE_PATH,
-        url = "${surprising.clients.matching.base-url:http://localhost:9094}")
+        url = "${surprising.clients.matching.base-url:${surprising.clients.gateway.url:}}",
+        fallbackFactory = MarketDataRpcApiFallbackFactory.class)
 public interface MarketDataRpcApi {
 
     @GetMapping("/orderbook")

@@ -26,10 +26,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-account-provider",
+        name = "${surprising.clients.account.name:${surprising.clients.gateway.name:surprising-gateway}}",
         contextId = "accountRpcApi",
         path = AccountApiPaths.ACCOUNT_BASE_PATH,
-        url = "${surprising.clients.account.base-url:http://localhost:9094}")
+        url = "${surprising.clients.account.base-url:${surprising.clients.gateway.url:}}",
+        fallbackFactory = AccountRpcApiFallbackFactory.class)
 public interface AccountRpcApi {
 
     @GetMapping("/balance")
