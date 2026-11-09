@@ -174,6 +174,11 @@ public class TelegramUpdateDispatcher {
             settingsHandler.handleModeChange(chatId, messageId, tgUser, mode);
         } else if ("settings:begin_pin".equals(data)) {
             settingsHandler.startPinSetupStep(chatId, messageId, tgUser);
+        } else if ("settings:lang:menu".equals(data)) {
+            settingsHandler.renderLanguageSettings(chatId, messageId, tgUser);
+        } else if (data.startsWith("settings:lang:set:")) {
+            String lang = data.substring("settings:lang:set:".length());
+            settingsHandler.handleLanguageChange(chatId, messageId, tgUser, lang);
         }
     }
 
@@ -226,40 +231,52 @@ public class TelegramUpdateDispatcher {
             }
         }
 
-        // 2. 匹配固定指令与键盘快捷语
+        // 2. 匹配固定指令与多语言键盘快捷语（中、英、俄）
         if (text.startsWith("/start aff_")) {
             String inviteCode = text.substring("/start aff_".length()).trim();
             affiliateHandler.handleDeepLinkInvitation(chatId, tgUser, inviteCode);
-        } else if (text.startsWith("/start") || text.startsWith("/menu") || "主菜单".equals(text)) {
+        } else if (text.startsWith("/start") || text.startsWith("/menu") || "主菜单".equals(text)
+                || "Menu".equalsIgnoreCase(text) || "Main Menu".equalsIgnoreCase(text) || "Главное меню".equalsIgnoreCase(text)) {
             authHandler.sendWelcomeAndMainMenu(chatId, tgUser);
-        } else if (text.startsWith("/assets") || "💰 账户资产".equals(text) || "资产".equals(text)) {
+        } else if (text.startsWith("/assets") || "💰 账户资产".equals(text) || "💰 Assets".equalsIgnoreCase(text)
+                || "💰 Активы".equalsIgnoreCase(text) || "资产".equals(text) || "Assets".equalsIgnoreCase(text)) {
             assetHandler.renderAssets(chatId, null, tgUser);
         } else if (text.startsWith("/depth")) {
             String[] parts = text.split("\\s+");
             String symbol = parts.length > 1 ? parts[1] : "BTC-USDT";
             marketHandler.renderOrderBookDepth(chatId, null, symbol);
-        } else if (text.startsWith("/price") || text.startsWith("/market") || "📊 实时行情".equals(text) || "行情".equals(text)) {
+        } else if (text.startsWith("/price") || text.startsWith("/market") || "📊 实时行情".equals(text)
+                || "📊 Market".equalsIgnoreCase(text) || "📊 Рынок".equalsIgnoreCase(text) || "行情".equals(text) || "Market".equalsIgnoreCase(text)) {
             String[] parts = text.split("\\s+");
             String symbol = parts.length > 1 ? parts[1] : "BTC-USDT";
             marketHandler.renderMarketOverview(chatId, null, symbol);
         } else if (text.equalsIgnoreCase("btc") || text.equalsIgnoreCase("eth") || text.equalsIgnoreCase("sol")
                 || text.equalsIgnoreCase("doge") || text.equalsIgnoreCase("xrp")) {
             marketHandler.renderMarketOverview(chatId, null, text.toUpperCase() + "-USDT");
-        } else if (text.startsWith("/positions") || "📈 合约持仓".equals(text) || "持仓".equals(text)) {
+        } else if (text.startsWith("/positions") || "📈 合约持仓".equals(text) || "📈 Positions".equalsIgnoreCase(text)
+                || "📈 Позиции".equalsIgnoreCase(text) || "持仓".equals(text) || "Positions".equalsIgnoreCase(text)) {
             positionHandler.renderPositions(chatId, null, tgUser);
-        } else if (text.startsWith("/orders") || "📋 当前挂单".equals(text) || "挂单".equals(text)) {
+        } else if (text.startsWith("/orders") || "📋 当前挂单".equals(text) || "📋 Open Orders".equalsIgnoreCase(text)
+                || "📋 Ордера".equalsIgnoreCase(text) || "挂单".equals(text) || "Orders".equalsIgnoreCase(text)) {
             orderHandler.renderOpenOrders(chatId, null, tgUser);
-        } else if (text.startsWith("/trade") || "⚡ 快捷交易".equals(text) || "交易".equals(text)) {
+        } else if (text.startsWith("/trade") || "⚡ 快捷交易".equals(text) || "⚡ Fast Trade".equalsIgnoreCase(text)
+                || "⚡ Быстрая торговля".equalsIgnoreCase(text) || "交易".equals(text) || "Trade".equalsIgnoreCase(text)) {
             tradeHandler.renderTradeCenter(chatId, null, tgUser);
-        } else if (text.startsWith("/deposit") || "💳 充值".equals(text) || "充币".equals(text)) {
+        } else if (text.startsWith("/deposit") || "💳 充值".equals(text) || "💳 Deposit".equalsIgnoreCase(text)
+                || "💳 Депозит".equalsIgnoreCase(text) || "充币".equals(text) || "Deposit".equalsIgnoreCase(text)) {
             depositHandler.renderChainSelection(chatId, null, tgUser);
-        } else if (text.startsWith("/withdraw") || "💸 提币".equals(text) || "提现".equals(text)) {
+        } else if (text.startsWith("/withdraw") || "💸 提币".equals(text) || "💸 Withdraw".equalsIgnoreCase(text)
+                || "💸 Вывод".equalsIgnoreCase(text) || "提现".equals(text) || "Withdraw".equalsIgnoreCase(text)) {
             withdrawHandler.renderChainSelection(chatId, null, tgUser);
-        } else if (text.startsWith("/transfer") || "🔄 划转".equals(text) || "资金划转".equals(text)) {
+        } else if (text.startsWith("/transfer") || "🔄 划转".equals(text) || "🔄 Transfer".equalsIgnoreCase(text)
+                || "🔄 Перевод".equalsIgnoreCase(text) || "资金划转".equals(text) || "Transfer".equalsIgnoreCase(text)) {
             transferHandler.renderDirectionSelection(chatId, null, tgUser);
-        } else if (text.startsWith("/kol") || text.startsWith("/affiliate") || "🤝 邀请返佣".equals(text) || "邀请".equals(text)) {
+        } else if (text.startsWith("/kol") || text.startsWith("/affiliate") || "🤝 邀请返佣".equals(text)
+                || "🤝 Referral (KOL)".equalsIgnoreCase(text) || "🤝 Рефералы (KOL)".equalsIgnoreCase(text)
+                || "邀请".equals(text) || "Referral".equalsIgnoreCase(text)) {
             affiliateHandler.renderKolDashboard(chatId, null, tgUser);
-        } else if (text.startsWith("/settings") || "⚙️ 设置".equals(text) || "安全设置".equals(text)) {
+        } else if (text.startsWith("/settings") || "⚙️ 设置".equals(text) || "⚙️ Settings".equalsIgnoreCase(text)
+                || "⚙️ Настройки".equalsIgnoreCase(text) || "安全设置".equals(text) || "Settings".equalsIgnoreCase(text)) {
             settingsHandler.renderSettings(chatId, null, tgUser);
         } else {
             // 未知输入时引导用户回主菜单

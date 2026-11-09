@@ -38,6 +38,13 @@ public class TelegramBotSecurityService {
         repository.upsertMode(userId, mode, Instant.now());
     }
 
+    public void updatePreferredLanguage(long userId, String languageCode) {
+        if (languageCode == null || languageCode.isBlank()) {
+            return;
+        }
+        repository.upsertLanguage(userId, languageCode.trim(), Instant.now());
+    }
+
     public void setTradePin(long userId, String pin) {
         if (pin == null || !pin.matches("^\\d{6}$")) {
             throw new IllegalArgumentException("交易密码必须为 6 位纯数字");

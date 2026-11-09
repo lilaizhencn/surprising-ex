@@ -5,16 +5,20 @@ import com.surprising.gateway.provider.auth.repository.TelegramIdentityRepositor
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.telegram.bot.client.TelegramBotClient;
 import com.surprising.gateway.provider.telegram.bot.config.TelegramBotProperties;
+import com.surprising.gateway.provider.telegram.bot.model.TelegramSecuritySettings;
 import com.surprising.gateway.provider.telegram.bot.model.TelegramUser;
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramInlineKeyboardButton;
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramInlineKeyboardMarkup;
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramKeyboardButton;
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramReplyKeyboardMarkup;
+import com.surprising.gateway.provider.telegram.bot.service.TelegramBotSecurityService;
+import com.surprising.gateway.provider.telegram.bot.service.TelegramI18nService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.Locale;
 
 @Component
 public class TelegramAuthHandler {
@@ -26,23 +30,29 @@ public class TelegramAuthHandler {
     private final GatewayUserRepository users;
     private final TelegramBotClient botClient;
     private final TelegramBotProperties properties;
+    private final TelegramI18nService i18n;
+    private final TelegramBotSecurityService securityService;
 
     public TelegramAuthHandler(TelegramIdentityRepository identities,
                                AuthPersistenceService authPersistence,
                                GatewayUserRepository users,
                                TelegramBotClient botClient,
-                               TelegramBotProperties properties) {
+                               TelegramBotProperties properties,
+                               TelegramI18nService i18n,
+                               TelegramBotSecurityService securityService) {
         this.identities = identities;
         this.authPersistence = authPersistence;
         this.users = users;
         this.botClient = botClient;
         this.properties = properties;
+        this.i18n = i18n;
+        this.securityService = securityService;
     }
 
     public long resolveUserId(TelegramUser tgUser) {
         String subject = String.valueOf(tgUser.id());
         Instant now = Instant.now();
-        return identities.lockIdentity(subject).orElseGet(() -> {
+        long userId = identities.lockIdentity(subject).orElseGet(() -> {
             log.info("New Telegram user auto-registration: id={}, name={}", tgUser.id(), tgUser.getDisplayName());
             var user = authPersistence.createUser(null, null, null, now);
             authPersistence.ensureDefaultRole(user.userId(), now);
@@ -50,91 +60,102 @@ public class TelegramAuthHandler {
             users.updateNickname(user.userId(), tgUser.getDisplayName(), now);
             return user.userId();
         });
+
+        // 尝试加载用户保存的偏好语言以热身 i18n 缓存
+        try {
+            if (securityService != null) {
+                TelegramSecuritySettings settings = securityService.getSettings(userId);
+                if (settings != null && settings.preferredLanguage() != null) {
+                    i18n.primeUserLocale(tgUser.id(), settings.preferredLanguage());
+                }
+            }
+        } catch (Exception ignored) {}
+
+        return userId;
     }
 
     public void sendWelcomeAndMainMenu(long chatId, TelegramUser tgUser) {
         long userId = resolveUserId(tgUser);
+        Locale locale = i18n.resolveLocale(tgUser);
 
-        String text = "🚀 <b>欢迎使用 Surprising 交易平台 Telegram 官方 Bot</b>\n\n" +
-                "👤 <b>当前用户:</b> " + escapeHtml(tgUser.getDisplayName()) + "\n" +
-                "🆔 <b>账户 UID:</b> <code>" + userId + "</code>\n" +
-                "🔗 <b>Telegram ID:</b> <code>" + tgUser.id() + "</code>\n\n" +
-                "您可以通过下方菜单快速进行<b>充提币、资金划转、开平仓、查看持仓、资产汇总与行情数据</b>。\n" +
-                "也可以直接点击<b>【打开 Mini App】</b>体验全功能 Web 交易终端！";
+        String text = i18n.t("menu.welcome", locale) + "\n\n" +
+                i18n.t("menu.current_user", locale, escapeHtml(tgUser.getDisplayName())) + "\n" +
+                i18n.t("menu.account_uid", locale, userId) + "\n" +
+                i18n.t("menu.telegram_id", locale, tgUser.id()) + "\n\n" +
+                i18n.t("menu.intro", locale);
 
-        // 发送带常驻 Reply 键盘的消息
-        TelegramReplyKeyboardMarkup replyMarkup = TelegramReplyKeyboardMarkup.builder()
-                .addRow(TelegramKeyboardButton.text("💰 账户资产"), TelegramKeyboardButton.text("📊 实时行情"))
-                .addRow(TelegramKeyboardButton.text("📈 合约持仓"), TelegramKeyboardButton.text("📋 当前挂单"), TelegramKeyboardButton.text("⚡ 快捷交易"))
-                .addRow(TelegramKeyboardButton.text("💳 充值"), TelegramKeyboardButton.text("💸 提币"), TelegramKeyboardButton.text("🔄 划转"))
-                .addRow(TelegramKeyboardButton.text("🤝 邀请返佣"), TelegramKeyboardButton.webApp("🚀 打开 Mini App 交易终端", properties.getWebappUrl()))
-                .build();
-
-        // 附带 Inline 快捷键盘
-        TelegramInlineKeyboardMarkup inlineMarkup = TelegramInlineKeyboardMarkup.builder()
-                .addRow(
-                        TelegramInlineKeyboardButton.callback("💰 资产看板", "menu:assets"),
-                        TelegramInlineKeyboardButton.callback("📈 持仓管理", "menu:positions")
-                )
-                .addRow(
-                        TelegramInlineKeyboardButton.callback("📊 市场行情", "menu:market"),
-                        TelegramInlineKeyboardButton.callback("📋 活跃挂单", "menu:orders"),
-                        TelegramInlineKeyboardButton.callback("⚡ 快捷交易", "menu:trade")
-                )
-                .addRow(
-                        TelegramInlineKeyboardButton.callback("💳 充值", "menu:deposit"),
-                        TelegramInlineKeyboardButton.callback("💸 提币", "menu:withdraw"),
-                        TelegramInlineKeyboardButton.callback("🔄 划转", "menu:transfer")
-                )
-                .addRow(
-                        TelegramInlineKeyboardButton.callback("🤝 邀请返佣 (KOL)", "kol:dashboard"),
-                        TelegramInlineKeyboardButton.callback("⚙️ 安全设置", "menu:settings")
-                )
-                .addRow(
-                        TelegramInlineKeyboardButton.webApp("📱 打开 Mini App 终端", properties.getWebappUrl())
-                )
-                .build();
+        TelegramReplyKeyboardMarkup replyMarkup = buildReplyKeyboard(locale);
+        TelegramInlineKeyboardMarkup inlineMarkup = buildInlineKeyboard(locale);
 
         botClient.sendMessage(chatId, text, inlineMarkup);
-        botClient.sendMessage(chatId, "👇 您也可以使用底部快捷菜单键盘快速导航：", replyMarkup);
+        botClient.sendMessage(chatId, i18n.t("menu.bottom_nav_hint", locale), replyMarkup);
     }
 
     public void renderMainMenu(long chatId, Long messageId, TelegramUser tgUser) {
         long userId = resolveUserId(tgUser);
-        String text = "🏛 <b>Surprising 交易主控制台</b>\n\n" +
-                "👤 <b>账户:</b> " + escapeHtml(tgUser.getDisplayName()) + " (UID: <code>" + userId + "</code>)\n" +
-                "⚡ 系统运行状态: 🟢 正常\n\n" +
-                "请选择您要执行的操作：";
+        Locale locale = i18n.resolveLocale(tgUser);
 
-        TelegramInlineKeyboardMarkup inlineMarkup = TelegramInlineKeyboardMarkup.builder()
-                .addRow(
-                        TelegramInlineKeyboardButton.callback("💰 资产看板", "menu:assets"),
-                        TelegramInlineKeyboardButton.callback("📈 合约持仓", "menu:positions")
-                )
-                .addRow(
-                        TelegramInlineKeyboardButton.callback("📊 市场行情", "menu:market"),
-                        TelegramInlineKeyboardButton.callback("📋 活跃挂单", "menu:orders"),
-                        TelegramInlineKeyboardButton.callback("⚡ 快捷交易", "menu:trade")
-                )
-                .addRow(
-                        TelegramInlineKeyboardButton.callback("💳 充值", "menu:deposit"),
-                        TelegramInlineKeyboardButton.callback("💸 提币", "menu:withdraw"),
-                        TelegramInlineKeyboardButton.callback("🔄 划转", "menu:transfer")
-                )
-                .addRow(
-                        TelegramInlineKeyboardButton.callback("🤝 邀请返佣 (KOL)", "kol:dashboard"),
-                        TelegramInlineKeyboardButton.callback("⚙️ 安全设置", "menu:settings")
-                )
-                .addRow(
-                        TelegramInlineKeyboardButton.webApp("📱 打开 Mini App 终端", properties.getWebappUrl())
-                )
-                .build();
+        String text = i18n.t("menu.welcome", locale) + "\n\n" +
+                i18n.t("menu.current_user", locale, escapeHtml(tgUser.getDisplayName())) + " (" +
+                i18n.t("menu.account_uid", locale, userId) + ")\n\n" +
+                i18n.t("menu.intro", locale);
+
+        TelegramInlineKeyboardMarkup inlineMarkup = buildInlineKeyboard(locale);
 
         if (messageId != null) {
             botClient.editMessageText(chatId, messageId, text, inlineMarkup);
         } else {
             botClient.sendMessage(chatId, text, inlineMarkup);
         }
+    }
+
+    public TelegramReplyKeyboardMarkup buildReplyKeyboard(Locale locale) {
+        return TelegramReplyKeyboardMarkup.builder()
+                .addRow(
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.assets", locale)),
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.market", locale))
+                )
+                .addRow(
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.positions", locale)),
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.orders", locale)),
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.trade", locale))
+                )
+                .addRow(
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.deposit", locale)),
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.withdraw", locale)),
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.transfer", locale))
+                )
+                .addRow(
+                        TelegramKeyboardButton.text(i18n.t("menu.btn.kol", locale)),
+                        TelegramKeyboardButton.webApp(i18n.t("menu.open_miniapp_btn", locale), properties.getWebappUrl())
+                )
+                .build();
+    }
+
+    public TelegramInlineKeyboardMarkup buildInlineKeyboard(Locale locale) {
+        return TelegramInlineKeyboardMarkup.builder()
+                .addRow(
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.assets", locale), "menu:assets"),
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.positions", locale), "menu:positions")
+                )
+                .addRow(
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.market", locale), "menu:market"),
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.orders", locale), "menu:orders"),
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.trade", locale), "menu:trade")
+                )
+                .addRow(
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.deposit", locale), "menu:deposit"),
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.withdraw", locale), "menu:withdraw"),
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.transfer", locale), "menu:transfer")
+                )
+                .addRow(
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.kol", locale), "kol:dashboard"),
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.settings", locale), "menu:settings")
+                )
+                .addRow(
+                        TelegramInlineKeyboardButton.webApp(i18n.t("menu.open_miniapp_btn", locale), properties.getWebappUrl())
+                )
+                .build();
     }
 
     private static String escapeHtml(String text) {

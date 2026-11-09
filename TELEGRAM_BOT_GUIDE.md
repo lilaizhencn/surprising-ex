@@ -170,3 +170,29 @@ telegram:
 mvn -f surprising-ex/pom.xml test -pl surprising-gateway -Dtest="Telegram*Test"
 ```
 测试结果：**全部通过（BUILD SUCCESS，50 Tests Passed）**。
+
+---
+
+## 7. 全球化多语言国际化体系（i18n）
+
+### 7.1 双轨语言判定机制
+1. **零感知自动匹配（Auto-detect）**：
+   - 首次交互或未手动配置偏好时，TelegramUpdateDispatcher 自动提取 Telegram 客户端上报的 `from.language_code`；
+   - `zh*`（`zh-hans`, `zh-cn`, `zh-hk` 等）自动匹配为简体中文（`zh_CN`）；
+   - `ru*` 自动匹配为俄语（`ru`）；
+   - 其他语言默认采用全球通用英语（`en`）。
+2. **用户自主偏好持久化（Manual Override）**：
+   - 在 `/settings`（设置中心）提供「🌐 语言设置 / Language」内联按钮；
+   - 支持实时切换语言（`🇨🇳 简体中文`、`🇺🇸 English`、`🇷🇺 Русский`）；
+   - 偏好持久化存入 `gateway_user_telegram_security_settings.preferred_language`，并在内存缓存毫秒级命中。
+
+### 7.2 资源包与模板分层
+- 基础与默认兜底：`i18n/telegram_messages.properties` / `telegram_messages_en.properties`；
+- 简体中文：`i18n/telegram_messages_zh_CN.properties`；
+- 俄语：`i18n/telegram_messages_ru.properties`；
+- 核心服务：`TelegramI18nService` 负责动态参数插值（针对账号 UID/订单号做千分位清洗，避免数字被错误格式化），保证文案高可读性。
+
+### 7.3 多语言键盘自适应
+- **常驻 Reply 键盘自适应**：用户切换语言后，Bot 自动推送对应语言的常驻底部导航按钮；
+- **多语言快捷词分发**：Dispatcher 同时识别中文（如 `💰 账户资产`）、英文（如 `💰 Assets`）、俄文（如 `💰 Активы`），无论用户以何种语言点击键盘均可精准路由。
+

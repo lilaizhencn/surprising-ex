@@ -174,4 +174,32 @@ class TelegramUpdateDispatcherTest {
 
         verify(withdrawHandler).handleAddressInput(eq(testChat.id()), eq(testUser), eq("TYDzsxdczEfD17Q6yoRPAxmGgkPxT888888"), any());
     }
+
+    @Test
+    void dispatchesMultilingualAssetsCommands() {
+        // 英文键盘
+        TelegramMessage enMsg = new TelegramMessage(6L, testUser, testChat, 123456L, "💰 Assets");
+        dispatcher.dispatch(new TelegramUpdate(6L, enMsg, null));
+        verify(assetHandler, times(1)).renderAssets(eq(testChat.id()), isNull(), eq(testUser));
+
+        // 俄文键盘
+        TelegramMessage ruMsg = new TelegramMessage(7L, testUser, testChat, 123456L, "💰 Активы");
+        dispatcher.dispatch(new TelegramUpdate(7L, ruMsg, null));
+        verify(assetHandler, times(2)).renderAssets(eq(testChat.id()), isNull(), eq(testUser));
+    }
+
+    @Test
+    void dispatchesLanguageSettingsCallbacks() {
+        TelegramMessage origMsg = new TelegramMessage(20L, null, testChat, 123456L, "settings");
+
+        // 打开语言设置菜单
+        TelegramCallbackQuery cqMenu = new TelegramCallbackQuery("cq_lang_menu", testUser, origMsg, "settings:lang:menu");
+        dispatcher.dispatch(new TelegramUpdate(20L, null, cqMenu));
+        verify(settingsHandler).renderLanguageSettings(eq(testChat.id()), eq(20L), eq(testUser));
+
+        // 切换语言为俄文
+        TelegramCallbackQuery cqSet = new TelegramCallbackQuery("cq_lang_set", testUser, origMsg, "settings:lang:set:ru");
+        dispatcher.dispatch(new TelegramUpdate(21L, null, cqSet));
+        verify(settingsHandler).handleLanguageChange(eq(testChat.id()), eq(20L), eq(testUser), eq("ru"));
+    }
 }

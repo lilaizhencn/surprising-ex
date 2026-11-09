@@ -4969,9 +4969,13 @@ CREATE TABLE IF NOT EXISTS gateway_user_telegram_security_settings (
     user_id BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),
     security_mode VARCHAR(32) NOT NULL DEFAULT 'CONFIRM_ONLY',
     trade_pin_hash TEXT,
+    preferred_language VARCHAR(16),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE IF EXISTS gateway_user_telegram_security_settings
+    ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(16);
 
 CREATE INDEX IF NOT EXISTS gateway_user_telegram_sec_mode_idx
     ON gateway_user_telegram_security_settings(security_mode);

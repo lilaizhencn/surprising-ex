@@ -7,12 +7,13 @@ import com.surprising.gateway.provider.telegram.bot.model.TelegramSessionState;
 import com.surprising.gateway.provider.telegram.bot.model.TelegramUser;
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramInlineKeyboardButton;
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramInlineKeyboardMarkup;
+import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramReplyKeyboardMarkup;
 import com.surprising.gateway.provider.telegram.bot.service.TelegramBotSecurityService;
+import com.surprising.gateway.provider.telegram.bot.service.TelegramI18nService;
 import com.surprising.gateway.provider.telegram.bot.service.TelegramSessionService;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
-import java.time.Instant;
+import java.util.Locale;
 
 @Component
 public class TelegramSettingsHandler {
@@ -21,49 +22,59 @@ public class TelegramSettingsHandler {
     private final TelegramBotSecurityService securityService;
     private final TelegramSessionService sessionService;
     private final TelegramBotClient botClient;
+    private final TelegramI18nService i18n;
 
     public TelegramSettingsHandler(TelegramAuthHandler authHandler,
                                    TelegramBotSecurityService securityService,
                                    TelegramSessionService sessionService,
-                                   TelegramBotClient botClient) {
+                                   TelegramBotClient botClient,
+                                   TelegramI18nService i18n) {
         this.authHandler = authHandler;
         this.securityService = securityService;
         this.sessionService = sessionService;
         this.botClient = botClient;
+        this.i18n = i18n;
     }
 
     public void renderSettings(long chatId, Long messageId, TelegramUser tgUser) {
         long userId = authHandler.resolveUserId(tgUser);
         TelegramSecuritySettings settings = securityService.getSettings(userId);
+        Locale locale = i18n.resolveLocale(tgUser);
 
         String modeDesc = switch (settings.securityMode()) {
-            case CONFIRM_ONLY -> "🟢 快速确认 (仅内联按钮二次确认)";
-            case TRADE_PASSWORD -> "🔐 交易密码 (需要输入 6 位交易 PIN)";
-            case OTP_VERIFY -> "🛡 2FA / 动态验证码 (需要输入 6 位 OTP/邮箱码)";
+            case CONFIRM_ONLY -> i18n.t("settings.mode.confirm_only", locale);
+            case TRADE_PASSWORD -> i18n.t("settings.mode.trade_password", locale);
+            case OTP_VERIFY -> i18n.t("settings.mode.otp_verify", locale);
         };
 
-        String pinDesc = settings.hasTradePin() ? "🟢 已设置" : "🔴 未设置 (使用前需先设置)";
+        String pinDesc = settings.hasTradePin()
+                ? i18n.t("settings.pin_set", locale)
+                : i18n.t("settings.pin_unset", locale);
 
-        String text = "⚙️ <b>Telegram Bot 安全与确认设置</b>\n" +
+        String currentLangName = TelegramI18nService.getLanguageDisplayName(locale);
+
+        String text = i18n.t("settings.title", locale) + "\n" +
                 "━━━━━━━━━━━━━━━━━━━━\n" +
-                "👤 <b>账户 UID:</b> <code>" + userId + "</code>\n" +
-                "🛡 <b>当前操作确认级别:</b>\n" + modeDesc + "\n" +
-                "🔑 <b>交易密码状态:</b> " + pinDesc + "\n\n" +
-                "<i>您可以在下方自由切换提币与敏感交易时的二次安全防线：</i>";
+                i18n.t("settings.uid", locale, userId) + "\n" +
+                i18n.t("settings.mode_label", locale) + "\n" + modeDesc + "\n" +
+                i18n.t("settings.pin_status", locale) + " " + pinDesc + "\n" +
+                "🌐 <b>" + i18n.t("settings.lang.current", locale, currentLangName) + "</b>\n\n" +
+                i18n.t("settings.intro_hint", locale);
 
         TelegramInlineKeyboardMarkup.Builder markup = TelegramInlineKeyboardMarkup.builder()
                 .addRow(
-                        TelegramInlineKeyboardButton.callback("🟢 设为: 快速确认", "settings:mode:CONFIRM_ONLY"),
-                        TelegramInlineKeyboardButton.callback("🔐 设为: 交易密码", "settings:mode:TRADE_PASSWORD")
+                        TelegramInlineKeyboardButton.callback(i18n.t("settings.btn.set_confirm_only", locale), "settings:mode:CONFIRM_ONLY"),
+                        TelegramInlineKeyboardButton.callback(i18n.t("settings.btn.set_trade_password", locale), "settings:mode:TRADE_PASSWORD")
                 )
                 .addRow(
-                        TelegramInlineKeyboardButton.callback("🛡 设为: 2FA验证码", "settings:mode:OTP_VERIFY")
+                        TelegramInlineKeyboardButton.callback(i18n.t("settings.btn.set_otp_verify", locale), "settings:mode:OTP_VERIFY")
                 )
                 .addRow(
-                        TelegramInlineKeyboardButton.callback("🔑 设置/修改 6 位交易密码", "settings:begin_pin")
+                        TelegramInlineKeyboardButton.callback(i18n.t("settings.btn.setup_pin", locale), "settings:begin_pin"),
+                        TelegramInlineKeyboardButton.callback(i18n.t("settings.btn.lang_menu", locale), "settings:lang:menu")
                 )
                 .addRow(
-                        TelegramInlineKeyboardButton.callback("⬅️ 返回主菜单", "menu:main")
+                        TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.back", locale), "menu:main")
                 );
 
         if (messageId != null) {
@@ -73,19 +84,58 @@ public class TelegramSettingsHandler {
         }
     }
 
+    public void renderLanguageSettings(long chatId, Long messageId, TelegramUser tgUser) {
+        Locale current = i18n.resolveLocale(tgUser);
+
+        String text = i18n.t("settings.lang.title", current) + "\n" +
+                "━━━━━━━━━━━━━━━━━━━━\n" +
+                i18n.t("settings.lang.choose_prompt", current);
+
+        TelegramInlineKeyboardMarkup.Builder markup = TelegramInlineKeyboardMarkup.builder();
+        for (TelegramI18nService.SupportedLanguage lang : i18n.getSupportedLanguages()) {
+            boolean isSelected = lang.locale().getLanguage().equalsIgnoreCase(current.getLanguage());
+            String btnText = lang.displayName() + (isSelected ? " ✅" : "");
+            markup.addRow(TelegramInlineKeyboardButton.callback(btnText, "settings:lang:set:" + lang.code()));
+        }
+        markup.addRow(TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.back", current), "menu:settings"));
+
+        if (messageId != null) {
+            botClient.editMessageText(chatId, messageId, text, markup.build());
+        } else {
+            botClient.sendMessage(chatId, text, markup.build());
+        }
+    }
+
+    public void handleLanguageChange(long chatId, Long messageId, TelegramUser tgUser, String langTag) {
+        long userId = authHandler.resolveUserId(tgUser);
+        Locale newLocale = i18n.setUserLocale(tgUser.id(), userId, langTag);
+        String langName = TelegramI18nService.getLanguageDisplayName(newLocale);
+
+        // 答复点击提示
+        botClient.answerCallbackQuery(null, i18n.t("settings.lang.success", newLocale, langName), false);
+
+        // 重新渲染设置页
+        renderSettings(chatId, messageId, tgUser);
+
+        // 发送更新后的常驻底部 Reply 键盘
+        TelegramReplyKeyboardMarkup replyMarkup = authHandler.buildReplyKeyboard(newLocale);
+        botClient.sendMessage(chatId, i18n.t("settings.lang.success", newLocale, langName), replyMarkup);
+    }
+
     public void handleModeChange(long chatId, long messageId, TelegramUser tgUser, String modeStr) {
         long userId = authHandler.resolveUserId(tgUser);
         TelegramSecurityMode mode = TelegramSecurityMode.fromString(modeStr);
+        Locale locale = i18n.resolveLocale(tgUser);
         try {
             securityService.updateSecurityMode(userId, mode);
             renderSettings(chatId, messageId, tgUser);
         } catch (IllegalStateException ex) {
             botClient.answerCallbackQuery(null, ex.getMessage(), true);
-            String text = "⚠️ <b>无法切换为交易密码模式</b>\n\n" +
-                    ex.getMessage() + "\n请点击下方按钮先完成交易密码初始化。";
+            String text = "⚠️ <b>" + i18n.t("settings.pin_required_alert", locale) + "</b>\n\n" +
+                    ex.getMessage();
             TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
-                    .addRow(TelegramInlineKeyboardButton.callback("🔑 立即设置 6 位交易密码", "settings:begin_pin"))
-                    .addRow(TelegramInlineKeyboardButton.callback("⬅️ 返回设置", "menu:settings"))
+                    .addRow(TelegramInlineKeyboardButton.callback(i18n.t("settings.btn.setup_pin", locale), "settings:begin_pin"))
+                    .addRow(TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.back", locale), "menu:settings"))
                     .build();
             botClient.editMessageText(chatId, messageId, text, markup);
         }
@@ -93,14 +143,14 @@ public class TelegramSettingsHandler {
 
     public void startPinSetupStep(long chatId, Long messageId, TelegramUser tgUser) {
         sessionService.setState(tgUser.id(), TelegramSessionState.Step.SETTINGS_AWAITING_NEW_PIN, null);
+        Locale locale = i18n.resolveLocale(tgUser);
 
-        String text = "🔑 <b>设置 6 位交易密码</b>\n" +
+        String text = i18n.t("settings.pin_setup_title", locale) + "\n" +
                 "━━━━━━━━━━━━━━━━━━━━\n" +
-                "请在下方聊天输入框直接回复您的 <b>6 位纯数字交易密码</b>（例如: <code>886622</code>）：\n\n" +
-                "<i>此密码将用于您在 Telegram Bot 执行提币与快捷开仓时的二次安全验证。</i>";
+                i18n.t("settings.pin_setup_prompt", locale);
 
         TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
-                .addRow(TelegramInlineKeyboardButton.callback("❌ 取消设置", "menu:settings"))
+                .addRow(TelegramInlineKeyboardButton.callback(i18n.t("common.btn.cancel", locale), "menu:settings"))
                 .build();
 
         if (messageId != null) {
@@ -113,19 +163,19 @@ public class TelegramSettingsHandler {
     public void handlePinInput(long chatId, TelegramUser tgUser, String pinText) {
         long userId = authHandler.resolveUserId(tgUser);
         String pin = pinText.trim();
+        Locale locale = i18n.resolveLocale(tgUser);
         try {
             securityService.setTradePin(userId, pin);
             sessionService.clearState(tgUser.id());
 
-            String text = "🎉 <b>6 位交易密码设置成功！</b>\n\n" +
-                    "您的安全密码已就绪，当前已自动开启交易密码安全保护。";
+            String text = i18n.t("settings.pin_success", locale);
             TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
-                    .addRow(TelegramInlineKeyboardButton.callback("⚙️ 查看安全设置", "menu:settings"))
-                    .addRow(TelegramInlineKeyboardButton.callback("⬅️ 返回主菜单", "menu:main"))
+                    .addRow(TelegramInlineKeyboardButton.callback(i18n.t("settings.btn.lang_menu", locale), "menu:settings"))
+                    .addRow(TelegramInlineKeyboardButton.callback(i18n.t("menu.btn.back", locale), "menu:main"))
                     .build();
             botClient.sendMessage(chatId, text, markup);
         } catch (IllegalArgumentException ex) {
-            botClient.sendMessage(chatId, "❌ " + ex.getMessage() + "，请重新输入 6 位纯数字：", null);
+            botClient.sendMessage(chatId, i18n.t("settings.pin_invalid", locale), null);
         }
     }
 }

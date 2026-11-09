@@ -5,6 +5,8 @@ import com.surprising.gateway.provider.telegram.bot.model.TelegramSecuritySettin
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
@@ -19,14 +21,28 @@ public class TelegramBotSecurityRepository {
     }
 
     public Optional<TelegramSecuritySettings> findSettings(long userId) {
-        String sql = "SELECT user_id, security_mode, trade_pin_hash IS NOT NULL as has_pin, updated_at " +
+        String sql = "SELECT user_id, security_mode, trade_pin_hash IS NOT NULL as has_pin, preferred_language, updated_at " +
                 "FROM gateway_user_telegram_security_settings WHERE user_id = ?";
-        return jdbc.query(sql, (rs, rowNum) -> new TelegramSecuritySettings(
-                rs.getLong("user_id"),
-                TelegramSecurityMode.fromString(rs.getString("security_mode")),
-                rs.getBoolean("has_pin"),
-                rs.getTimestamp("updated_at").toInstant()
-        ), userId).stream().findFirst();
+        try {
+            return jdbc.query(sql, (rs, rowNum) -> new TelegramSecuritySettings(
+                    rs.getLong("user_id"),
+                    TelegramSecurityMode.fromString(rs.getString("security_mode")),
+                    rs.getBoolean("has_pin"),
+                    getStringQuietly(rs, "preferred_language"),
+                    rs.getTimestamp("updated_at").toInstant()
+            ), userId).stream().findFirst();
+        } catch (Exception ex) {
+            // Fallback for environments where preferred_language column has not yet been applied
+            String fallbackSql = "SELECT user_id, security_mode, trade_pin_hash IS NOT NULL as has_pin, updated_at " +
+                    "FROM gateway_user_telegram_security_settings WHERE user_id = ?";
+            return jdbc.query(fallbackSql, (rs, rowNum) -> new TelegramSecuritySettings(
+                    rs.getLong("user_id"),
+                    TelegramSecurityMode.fromString(rs.getString("security_mode")),
+                    rs.getBoolean("has_pin"),
+                    null,
+                    rs.getTimestamp("updated_at").toInstant()
+            ), userId).stream().findFirst();
+        }
     }
 
     public Optional<String> findTradePinHash(long userId) {
@@ -47,5 +63,20 @@ public class TelegramBotSecurityRepository {
                 "VALUES (?, 'TRADE_PASSWORD', ?, ?) " +
                 "ON CONFLICT (user_id) DO UPDATE SET trade_pin_hash = EXCLUDED.trade_pin_hash, updated_at = EXCLUDED.updated_at";
         jdbc.update(sql, userId, pinHash, Timestamp.from(now));
+    }
+
+    public void upsertLanguage(long userId, String languageCode, Instant now) {
+        String sql = "INSERT INTO gateway_user_telegram_security_settings(user_id, security_mode, preferred_language, updated_at) " +
+                "VALUES (?, 'CONFIRM_ONLY', ?, ?) " +
+                "ON CONFLICT (user_id) DO UPDATE SET preferred_language = EXCLUDED.preferred_language, updated_at = EXCLUDED.updated_at";
+        jdbc.update(sql, userId, languageCode, Timestamp.from(now));
+    }
+
+    private String getStringQuietly(ResultSet rs, String column) {
+        try {
+            return rs.getString(column);
+        } catch (SQLException ignored) {
+            return null;
+        }
     }
 }
