@@ -25,6 +25,7 @@ import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.Header;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongConsumer;
 import org.agrona.DirectBuffer;
@@ -83,6 +84,8 @@ public final class AeronTradingClusterService implements ClusteredService {
     /** Aeron 提供的当前集群句柄，供快照发布和空闲等待使用，终止时释放引用。 */
     private Cluster cluster;
 
+    private final List<ClusterRoleChangeListener> roleChangeListeners;
+
     /**
      * Spring 装配主入口，接收统一绑定的拓扑与配置。
      */
@@ -93,14 +96,32 @@ public final class AeronTradingClusterService implements ClusteredService {
             TradingCpuAffinity affinity,
             LaneTopology laneTopology,
             CoreRuntimeConfiguration configuration,
+            RealtimeConfiguration realtimeConfiguration,
+            @Autowired(required = false) List<ClusterRoleChangeListener> roleChangeListeners) {
+        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration, roleChangeListeners);
+    }
+
+    public AeronTradingClusterService(
+            ClusterTopology topology,
+            ClusterServiceEgress egress,
+            TradingCpuAffinity affinity,
+            LaneTopology laneTopology,
+            CoreRuntimeConfiguration configuration,
             RealtimeConfiguration realtimeConfiguration) {
-        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration);
+        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration, null);
     }
 
     /** 独立工具与测试的完整装配入口，与 Spring 使用同一组初始化逻辑。 */
     public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
             TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration,
             RealtimeConfiguration realtimeConfiguration) {
+        this(productLine, egress, affinity, laneTopology, configuration, realtimeConfiguration, null);
+    }
+
+    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
+            TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration,
+            RealtimeConfiguration realtimeConfiguration,
+            List<ClusterRoleChangeListener> roleChangeListeners) {
         this.affinityConfiguration = java.util.Objects.requireNonNull(affinity);
         this.egress = java.util.Objects.requireNonNull(egress);
         this.snapshotTimeoutNanos = TimeUnit.SECONDS.toNanos(configuration.snapshotTimeoutSeconds());
@@ -113,6 +134,7 @@ public final class AeronTradingClusterService implements ClusteredService {
                 configuration,
                 realtimeConfiguration);
         this.input = coreOwner.ingress();
+        this.roleChangeListeners = roleChangeListeners != null ? List.copyOf(roleChangeListeners) : List.of();
     }
 
 
@@ -139,6 +161,15 @@ public final class AeronTradingClusterService implements ClusteredService {
         coreOwner.state().activate(affinityConfiguration);
         cpuAffinity = affinityConfiguration.owner();
         started = true;
+        if (!roleChangeListeners.isEmpty()) {
+            for (ClusterRoleChangeListener listener : roleChangeListeners) {
+                try {
+                    listener.onRoleChanged(cluster.role());
+                } catch (Throwable t) {
+                    LOG.warn("Cluster role change listener failed on start: {}", t.getMessage());
+                }
+            }
+        }
     }
 
     /**
@@ -326,6 +357,15 @@ public final class AeronTradingClusterService implements ClusteredService {
         }
         ownerEpoch = nextEpoch;
         coreOwner.roleChange(role);
+        if (!roleChangeListeners.isEmpty()) {
+            for (ClusterRoleChangeListener listener : roleChangeListeners) {
+                try {
+                    listener.onRoleChanged(role);
+                } catch (Throwable t) {
+                    LOG.warn("Cluster role change listener failed: {}", t.getMessage());
+                }
+            }
+        }
     }
 
     /**

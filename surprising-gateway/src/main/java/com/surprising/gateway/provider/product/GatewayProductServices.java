@@ -11,11 +11,13 @@ import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.client.topology.AeronClusterTopologyProvider;
 import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PreDestroy;
 import java.util.*;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.*;
 import org.springframework.core.env.MapPropertySource;
@@ -32,13 +34,24 @@ public final class GatewayProductServices implements AutoCloseable {
     private final GatewayProductsProperties configuration;
     private final GatewayProductSettings settings;
     private final ConfigurableApplicationContext parent;
+    private final AeronClusterTopologyProvider topologyProvider;
     private volatile boolean closed;
 
-    public GatewayProductServices(ConfigurableApplicationContext parent, GatewayProductsProperties configuration,
-                                  GatewayProductSettings settings) {
+    @Autowired
+    public GatewayProductServices(
+            ConfigurableApplicationContext parent,
+            GatewayProductsProperties configuration,
+            GatewayProductSettings settings,
+            @Autowired(required = false) AeronClusterTopologyProvider topologyProvider) {
         this.parent = parent;
         this.configuration = configuration;
         this.settings = settings;
+        this.topologyProvider = topologyProvider;
+    }
+
+    public GatewayProductServices(ConfigurableApplicationContext parent, GatewayProductsProperties configuration,
+                                  GatewayProductSettings settings) {
+        this(parent, configuration, settings, null);
     }
 
     public synchronized void reload() {
@@ -182,8 +195,14 @@ public final class GatewayProductServices implements AutoCloseable {
         for (String prefix : List.of("surprising.account.kafka", "surprising.trading.order.kafka",
                 "surprising.trading.trigger", "surprising.price.consumer", "surprising.websocket.kafka"))
             values.put(prefix + ".product-line", product.name());
+        List<String> hosts = (topologyProvider != null)
+                ? topologyProvider.lookupHostnames(product)
+                : core.getHostnames();
+        if (hosts == null || hosts.isEmpty()) {
+            hosts = core.getHostnames();
+        }
         for (String prefix : List.of("surprising.account.aeron", "surprising.trading.order.aeron", "surprising.trading.trigger.aeron")) {
-            values.put(prefix + ".hostnames", String.join(",", core.getHostnames()));
+            values.put(prefix + ".hostnames", String.join(",", hosts));
             values.put(prefix + ".egress-hostname", core.getEgressHostname());
             values.put(prefix + ".response-timeout", core.getResponseTimeout().toMillis() + "ms");
             values.put(prefix + ".client-connections", core.getClientConnections());
