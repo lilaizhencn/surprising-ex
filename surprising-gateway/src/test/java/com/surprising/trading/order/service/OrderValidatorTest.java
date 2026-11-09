@@ -272,6 +272,54 @@ class OrderValidatorTest {
     }
 
     @Test
+    void rejectsLimitBuyBelowMarkPricePassiveBand() {
+        OrderValidator validator = limitPriceBandValidator(tradingRule(), OptionalLong.of(100_000L),
+                50_000L);
+
+        // 默认 passiveBandPpm = 500_000 (50%)，下限是 50_000L，买单挂 40_000L 应被拦截
+        var result = validator.validate(limit(OrderSide.BUY, 40_000L, 1L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("limit buy price below mark price passive band");
+    }
+
+    @Test
+    void rejectsLimitSellAboveMarkPricePassiveBand() {
+        OrderValidator validator = limitPriceBandValidator(tradingRule(), OptionalLong.of(100_000L),
+                50_000L);
+
+        // 默认 passiveBandPpm = 500_000 (50%)，上限是 150_000L，卖单挂 160_000L 应被拦截
+        var result = validator.validate(limit(OrderSide.SELL, 160_000L, 1L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("limit sell price exceeds mark price passive band");
+    }
+
+    @Test
+    void rejectsSpotLimitOrderWhenExceedsPriceBand() {
+        OrderValidator validator = limitPriceBandValidator(spotRule(), OptionalLong.of(100_000L),
+                50_000L);
+
+        // 现货买单超出标记价 +5% 激进带，被拦截防手抖
+        var result = validator.validate(limit(OrderSide.BUY, 106_000L, 1L));
+
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.rejectReason()).isEqualTo("limit buy price exceeds mark price band");
+    }
+
+    @Test
+    void acceptsSpotLimitOrderWhenMarkUnavailable() {
+        OrderValidator validator = limitPriceBandValidator(spotRule(), OptionalLong.empty(),
+                50_000L);
+
+        // 现货若标记价短暂缺失，优雅降级放行
+        var result = validator.validate(limit(OrderSide.BUY, 100_000L, 1L));
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.rejectReason()).isNull();
+    }
+
+    @Test
     void rejectsLimitOrderWithoutFreshMarkWhenPriceBandEnabled() {
         OrderValidator validator = limitPriceBandValidator(tradingRule(), OptionalLong.empty(), 50_000L);
 
