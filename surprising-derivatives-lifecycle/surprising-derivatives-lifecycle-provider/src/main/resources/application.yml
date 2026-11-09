@@ -16,6 +16,8 @@ spring:
           default:
             connect-timeout: 2000
             read-timeout: 5000
+          surprising-gateway:
+            url: ${GATEWAY_DIRECT_URL:http://localhost:9094}
 resilience4j:
   circuitbreaker:
     configs:
@@ -83,6 +85,3 @@ surprising:
       allowed-future-skew: 1s
       concurrency: 1
       max-poll-records: 500
-  clients:
-    gateway:
-      url: ${SURPRISING_GATEWAY_URL:http://localhost:9094}

@@ -34,12 +34,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(
-        name = "surprising-gateway",
-        contextId = "orderRpcApi",
-        path = TradingApiPaths.ORDER_BASE_PATH,
-        url = "${surprising.clients.gateway.url:}",
-        fallbackFactory = OrderRpcApiFallbackFactory.class)
+@FeignClient(name = "surprising-gateway", contextId = "orderRpcApi", path = TradingApiPaths.ORDER_BASE_PATH)
 public interface OrderRpcApi {
 
     @PostMapping
