@@ -5,8 +5,8 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
-@FeignClient(name = "${surprising.clients.trading.name:${surprising.clients.gateway.name:surprising-gateway}}", contextId = "makerQuoteInputsClient",
-        url = "${surprising.clients.trading.base-url:${surprising.clients.gateway.url:}}")
+@FeignClient(name = "surprising-gateway", contextId = "makerQuoteInputsClient",
+        url = "${surprising.clients.gateway.url:}")
 public interface MakerQuoteInputsClient {
     @PostMapping("/internal/v1/trading/maker/quote-inputs")
     MakerQuoteInputs.Response query(@RequestBody MakerQuoteInputs.Request request);

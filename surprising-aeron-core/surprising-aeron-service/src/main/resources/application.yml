@@ -1,3 +1,7 @@
+spring:
+  application:
+    name: surprising-aeron-core
+
 surprising:
   aeron:
     # 首次启动的交易拓扑；恢复时使用快照保存的拓扑，不重新分配已有账户。

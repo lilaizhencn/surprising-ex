@@ -59,16 +59,7 @@ surprising:
       required-instrument-ids: ${PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS:}
   clients:
     gateway:
-      name: ${SURPRISING_GATEWAY_NAME:surprising-gateway}
-      url: ${SURPRISING_GATEWAY_URL:}
-    account:
-      base-url: ${SURPRISING_ACCOUNT_URL:${SURPRISING_GATEWAY_URL:http://localhost:9094}}
-    instrument:
-      base-url: ${SURPRISING_INSTRUMENT_URL:${SURPRISING_GATEWAY_URL:http://localhost:9094}}
-    matching:
-      base-url: ${SURPRISING_MATCHING_URL:${SURPRISING_GATEWAY_URL:http://localhost:9094}}
-    trading:
-      base-url: ${SURPRISING_TRADING_URL:${SURPRISING_GATEWAY_URL:http://localhost:9094}}
+      url: ${SURPRISING_GATEWAY_URL:http://localhost:9094}
   market-maker:
     infrastructure:
       product-line: ${PRODUCT_LINE}

@@ -85,7 +85,4 @@ surprising:
       max-poll-records: 500
   clients:
     gateway:
-      name: ${SURPRISING_GATEWAY_NAME:surprising-gateway}
-      url: ${SURPRISING_GATEWAY_URL:}
-    instrument:
-      base-url: ${SURPRISING_INSTRUMENT_URL:${SURPRISING_GATEWAY_URL:http://localhost:9094}}
+      url: ${SURPRISING_GATEWAY_URL:http://localhost:9094}

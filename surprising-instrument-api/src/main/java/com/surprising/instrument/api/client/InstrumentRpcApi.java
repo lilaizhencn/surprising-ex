@@ -12,10 +12,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "${surprising.clients.instrument.name:${surprising.clients.gateway.name:surprising-gateway}}",
+        name = "surprising-gateway",
         contextId = "instrumentRpcApi",
         path = InstrumentApiPaths.INTERNAL_BASE_PATH,
-        url = "${surprising.clients.instrument.base-url:${surprising.clients.gateway.url:}}",
+        url = "${surprising.clients.gateway.url:}",
         fallbackFactory = InstrumentRpcApiFallbackFactory.class)
 public interface InstrumentRpcApi {
 
