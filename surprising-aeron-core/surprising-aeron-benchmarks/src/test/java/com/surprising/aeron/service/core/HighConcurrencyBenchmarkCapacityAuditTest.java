@@ -145,6 +145,69 @@ public class HighConcurrencyBenchmarkCapacityAuditTest {
         }
     }
 
+    @Test
+    void executeProductionMixedWorkloadCapacityAudit() {
+        System.out.println("================================================================================");
+        System.out.println(">>> 正在启动 Surprising 真实生产混合业务模式高并发性能压测审计 (Production Mixed)...");
+        System.out.println(">>> 业务涵盖: 批量报单撮合 + 强平穿仓与保险基金垫付 + 定时资金费划转 + 标记价格风控跳动");
+        System.out.println("================================================================================");
+
+        int accountLanes = 4;
+        int activeUsers = 1_024;
+        int symbols = 4;
+        int hftRounds = 48;
+        int hftBatchSize = 20;
+
+        var template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, symbols);
+
+        try (var scenario = LinearPerpetualMixedWorkload.productionScenario(template, hftRounds, hftBatchSize)) {
+            // 预热一轮
+            scenario.run();
+
+            // 正式生产混合业务压测
+            long startNanos = System.nanoTime();
+            long runResult = scenario.run();
+            long elapsedNanos = System.nanoTime() - startNanos;
+            double elapsedSec = elapsedNanos / 1_000_000_000.0;
+
+            long totalOps = scenario.terminalOperations();
+            long tradingOps = scenario.terminalTradingOperations();
+            long lifecycleOps = scenario.terminalLifecycleOperations();
+            long terminalTrades = scenario.terminalTrades();
+            long laneTotalOps = scenario.laneOperations();
+            long laneCommandOps = scenario.laneOperations(0);
+            long laneSettlementOps = scenario.laneOperations(1);
+            long laneQueryOps = scenario.laneOperations(2);
+            long laneRiskOps = scenario.laneOperations(3);
+
+            double mixedTps = totalOps / elapsedSec;
+            double tradingTps = tradingOps / elapsedSec;
+            double laneTps = laneTotalOps / elapsedSec;
+
+            System.out.printf("[压测结果 - 真实生产混合业务] 4 Account Lanes, 1024 活跃用户, 4 交易对, 48 轮并发%n");
+            System.out.printf("  - 混合业务总操作数: %d 笔 (纯执行耗时: %.4f 秒)%n", totalOps, elapsedSec);
+            System.out.printf("  - 综合混合业务吞吐量 (Mixed TPS): %.2f ops/sec%n", mixedTps);
+            System.out.printf("  - 其中纯高频交易指令 (Trading Ops): %d 笔 (%.2f TPS)%n", tradingOps, tradingTps);
+            System.out.printf("  - 其中生命周期风控/资金费/强平操作 (Lifecycle Ops): %d 笔%n", lifecycleOps);
+            System.out.printf("  - 订单簿撮合成交对数 (Trades Matched): %d 对%n", terminalTrades);
+            System.out.printf("  - 4 记账泳道分片任务总数 (Lane Operations): %d 笔 (%.2f 分片记账 TPS)%n",
+                    laneTotalOps, laneTps);
+            System.out.printf("    * 指令准入记账 (Command): %d 笔%n", laneCommandOps);
+            System.out.printf("    * 撮合成交结算 (Settlement): %d 笔%n", laneSettlementOps);
+            System.out.printf("    * 账户资产查询 (Query): %d 笔%n", laneQueryOps);
+            System.out.printf("    * 穿仓强平与风控扫描 (Risk): %d 笔%n", laneRiskOps);
+            System.out.printf("  - 撮合引擎最大积压深度 (Max Backlog): %d 笔%n", scenario.maxBacklog());
+
+            scenario.verify();
+            System.out.println("  - 混合业务资金守恒与状态快照恢复: 100% PASS (无穿仓坏账，资金守恒)");
+            System.out.println("================================================================================");
+
+            assertThat(runResult).isNotZero();
+            assertThat(totalOps).isGreaterThan(0);
+            assertThat(tradingOps).isGreaterThan(0);
+        }
+    }
+
     private static int testPriceBandFast(int i, long mark, long bandPpm, long passiveBandPpm) {
         long price = mark + ((i % 200) - 100) * 1000L;
         long maxBuy = mark + (mark * bandPpm) / 1_000_000L;
