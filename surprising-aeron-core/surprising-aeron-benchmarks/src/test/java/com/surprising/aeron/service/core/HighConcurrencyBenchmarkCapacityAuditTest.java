@@ -80,6 +80,71 @@ public class HighConcurrencyBenchmarkCapacityAuditTest {
         System.out.println("================================================================================");
     }
 
+    @Test
+    void executeSaturatedCapacityAudit() {
+        System.out.println("================================================================================");
+        System.out.println(">>> 正在启动 Surprising 交易核心极限饱和发压压测审计 (Saturation Capacity Audit)...");
+        System.out.println("================================================================================");
+
+        int symbols = 16;
+        int activeUsers = 64;
+        int accountLanes = 4;
+        int maxInFlight = 128;
+        int operationsPerRun = 16_384;
+        int targetOperationsPerSecond = 200_000;
+
+        var config = LinearPerpetualScaleConfig.scale(symbols, symbols, 2, 5,
+                LinearPerpetualTrafficProfile.UNIFORM, symbols);
+        var template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, config);
+
+        try (var scenario = LinearPerpetualSaturationWorkload.scenario(template, maxInFlight, operationsPerRun, targetOperationsPerSecond)) {
+            // 预热一轮
+            scenario.run();
+
+            // 极限饱和压测正式运行
+            long startNanos = System.nanoTime();
+            long runResult = scenario.run();
+            long elapsedNanos = System.nanoTime() - startNanos;
+            double elapsedSec = elapsedNanos / 1_000_000_000.0;
+            double tps = operationsPerRun / elapsedSec;
+
+            long p50Micros = scenario.p50LatencyNanos() / 1_000;
+            long p99Micros = scenario.p99LatencyNanos() / 1_000;
+            long p999Micros = scenario.p999LatencyNanos() / 1_000;
+
+            System.out.printf("[压测结果 - 极限饱和发压] 在途并发窗口(In-Flight)=%d, 目标发压速率=%d ops/s%n",
+                    maxInFlight, targetOperationsPerSecond);
+            System.out.printf("  - 饱和测试指令总数: %d 笔 (终态成交: %d 笔)%n",
+                    scenario.operations(), scenario.terminalTrades());
+            System.out.printf("  - 纯执行耗时: %.4f 秒%n", elapsedSec);
+            System.out.printf("  - 极限饱和撮合吞吐 (TPS): %.2f orders/sec%n", tps);
+            System.out.printf("  - 饱和延迟分位数: P50=%d μs, P99=%d μs, P99.9=%d μs%n",
+                    p50Micros, p99Micros, p999Micros);
+            System.out.printf("  - 最大撮合积压 (Max Backlog): %d%n", scenario.maxBacklog());
+            System.out.printf("  - 平均撮合积压 (Avg Backlog): %.2f%n", scenario.averageMatchingBacklog());
+            System.out.printf("  - 全并发窗口打满率 (Full Window %%): %.2f%%%n", scenario.fullWindowPercentage() * 100);
+            System.out.printf("  - 生产者饥饿率 (Producer Starvation %%): %.2f%%%n", scenario.producerStarvationPercentage() * 100);
+            System.out.printf("  - 管道重填次数 (Refill Operations): %d%n", scenario.refillOperations());
+
+            LinearPerpetualSaturationWorkload.LatencyReport report = scenario.latencyReport();
+            if (report != null) {
+                System.out.println("  - 三阶段耗时细分 (微秒):");
+                System.out.printf("    * 入队至Core接收 (Entry->Accepted): P50=%.1f μs, P99=%.1f μs%n",
+                        report.entryAccepted().p50() / 1000.0, report.entryAccepted().p99() / 1000.0);
+                System.out.printf("    * Core接收至撮合终态 (Accepted->Terminal): P50=%.1f μs, P99=%.1f μs%n",
+                        report.acceptedTerminal().p50() / 1000.0, report.acceptedTerminal().p99() / 1000.0);
+                System.out.printf("    * 全链路端到端 (Entry->Terminal): P50=%.1f μs, P99=%.1f μs, Max=%.1f μs%n",
+                        report.entryTerminal().p50() / 1000.0, report.entryTerminal().p99() / 1000.0, report.entryTerminal().max() / 1000.0);
+            }
+            scenario.verify();
+            System.out.println("  - 状态快照与资金不变量审计: PASS (资金与委托零差错)");
+            System.out.println("================================================================================");
+
+            assertThat(runResult).isNotZero();
+            assertThat(scenario.operations()).isEqualTo(operationsPerRun);
+        }
+    }
+
     private static int testPriceBandFast(int i, long mark, long bandPpm, long passiveBandPpm) {
         long price = mark + ((i % 200) - 100) * 1000L;
         long maxBuy = mark + (mark * bandPpm) / 1_000_000L;
