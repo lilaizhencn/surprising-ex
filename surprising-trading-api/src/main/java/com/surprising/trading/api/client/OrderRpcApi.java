@@ -34,64 +34,64 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-gateway", contextId = "orderRpcApi", path = TradingApiPaths.ORDER_BASE_PATH)
+@FeignClient(name = "surprising-gateway", contextId = "orderRpcApi")
 public interface OrderRpcApi {
 
-    @PostMapping
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH)
     OrderCommandReceipt place(@Valid @RequestBody PlaceOrderRequest request);
 
-    @PostMapping("/batch")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch")
     OrderCommandReceipt placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request);
 
-    @PostMapping("/test")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/test")
     TestOrderResponse test(@Valid @RequestBody PlaceOrderRequest request);
 
-    @PostMapping("/amend")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/amend")
     OrderCommandReceipt amend(@Valid @RequestBody AmendOrderRequest request);
 
-    @PostMapping("/batch-amend")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-amend")
     OrderCommandReceipt amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request);
 
-    @PostMapping("/close-position")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/close-position")
     OrderResponse closePosition(@Valid @RequestBody ClosePositionRequest request);
 
-    @PostMapping("/cancel")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel")
     OrderCommandReceipt cancel(@Valid @RequestBody CancelOrderRequest request);
 
-    @PostMapping("/batch-cancel")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-cancel")
     OrderCommandReceipt cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request);
 
-    @PostMapping("/cancel-open")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel-open")
     OrderBatchResponse cancelOpen(@Valid @RequestBody CancelOpenOrdersRequest request);
 
-    @PostMapping("/cancel-all-after")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel-all-after")
     CancelAllAfterResponse cancelAllAfter(@Valid @RequestBody CancelAllAfterRequest request);
 
-    @PostMapping("/algo")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo")
     AlgoOrderResponse placeAlgo(@Valid @RequestBody PlaceAlgoOrderRequest request);
 
-    @PostMapping("/algo/cancel")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/cancel")
     AlgoOrderResponse cancelAlgo(@Valid @RequestBody CancelAlgoOrderRequest request);
 
-    @PostMapping("/algo/cancel-open")
+    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/cancel-open")
     AlgoOrderBatchResponse cancelOpenAlgo(@Valid @RequestBody CancelOpenAlgoOrdersRequest request);
 
-    @GetMapping("/algo/{algoOrderId}")
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/{algoOrderId}")
     AlgoOrderResponse getAlgo(@PathVariable("algoOrderId") @Positive long algoOrderId);
 
-    @GetMapping("/algo/open")
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/open")
     AlgoOrderQueryResponse openAlgoOrders(@RequestParam("userId") @Positive long userId,
                                           @RequestParam(value = "instrumentId", required = false) String instrumentId,
                                           @RequestParam(value = "limit", defaultValue = "100") @Min(1) @Max(1000) int limit);
 
-    @GetMapping("/{orderId}")
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/{orderId}")
     OrderResponse get(@PathVariable("orderId") @Positive long orderId);
 
-    @GetMapping("/by-client-order-id")
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/by-client-order-id")
     OrderResponse getByClientOrderId(@RequestParam("userId") @Positive long userId,
                                      @RequestParam("clientOrderId") @NotBlank String clientOrderId);
 
-    @GetMapping("/open")
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/open")
     OrderQueryResponse openOrders(@RequestParam("userId") @Positive long userId,
                                   @RequestParam(value = "instrumentId", required = false) String instrumentId,
                                   @RequestParam(value = "limit", defaultValue = "100") @Min(1) @Max(1000) int limit,

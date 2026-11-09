@@ -25,30 +25,30 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-gateway", contextId = "accountRpcApi", path = AccountApiPaths.ACCOUNT_BASE_PATH)
+@FeignClient(name = "surprising-gateway", contextId = "accountRpcApi")
 public interface AccountRpcApi {
 
-    @GetMapping("/balance")
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/balance")
     BalanceResponse balance(@RequestParam("userId") @Positive long userId,
                             @RequestParam("asset") @NotBlank String asset);
 
-    @GetMapping("/balances")
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/balances")
     BalanceQueryResponse balances(@RequestParam("userId") @Positive long userId);
 
-    @GetMapping("/product-balance")
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/product-balance")
     ProductBalanceResponse productBalance(@RequestParam("userId") @Positive long userId,
                                           @RequestParam("accountType") AccountType accountType,
                                           @RequestParam("asset") @NotBlank String asset);
 
-    @GetMapping("/product-balances")
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/product-balances")
     ProductBalanceQueryResponse productBalances(@RequestParam("userId") @Positive long userId,
                                                 @RequestParam(value = "accountType", required = false)
                                                 AccountType accountType);
 
-    @PostMapping("/transfers")
+    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/transfers")
     ProductTransferResponse transfer(@Valid @RequestBody ProductTransferRequest request);
 
-    @GetMapping("/position-mode")
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-mode")
     PositionModeResponse positionMode(@RequestParam("userId") @Positive long userId,
                                       @RequestParam(value = "productLine", required = false)
                                       ProductLine productLine);
@@ -57,10 +57,10 @@ public interface AccountRpcApi {
         return positionMode(userId, null);
     }
 
-    @PostMapping("/position-mode")
+    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-mode")
     PositionModeResponse updatePositionMode(@Valid @RequestBody PositionModeUpdateRequest request);
 
-    @GetMapping("/position")
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position")
     PositionResponse position(@RequestParam("userId") @Positive long userId,
                               @RequestParam("instrumentId") @NotBlank String instrumentId,
                               @RequestParam(value = "marginMode", required = false) String marginMode,
@@ -70,16 +70,16 @@ public interface AccountRpcApi {
         return position(userId, instrumentId, marginMode, null);
     }
 
-    @GetMapping("/position-margin")
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin")
     PositionMarginResponse positionMargin(@RequestParam("userId") @Positive long userId,
                                           @RequestParam("instrumentId") @NotBlank String instrumentId,
                                           @RequestParam(value = "marginMode", required = false) String marginMode);
 
-    @PostMapping("/position-margin-adjustments")
+    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin-adjustments")
     PositionMarginAdjustmentResponse adjustPositionMargin(
             @Valid @RequestBody PositionMarginAdjustmentRequest request);
 
-    @GetMapping("/positions")
+    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/positions")
     PositionQueryResponse positions(@RequestParam("userId") @Positive long userId,
                                     @RequestParam(value = "positionSide", required = false) String positionSide);
 
