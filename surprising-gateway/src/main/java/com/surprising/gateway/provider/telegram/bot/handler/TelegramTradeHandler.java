@@ -36,6 +36,7 @@ public class TelegramTradeHandler {
     private final TelegramBotSecurityService securityService;
     private final TelegramBotClient botClient;
     private final TelegramBotProperties properties;
+    private final com.surprising.gateway.provider.telegram.bot.service.TelegramI18nService i18n;
 
     public TelegramTradeHandler(GatewayProductServices products,
                                 TelegramAuthHandler authHandler,
@@ -43,40 +44,49 @@ public class TelegramTradeHandler {
                                 TelegramBotSecurityService securityService,
                                 TelegramBotClient botClient,
                                 TelegramBotProperties properties) {
+        this(products, authHandler, sessionService, securityService, botClient, properties, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TelegramTradeHandler(GatewayProductServices products,
+                                TelegramAuthHandler authHandler,
+                                TelegramSessionService sessionService,
+                                TelegramBotSecurityService securityService,
+                                TelegramBotClient botClient,
+                                TelegramBotProperties properties,
+                                com.surprising.gateway.provider.telegram.bot.service.TelegramI18nService i18n) {
         this.products = products;
         this.authHandler = authHandler;
         this.sessionService = sessionService;
         this.securityService = securityService;
         this.botClient = botClient;
         this.properties = properties;
+        this.i18n = i18n;
     }
 
     public void renderTradeCenter(long chatId, Long messageId, TelegramUser tgUser) {
         sessionService.clearState(tgUser.id());
-        String text = "⚡ <b>Surprising 交易中心（双模交易）</b>\n" +
+        java.util.Locale locale = (i18n != null) ? i18n.resolveLocale(tgUser) : java.util.Locale.ENGLISH;
+
+        String text = (i18n != null ? i18n.t("trade.title", locale) : "⚡ <b>Surprising 交易中心</b>") + "\n" +
                 "━━━━━━━━━━━━━━━━━━━━\n" +
-                "本交易平台支持两种交互模式：\n\n" +
-                "1️⃣ <b>Telegram Mini App (TMA) 深度交易:</b>\n" +
-                "点击下方专属按钮，在 Telegram 内部全屏打开专业 Web K线走势、深度盘口与高阶挂单交易终端！\n\n" +
-                "2️⃣ <b>Bot 原生极速市价下单:</b>\n" +
-                "无需打开任何网页，直接在 Bot 内选择币对与方向一键闪电下单！\n\n" +
-                "👇 请选择您喜欢的交易方式：";
+                (i18n != null ? i18n.t("trade.choose_action", locale) : "请选择交易方式：");
 
         TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
                 .addRow(
-                        TelegramInlineKeyboardButton.webApp("🚀 打开 Mini App 交易终端", properties.getWebappUrl())
+                        TelegramInlineKeyboardButton.webApp(i18n != null ? i18n.t("menu.open_miniapp_btn", locale) : "🚀 打开 Mini App", properties.getWebappUrl())
                 )
                 .addRow(
-                        TelegramInlineKeyboardButton.callback("🟢 快捷开多 BTC", "trade:fast:BTC-USDT:BUY"),
-                        TelegramInlineKeyboardButton.callback("🔴 快捷做空 BTC", "trade:fast:BTC-USDT:SELL")
+                        TelegramInlineKeyboardButton.callback("🟢 Buy BTC", "trade:fast:BTC-USDT:BUY"),
+                        TelegramInlineKeyboardButton.callback("🔴 Sell BTC", "trade:fast:BTC-USDT:SELL")
                 )
                 .addRow(
-                        TelegramInlineKeyboardButton.callback("🟢 快捷开多 ETH", "trade:fast:ETH-USDT:BUY"),
-                        TelegramInlineKeyboardButton.callback("🔴 快捷做空 ETH", "trade:fast:ETH-USDT:SELL")
+                        TelegramInlineKeyboardButton.callback("🟢 Buy ETH", "trade:fast:ETH-USDT:BUY"),
+                        TelegramInlineKeyboardButton.callback("🔴 Sell ETH", "trade:fast:ETH-USDT:SELL")
                 )
                 .addRow(
-                        TelegramInlineKeyboardButton.callback("📈 查看我的持仓", "menu:positions"),
-                        TelegramInlineKeyboardButton.callback("⬅️ 返回主菜单", "menu:main")
+                        TelegramInlineKeyboardButton.callback(i18n != null ? i18n.t("menu.btn.positions", locale) : "📈 持仓", "menu:positions"),
+                        TelegramInlineKeyboardButton.callback(i18n != null ? i18n.t("menu.btn.back", locale) : "⬅️ 返回", "menu:main")
                 )
                 .build();
 

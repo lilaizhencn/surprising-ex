@@ -179,6 +179,32 @@ public class TelegramBotClient {
         }
     }
 
+    public record BotCommand(String command, String description) {}
+
+    public boolean setMyCommands(java.util.List<BotCommand> commands, String languageCode) {
+        if (!isConfigured() || commands == null || commands.isEmpty()) {
+            return false;
+        }
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("commands", commands);
+            if (languageCode != null && !languageCode.isBlank()) {
+                body.put("language_code", languageCode.trim().toLowerCase());
+            }
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl("setMyCommands"), entity, String.class);
+            log.info("Telegram setMyCommands (lang={}) response: {}", languageCode, response.getBody());
+            return response.getStatusCode().is2xxSuccessful();
+        } catch (RestClientException ex) {
+            log.warn("Failed to setMyCommands for lang={}: {}", languageCode, ex.getMessage());
+            return false;
+        }
+    }
+
     public java.util.List<com.surprising.gateway.provider.telegram.bot.model.TelegramUpdate> getUpdates(long offset, int limit, int timeoutSec) {
         if (!isConfigured()) {
             return java.util.List.of();

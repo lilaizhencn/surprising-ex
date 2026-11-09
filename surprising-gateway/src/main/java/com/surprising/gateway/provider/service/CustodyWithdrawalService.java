@@ -42,6 +42,7 @@ public class CustodyWithdrawalService {
     private final CustodyWithdrawalReconciliationService reconciliationService;
     private final ObjectMapper objectMapper;
     private final com.surprising.asset.service.AssetConfigurationService assets;
+    private final com.surprising.gateway.provider.reconciliation.EmergencyWithdrawalCircuitBreaker circuitBreaker;
 
     public CustodyWithdrawalService(GatewayProperties properties,
                                     CustodyWithdrawalRepository repository,
@@ -52,6 +53,22 @@ public class CustodyWithdrawalService {
                                     CustodyWithdrawalRefundService refundService,
                                     CustodyWithdrawalReconciliationService reconciliationService,
                                     ObjectMapper objectMapper, com.surprising.asset.service.AssetConfigurationService assets) {
+        this(properties, repository, states, walletClient, spotAccountClient, valuationClient,
+                refundService, reconciliationService, objectMapper, assets, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CustodyWithdrawalService(GatewayProperties properties,
+                                    CustodyWithdrawalRepository repository,
+                                    CustodyWithdrawalStateService states,
+                                    CustodyWalletClient walletClient,
+                                    SpotAccountClient spotAccountClient,
+                                    WithdrawalValuationClient valuationClient,
+                                    CustodyWithdrawalRefundService refundService,
+                                    CustodyWithdrawalReconciliationService reconciliationService,
+                                    ObjectMapper objectMapper,
+                                    com.surprising.asset.service.AssetConfigurationService assets,
+                                    com.surprising.gateway.provider.reconciliation.EmergencyWithdrawalCircuitBreaker circuitBreaker) {
         this.properties = properties;
         this.assets = assets;
         this.repository = repository;
@@ -62,6 +79,7 @@ public class CustodyWithdrawalService {
         this.refundService = refundService;
         this.reconciliationService = reconciliationService;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.circuitBreaker = circuitBreaker;
     }
 
     public com.surprising.asset.service.AssetConfigurationService.WithdrawalQuote quote(String asset, String chain, String amount) {
@@ -70,6 +88,9 @@ public class CustodyWithdrawalService {
     }
 
     public WithdrawalResponse submit(long userId, String idempotencyKey, WithdrawalRequest request) {
+        if (circuitBreaker != null && !circuitBreaker.isWithdrawalAllowed()) {
+            throw new IllegalStateException("🚨 平台资金风控熔断：提现通道已紧急暂停！原因: " + circuitBreaker.getStopReason());
+        }
         validateInput(userId, idempotencyKey, request);
         String normalizedKey = idempotencyKey.trim();
         String requestHash = sha256(canonical(request));

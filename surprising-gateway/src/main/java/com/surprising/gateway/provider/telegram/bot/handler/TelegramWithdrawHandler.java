@@ -28,21 +28,49 @@ public class TelegramWithdrawHandler {
     private final TelegramSessionService sessionService;
     private final TelegramBotSecurityService securityService;
     private final TelegramBotClient botClient;
+    private final com.surprising.gateway.provider.reconciliation.EmergencyWithdrawalCircuitBreaker circuitBreaker;
 
     public TelegramWithdrawHandler(CustodyWithdrawalService withdrawalService,
                                    TelegramAuthHandler authHandler,
                                    TelegramSessionService sessionService,
                                    TelegramBotSecurityService securityService,
                                    TelegramBotClient botClient) {
+        this(withdrawalService, authHandler, sessionService, securityService, botClient, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TelegramWithdrawHandler(CustodyWithdrawalService withdrawalService,
+                                   TelegramAuthHandler authHandler,
+                                   TelegramSessionService sessionService,
+                                   TelegramBotSecurityService securityService,
+                                   TelegramBotClient botClient,
+                                   com.surprising.gateway.provider.reconciliation.EmergencyWithdrawalCircuitBreaker circuitBreaker) {
         this.withdrawalService = withdrawalService;
         this.authHandler = authHandler;
         this.sessionService = sessionService;
         this.securityService = securityService;
         this.botClient = botClient;
+        this.circuitBreaker = circuitBreaker;
     }
 
     public void renderChainSelection(long chatId, Long messageId, TelegramUser tgUser) {
         sessionService.clearState(tgUser.id());
+        if (circuitBreaker != null && !circuitBreaker.isWithdrawalAllowed()) {
+            String text = "🚨 <b>平台资金风控熔断中</b>\n" +
+                    "━━━━━━━━━━━━━━━━━━━━\n" +
+                    "受资金安全与自动对账保护机制拦截，提现通道目前处于临时风控熔断状态。\n\n" +
+                    "⚠️ <b>原因:</b> <code>" + circuitBreaker.getStopReason() + "</code>\n" +
+                    "技术与风控团队正在核验账目，请稍候重试或关注官方最新公告。";
+            TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
+                    .addRow(TelegramInlineKeyboardButton.callback("⬅️ 返回主菜单", "menu:main"))
+                    .build();
+            if (messageId != null) {
+                botClient.editMessageText(chatId, messageId, text, markup);
+            } else {
+                botClient.sendMessage(chatId, text, markup);
+            }
+            return;
+        }
         String text = "💸 <b>发起提币申请</b>\n" +
                 "━━━━━━━━━━━━━━━━━━━━\n" +
                 "请选择您要提现的币种与主链网络：\n\n" +

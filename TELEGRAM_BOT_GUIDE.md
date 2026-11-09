@@ -196,3 +196,17 @@ mvn -f surprising-ex/pom.xml test -pl surprising-gateway -Dtest="Telegram*Test"
 - **常驻 Reply 键盘自适应**：用户切换语言后，Bot 自动推送对应语言的常驻底部导航按钮；
 - **多语言快捷词分发**：Dispatcher 同时识别中文（如 `💰 账户资产`）、英文（如 `💰 Assets`）、俄文（如 `💰 Активы`），无论用户以何种语言点击键盘均可精准路由。
 
+### 7.4 客户端原生命令栏自动注册 (`setMyCommands`)
+系统启动时由 `TelegramBotCommandInitializer` 自动向 Telegram 官方注册三种语言的 `/` 命令菜单列表：
+- 英语（Default/EN）：`/start`, `/assets`, `/market`, `/positions`, `/orders`, `/trade`, `/deposit`, `/withdraw`, `/transfer`, `/settings`
+- 简体中文（ZH）：对应中文功能简介
+- 俄语（RU）：对应俄文功能简介
+
+### 7.5 生产 Webhook 自动化配置
+提供 `deployment/scripts/setup-telegram-webhook.sh` 脚本，支持向 Telegram 官方一键挂载 HTTPS 域名与 `secret_token` 安全校验。
+
+### 7.6 资金安全与对账熔断提现阻断联动
+- 当高频资金对账引擎（每 5 分钟执行一次）检测到账实不符时，`EmergencyWithdrawalCircuitBreaker` 自动触发；
+- Telegram Bot 提现通道（`TelegramWithdrawHandler`）立即被风控锁定，向用户清晰展示熔断原因，防止资金漏洞穿透。
+
+

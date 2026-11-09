@@ -13,6 +13,15 @@ public class TelegramBotProperties {
     private String webhookSecret = "";
     private String webappUrl = "https://app.surprising.exchange";
     private boolean pollingEnabled = false;
+    private Long alertChatId = null;
+
+    public Long getAlertChatId() {
+        return alertChatId;
+    }
+
+    public void setAlertChatId(Long alertChatId) {
+        this.alertChatId = alertChatId;
+    }
 
     public boolean isConfigured() {
         return token != null && !token.isBlank();
