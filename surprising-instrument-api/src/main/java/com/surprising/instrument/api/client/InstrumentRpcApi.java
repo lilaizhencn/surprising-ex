@@ -11,11 +11,7 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(
-        name = "surprising-instrument-provider",
-        contextId = "instrumentRpcApi",
-        path = InstrumentApiPaths.INTERNAL_BASE_PATH,
-        url = "${surprising.clients.instrument.base-url:http://localhost:9094}")
+@FeignClient(name = "surprising-gateway", contextId = "instrumentRpcApi", path = InstrumentApiPaths.INTERNAL_BASE_PATH)
 public interface InstrumentRpcApi {
 
     @GetMapping("/latest")

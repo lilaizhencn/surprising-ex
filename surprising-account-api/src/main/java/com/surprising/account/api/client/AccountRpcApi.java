@@ -25,11 +25,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(
-        name = "surprising-account-provider",
-        contextId = "accountRpcApi",
-        path = AccountApiPaths.ACCOUNT_BASE_PATH,
-        url = "${surprising.clients.account.base-url:http://localhost:9094}")
+@FeignClient(name = "surprising-gateway", contextId = "accountRpcApi", path = AccountApiPaths.ACCOUNT_BASE_PATH)
 public interface AccountRpcApi {
 
     @GetMapping("/balance")

@@ -106,7 +106,8 @@ public final class LinearPerpetualMixedWorkload {
 
     public static Template template(int accountLanes, int activeUsers, LinearPerpetualScaleConfig scaleConfig) {
         if (activeUsers < accountLanes || activeUsers > LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE) {
-            throw new IllegalArgumentException("activeUsers must cover every lane and be at most 10000");
+            throw new IllegalArgumentException("activeUsers must cover every lane and be at most "
+                    + LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE);
         }
         if (activeUsers < scaleConfig.activeSymbols()) {
             throw new IllegalArgumentException("activeUsers must cover every active instrumentId");

@@ -67,7 +67,8 @@ public final class SpotMixedWorkload {
 
     public static Template template(int accountLanes, int activeUsers, int symbolCount) {
         if (activeUsers < accountLanes || activeUsers > LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE) {
-            throw new IllegalArgumentException("activeUsers must cover every lane and be at most 10000");
+            throw new IllegalArgumentException("activeUsers must cover every lane and be at most "
+                    + LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE);
         }
         if (symbolCount < 2 || symbolCount > 256 || activeUsers < symbolCount) {
             throw new IllegalArgumentException("symbolCount must be in [2,256] and not exceed activeUsers");

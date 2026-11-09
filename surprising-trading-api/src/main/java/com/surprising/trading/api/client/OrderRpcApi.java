@@ -34,11 +34,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(
-        name = "surprising-trading-provider",
-        contextId = "orderRpcApi",
-        path = TradingApiPaths.ORDER_BASE_PATH,
-        url = "${surprising.clients.trading.base-url:http://localhost:9094}")
+@FeignClient(name = "surprising-gateway", contextId = "orderRpcApi", path = TradingApiPaths.ORDER_BASE_PATH)
 public interface OrderRpcApi {
 
     @PostMapping

@@ -122,6 +122,7 @@ public class TradingOrderProperties {
         private long marketMaxMarkAgeMs = 5_000L;
         private boolean limitPriceProtectionEnabled;
         private long limitPriceBandPpm = 50_000L;
+        private long limitPricePassiveBandPpm = 500_000L;
         private long limitPriceMaxMarkAgeMs = 5_000L;
         public com.surprising.aeron.protocol.CoreOrderProtection protection() {
             return new com.surprising.aeron.protocol.CoreOrderProtection(marketMaxSlippagePpm, marketMaxMarkAgeMs,

@@ -185,10 +185,14 @@ public class OrderValidator {
         if (request.priceTicks() <= 0) {
             return ValidationResult.reject("limit order priceTicks must be positive", rule.changeId(), rule.instrumentType());
         }
-        // 现货限价单的成交价格由用户直接给出，保证金产品才需要用标记价做价格带保护。
-        // 现货余额预占和成交结算不应因为衍生品行情缓存短暂不可用而被拒绝。
+        // 衍生品强制校验标记价价格带保护；现货在行情可用时执行防手抖保护，短暂不可用时宽容放行
         if (!rule.spot()) {
-            ValidationResult priceBand = validateLimitPriceBand(request, rule);
+            ValidationResult priceBand = validateLimitPriceBand(request, rule, false);
+            if (!priceBand.accepted()) {
+                return priceBand;
+            }
+        } else if (properties.getRisk().isLimitPriceProtectionEnabled()) {
+            ValidationResult priceBand = validateLimitPriceBand(request, rule, true);
             if (!priceBand.accepted()) {
                 return priceBand;
             }
@@ -196,27 +200,52 @@ public class OrderValidator {
         return validateNotionalRange(request, rule, request.priceTicks(), request.priceTicks());
     }
 
-    private ValidationResult validateLimitPriceBand(PlaceOrderRequest request, InstrumentRule rule) {
+    private ValidationResult validateLimitPriceBand(PlaceOrderRequest request, InstrumentRule rule,
+                                                    boolean softFallbackOnMissingPrice) {
         if (!properties.getRisk().isLimitPriceProtectionEnabled()) {
             return ValidationResult.ok(rule.changeId(), rule.instrumentType(), rule.contractType());
         }
         OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.instrumentId(), rule.changeId(),
                 properties.getRisk().getLimitPriceMaxMarkAgeMs());
         if (markPriceTicks.isEmpty()) {
+            if (softFallbackOnMissingPrice) {
+                return ValidationResult.ok(rule.changeId(), rule.instrumentType(), rule.contractType());
+            }
             return ValidationResult.reject("mark price unavailable", rule.changeId(), rule.instrumentType());
         }
-        long boundaryTicks;
+        long markPrice = markPriceTicks.getAsLong();
+        long aggressiveBandPpm = properties.getRisk().getLimitPriceBandPpm();
+        long passiveBandPpm = properties.getRisk().getLimitPricePassiveBandPpm();
         try {
-            boundaryTicks = MarketPriceProtection.protectedPriceTicks(request.side(), markPriceTicks.getAsLong(),
-                    properties.getRisk().getLimitPriceBandPpm());
+            if (request.side() == OrderSide.BUY) {
+                // 1. 买单激进上限（防吃单穿仓与恶意拉抬）
+                long maxBuyTicks = MarketPriceProtection.protectedPriceTicks(OrderSide.BUY, markPrice, aggressiveBandPpm);
+                if (request.priceTicks() > maxBuyTicks) {
+                    return ValidationResult.reject("limit buy price exceeds mark price band", rule.changeId(), rule.instrumentType());
+                }
+                // 2. 买单被动下限（防极端偏离垃圾挂单与输入敲错位数）
+                if (passiveBandPpm > 0) {
+                    long minBuyTicks = MarketPriceProtection.protectedPriceTicks(OrderSide.SELL, markPrice, passiveBandPpm);
+                    if (request.priceTicks() < minBuyTicks) {
+                        return ValidationResult.reject("limit buy price below mark price passive band", rule.changeId(), rule.instrumentType());
+                    }
+                }
+            } else {
+                // 1. 卖单激进下限（防砸穿仓与恶意砸盘）
+                long minSellTicks = MarketPriceProtection.protectedPriceTicks(OrderSide.SELL, markPrice, aggressiveBandPpm);
+                if (request.priceTicks() < minSellTicks) {
+                    return ValidationResult.reject("limit sell price exceeds mark price band", rule.changeId(), rule.instrumentType());
+                }
+                // 2. 卖单被动上限（防天价垃圾挂单与输入敲错位数）
+                if (passiveBandPpm > 0) {
+                    long maxSellTicks = MarketPriceProtection.protectedPriceTicks(OrderSide.BUY, markPrice, passiveBandPpm);
+                    if (request.priceTicks() > maxSellTicks) {
+                        return ValidationResult.reject("limit sell price exceeds mark price passive band", rule.changeId(), rule.instrumentType());
+                    }
+                }
+            }
         } catch (ArithmeticException ex) {
             return ValidationResult.reject("price protection overflow", rule.changeId(), rule.instrumentType());
-        }
-        if (request.side() == OrderSide.BUY && request.priceTicks() > boundaryTicks) {
-            return ValidationResult.reject("limit buy price exceeds mark price band", rule.changeId(), rule.instrumentType());
-        }
-        if (request.side() == OrderSide.SELL && request.priceTicks() < boundaryTicks) {
-            return ValidationResult.reject("limit sell price exceeds mark price band", rule.changeId(), rule.instrumentType());
         }
         return ValidationResult.ok(rule.changeId(), rule.instrumentType(), rule.contractType());
     }

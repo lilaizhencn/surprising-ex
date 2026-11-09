@@ -54,7 +54,7 @@ public final class LinearPerpetualBenchmarkSupport {
     public static final int DEFAULT_ACCOUNT_LANES = 4;
     public static final int DEFAULT_MAKER_DEPTH = 16;
     public static final int DEFAULT_RISK_USERS = 32;
-    public static final int MAX_BENCHMARK_SCALE = 10_000;
+    public static final int MAX_BENCHMARK_SCALE = 200_000;
     private static final String SYMBOL = "10";
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
