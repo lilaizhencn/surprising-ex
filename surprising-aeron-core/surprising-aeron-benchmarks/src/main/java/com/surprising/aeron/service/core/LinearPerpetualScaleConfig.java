@@ -41,6 +41,11 @@ public record LinearPerpetualScaleConfig(
 
     public static LinearPerpetualScaleConfig production(int symbols) {
         return new LinearPerpetualScaleConfig(symbols, symbols, 1, 3,
+                LinearPerpetualTrafficProfile.UNIFORM, symbols, true);
+    }
+
+    public static LinearPerpetualScaleConfig samplingSmoke(int symbols) {
+        return new LinearPerpetualScaleConfig(symbols, symbols, 1, 3,
                 LinearPerpetualTrafficProfile.UNIFORM, symbols, false);
     }
 

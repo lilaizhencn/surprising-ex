@@ -41,7 +41,6 @@ public final class DerivativeMixedWorkload {
 
     public static final int DEFAULT_SYMBOLS = 4;
     public static final int DEFAULT_HFT_BATCH_SIZE = 20;
-    private static final int OPEN_ORDER_USER_CAP = 128;
     private static final int RISK_BATCH_SIZE = 64;
     private static final long ENTRY_PRICE = 100;
     private static final long SAFE_BALANCE = 10_000_000_000L;
@@ -128,7 +127,7 @@ public final class DerivativeMixedWorkload {
                 harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
                         order(harness.nextOrderId(), instrumentId, CoreOrderSide.BUY,
                                 ENTRY_PRICE, 1, CoreTimeInForce.IOC)));
-                int openOrders = index < OPEN_ORDER_USER_CAP ? index & 3 : 0;
+                int openOrders = index & 3;
                 for (int open = 0; open < openOrders; open++) {
                     harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
                             order(harness.nextOrderId(), instrumentId, CoreOrderSide.BUY,
@@ -184,7 +183,7 @@ public final class DerivativeMixedWorkload {
                 harness.refreshMarkPricesIfDue(template.symbols());
                 for (int round = 0; round < hftRounds; round++) {
                     executeTwoSidedBurst(harness, template, hftBatchSize, lifecycleOrders);
-                    if (round < template.symbols().size()) executeHeavyWork(harness, template, round);
+                    executeHeavyWork(harness, template, round % template.symbols().size());
                 }
                 latestLifecycleOrders.clear();
                 latestLifecycleOrders.addAll(lifecycleOrders);
