@@ -16,8 +16,6 @@ spring:
           default:
             connect-timeout: 2000
             read-timeout: 5000
-          surprising-gateway:
-            url: ${GATEWAY_DIRECT_URL:http://localhost:9094}
 resilience4j:
   circuitbreaker:
     configs:

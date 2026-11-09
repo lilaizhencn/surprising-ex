@@ -17,8 +17,6 @@ spring:
             # 做市报价是异步用户命令链路，读超时要覆盖 Kafka 重平衡和账户预占确认。
             connect-timeout: 2000
             read-timeout: 5000
-          surprising-gateway:
-            url: ${GATEWAY_DIRECT_URL:http://localhost:9094}
 resilience4j:
   circuitbreaker:
     configs:
