@@ -1,6 +1,5 @@
 package com.surprising.instrument.api.client;
 
-import com.surprising.instrument.api.InstrumentApiPaths;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentSnapshotResponse;
@@ -14,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 @FeignClient(name = "surprising-gateway", contextId = "instrumentRpcApi")
 public interface InstrumentRpcApi {
 
-    @GetMapping(InstrumentApiPaths.INTERNAL_BASE_PATH + "/latest")
+    @GetMapping("/internal/v1/instruments/latest")
     InstrumentResponse latest(@RequestParam("instrumentId") int instrumentId,
                               @RequestParam("productLine") ProductLine productLine);
 
@@ -22,15 +21,15 @@ public interface InstrumentRpcApi {
         return list(null, type, status);
     }
 
-    @GetMapping(InstrumentApiPaths.INTERNAL_BASE_PATH + "/list")
+    @GetMapping("/internal/v1/instruments/list")
     InstrumentQueryResponse list(@RequestParam(value = "productLine", required = false) ProductLine productLine,
                                  @RequestParam(value = "type", required = false) InstrumentType type,
                                  @RequestParam(value = "status", required = false) InstrumentStatus status);
 
-    @GetMapping(InstrumentApiPaths.INTERNAL_BASE_PATH + "/trade-encoding")
+    @GetMapping("/internal/v1/instruments/trade-encoding")
     com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(@RequestParam("productLine") ProductLine productLine,
             @RequestParam("instrumentId") int instrumentId, @RequestParam("changeId") long changeId);
 
-    @GetMapping(InstrumentApiPaths.INTERNAL_BASE_PATH + "/snapshot")
+    @GetMapping("/internal/v1/instruments/snapshot")
     InstrumentSnapshotResponse snapshot(@RequestParam("productLine") ProductLine productLine);
 }

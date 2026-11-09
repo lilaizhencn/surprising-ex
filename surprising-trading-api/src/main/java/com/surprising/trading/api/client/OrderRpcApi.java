@@ -1,6 +1,5 @@
 package com.surprising.trading.api.client;
 
-import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
 import com.surprising.trading.api.model.AlgoOrderQueryResponse;
@@ -37,61 +36,61 @@ import org.springframework.web.bind.annotation.RequestParam;
 @FeignClient(name = "surprising-gateway", contextId = "orderRpcApi")
 public interface OrderRpcApi {
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH)
+    @PostMapping("/api/v1/trading/orders")
     OrderCommandReceipt place(@Valid @RequestBody PlaceOrderRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch")
+    @PostMapping("/api/v1/trading/orders/batch")
     OrderCommandReceipt placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/test")
+    @PostMapping("/api/v1/trading/orders/test")
     TestOrderResponse test(@Valid @RequestBody PlaceOrderRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/amend")
+    @PostMapping("/api/v1/trading/orders/amend")
     OrderCommandReceipt amend(@Valid @RequestBody AmendOrderRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-amend")
+    @PostMapping("/api/v1/trading/orders/batch-amend")
     OrderCommandReceipt amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/close-position")
+    @PostMapping("/api/v1/trading/orders/close-position")
     OrderResponse closePosition(@Valid @RequestBody ClosePositionRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel")
+    @PostMapping("/api/v1/trading/orders/cancel")
     OrderCommandReceipt cancel(@Valid @RequestBody CancelOrderRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/batch-cancel")
+    @PostMapping("/api/v1/trading/orders/batch-cancel")
     OrderCommandReceipt cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel-open")
+    @PostMapping("/api/v1/trading/orders/cancel-open")
     OrderBatchResponse cancelOpen(@Valid @RequestBody CancelOpenOrdersRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancel-all-after")
+    @PostMapping("/api/v1/trading/orders/cancel-all-after")
     CancelAllAfterResponse cancelAllAfter(@Valid @RequestBody CancelAllAfterRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo")
+    @PostMapping("/api/v1/trading/orders/algo")
     AlgoOrderResponse placeAlgo(@Valid @RequestBody PlaceAlgoOrderRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/cancel")
+    @PostMapping("/api/v1/trading/orders/algo/cancel")
     AlgoOrderResponse cancelAlgo(@Valid @RequestBody CancelAlgoOrderRequest request);
 
-    @PostMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/cancel-open")
+    @PostMapping("/api/v1/trading/orders/algo/cancel-open")
     AlgoOrderBatchResponse cancelOpenAlgo(@Valid @RequestBody CancelOpenAlgoOrdersRequest request);
 
-    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/{algoOrderId}")
+    @GetMapping("/api/v1/trading/orders/algo/{algoOrderId}")
     AlgoOrderResponse getAlgo(@PathVariable("algoOrderId") @Positive long algoOrderId);
 
-    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/open")
+    @GetMapping("/api/v1/trading/orders/algo/open")
     AlgoOrderQueryResponse openAlgoOrders(@RequestParam("userId") @Positive long userId,
                                           @RequestParam(value = "instrumentId", required = false) String instrumentId,
                                           @RequestParam(value = "limit", defaultValue = "100") @Min(1) @Max(1000) int limit);
 
-    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/{orderId}")
+    @GetMapping("/api/v1/trading/orders/{orderId}")
     OrderResponse get(@PathVariable("orderId") @Positive long orderId);
 
-    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/by-client-order-id")
+    @GetMapping("/api/v1/trading/orders/by-client-order-id")
     OrderResponse getByClientOrderId(@RequestParam("userId") @Positive long userId,
                                      @RequestParam("clientOrderId") @NotBlank String clientOrderId);
 
-    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/open")
+    @GetMapping("/api/v1/trading/orders/open")
     OrderQueryResponse openOrders(@RequestParam("userId") @Positive long userId,
                                   @RequestParam(value = "instrumentId", required = false) String instrumentId,
                                   @RequestParam(value = "limit", defaultValue = "100") @Min(1) @Max(1000) int limit,

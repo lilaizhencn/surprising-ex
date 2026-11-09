@@ -1,7 +1,6 @@
 package com.surprising.account.api.client;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
@@ -28,27 +27,27 @@ import org.springframework.web.bind.annotation.RequestParam;
 @FeignClient(name = "surprising-gateway", contextId = "accountRpcApi")
 public interface AccountRpcApi {
 
-    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/balance")
+    @GetMapping("/api/v1/accounts/balance")
     BalanceResponse balance(@RequestParam("userId") @Positive long userId,
                             @RequestParam("asset") @NotBlank String asset);
 
-    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/balances")
+    @GetMapping("/api/v1/accounts/balances")
     BalanceQueryResponse balances(@RequestParam("userId") @Positive long userId);
 
-    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/product-balance")
+    @GetMapping("/api/v1/accounts/product-balance")
     ProductBalanceResponse productBalance(@RequestParam("userId") @Positive long userId,
                                           @RequestParam("accountType") AccountType accountType,
                                           @RequestParam("asset") @NotBlank String asset);
 
-    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/product-balances")
+    @GetMapping("/api/v1/accounts/product-balances")
     ProductBalanceQueryResponse productBalances(@RequestParam("userId") @Positive long userId,
                                                 @RequestParam(value = "accountType", required = false)
                                                 AccountType accountType);
 
-    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/transfers")
+    @PostMapping("/api/v1/accounts/transfers")
     ProductTransferResponse transfer(@Valid @RequestBody ProductTransferRequest request);
 
-    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-mode")
+    @GetMapping("/api/v1/accounts/position-mode")
     PositionModeResponse positionMode(@RequestParam("userId") @Positive long userId,
                                       @RequestParam(value = "productLine", required = false)
                                       ProductLine productLine);
@@ -57,10 +56,10 @@ public interface AccountRpcApi {
         return positionMode(userId, null);
     }
 
-    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-mode")
+    @PostMapping("/api/v1/accounts/position-mode")
     PositionModeResponse updatePositionMode(@Valid @RequestBody PositionModeUpdateRequest request);
 
-    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position")
+    @GetMapping("/api/v1/accounts/position")
     PositionResponse position(@RequestParam("userId") @Positive long userId,
                               @RequestParam("instrumentId") @NotBlank String instrumentId,
                               @RequestParam(value = "marginMode", required = false) String marginMode,
@@ -70,16 +69,16 @@ public interface AccountRpcApi {
         return position(userId, instrumentId, marginMode, null);
     }
 
-    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin")
+    @GetMapping("/api/v1/accounts/position-margin")
     PositionMarginResponse positionMargin(@RequestParam("userId") @Positive long userId,
                                           @RequestParam("instrumentId") @NotBlank String instrumentId,
                                           @RequestParam(value = "marginMode", required = false) String marginMode);
 
-    @PostMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/position-margin-adjustments")
+    @PostMapping("/api/v1/accounts/position-margin-adjustments")
     PositionMarginAdjustmentResponse adjustPositionMargin(
             @Valid @RequestBody PositionMarginAdjustmentRequest request);
 
-    @GetMapping(AccountApiPaths.ACCOUNT_BASE_PATH + "/positions")
+    @GetMapping("/api/v1/accounts/positions")
     PositionQueryResponse positions(@RequestParam("userId") @Positive long userId,
                                     @RequestParam(value = "positionSide", required = false) String positionSide);
 
