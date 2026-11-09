@@ -208,6 +208,68 @@ public class HighConcurrencyBenchmarkCapacityAuditTest {
         }
     }
 
+    @Test
+    void executeTenThousandUserProductionMixedScaleAudit() {
+        System.out.println("================================================================================");
+        System.out.println(">>> 正在启动 Surprising 生产级宏观万级用户大规模混合业务高并发压测审计...");
+        System.out.println(">>> 规模型号: 10,000 活跃持仓用户 (顶格基准), 16 活跃交易对, 4 记账泳道分片");
+        System.out.println(">>> 业务场景: 大规模做市批量撤挂单 + 10,000 用户定时资金费扣划 + 标记价跳动 + 穿仓强平");
+        System.out.println("================================================================================");
+
+        int accountLanes = 4;
+        int activeUsers = 10_000;
+        int symbols = 16;
+        int hftRounds = 128;
+        int hftBatchSize = 20;
+
+        long t0 = System.currentTimeMillis();
+        var template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, symbols);
+        long setupMs = System.currentTimeMillis() - t0;
+        System.out.printf(">> 10,000 活跃用户与 16 交易对底座状态生成耗时: %.2f 秒%n", setupMs / 1000.0);
+
+        try (var scenario = LinearPerpetualMixedWorkload.productionScenario(template, hftRounds, hftBatchSize)) {
+            // 预热一轮
+            scenario.run();
+
+            // 正式生产大规模混合发压
+            long startNanos = System.nanoTime();
+            long runResult = scenario.run();
+            long elapsedNanos = System.nanoTime() - startNanos;
+            double elapsedSec = elapsedNanos / 1_000_000_000.0;
+
+            long totalOps = scenario.terminalOperations();
+            long tradingOps = scenario.terminalTradingOperations();
+            long lifecycleOps = scenario.terminalLifecycleOperations();
+            long terminalTrades = scenario.terminalTrades();
+            long laneTotalOps = scenario.laneOperations();
+            long laneCommandOps = scenario.laneOperations(0);
+            long laneSettlementOps = scenario.laneOperations(1);
+
+            double mixedTps = totalOps / elapsedSec;
+            double tradingTps = tradingOps / elapsedSec;
+            double laneTps = laneTotalOps / elapsedSec;
+
+            System.out.printf("[压测结果 - 10,000 顶格用户混合业务] 4 Lanes, 10,000 Users, 16 Symbols, 128 轮并发%n");
+            System.out.printf("  - 混合业务总操作数: %d 笔 (纯执行耗时: %.4f 秒)%n", totalOps, elapsedSec);
+            System.out.printf("  - 宏观混合业务综合吞吐量 (Mixed TPS): %.2f ops/sec%n", mixedTps);
+            System.out.printf("  - 其中纯高频做市/交易指令: %d 笔 (%.2f TPS)%n", tradingOps, tradingTps);
+            System.out.printf("  - 其中生命周期风控/全网资金费交割操作: %d 笔%n", lifecycleOps);
+            System.out.printf("  - 订单簿撮合成交对数 (Trades Matched): %d 对%n", terminalTrades);
+            System.out.printf("  - 4 记账泳道分片任务总数 (Lane Operations): %d 笔 (%.2f 分片记账 TPS)%n",
+                    laneTotalOps, laneTps);
+            System.out.printf("    * 指令准入记账 (Command): %d 笔%n", laneCommandOps);
+            System.out.printf("    * 撮合成交结算 (Settlement): %d 笔%n", laneSettlementOps);
+            System.out.printf("  - 撮合引擎最大积压深度 (Max Backlog): %d 笔%n", scenario.maxBacklog());
+
+            scenario.verify();
+            System.out.println("  - 10,000 用户全账本资金守恒与状态快照恢复: 100% PASS (零穿仓，资金守恒)");
+            System.out.println("================================================================================");
+
+            assertThat(runResult).isNotZero();
+            assertThat(totalOps).isGreaterThan(0);
+        }
+    }
+
     private static int testPriceBandFast(int i, long mark, long bandPpm, long passiveBandPpm) {
         long price = mark + ((i % 200) - 100) * 1000L;
         long maxBuy = mark + (mark * bandPpm) / 1_000_000L;
