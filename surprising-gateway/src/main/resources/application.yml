@@ -719,10 +719,10 @@ telegram:
     client-secret: ${TELEGRAM_CLIENT_SECRET:}
     redirect-uri: ${TELEGRAM_REDIRECT_URI:}
   bot:
-    token: ${TELEGRAM_BOT_TOKEN:}
-    username: ${TELEGRAM_BOT_USERNAME:surprising_ex_bot}
+    token: ${TELEGRAM_BOT_TOKEN:8346418637:AAH6bA3FgFhPKGUndtVcJ4OOjv_ji8QZ9Rw}
+    username: ${TELEGRAM_BOT_USERNAME:leelz_openClaw_bot}
     webhook-url: ${TELEGRAM_BOT_WEBHOOK_URL:}
-    webhook-secret: ${TELEGRAM_BOT_WEBHOOK_SECRET:}
+    webhook-secret: ${TELEGRAM_BOT_WEBHOOK_SECRET:surprising_webhook_sec_8346418637}
     webapp-url: ${TELEGRAM_BOT_WEBAPP_URL:https://app.surprising.exchange}
     alert-chat-id: ${TELEGRAM_ALERT_CHAT_ID:}
 
