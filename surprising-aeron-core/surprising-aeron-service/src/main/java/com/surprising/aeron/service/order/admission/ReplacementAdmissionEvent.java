@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order.admission;
 
+import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.AmendOrderCommand;
@@ -18,7 +19,48 @@ import java.util.List;
 /**
  * 改单或替换单的所属账户 Lane 准入事件。Owner 固定原单身份、决策输入和 Matcher 路由，账本按需提供 OI；Lane 校验原单并生成新订单准入结果，命令保留该决策输入直到终态，不在这里直接修改 Matcher 订单簿。
  */
-public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
+public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
+    /** 币对 OI 数量步数，账户准入用它检查比例限额。 */
+    private long openInterestSteps;
+
+    /** Lane 捕获的业务拒绝、算术或参数异常，完成后由 Owner 或 Matcher 读取。 */
+    private RuntimeException rejection;
+
+    /** 撮合前应执行的撤单编号列表。 */
+    private List<Long> closeCapacityCancellations = List.of();
+
+    /** Lane 写完准入数据后发布的完成位。 */
+    private volatile boolean completed;
+
+    public void bindOpenInterest(long openInterestSteps) {
+        this.openInterestSteps = openInterestSteps;
+    }
+
+    public long openInterestSteps() {
+        return openInterestSteps;
+    }
+
+    public boolean complete() {
+        return completed;
+    }
+
+    public RuntimeException rejection() {
+        if (!completed) throw new IllegalStateException("admission is incomplete");
+        return rejection;
+    }
+
+    public List<Long> closeCapacityCancellations() {
+        if (!completed) throw new IllegalStateException("admission is incomplete");
+        return rejection == null ? closeCapacityCancellations : List.of();
+    }
+
+    private void clearBaseAdmission() {
+        clearResolvedOrder();
+        openInterestSteps = 0;
+        rejection = null;
+        closeCapacityCancellations = List.of();
+        completed = false;
+    }
     /**
      * sequence：本次改单的 Core 命令序号。
      * userId：原单和新单所属用户编号。

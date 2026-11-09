@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order.admission;
 
+import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.account.AccountLaneState;
@@ -19,7 +20,48 @@ import lombok.experimental.Accessors;
 
 /** 一笔普通下单的单向准入交接事件，同时复用 ResolvedPlaceOrder 存决策字段。Owner 先绑定路由，账本按需提供 OI，所属 Lane 决策、检查及冻结，Matcher 等回执后才能使用；对象池回收还要满足消费条件。 构造约定：创建可由对象池保存的空准入事件，后续先绑定决策输入，再准备命令归属。 */
 @NoArgsConstructor
-public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
+public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
+    /** 币对 OI 数量步数，账户准入用它检查比例限额。 */
+    private long openInterestSteps;
+
+    /** Lane 捕获的业务拒绝、算术或参数异常，完成后由 Owner 或 Matcher 读取。 */
+    private RuntimeException rejection;
+
+    /** 撮合前应执行的撤单编号列表。 */
+    private List<Long> closeCapacityCancellations = List.of();
+
+    /** Lane 写完准入数据后发布的完成位。 */
+    private volatile boolean completed;
+
+    public void bindOpenInterest(long openInterestSteps) {
+        this.openInterestSteps = openInterestSteps;
+    }
+
+    public long openInterestSteps() {
+        return openInterestSteps;
+    }
+
+    public boolean complete() {
+        return completed;
+    }
+
+    public RuntimeException rejection() {
+        if (!completed) throw new IllegalStateException("admission is incomplete");
+        return rejection;
+    }
+
+    public List<Long> closeCapacityCancellations() {
+        if (!completed) throw new IllegalStateException("admission is incomplete");
+        return rejection == null ? closeCapacityCancellations : List.of();
+    }
+
+    private void clearBaseAdmission() {
+        clearResolvedOrder();
+        openInterestSteps = 0;
+        rejection = null;
+        closeCapacityCancellations = List.of();
+        completed = false;
+    }
     /** 本次下单的 Core 命令序号，准入回执和冻结状态都归属此序号。 */
     @Accessors(fluent = true, chain = false)
     @Getter
