@@ -724,6 +724,7 @@ telegram:
     webhook-url: ${TELEGRAM_BOT_WEBHOOK_URL:}
     webhook-secret: ${TELEGRAM_BOT_WEBHOOK_SECRET:}
     webapp-url: ${TELEGRAM_BOT_WEBAPP_URL:https://app.surprising.exchange}
+    alert-chat-id: ${TELEGRAM_ALERT_CHAT_ID:}
 
 
 # Google Identity Services / native Google Sign-In. Empty IDs keep the provider disabled.
