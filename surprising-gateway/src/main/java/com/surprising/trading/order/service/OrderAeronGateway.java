@@ -2,6 +2,7 @@ package com.surprising.trading.order.service;
 
 import com.surprising.trading.order.exception.OrderCommandRejectedException;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.aeron.client.AeronClientPool;
 import io.aeron.driver.MediaDriver;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -42,9 +43,10 @@ public class OrderAeronGateway implements AutoCloseable {
 
     private static AeronClientPool createClients(TradingOrderProperties properties, MediaDriver driver) {
         TradingOrderProperties.Aeron aeron = properties.getAeron();
-        return new AeronClientPool("order", properties.getKafka().getProductLine(), aeron.getHostnames(),
+        ProductLine productLine = properties.getProductLine();
+        return new AeronClientPool("order", productLine, aeron.getHostnames(),
                 aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
-                "order-" + properties.getKafka().getProductLine().name() + "-node-" + aeron.getNodeId(), driver);
+                "order-" + productLine.name() + "-node-" + aeron.getNodeId(), driver);
     }
 
     public CoreCommandOutcome commandOutcome(CoreMessageType type, UUID commandId, long userId, byte[] payload) {

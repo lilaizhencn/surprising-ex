@@ -23,8 +23,8 @@ public final class DerivativesAeronClient implements AutoCloseable {
                                   InsuranceProperties insurance, AdlProperties adl) {
         ProductLine productLine = risk.getProductLine();
         if (liquidation.getProductLine() != productLine
-                || insurance.getKafka().getProductLine() != productLine
-                || adl.getKafka().getProductLine() != productLine) {
+                || insurance.getProductLine() != productLine
+                || adl.getProductLine() != productLine) {
             throw new IllegalStateException("all lifecycle providers must use the same product line");
         }
         RiskProperties.Aeron aeron = risk.getAeron();

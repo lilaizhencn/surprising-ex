@@ -20,7 +20,7 @@ public class AdlAeronGateway {
     private final ProductLine productLine;
 
     public AdlAeronGateway(AdlProperties properties, DerivativesAeronClient clients) {
-        productLine = properties.getKafka().getProductLine();
+        productLine = properties.getProductLine();
         this.clients = clients;
     }
 

@@ -20,7 +20,7 @@ public class InsuranceAeronGateway {
     private final ProductLine productLine;
 
     public InsuranceAeronGateway(InsuranceProperties properties, DerivativesAeronClient clients) {
-        productLine = properties.getKafka().getProductLine();
+        productLine = properties.getProductLine();
         this.clients = clients;
     }
 

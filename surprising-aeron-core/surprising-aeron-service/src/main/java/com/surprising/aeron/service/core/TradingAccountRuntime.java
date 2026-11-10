@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.position.PositionIndexOps;
+import com.surprising.aeron.service.order.ClientOrderIndexOps;
+import com.surprising.aeron.service.liquidation.LiquidationIndexOps;
+import com.surprising.aeron.service.trigger.TriggerOrderOperations;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.bootstrap.account.LaneThread;
@@ -125,6 +129,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private static final java.lang.invoke.VarHandle OWNER_THREAD;
     final UncommittedChanges changes = new UncommittedChanges();
     final PartitionCoordinator coordinator;
+    private final TriggerOrderOperations triggerOps = new TriggerOrderOperations(this);
 
     static {
         try { OWNER_THREAD = java.lang.invoke.MethodHandles.lookup().findVarHandle(TradingAccountRuntime.class, "owner", Thread.class); }
@@ -4436,8 +4441,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 修改后持仓数量是否非零，与原暴露状态一起决定索引变化
         boolean isOpen = current.signedQuantitySteps() != 0;
         if (wasOpen && (!isOpen || oldSymbol != current.symbolId()))
-            unindexOpenPosition(lane, positionKey, current.userId(), oldSymbol);
-        if ((!wasOpen && isOpen) || oldSymbol != current.symbolId()) indexOpenPosition(lane, positionKey, current);
+            PositionIndexOps.unindexOpenPosition(lane, positionKey, current.userId(), oldSymbol);
+        if ((!wasOpen && isOpen) || oldSymbol != current.symbolId()) PositionIndexOps.indexOpenPosition(lane, positionKey, current);
         publishPosition(lane, positionKey, current);
         return current;
     }
@@ -5765,99 +5770,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     private static void replacePositionIndexes(AccountPartition lane, long positionKey,
                                                Position previous, Position replacement) {
-        if (previous == null) {
-            indexPosition(lane, positionKey, replacement);
-            return;
-        }
-        // 调用方已经保证同一用户；普通元数据、数量及正负变化不改变用户成员关系。
-        // 标的相同且仍有非零暴露时，也不重复维护标的成员关系。
-        if (previous.symbolId() == replacement.symbolId()
-                && (previous.signedQuantitySteps() != 0) == (replacement.signedQuantitySteps() != 0)) return;
-        unindexOpenPosition(lane, positionKey, previous);
-        indexOpenPosition(lane, positionKey, replacement);
+        PositionIndexOps.replacePositionIndexes(lane, positionKey, previous, replacement);
     }
 
-    /**
-     * 登记用户持仓键，并按非零暴露条件维护标的活动持仓索引。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param positionKey 持仓内部身份键
-     * @param position 用于登记用户及非零暴露索引的持仓值
-     */
     public static void indexPosition(AccountPartition lane, long positionKey, Position position) {
-        lane.indexPositionKey(position.userId(), positionKey);
-        indexOpenPosition(lane, positionKey, position);
+        PositionIndexOps.indexPosition(lane, positionKey, position);
     }
 
-    /**
-     * 只为非零持仓在标的与用户下保存有序原始键列表，二分插入避免重复身份。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param positionKey 持仓内部身份键
-     * @param position 非零时需要加入活动索引的持仓值
-     */
-    private static void indexOpenPosition(AccountPartition lane, long positionKey, Position position) {
-        if (position.signedQuantitySteps() == 0) return;
-        // 当前标的按用户分组的活动持仓键索引
-        LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
-                lane.symbolPositionKeys(position.symbolId());
-        if (byUser == null) {
-            byUser = new LongObjectHashMap<>();
-            lane.storeSymbolPositionKeys(position.symbolId(), byUser);
-        }
-        // 该标的该用户的有序持仓键原始列表，二分定位后按需插入
-        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys = byUser.get(position.userId());
-        if (keys == null) {
-            keys = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(2);
-            byUser.put(position.userId(), keys);
-        }
-        // 本轮有效变化项、原始列表或余额补丁的遍历下标
-        int index = keys.binarySearch(positionKey);
-        if (index < 0) keys.addAtIndex(-index - 1, positionKey);
-    }
-
-    /**
-     * 删除用户持仓键，并撤销对应标的活动索引。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param positionKey 持仓内部身份键
-     * @param position 需要从用户及活动索引撤出的原持仓值
-     */
     public static void unindexPosition(AccountPartition lane, long positionKey, Position position) {
-        lane.unindexPositionKey(position.userId(), positionKey);
-        unindexOpenPosition(lane, positionKey, position);
-    }
-
-    /**
-     * 从标的及用户有序键列表删除指定身份，列表或分组空后逐层清理。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param positionKey 持仓内部身份键
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param symbolId 本产品线标的内部身份
-     */
-    private static void unindexOpenPosition(AccountPartition lane, long positionKey,
-                                             long userId, int symbolId) {
-        // 当前标的按用户分组的活动持仓键索引
-        LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
-                lane.symbolPositionKeys(symbolId);
-        // 该标的该用户的原持仓键列表，二分定位后移除目标身份
-        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys =
-                byUser == null ? null : byUser.get(userId);
-        if (keys == null) return;
-        // 本轮有效变化项、原始列表或余额补丁的遍历下标
-        int index = keys.binarySearch(positionKey);
-        if (index < 0) return;
-        keys.removeAtIndex(index);
-        if (keys.isEmpty()) byUser.remove(userId);
-        if (byUser.isEmpty()) lane.removeSymbolPositionKeys(symbolId);
-    }
-
-    /**
-     * 旧持仓非零时按其用户和标的删除活动持仓索引，零持仓无需处理。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param positionKey 持仓内部身份键
-     * @param position 需要撤销活动暴露索引的原持仓值
-     */
-    private static void unindexOpenPosition(AccountPartition lane, long positionKey, Position position) {
-        if (position.signedQuantitySteps() == 0) return;
-        unindexOpenPosition(lane, positionKey, position.userId(), position.symbolId());
+        PositionIndexOps.unindexPosition(lane, positionKey, position);
     }
 
     /**
@@ -5867,103 +5788,24 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (currentLaneCommandScope() == null) changes.balancesChanged = true;
     }
 
-
-    /**
-     * 更新客户号到订单及订单到客户号双向索引；客户号改指另一订单时先移除旧反向关系。调用方保证订单号为正，零保留为原始映射缺失值。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param clientKey 客户订单号内部键，零表示没有客户号
-     * @param orderId 本次操作关联的订单实体 ID
-     */
     public static void putClientOrderIndex(AccountPartition lane, long userId, long clientKey, long orderId) {
-        // 该用户客户号到订单的原始映射，零表示没有对应订单
-        Long2LongHashMap userClientOrders = lane.userClientOrders(userId);
-        if (userClientOrders == null) {
-            userClientOrders = new Long2LongHashMap(lane.admissionIndexCapacity(), 0.65f, 0, false);
-            lane.storeUserClientOrders(userId, userClientOrders);
-        }
-        // 订单 ID 使用正值，零保留为原始映射的缺失值。
-        // 直接读取即可判断旧指向，避免先 contains 再 get 的重复探测。
-        // 客户号原来指向的订单号，零表示没有旧关系
-        long previousOrderId = userClientOrders.get(clientKey);
-        // 客户号原来是否有非零订单指向，决定是否撤销旧反向关系
-        boolean hadPrevious = previousOrderId != 0;
-        userClientOrders.put(clientKey, orderId);
-        if (hadPrevious && previousOrderId != orderId) {
-            lane.clientKeysByOrderId().remove(previousOrderId, clientKey);
-        }
-        lane.clientKeysByOrderId().add(orderId, clientKey);
+        ClientOrderIndexOps.putClientOrderIndex(lane, userId, clientKey, orderId);
     }
 
-    /**
-     * 客户号存在时删除正向及反向关系并返回原订单号，未找到返回空。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param clientKey 客户订单号内部键，零表示没有客户号
-     */
     public static Long removeClientOrderIndex(AccountPartition lane, long userId, long clientKey) {
-        // 该用户客户号到订单的原始映射，零表示没有对应订单
-        Long2LongHashMap userClientOrders = lane.userClientOrders(userId);
-        if (userClientOrders == null) return null;
-        // 当前客户号、订单或预留对应的订单实体 ID
-        long orderId = userClientOrders.get(clientKey);
-        if (orderId == 0) return null;
-        userClientOrders.remove(clientKey);
-        lane.clientKeysByOrderId().remove(orderId, clientKey);
-        return orderId;
+        return ClientOrderIndexOps.removeClientOrderIndex(lane, userId, clientKey);
     }
 
-    /**
-     * 为未完成且未取消的强平建立用户、标的、方向索引，同一持仓方向出现不同活动强平时拒绝。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param liquidation 本次保存、替换或活动索引处理的强平状态
-     */
     static void indexActiveLiquidation(AccountPartition lane, RiskScanner.LiquidationOrder liquidation) {
-        if (!active(liquidation)) return;
-        // 当前用户按标的分组的活动强平索引
-        IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.activeLiquidations(liquidation.userId());
-        if (bySymbol == null) {
-            bySymbol = new IntObjectHashMap<>();
-            lane.storeActiveLiquidations(liquidation.userId(), bySymbol);
-        }
-        // 当前标的按持仓方向保存的活动强平身份映射
-        LongObjectHashMap<Long> bySide = bySymbol.get(liquidation.symbolId());
-        if (bySide == null) {
-            bySide = new LongObjectHashMap<>();
-            bySymbol.put(liquidation.symbolId(), bySide);
-        }
-        // 同用户、标的和方向当前已有的可空强平 ID，禁止另一个活动身份占位
-        Long current = bySide.get(liquidation.positionSide().ordinal());
-        if (current != null && current != liquidation.liquidationId()) {
-            throw new IllegalStateException("multiple active runtime liquidations for one position");
-        }
-        bySide.put(liquidation.positionSide().ordinal(), liquidation.liquidationId());
+        LiquidationIndexOps.indexActiveLiquidation(lane, liquidation);
     }
 
-    /**
-     * 旧强平仍属活动分类时删除其方向索引，并逐层清理空标的与用户分组。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param liquidation 本次保存、替换或活动索引处理的强平状态
-     */
     static void removeActiveLiquidation(AccountPartition lane, RiskScanner.LiquidationOrder liquidation) {
-        if (!active(liquidation)) return;
-        // 当前用户按标的分组的活动强平索引
-        IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.activeLiquidations(liquidation.userId());
-        // 当前标的按持仓方向保存的活动强平身份映射
-        LongObjectHashMap<Long> bySide = bySymbol == null ? null : bySymbol.get(liquidation.symbolId());
-        if (bySide == null) return;
-        bySide.remove(liquidation.positionSide().ordinal());
-        if (bySide.isEmpty()) bySymbol.remove(liquidation.symbolId());
-        if (bySymbol.isEmpty()) lane.removeActiveLiquidations(liquidation.userId());
+        LiquidationIndexOps.removeActiveLiquidation(lane, liquidation);
     }
 
-    /**
-     * 判断强平是否尚未 COMPLETED 且未 CANCELED，用作活动索引的统一分类。
-     * @param liquidation 本次保存、替换或活动索引处理的强平状态
-     */
     static boolean active(RiskScanner.LiquidationOrder liquidation) {
-        return liquidation.status() != CoreLiquidationState.Status.COMPLETED
-                && liquidation.status() != CoreLiquidationState.Status.CANCELED;
+        return LiquidationIndexOps.active(liquidation);
     }
 
 
@@ -6461,234 +6303,48 @@ public final class TradingAccountRuntime implements AutoCloseable {
         incrementCommandRevision();
     }
 
-    /**
-     * 检查全局版本容量，完整准备一份尚未存在的条件单，再写入并递增命令版本，不用于覆盖旧条件单。
-     */
     public void upsertTriggerOrder(long userId,
                                    CoreTriggerOrderStateView view, int symbolId,
                                    long positionKey, boolean instrumentSettled) {
-        requireRevisionCapacity();
-        CoreTriggerOrderState trigger = prepareTriggerPlacement(userId, view, symbolId, positionKey, instrumentSettled);
-        putTriggerOrder(trigger);
-        incrementCommandRevision();
+        triggerOps.upsertTriggerOrder(userId, view, symbolId, positionKey, instrumentSettled);
     }
 
-    /**
-     * 先校验止盈和止损两腿关系，再分别完成登记校验，并预检两次版本递增容量；两腿都准备好后才依次写入原账户状态。
-     */
     public void placeOcoPair(long userId,
                              CoreTriggerOrderStateView takeProfit, CoreTriggerOrderStateView stopLoss,
                              int symbolId, long positionKey, boolean instrumentSettled) {
-        com.surprising.aeron.service.trigger.command.TriggerOrderCommands.validateOcoPair(takeProfit, stopLoss);
-        var first = prepareTriggerPlacement(userId, takeProfit, symbolId, positionKey, instrumentSettled);
-        var second = prepareTriggerPlacement(userId, stopLoss, symbolId, positionKey, instrumentSettled);
-        Math.addExact(revision(), 2);
-        putTriggerOrder(first);
-        putTriggerOrder(second);
-        incrementCommandRevision();
-        incrementCommandRevision();
+        triggerOps.placeOcoPair(userId, takeProfit, stopLoss, symbolId, positionKey, instrumentSettled);
     }
 
-    /**
-     * 核对归属、客户标识、币对存在和未结算、普通编号与客户编号不重复，再检查持仓容量；准备新条件单，不直接写状态。
-     */
-    private CoreTriggerOrderState prepareTriggerPlacement(long userId,
-                                                         CoreTriggerOrderStateView view, int symbolId,
-                                                         long positionKey, boolean instrumentSettled) {
-        if (view == null || userId <= 0 || symbolId < 0 || positionKey < 0) {
-            throw new IllegalArgumentException("invalid prepared runtime trigger order update");
-        }
-        assertOwner();
-        if (view.userId() != userId || view.productLine() != productLine()) {
-            throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
-        }
-        if (view.clientTriggerOrderId().isBlank()) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
-        }
-        CoreInstrument instrument = instrument(view.instrumentId());
-        if (instrument == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
-        }
-        if (instrumentSettled) {
-            throw new CoreStateRejectedException("INSTRUMENT_SETTLED", "instrument is already settled");
-        }
-        if (triggerOrder(view.triggerOrderId()) != null) {
-            throw new CoreStateRejectedException("DUPLICATE_TRIGGER_ORDER_ID", "trigger order already exists");
-        }
-        if (hasTriggerClient(userId, view.clientTriggerOrderId())) {
-            throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
-                    "clientTriggerOrderId already exists");
-        }
-        validateTriggerPlacement(userId, symbolId, positionKey, view);
-        return CoreTriggerOrderState.from(view, instrument);
-    }
-
-    /**
-     * 先要求用户存在；衍生品还须持仓模式和保证金模式一致、有非零持仓、方向确实平仓，并检查已挂只减仓量加本次预计条件单占量不超持仓。
-     */
-    private void validateTriggerPlacement(long userId, int symbolId,
-                                          long positionKey, CoreTriggerOrderStateView view) {
-        UserAccount user = user(userId);
-        if (user == null) throw new CoreStateRejectedException("USER_NOT_FOUND", "user does not exist");
-        if (!productLine().isDerivative()) return;
-        if (user.positionMode() == CorePositionMode.ONE_WAY && view.positionSide().hedgeSide()
-                || user.positionMode() == CorePositionMode.HEDGE && !view.positionSide().hedgeSide()) {
-            throw new CoreStateRejectedException("POSITION_MODE_MISMATCH",
-                    "trigger position side does not match user position mode");
-        }
-        Position position = position(positionKey);
-        if (position == null || position.signedQuantitySteps() == 0) {
-            throw new CoreStateRejectedException("TRIGGER_POSITION_REQUIRED",
-                    "trigger order requires an open position");
-        }
-        if (position.marginMode() != view.marginMode()) {
-            throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID",
-                    "trigger margin mode does not match position");
-        }
-        CoreOrderSide closeSide = position.signedQuantitySteps() > 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
-        if (view.side() != closeSide) {
-            throw new CoreStateRejectedException("TRIGGER_SIDE_NOT_REDUCING",
-                    "trigger order side must reduce the current position");
-        }
-        long openReduceOnly = openReduceOnlyQuantity(
-                userId, symbolId, view.positionSide(), closeSide, view.marginMode());
-        long projectedTriggerCapacity = projectedTriggerCapacity(userId, view);
-        if (Math.addExact(openReduceOnly, projectedTriggerCapacity)
-                > Math.absExact(position.signedQuantitySteps())) {
-            throw new CoreStateRejectedException("TRIGGER_CLOSE_CAPACITY_EXCEEDED",
-                    "trigger order quantity exceeds available position");
-        }
-    }
-
-    /**
-     * 核对用户归属，已不开放的条件单返回 false；仍开放则保留已有触发信息并转成 CANCELED，推进记录及命令版本。
-     */
     public boolean cancelTriggerOrder(long userId, long triggerOrderId) {
-        requireTriggerInput(userId, triggerOrderId);
-        CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
-        if (current.userId() != userId) {
-            throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
-        }
-        if (!current.status().open()) return false;
-        updateTriggerOrder(current, CoreTriggerOrderStatus.CANCELED, 0, current.triggerSequence(),
-                current.triggeredPriceTicks(), current.rejectReason(), current.updatedAtEpochMillis());
-        return true;
+        return triggerOps.cancelTriggerOrder(userId, triggerOrderId);
     }
 
-    /**
-     * 只取消仍为 PENDING 的条件单并写回后状态，命令级版本发布由原提交事件负责，本辅助入口不重复递增命令版本。
-     */
     public boolean cancelPendingTriggerOrderForCommit(long triggerId) {
-        CoreTriggerOrderState current = requireTriggerOrder(triggerId);
-        if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
-        putTriggerOrder(current.toPendingCancellation());
-        return true;
+        return triggerOps.cancelPendingTriggerOrderForCommit(triggerId);
     }
 
-    /**
-     * 仅允许 PENDING 转为 TRIGGERING，记录本轮触发序号和价格。
-     */
     public boolean claimTriggerOrder(long triggerOrderId, long triggerSequence,
                                     long triggeredPriceTicks, long triggeredAtEpochMillis) {
-        CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
-        if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
-        updateTriggerOrder(current, CoreTriggerOrderStatus.TRIGGERING, 0, triggerSequence,
-                triggeredPriceTicks, current.rejectReason(), triggeredAtEpochMillis);
-        return true;
+        return triggerOps.claimTriggerOrder(triggerOrderId, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis);
     }
 
-    /**
-     * 仅允许已认领的 TRIGGERING 记录按结果转为 TRIGGERED 或 TRIGGER_FAILED，写子单编号及原因。
-     */
     public boolean completeTriggerOrder(long triggerOrderId, boolean success,
                                        long placedOrderId, String rejectReason, long completedAtEpochMillis) {
-        CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
-        if (current.status() != CoreTriggerOrderStatus.TRIGGERING) return false;
-        updateTriggerOrder(current, success ? CoreTriggerOrderStatus.TRIGGERED
-                        : CoreTriggerOrderStatus.TRIGGER_FAILED, placedOrderId, current.triggerSequence(),
-                current.triggeredPriceTicks(), rejectReason, completedAtEpochMillis);
-        return true;
+        return triggerOps.completeTriggerOrder(triggerOrderId, success, placedOrderId, rejectReason, completedAtEpochMillis);
     }
 
-    /**
-     * 只更新仍开放的移动止损，采用调用方算出的高低价格水位和激活时间，保留原执行信息并递增版本。
-     */
     public boolean updateTrailingTriggerOrder(long triggerOrderId,
                                              long highestPriceTicks, long lowestPriceTicks,
                                              long activatedAtEpochMillis) {
-        CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
-        if (!current.status().open() || current.triggerType() != CoreTriggerOrderType.TRAILING_STOP) return false;
-        putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(),
-                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(),
-                current.instrument(), current.side(),
-                current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
-                current.activationPriceTicks(), current.callbackRatePpm(), highestPriceTicks, lowestPriceTicks,
-                activatedAtEpochMillis, current.orderType(), current.timeInForce(), current.priceTicks(),
-                current.quantitySteps(), current.marginMode(), current.positionSide(), current.status(),
-                current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
-                current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
-                current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
-                Math.incrementExact(current.revision()), current.priceSource()));
-        incrementCommandRevision();
-        return true;
+        return triggerOps.updateTrailingTriggerOrder(triggerOrderId, highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis);
     }
 
-    /**
-     * 只有待触发、设置了到期时间且已到期的记录才转为 EXPIRED，其他情况返回 false。
-     */
     public boolean expireTriggerOrder(long triggerOrderId, long expiredAtEpochMillis) {
-        CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
-        if (current.status() != CoreTriggerOrderStatus.PENDING || current.expiresAtEpochMillis() == 0
-                || current.expiresAtEpochMillis() > expiredAtEpochMillis) return false;
-        updateTriggerOrder(current, CoreTriggerOrderStatus.EXPIRED, 0, current.triggerSequence(),
-                current.triggeredPriceTicks(), current.rejectReason(), expiredAtEpochMillis);
-        return true;
+        return triggerOps.expireTriggerOrder(triggerOrderId, expiredAtEpochMillis);
     }
 
-    /**
-     * 仅把更新时间不晚于给定界限的 TRIGGERING 记录恢复为 PENDING，清除子单关联及触发序号价格。
-     */
     public boolean retryTriggerOrder(long triggerOrderId,
                                     long staleBeforeEpochMillis, long retryAtEpochMillis) {
-        CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
-        if (current.status() != CoreTriggerOrderStatus.TRIGGERING
-                || current.updatedAtEpochMillis() > staleBeforeEpochMillis) return false;
-        updateTriggerOrder(current, CoreTriggerOrderStatus.PENDING, 0, 0, 0,
-                current.rejectReason(), retryAtEpochMillis);
-        return true;
-    }
-
-    /**
-     * 先检查命令版本容量，再用统一转换生成记录后状态、写入并递增命令版本。
-     */
-    private void updateTriggerOrder(CoreTriggerOrderState current,
-                                    CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
-                                    long triggeredPriceTicks, String rejectReason, long updatedAt) {
-        requireRevisionCapacity();
-        putTriggerOrder(current.transition(status, placedOrderId, triggerSequence,
-                triggeredPriceTicks, rejectReason, updatedAt));
-        incrementCommandRevision();
-    }
-
-    /**
-     * 校验运行时和正条件单编号，遵守原所有权并读取记录，不存在返回明确 TRIGGER_ORDER_NOT_FOUND 拒绝。
-     */
-    private CoreTriggerOrderState requireTriggerOrder(long triggerOrderId) {
-        if (triggerOrderId <= 0) throw new IllegalArgumentException("invalid runtime trigger order");
-        assertOwner();
-        CoreTriggerOrderState current = triggerOrder(triggerOrderId);
-        if (current == null) {
-            throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
-        }
-        return current;
-    }
-
-    /**
-     * 仅核对用户和条件单编号的基本有效性。
-     */
-    private static void requireTriggerInput(long userId, long triggerOrderId) {
-        if (userId <= 0 || triggerOrderId <= 0) {
-            throw new IllegalArgumentException("invalid runtime trigger order");
-        }
+        return triggerOps.retryTriggerOrder(triggerOrderId, staleBeforeEpochMillis, retryAtEpochMillis);
     }
 }

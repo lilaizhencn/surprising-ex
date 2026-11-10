@@ -14,7 +14,6 @@ import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.api.model.TriggerPriceSource;
 import com.surprising.trading.trigger.service.TriggerOrderService;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,13 +22,13 @@ import org.mockito.ArgumentCaptor;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-class BracketOrderCoordinatorTest {
+class BracketOrderDispatcherTest {
 
     @Test
     @DisplayName("主订单即时成交时自动部署止盈和止损触发单")
     void shouldDeployBracketTriggersOnImmediateFill() {
         TriggerOrderService triggerService = mock(TriggerOrderService.class);
-        BracketOrderCoordinator coordinator = new BracketOrderCoordinator(triggerService);
+        BracketOrderDispatcher dispatcher = new BracketOrderDispatcher(triggerService);
 
         // 买单开多，入场价 50000，止盈 55000，止损 48000
         PlaceOrderRequest request = new PlaceOrderRequest(
@@ -50,7 +49,7 @@ class BracketOrderCoordinatorTest {
                 Instant.now(), Instant.now()
         );
 
-        coordinator.registerBracket(request, response);
+        dispatcher.registerBracket(request, response);
 
         ArgumentCaptor<PlaceTriggerOrderRequest> captor = ArgumentCaptor.forClass(PlaceTriggerOrderRequest.class);
         verify(triggerService, times(2)).place(captor.capture());
@@ -84,7 +83,7 @@ class BracketOrderCoordinatorTest {
     @DisplayName("卖单开空即时成交时平仓方向为 BUY")
     void shouldDeployBracketTriggersForSellOrder() {
         TriggerOrderService triggerService = mock(TriggerOrderService.class);
-        BracketOrderCoordinator coordinator = new BracketOrderCoordinator(triggerService);
+        BracketOrderDispatcher dispatcher = new BracketOrderDispatcher(triggerService);
 
         // 卖单开空，入场价 50000，止盈 45000，止损 52000
         PlaceOrderRequest request = new PlaceOrderRequest(
@@ -105,7 +104,7 @@ class BracketOrderCoordinatorTest {
                 Instant.now(), Instant.now()
         );
 
-        coordinator.registerBracket(request, response);
+        dispatcher.registerBracket(request, response);
 
         ArgumentCaptor<PlaceTriggerOrderRequest> captor = ArgumentCaptor.forClass(PlaceTriggerOrderRequest.class);
         verify(triggerService, times(2)).place(captor.capture());

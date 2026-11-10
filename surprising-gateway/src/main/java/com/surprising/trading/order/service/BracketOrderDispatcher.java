@@ -16,17 +16,17 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * 开仓自带止盈止损协调器 (Bracket Order / TP-SL Coordinator)。
+ * 开仓自带止盈止损派发器 (Bracket Order / TP-SL Dispatcher)。
  * 恪守 KISS 原则，为主订单自动派发和维护止盈止损触发单。
  */
 @Service
-public class BracketOrderCoordinator {
-    private static final Logger log = LoggerFactory.getLogger(BracketOrderCoordinator.class);
+public class BracketOrderDispatcher {
+    private static final Logger log = LoggerFactory.getLogger(BracketOrderDispatcher.class);
 
     private final TriggerOrderService triggerOrderService;
     private final Map<Long, PlaceOrderRequest> pendingBrackets = new ConcurrentHashMap<>();
 
-    public BracketOrderCoordinator(TriggerOrderService triggerOrderService) {
+    public BracketOrderDispatcher(TriggerOrderService triggerOrderService) {
         this.triggerOrderService = triggerOrderService;
     }
 

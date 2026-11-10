@@ -13,6 +13,14 @@ public class InsuranceProperties {
     @Setter
     private volatile Coverage coverage = new Coverage();
 
+    public ProductLine getProductLine() {
+        return kafka.getProductLine();
+    }
+
+    public void setProductLine(ProductLine productLine) {
+        kafka.setProductLine(productLine);
+    }
+
     public void setKafka(Kafka kafka) {
         this.kafka = kafka == null ? new Kafka() : kafka;
     }

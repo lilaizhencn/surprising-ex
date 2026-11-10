@@ -99,7 +99,7 @@ public class OrderService {
     private final TradingMetricsService tradingMetrics;
     private final TradeProjectionRepository tradeProjection;
     private final ValkeyUserQueries realtimeQueries;
-    private final BracketOrderCoordinator bracketOrderCoordinator;
+    private final BracketOrderDispatcher bracketOrderDispatcher;
 
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderAeronGateway aeron, AeronOrderProjectionRepository aeronOrderProjection,
@@ -114,7 +114,7 @@ public class OrderService {
                         OrderAeronGateway aeron, AeronOrderProjectionRepository aeronOrderProjection,
                         MatchingMarketDataService bboOrderBook, TradingMetricsService tradingMetrics,
                         TradeProjectionRepository tradeProjection, ValkeyUserQueries realtimeQueries,
-                        @Autowired(required = false) BracketOrderCoordinator bracketOrderCoordinator) {
+                        @Autowired(required = false) BracketOrderDispatcher bracketOrderDispatcher) {
         this.properties = properties;
         this.orderValidator = orderValidator;
         this.aeron = aeron;
@@ -123,7 +123,7 @@ public class OrderService {
         this.tradingMetrics = tradingMetrics;
         this.tradeProjection = tradeProjection;
         this.realtimeQueries = realtimeQueries;
-        this.bracketOrderCoordinator = bracketOrderCoordinator;
+        this.bracketOrderDispatcher = bracketOrderDispatcher;
     }
 
     public ObjectNode tradingMetrics(int window, int limit, ProductLine requestedProduct) {
@@ -160,8 +160,8 @@ public class OrderService {
         requireAeron();
         PlaceOrderRequest prepared = prepareOrder(request);
         OrderResponse response = submitPlaceOrder(prepared);
-        if (bracketOrderCoordinator != null && prepared.hasBracketOrders() && response != null) {
-            bracketOrderCoordinator.registerBracket(prepared, response);
+        if (bracketOrderDispatcher != null && prepared.hasBracketOrders() && response != null) {
+            bracketOrderDispatcher.registerBracket(prepared, response);
         }
         return response;
     }
@@ -731,7 +731,7 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        ProductLine productLine = properties.getKafka().getProductLine();
+        ProductLine productLine = properties.getProductLine();
         return requireAeron().lifecycleOpenOrders(instrumentId, limit).stream()
                 .map(view -> requireLocalOrder(view, productLine))
                 .toList();
@@ -1180,7 +1180,7 @@ public class OrderService {
     }
 
     private ProductLine configuredProductLine() {
-        return requireProductLine(properties.getKafka().getProductLine());
+        return requireProductLine(properties.getProductLine());
     }
 
     private static ProductLine requireProductLine(ProductLine productLine) {
@@ -1494,7 +1494,7 @@ public class OrderService {
     }
 
     public ProductLine currentProductLine() {
-        return properties.getKafka().getProductLine();
+        return properties.getProductLine();
     }
 
     public enum CommandKind {

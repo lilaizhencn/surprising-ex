@@ -13,6 +13,13 @@ import jakarta.annotation.PostConstruct;
 public class TradingOrderProperties {
 
     @Setter
+    private ProductLine productLine;
+
+    public ProductLine getProductLine() {
+        return productLine != null ? productLine : (kafka != null ? kafka.getProductLine() : null);
+    }
+
+    @Setter
     private Kafka kafka = new Kafka();
     private EventPublish eventPublish = new EventPublish();
     @Setter
