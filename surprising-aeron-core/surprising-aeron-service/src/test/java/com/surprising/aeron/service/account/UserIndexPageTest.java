@@ -21,8 +21,8 @@ class UserIndexPageTest {
         CursorAwareUserSet users = new CursorAwareUserSet(java.util.List.of(1L, 2L, 3L, 4L, 5L));
 
         // 游标二之后最多取两个用户的实际分页结果。
-        UserIndexPage page =
-                UserIndexPage.select(users, 2L, 2);
+        AccountExposureIndex.Page page =
+                AccountExposureIndex.Page.select(users, 2L, 2);
 
         assertThat(users.tailCursor).isEqualTo(2L);
         assertThat(page.userIds()).containsExactly(3L, 4L);

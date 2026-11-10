@@ -1,8 +1,10 @@
 package com.surprising.aeron.model;
 
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.order.*;
+
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.snapshot.state.CoreStateHash;
 import com.surprising.aeron.service.snapshot.state.StateMapSupport;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -28,7 +30,7 @@ import java.util.TreeMap;
 public record TradingCoreState(
         ProductLine productLine,
         long revision,
-        Map<Long, CoreUserState> users,
+        Map<Long, UserAccountSnapshot> users,
         Map<Long, CoreOrderState> orders,
         Map<String, CoreInstrument> instruments,
         CoreRiskState riskState,
@@ -47,7 +49,7 @@ public record TradingCoreState(
                 || triggerOrders == null) {
             throw new IllegalArgumentException("invalid trading core state");
         }
-        Map<Long, CoreUserState> sortedUsers = StateMapSupport.freezeSorted(users);
+        Map<Long, UserAccountSnapshot> sortedUsers = StateMapSupport.freezeSorted(users);
         Map<Long, CoreOrderState> sortedOrders = StateMapSupport.freezeSorted(orders);
         sortedUsers.forEach((userId, user) -> validateUser(productLine, userId, user));
         sortedOrders.forEach((orderId, order) -> validateOrder(productLine, sortedUsers, orderId, order));
@@ -95,7 +97,7 @@ public record TradingCoreState(
      * @param cancelAllAfterTimers 按用户与范围键保存的全撤计时器
      * @param triggerOrders 按触发单 ID 保存的状态
      */
-    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
+    public TradingCoreState(ProductLine productLine, long revision, Map<Long, UserAccountSnapshot> users,
                             Map<Long, CoreOrderState> orders,
                             Map<String, CoreInstrument> instruments, CoreRiskState riskState,
                             CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
@@ -122,7 +124,7 @@ public record TradingCoreState(
      * @param userId 待读取、验证或排序的用户 ID
      * @param user 当前要验证或混合哈希的冷用户正文
      */
-    private static void validateUser(ProductLine productLine, long userId, CoreUserState user) {
+    private static void validateUser(ProductLine productLine, long userId, UserAccountSnapshot user) {
         if (userId != user.userId() || user.productLine() != productLine) {
             throw new IllegalArgumentException("user state belongs to another partition");
         }
@@ -135,7 +137,7 @@ public record TradingCoreState(
      * @param orderId 待读取、验证或盖提交元数据的订单号
      * @param order 当前要验证或混合哈希的冷订单正文
      */
-    private static void validateOrder(ProductLine productLine, Map<Long, CoreUserState> users,
+    private static void validateOrder(ProductLine productLine, Map<Long, UserAccountSnapshot> users,
                                       long orderId, CoreOrderState order) {
         if (orderId != order.orderId() || order.productLine() != productLine
                 || !users.containsKey(order.userId())) {
@@ -161,7 +163,7 @@ public record TradingCoreState(
      * @param id 触发单映射键，必须等于状态自身 ID
      * @param trigger 当前要验证用户及产品线归属的触发单
      */
-    private static void validateTrigger(ProductLine productLine, Map<Long, CoreUserState> users,
+    private static void validateTrigger(ProductLine productLine, Map<Long, UserAccountSnapshot> users,
                                          Object id, CoreTriggerOrderState trigger) {
         if (!id.equals(trigger.triggerOrderId()) || trigger.productLine() != productLine
                 || !users.containsKey(trigger.userId())) {
@@ -176,7 +178,7 @@ public record TradingCoreState(
         // 按既定业务字段顺序不断混合的哈希累计值
         long hash = CoreStateHash.mix(CoreStateHash.start(), com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(productLine));
         hash = CoreStateHash.mix(hash, revision);
-        for (CoreUserState /* 当前冷用户值或校验回调参数，删除项为空时跳过 */ user : users.values()) {
+        for (UserAccountSnapshot /* 当前冷用户值或校验回调参数，删除项为空时跳过 */ user : users.values()) {
             hash = hashUser(hash, user);
         }
         for (CoreOrderState /* 当前校验、比较提交元数据、派生客户端索引或混合哈希的冷订单 */ order : orders.values()) {
@@ -387,7 +389,7 @@ public record TradingCoreState(
      * @param initial 此前已经累计的哈希状态
      * @param user 当前要验证或混合哈希的冷用户正文
      */
-    static long hashUser(long initial, CoreUserState user) {
+    static long hashUser(long initial, UserAccountSnapshot user) {
         // 按既定业务字段顺序不断混合的哈希累计值
         long hash = CoreStateHash.mix(initial, com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(user.productLine()));
         hash = CoreStateHash.mix(hash, user.userId());
@@ -398,7 +400,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, balance.availableUnits());
             hash = CoreStateHash.mix(hash, balance.lockedUnits());
         }
-        for (OrderReservation /* 当前用户的订单预留，剩余为零时不参与业务哈希 */ reservation : user.reservations().values()) {
+        for (OrderFundsReservation.Snapshot /* 当前用户的订单预留，剩余为零时不参与业务哈希 */ reservation : user.reservations().values()) {
             if (reservation.remainingUnits() == 0) continue;
             hash = CoreStateHash.mix(hash, reservation.orderId());
             hash = CoreStateHash.mix(hash, reservation.instrumentId());

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -12,7 +14,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
@@ -30,7 +32,7 @@ public class ActiveOrderIndexBenchmark {
     @Param({"1", "4"}) public int symbols;
     private ActiveOrderIndex index;
     private RuntimeIdentityRegistry identities;
-    private final OrderRuntime[] open = new OrderRuntime[20], terminal = new OrderRuntime[20];
+    private final Order[] open = new Order[20], terminal = new Order[20];
 
     @Setup public void setup() {
         identities = new RuntimeIdentityRegistry();

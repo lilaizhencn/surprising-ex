@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassTransform;
 import java.lang.classfile.instruction.InvokeInstruction;
@@ -36,7 +38,7 @@ public final class CoreFaultAgent {
             public byte[] transform(ClassLoader loader, String name, Class<?> type,
                                     ProtectionDomain domain, byte[] bytes) {
                 // 是否是实际批量订单执行器类
-                boolean core = name.equals("com/surprising/aeron/service/order/OrderBatchExecutor");
+                boolean core = name.equals("com/surprising/aeron/service/order/OrderBatchProcessor");
                 // 是否是分块快照解析器的内部类
                 boolean snapshot = name.startsWith("com/surprising/aeron/service/snapshot/SectionedCoreSnapshotParser$");
                 if (!core && !snapshot) return null;
@@ -61,7 +63,7 @@ public final class CoreFaultAgent {
                                     builder.with(element);
                                     if (core && element instanceof InvokeInstruction /* 当前匹配到的调用指令，用其名称及必要的所属类筛选插入位置 */ invoke
                                             && invoke.name().equalsString("result")
-                                            && invoke.owner().asInternalName().endsWith("CommandSlot")) {
+                                            && invoke.owner().asInternalName().endsWith("OrderCommand")) {
                                         builder.aload(0).aload(1).invokestatic(hooks, "afterLaneContext",
                                                 MethodTypeDesc.ofDescriptor("(Ljava/lang/Object;Ljava/lang/Object;)V"));
                                     }

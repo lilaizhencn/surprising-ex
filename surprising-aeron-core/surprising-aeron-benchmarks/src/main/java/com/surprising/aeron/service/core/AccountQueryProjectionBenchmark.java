@@ -1,18 +1,20 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.account.UserRuntime;
+import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.AccountBalance;
+import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.query.state.RuntimeStateQueryService;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.order.OrderFundsReservation;
+import com.surprising.aeron.service.position.Position;
+import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -29,7 +31,7 @@ public class AccountQueryProjectionBenchmark {
     @Param({"USER", "ORDER", "CLIENT"}) public String queryType;
     private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
-    private AccountLaneState lane;
+    private AccountPartition lane;
     private long calls, startedCalls, startedMillis;
     private Interval interval;
 
@@ -45,14 +47,14 @@ public class AccountQueryProjectionBenchmark {
                 0, 0, 0, -1, 0));
         runtime.registerInstrument(instrument);
         int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
-        runtime.putUser(new UserRuntime(product, 7, 3, CorePositionMode.ONE_WAY));
-        runtime.putBalance(new BalanceRuntime(7, asset, 1000, 150));
-        runtime.putReservation(new ReservationRuntime(71, 7, symbol,
+        runtime.putUser(new UserAccount(product, 7, 3, CorePositionMode.ONE_WAY));
+        runtime.putBalance(new AccountBalance(7, asset, 1000, 150));
+        runtime.putReservation(new OrderFundsReservation(71, 7, symbol,
                 ReservationKind.DERIVATIVE_MARGIN, asset, 100, 0, 0, 2));
-        runtime.putPosition(identities.positionKey(7, "1"), new PositionRuntime(7, symbol, asset,
+        runtime.putPosition(identities.positionKey(7, "1"), new Position(7, symbol, asset,
                 CoreMarginMode.CROSS, CorePositionSide.NET, instrument, 2, 100, 200, 7, 50));
         runtime.putLeverage(new CoreLeverageKey(7, "1", CoreMarginMode.CROSS), 5_000_000);
-        runtime.putOrder(new OrderRuntime(71, product, 7, symbol, instrument, CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+        runtime.putOrder(new Order(71, product, 7, symbol, instrument, CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "query-71", new UUID(1, 71), 0, 0, 0,
                 1000, 1000, 9, CoreOrderStatus.OPEN, 1));
         runtime.putClientOrder(7, identities.clientKey(7, "query-71"), 71);
@@ -71,11 +73,11 @@ public class AccountQueryProjectionBenchmark {
     @Benchmark public byte[] projectAndEncode() {
         byte[] result = switch (queryType) {
             case "USER" -> CoreStateQueryCodec.encodeUserState(
-                    RuntimeStateQueryService.userState(runtime, lane, identities, 7, false).view());
+                    CoreQueryService.StateQueries.userState(runtime, lane, identities, 7, false).view());
             case "ORDER" -> CoreStateQueryCodec.encodeOrderState(
-                    RuntimeStateQueryService.orderState(runtime, lane, identities, 71, false).view());
+                    CoreQueryService.StateQueries.orderState(runtime, lane, identities, 71, false).view());
             case "CLIENT" -> CoreStateQueryCodec.encodeOrderState(
-                    RuntimeStateQueryService.clientOrderState(runtime, lane, identities, 7, "query-71").view());
+                    CoreQueryService.StateQueries.clientOrderState(runtime, lane, identities, 7, "query-71").view());
             default -> throw new IllegalArgumentException("unknown query type");
         };
         calls++;

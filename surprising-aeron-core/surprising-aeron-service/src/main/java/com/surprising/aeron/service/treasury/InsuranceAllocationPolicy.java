@@ -3,7 +3,7 @@ package com.surprising.aeron.service.treasury;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
+import com.surprising.aeron.service.risk.RiskScanner;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,18 +18,18 @@ import lombok.RequiredArgsConstructor;
 public final class InsuranceAllocationPolicy {
 
     /** 索赔固定顺序：触发价格序号、用户、合约名、持仓方向、强平编号。 */
-    private static final Comparator<LiquidationRuntime> CLAIM_ORDER = Comparator
-            .comparingLong(LiquidationRuntime::triggerPriceSequence)
-            .thenComparingLong(LiquidationRuntime::userId)
+    private static final Comparator<RiskScanner.LiquidationOrder> CLAIM_ORDER = Comparator
+            .comparingLong(RiskScanner.LiquidationOrder::triggerPriceSequence)
+            .thenComparingLong(RiskScanner.LiquidationOrder::userId)
             .thenComparing(value -> value.instrument().instrumentId())
             .thenComparingInt(value -> value.positionSide().ordinal())
-            .thenComparingLong(LiquidationRuntime::liquidationId);
+            .thenComparingLong(RiskScanner.LiquidationOrder::liquidationId);
 
     /** 当前命令或查询持有的按资产索赔引用分组，预算由账本读取；列表不是永久不可变副本，后续分配会原地排序，生命周期由调用方交接。 构造约定：接管当前命令或查询已准备的按资产索赔列表，不复制列表或权威账户状态。 参数 byAsset：当前调用独占的按资产索赔列表 Map，构造时接管引用 */
     @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class AllocationInputs {
         /** 当前命令或查询按结算资产保存的索赔列表，后续分配会原地排序，消费期间独占。 */
-        private final Map<Integer, ArrayList<LiquidationRuntime>> byAsset;
+        private final Map<Integer, ArrayList<RiskScanner.LiquidationOrder>> byAsset;
     }
 
     /**
@@ -43,10 +43,10 @@ public final class InsuranceAllocationPolicy {
             int[] assetIds, CoreInstrument[] instruments) {
         if (runtime.currentLaneCommandScope() == null) throw new IllegalStateException("insurance claim read requires Lane ownership");
         // 本次新建的结算资产到索赔列表分组。
-        Map<Integer, ArrayList<LiquidationRuntime>> byAsset = new HashMap<>();
+        Map<Integer, ArrayList<RiskScanner.LiquidationOrder>> byAsset = new HashMap<>();
         for (/* 当前候选、有效回执或已排序索赔列表下标。 */ int index = 0; index < ids.length; index++) {
             // 当前 Lane 回执或运行时查到的强平值，空值跳过。
-            LiquidationRuntime value = runtime.liquidation(ids[index]);
+            RiskScanner.LiquidationOrder value = runtime.liquidation(ids[index]);
             // 当前候选对应的规范合约对象，需与强平输入中的对象匹配。
             CoreInstrument instrument = instruments[index];
             if (value == null || value.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED
@@ -62,7 +62,7 @@ public final class InsuranceAllocationPolicy {
      */
     public static Map<Long, Long> allocations(TreasuryRuntime ledger, AllocationInputs[] laneClaims) {
         // 合并各 Lane 分组后新建的资产索赔 Map。
-        Map<Integer, ArrayList<LiquidationRuntime>> merged = new HashMap<>();
+        Map<Integer, ArrayList<RiskScanner.LiquidationOrder>> merged = new HashMap<>();
         for (AllocationInputs /* 本次准备或合并的索赔输入，包含当前调用持有的列表引用。 */ inputs : laneClaims) if (inputs != null)
             inputs.byAsset.forEach((/* 当前索赔所属结算资产编号。 */ assetId, /* 当前资产需要分配的独占索赔列表，排序会改变列表顺序。 */ claims) -> merged.computeIfAbsent(assetId, /* 创建该资产分组时回调收到的键，只需要新建列表，不再读取键。 */ ignored -> new ArrayList<>()).addAll(claims));
         Map<Long, Long> result = new HashMap<>();
@@ -79,11 +79,11 @@ public final class InsuranceAllocationPolicy {
      * @param ledger 当前线程独占的原财库
      * @return 顺序首项的预期覆盖金额；目标非首项、缺失或总缺口为零时返回 -1
      */
-    public static long resolve(LiquidationRuntime[] receipts, int count, long liquidationId,
+    public static long resolve(RiskScanner.LiquidationOrder[] receipts, int count, long liquidationId,
                                      int assetId, TreasuryRuntime ledger) {
-        ArrayList<LiquidationRuntime> claims = new ArrayList<>();
+        ArrayList<RiskScanner.LiquidationOrder> claims = new ArrayList<>();
         for (int index = 0; index < count; index++) {
-            LiquidationRuntime value = receipts[index];
+            RiskScanner.LiquidationOrder value = receipts[index];
             if (value != null) claims.add(value);
         }
         if (claims.isEmpty()) return -1;
@@ -94,7 +94,7 @@ public final class InsuranceAllocationPolicy {
         BigInteger total = BigInteger.ZERO;
         for (/* 当前候选、有效回执或已排序索赔列表下标。 */ int index = 0; index < claims.size(); index++) {
             // 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。
-            LiquidationRuntime claim = claims.get(index);
+            RiskScanner.LiquidationOrder claim = claims.get(index);
             total = total.add(BigInteger.valueOf(claim.deficitUnits()));
             if (claim.liquidationId() == liquidationId) targetIndex = index;
         }
@@ -107,7 +107,7 @@ public final class InsuranceAllocationPolicy {
         BigInteger allocated = BigInteger.ZERO;
         // 目标按比例整除得到的基础补偿，不含余数补一。
         long targetBase = 0;
-        for (LiquidationRuntime /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) {
+        for (RiskScanner.LiquidationOrder /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) {
             // 当前索赔按预算乘缺口再除总缺口得到的基础份额。
             BigInteger share = available.multiply(BigInteger.valueOf(claim.deficitUnits()))
                     .divide(total);
@@ -125,15 +125,15 @@ public final class InsuranceAllocationPolicy {
      * @param claims 当前调用独占的待保险索赔列表，分配方法会原地排序
      * @param result 接收强平编号到补偿金额的调用方结果 Map
      */
-    private static void allocateAsset(long availableUnits, ArrayList<LiquidationRuntime> claims, Map<Long, Long> result) {
+    private static void allocateAsset(long availableUnits, ArrayList<RiskScanner.LiquidationOrder> claims, Map<Long, Long> result) {
         claims.sort(CLAIM_ORDER);
         // 使用 BigInteger 汇总的同资产总缺口，避免长整数总额溢出。
         BigInteger total = BigInteger.ZERO;
-        for (LiquidationRuntime /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) total = total.add(BigInteger.valueOf(claim.deficitUnits()));
+        for (RiskScanner.LiquidationOrder /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) total = total.add(BigInteger.valueOf(claim.deficitUnits()));
         // 当前非负保险余额与同资产总缺口取小后的可分配预算。
         BigInteger available = BigInteger.valueOf(Math.max(0, availableUnits)).min(total);
         if (available.signum() == 0) {
-            for (LiquidationRuntime /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) result.put(claim.liquidationId(), 0L);
+            for (RiskScanner.LiquidationOrder /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) result.put(claim.liquidationId(), 0L);
             return;
         }
         // 当前资产每个已排序索赔的基础比例补偿原语数组。

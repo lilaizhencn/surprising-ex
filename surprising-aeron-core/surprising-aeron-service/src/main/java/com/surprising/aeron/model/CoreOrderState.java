@@ -1,11 +1,13 @@
 package com.surprising.aeron.model;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 
@@ -80,7 +82,7 @@ public record CoreOrderState(
                 || status == null || revision <= 0) {
             throw new IllegalArgumentException("invalid order state");
         }
-        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
+        instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         if (status == CoreOrderStatus.OPEN && executedQuantitySteps == quantitySteps) {
             throw new IllegalArgumentException("open order must have remaining quantity");
         }

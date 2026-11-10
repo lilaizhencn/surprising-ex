@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core.change;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -9,10 +11,10 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.service.account.AccountLaneState;
+import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -26,11 +28,11 @@ class OrderSlotReuseTest {
      * 创建指定编号、买入十步的已解析限价意图，带固定测试客户号及保证金预留参数。
      * @param id 测试订单编号，同时用于固定客户号
      */
-    private static ResolvedPlaceOrder intent(long id) {
+    private static OrderCommand.ResolvedPlaceOrder intent(long id) {
         // 用于构造已解析意图的限价下单业务命令。
         var order = new PlaceOrderCommand(id, "1", CoreOrderSide.BUY, 100, 10, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-" + id);
-        return new ResolvedPlaceOrder(order, CoreStateTestFixtures.runtimeInstrument(), 0, 100, 100, 100, 0, 0,
+        return new OrderCommand.ResolvedPlaceOrder(order, CoreStateTestFixtures.runtimeInstrument(), 0, 100, 100, 100, 0, 0,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
     /**
@@ -38,7 +40,7 @@ class OrderSlotReuseTest {
      */
     @Test void authoritativeOrderWaitsForResponseRetirementBeforeReinitialization() {
         // 当前线程持有的独立账户 Lane，直接控制回收水位。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         lane.assertOwner();
         // 最初由 Lane 准备的可回收权威订单对象。
         var first = lane.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, intent(1), new UUID(1, 1), 0, 100, 200, 0);
@@ -74,7 +76,7 @@ class OrderSlotReuseTest {
      */
     @Test void reservationReuseWaitsForItsOrderFenceAndKeepsIndependentValuesStable() {
         // 当前线程持有的独立账户 Lane，直接控制回收水位。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         lane.assertOwner();
         // 最初由 Lane 准备的可回收权威订单对象。
         var first = lane.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, intent(1), new UUID(1, 1), 0, 100, 200, 0);
@@ -119,7 +121,7 @@ class OrderSlotReuseTest {
         assertThat(retained.kind()).isEqualTo(ReservationKind.DERIVATIVE_MARGIN);
         assertThat(retained.releasedUnits()).isEqualTo(40);
         assertThat(retained.consumedUnits()).isEqualTo(60);
-        assertThatThrownBy(() -> ReservationRuntime.prepareForOrderSlot(retained, 4, 8, 0,
+        assertThatThrownBy(() -> OrderFundsReservation.prepareForOrderSlot(retained, 4, 8, 0,
                 ReservationKind.DERIVATIVE_MARGIN, 3, 100, 10)).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -128,9 +130,9 @@ class OrderSlotReuseTest {
      */
     @Test void afterImagesFreezeAtLaneCompletionAndMoveWithPhysicalBuffers() {
         // Lane 本次订单输出缓冲，完成时冻结其活引用。
-        var laneBuffer = new RuntimeOrderChangeBuffer();
+        var laneBuffer = new StateChangeBuffer.Orders();
         // Owner 接管物理存储后的独立消费缓冲。
-        var ownerBuffer = new RuntimeOrderChangeBuffer();
+        var ownerBuffer = new StateChangeBuffer.Orders();
         // 被 Lane 原位修改的活订单权威值。
         var source = CoreStateTestFixtures.order(1, 7, 0, 10);
         laneBuffer.putLive(1, source);

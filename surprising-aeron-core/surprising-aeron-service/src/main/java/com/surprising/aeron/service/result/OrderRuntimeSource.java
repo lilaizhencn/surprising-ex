@@ -1,23 +1,25 @@
 package com.surprising.aeron.service.result;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderStateSource;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.Order;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
 /**
- * 协议编码器使用的订单字段适配器，借用现有 OrderRuntime，不是订单快照；只有当前有效读取作用域内才能编码。
+ * 协议编码器使用的订单字段适配器，借用现有 Order，不是订单快照；只有当前有效读取作用域内才能编码。
  */
 public final class OrderRuntimeSource implements CoreOrderStateSource {
     /** 当前适配器借用的实际订单，清适配器时移除引用。 */
-    private OrderRuntime order;
+    private Order order;
     /** 与当前订单配对的协议币对文本。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -28,7 +30,7 @@ public final class OrderRuntimeSource implements CoreOrderStateSource {
      * @param order 当前有效状态读取边界中借用的订单
      * @param instrumentId 与该订单配对的协议币对文本
      */
-    public void set(OrderRuntime order, String instrumentId) {
+    public void set(Order order, String instrumentId) {
         this.order = order;
         this.instrumentId = instrumentId;
     }

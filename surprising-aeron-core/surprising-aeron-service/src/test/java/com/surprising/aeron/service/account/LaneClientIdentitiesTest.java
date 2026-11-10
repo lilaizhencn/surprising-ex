@@ -16,7 +16,7 @@ class LaneClientIdentitiesTest {
      */
     @Test void referencesProtectAnAliasUntilBothOrdersReleaseItAndRowsRecycle() throws Exception {
         // 真实 Lane 的身份行表，当前测试线程串行访问。
-        var table = new AccountLaneState(0, 16).clientIdentities();
+        var table = new AccountPartition(0, 16).clientIdentities();
         assertThat(table.prepare(11, 7, "客户😀", true)).isEqualTo(-11);
         assertThat(table.prepare(11, 7, "客户😀", true)).isEqualTo(11);
         table.rollback(11, 7, "客户😀");
@@ -44,7 +44,7 @@ class LaneClientIdentitiesTest {
      */
     @Test void collisionOverflowAndWrongRollbackDoNotChangeTheExistingIdentity() throws Exception {
         // 真实 Lane 的身份行表，当前测试线程串行访问。
-        var table = new AccountLaneState(0, 16).clientIdentities();
+        var table = new AccountPartition(0, 16).clientIdentities();
         table.prepare(17, 7, "original", true);
         assertThatThrownBy(() -> table.prepare(17, 8, "original", true)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> table.prepare(17, 7, "different", true)).isInstanceOf(IllegalStateException.class);
@@ -62,7 +62,7 @@ class LaneClientIdentitiesTest {
      */
     @Test void growthAndBackShiftDeletionKeepEveryLiveIdentityAcrossWraps() throws Exception {
         // 真实 Lane 的身份行表，当前测试线程串行访问。
-        var table = new AccountLaneState(0, 16).clientIdentities();
+        var table = new AccountPartition(0, 16).clientIdentities();
         // 滑动窗口始终保持的存活身份数量，一千零二十四。
         int live = 1024;
         for (/* 本轮需要准备、读取或释放的客户身份整数键。 */ long key = 1; key <= live; key++) table.prepare(key, 7, "id-" + key, true);
@@ -166,7 +166,7 @@ class LaneClientIdentitiesTest {
             assertThat(identities.clientOrderId(otherUser, 19)).isEqualTo("second-name");
             assertThat(identities.clientIdentityCount()).isOne();
             assertThatThrownBy(() -> identities.prepareClientKeyInLane(
-                    new AccountLaneState(secondLane.laneId(), 16), otherUser, "foreign"))
+                    new AccountPartition(secondLane.laneId(), 16), otherUser, "foreign"))
                     .isInstanceOf(IllegalStateException.class);
             runtime.startAccountLanes();
             // 计数为二的并发门闩，两条 Lane 都进入后才继续，检查互不阻塞。

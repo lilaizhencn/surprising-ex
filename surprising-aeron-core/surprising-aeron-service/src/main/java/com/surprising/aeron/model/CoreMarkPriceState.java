@@ -1,6 +1,8 @@
 package com.surprising.aeron.model;
 
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.*;
+
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 
 /**
  * 某个币对一版不可变的行情记录，把标记价、指数价、远期价和最新成交价与行情序号一起保存，供风险判断和条件单扫描使用。
@@ -34,7 +36,7 @@ public record CoreMarkPriceState(String instrumentId, long markPriceTicks,
      * 校验币对编号及行情范围：标记价、行情序号和时间必须为正，其余价格允许用 0 表示未提供。
      */
     public CoreMarkPriceState {
-        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
+        instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         if (markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0 || lastPriceTicks < 0
                 || priceSequence <= 0 || generatedAtEpochMillis <= 0) {
             throw new IllegalArgumentException("invalid mark price state");

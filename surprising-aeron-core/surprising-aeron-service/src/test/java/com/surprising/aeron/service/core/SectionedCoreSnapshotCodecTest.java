@@ -1,8 +1,10 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 
 import static com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.model.CoreOrderState;
@@ -22,10 +24,10 @@ import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
-import com.surprising.aeron.service.matcher.MatcherSnapshot;
+import com.surprising.aeron.service.matcher.OrderBookEngine;
+import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.result.CommandResultLedger;
 import com.surprising.aeron.service.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
@@ -302,8 +304,8 @@ class SectionedCoreSnapshotCodecTest {
         // 含合成 OPEN 买单的 Core 元数据状态。
         TradingCoreState tradingState = stateWithOpenBid();
         // 真实原生订单簿捕获并与该测试 Core 元数据配对的快照。
-        MatcherSnapshot matcherSnapshot;
-        try (/* 本测试创建的真实同步订单簿适配器，资源退出时关闭。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+        OrderBookSnapshot matcherSnapshot;
+        try (/* 本测试创建的真实同步订单簿适配器，资源退出时关闭。 */ OrderBookEngine adapter = new OrderBookEngine()) {
             assertThat(com.surprising.aeron.service.core.DirectMatcherTestInputs.placeDirect(adapter, 7, bid()).accepted()).isTrue();
             matcherSnapshot = matcherSnapshot(adapter,
                     43, 1, tradingState.businessStateHash(), tradingState,
@@ -537,7 +539,7 @@ class SectionedCoreSnapshotCodecTest {
         CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "1",
                 CoreOrderSide.BUY, 100, 2, 0, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(1L, order),
+                Map.of(7L, new UserAccountSnapshot(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(1L, order),
                 Map.of("1", CoreInstrument.from(ProductLine.SPOT,
                         new RegisterInstrumentCommand(
                                 "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0))),
@@ -574,7 +576,7 @@ class SectionedCoreSnapshotCodecTest {
     /**
      * 创建与合成 Core 挂单相同的一号品种、一号订单、价格一百、数量二的 GTC 买单撮合输入。
      */
-    private static ResolvedPlaceOrder bid() {
+    private static OrderCommand.ResolvedPlaceOrder bid() {
         return DirectMatcherTestInputs.order(
                 ProductLine.SPOT, 1, "1", CoreOrderSide.BUY, com.surprising.aeron.protocol.CoreOrderType.LIMIT,
                 com.surprising.aeron.protocol.CoreTimeInForce.GTC, 100, 2);

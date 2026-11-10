@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.position.Position;
+
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -36,9 +40,9 @@ import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.service.matcher.MatchingResult;
+import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.order.BenchmarkMatchingAwait;
-import com.surprising.aeron.service.order.ClusterCommandWindow;
+import com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayDeque;
@@ -69,7 +73,7 @@ public final class LinearPerpetualBenchmarkSupport {
     }
 
     /** 核对冷用户的资产总额，缺失资产按零计；不执行余额变更。 */
-    public static long totalUnits(com.surprising.aeron.service.account.CoreUserState user, String asset) {
+    public static long totalUnits(com.surprising.aeron.service.account.UserAccountSnapshot user, String asset) {
         var balance = user.balances().get(com.surprising.aeron.model.AssetBalance.normalizeAsset(asset));
         return balance == null ? 0 : totalUnits(balance);
     }
@@ -1163,7 +1167,7 @@ public final class LinearPerpetualBenchmarkSupport {
         private boolean deferBatchResponseValidation;
         /** Saturation runs use the same asynchronous command scope as Cluster ingress. */
         private boolean clusterMatchingPipeline;
-        private ClusterCommandWindow clusterCommandWindow;
+        private OrderCommandQueue.IngressWindow clusterCommandWindow;
         private byte[] deferredBatchResponseData;
         private int deferredBatchOperationWeight;
         private OpenLoopBusinessLatencyRecorder businessLatencies;
@@ -1297,7 +1301,7 @@ public final class LinearPerpetualBenchmarkSupport {
 
         public void useClusterMatchingPipeline() {
             clusterMatchingPipeline = true;
-            clusterCommandWindow = new ClusterCommandWindow(256);
+            clusterCommandWindow = new OrderCommandQueue.IngressWindow(256);
         }
 
         private PendingCommand submitCommand(CoreMessage command) {
@@ -1314,7 +1318,7 @@ public final class LinearPerpetualBenchmarkSupport {
             acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
             acceptedCoreMessages = Math.incrementExact(acceptedCoreMessages);
             int pendingBefore = state.pendingMatching().size();
-            ClusterCommandWindow.Entry windowEntry = null;
+            OrderCommandQueue.IngressWindow.Entry windowEntry = null;
             CoreResponse response;
             if (clusterMatchingPipeline
                     && TradingCoreRuntime.isMatchingCommand(command.header().messageType())) {
@@ -1424,7 +1428,7 @@ public final class LinearPerpetualBenchmarkSupport {
                             + " pendingCount=" + state.pendingMatching().size()
                             + " submittedCount=" + submittedMatching.size());
                 }
-                MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, pending.sequence);
+                OrderMatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, pending.sequence);
                 if (matching == null) continue;
                 nativeMatchingResult = matching.resultCode();
                 pending.response = state.commits.completeMatching(pending.sequence, matching,

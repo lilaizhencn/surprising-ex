@@ -27,7 +27,7 @@ import static org.mockito.ArgumentMatchers.*;
 /** Public local routes -> actual request controllers -> native services and authoritative scoped read views. */
 class ActiveOrderQueryBoundaryTest {
     final ValkeyUserQueries views=mock(ValkeyUserQueries.class);
-    final AeronOrderCommandService core=mock(AeronOrderCommandService.class);
+    final OrderAeronGateway core=mock(OrderAeronGateway.class);
     final TriggerOrderAeronGateway triggerCore=mock(TriggerOrderAeronGateway.class);
     final JsonMapper json=JsonMapper.builder().findAndAddModules().build();
     final jakarta.validation.ValidatorFactory validators=Validation.buildDefaultValidatorFactory();
@@ -38,7 +38,7 @@ class ActiveOrderQueryBoundaryTest {
         line=product;var properties=new TradingOrderProperties();properties.getKafka().setProductLine(line);
         var account=new AccountProperties();account.getKafka().setProductLine(line);
         var triggerProperties=new TriggerProperties();triggerProperties.setProductLine(line);
-        var order=new OrderService(properties,null,null,core,null,null,null,null,views);
+        var order=new OrderService(properties,null,core,null,null,null,null,views);
         var trigger=new TriggerOrderService(triggerProperties,triggerCore,views,null);
         var orders=new OrderRequestHandler(order,mock(AlgoOrderService.class),mock(CancelAllAfterService.class));
         var triggers=new TriggerOrderRequestHandler(trigger,order);

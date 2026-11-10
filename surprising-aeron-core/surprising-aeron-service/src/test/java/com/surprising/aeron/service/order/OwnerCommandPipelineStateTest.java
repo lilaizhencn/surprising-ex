@@ -17,7 +17,7 @@ class OwnerCommandPipelineStateTest {
     @Test
     void controlCompletionAcceptsOnlyItsSequenceWithAnEmptyTradingWindow() {
         // 直接测试的 Owner 调度状态，不带真实交易运行时。
-        var state = new OwnerCommandPipelineState();
+        var state = new OrderCommandQueue.PipelineState();
         state.rememberMatchingResponseSequence(7);
         // 人工构造的指定序号 APPLIED 响应。
         var response = new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
@@ -40,7 +40,7 @@ class OwnerCommandPipelineStateTest {
     @Test
     void dependencyWaitSurvivesUnrelatedRetirementAndEndsAtActualBlocker() {
         // 直接测试的 Owner 调度状态，不带真实交易运行时。
-        var state = new OwnerCommandPipelineState();
+        var state = new OrderCommandQueue.PipelineState();
         // 当前被记录为依赖阻塞的请求对象。
         var request = request(9);
         add(state, 1);
@@ -68,7 +68,7 @@ class OwnerCommandPipelineStateTest {
     @Test
     void controlFenceWaitsForWholeWindowAndResetDropsReferences() {
         // 直接测试的 Owner 调度状态，不带真实交易运行时。
-        var state = new OwnerCommandPipelineState();
+        var state = new OrderCommandQueue.PipelineState();
         // 当前被记录为依赖阻塞的请求对象。
         var request = request(9);
         add(state, 1);
@@ -89,7 +89,7 @@ class OwnerCommandPipelineStateTest {
     @Test
     void headBoundaryUsesWindowEntryEvenWithoutMatchingSequence() {
         // 直接测试的 Owner 调度状态，不带真实交易运行时。
-        var state = new OwnerCommandPipelineState();
+        var state = new OrderCommandQueue.PipelineState();
         add(state, 1);
         // 当前未绑定撮合序号的窗口首条目。
         var head = state.commandWindow().get(0);
@@ -107,7 +107,7 @@ class OwnerCommandPipelineStateTest {
      * 顺序建立并结束一个队首提交边界，不执行实际业务完成校验。
      * @param state 当前 Owner 调度状态
      */
-    private static void retire(OwnerCommandPipelineState state) {
+    private static void retire(OrderCommandQueue.PipelineState state) {
         state.beginHeadCommit();
         state.finishHeadCommit();
     }
@@ -117,7 +117,7 @@ class OwnerCommandPipelineStateTest {
      * @param state 当前 Owner 调度状态
      * @param id 测试请求的用户、源序号及相关身份编号
      */
-    private static void add(OwnerCommandPipelineState state, long id) {
+    private static void add(OrderCommandQueue.PipelineState state, long id) {
         // 当前状态持有的响应 FIFO。
         var window = state.commandWindow();
         window.resetCandidate(id);

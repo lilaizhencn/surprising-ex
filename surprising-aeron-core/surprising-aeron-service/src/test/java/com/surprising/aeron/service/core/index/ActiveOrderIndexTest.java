@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
@@ -14,7 +16,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.instrument.api.model.ContractType;
@@ -113,7 +115,7 @@ class ActiveOrderIndexTest {
             // 本用例 Owner 活跃订单路由索引
             var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
             // 本用例订单集合，终态测试为运行时数组，冷重建测试为按订单号映射
-            var orders = new com.surprising.aeron.service.order.state.OrderRuntime[3];
+            var orders = new com.surprising.aeron.service.order.Order[3];
             for (/* 当前构造三份对照订单的数组下标 */ int i = 0; i < orders.length; i++) {
                 // 当前构造、转为运行时或更新的测试订单
                 var order = new CoreOrderState(i + 1, ProductLine.SPOT, i < 2 ? 7 : 8, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
@@ -185,7 +187,7 @@ class ActiveOrderIndexTest {
     }
 
     /**
-     * 检查路由没有 OrderRuntime 字段，部分成交仍 OPEN 时复用同一个路由对象，终态时撤掉成员。
+     * 检查路由没有 Order 字段，部分成交仍 OPEN 时复用同一个路由对象，终态时撤掉成员。
      */
     @Test
     void runtimeUpdatesRetainRoutingOnlyAndRetireTerminalMembership() {
@@ -203,7 +205,7 @@ class ActiveOrderIndexTest {
         assertThat(route.userId()).isEqualTo(7);
         assertThat(route.instrumentId()).isEqualTo("1");
         assertThat(java.util.Arrays.stream(route.getClass().getDeclaredFields()).map(/* 当前反射字段，检查其值或类型以确认路由不含订单正文 */ field -> field.getType().getName()))
-                .doesNotContain(com.surprising.aeron.service.order.state.OrderRuntime.class.getName());
+                .doesNotContain(com.surprising.aeron.service.order.Order.class.getName());
         index.apply(1, CoreStateTestFixtures.filledOrder(order, 4, 6, 3, CoreOrderStatus.OPEN, 2), identities);
         assertThat(index.activeOrderRoute(1)).isSameAs(route);
         assertThat(index.page(7, "1", 0, 10).orderIds()).containsExactly(1L);
@@ -254,8 +256,8 @@ class ActiveOrderIndexTest {
         }
         // 包含本用例用户、合约和订单的冷状态
         var state = new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(11L, new CoreUserState(ProductLine.SPOT, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
-                        12L, new CoreUserState(ProductLine.SPOT, 12, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), orders,
+                Map.of(11L, new UserAccountSnapshot(ProductLine.SPOT, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
+                        12L, new UserAccountSnapshot(ProductLine.SPOT, 12, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), orders,
                 instruments(ProductLine.SPOT, "1", "2"), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例 Owner 活跃订单路由索引
         var index = new ActiveOrderIndex(state);
@@ -282,7 +284,7 @@ class ActiveOrderIndexTest {
                 CoreOrderStatus.OPEN, 1);
         // 用来投影账户准入索引的原 U 本位永续冷状态
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(11L, new CoreUserState(ProductLine.LINEAR_PERPETUAL, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+                Map.of(11L, new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
                 Map.of(7L, opening, 8L, reducing), instruments(ProductLine.LINEAR_PERPETUAL, "1"),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
@@ -317,7 +319,7 @@ class ActiveOrderIndexTest {
         CoreOrderState order = new CoreOrderState(7, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 100, 5, 0, false, CoreOrderStatus.OPEN, 1);
         // 包含本用例用户、合约和订单的冷状态
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(11L, new CoreUserState(ProductLine.SPOT, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(7L, order),
+                Map.of(11L, new UserAccountSnapshot(ProductLine.SPOT, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(7L, order),
                 instruments(ProductLine.SPOT, "1"), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
 
         // 本用例 Owner 活跃订单路由索引
@@ -338,7 +340,7 @@ class ActiveOrderIndexTest {
         }
         // 包含本用例用户、合约和订单的冷状态
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(11L, new CoreUserState(ProductLine.SPOT, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), orders,
+                Map.of(11L, new UserAccountSnapshot(ProductLine.SPOT, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), orders,
                 instruments(ProductLine.SPOT, "1"), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例 Owner 活跃订单路由索引
         ActiveOrderIndex index = new ActiveOrderIndex(state);
@@ -371,8 +373,8 @@ class ActiveOrderIndexTest {
         CoreOrderState third = new CoreOrderState(8, ProductLine.SPOT, 12, "1", CoreOrderSide.BUY, 102, 1, 0, false, CoreOrderStatus.OPEN, 1);
         // 包含本用例用户、合约和订单的冷状态
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(11L, new CoreUserState(ProductLine.SPOT, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
-                        12L, new CoreUserState(ProductLine.SPOT, 12, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+                Map.of(11L, new UserAccountSnapshot(ProductLine.SPOT, 11, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
+                        12L, new UserAccountSnapshot(ProductLine.SPOT, 12, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
                 Map.of(7L, first, 8L, third, 9L, second), instruments(ProductLine.SPOT, "1"), CoreRiskState.empty(),
                 CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例 Owner 活跃订单路由索引

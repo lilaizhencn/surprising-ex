@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -889,7 +891,7 @@ class RuntimeCommitRecoveryTest {
         // 本次原命令对应的 Core 撮合序号
         long sequence = state.matchingSequence(command.header().commandId());
         // 指定原序号的 Matcher 结果，尚未就绪时为空
-        com.surprising.aeron.service.matcher.MatchingResult matching = null;
+        com.surprising.aeron.service.matcher.OrderMatchingResult matching = null;
         // 当前撮合、结算或回调推进阶段的五秒截止时间，各阶段分别计算
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
@@ -1034,10 +1036,10 @@ class RuntimeCommitRecoveryTest {
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      * @param sequence 要等待的原 Core 撮合序号
      */
-    private static com.surprising.aeron.service.matcher.MatchingResult awaitMatching(
+    private static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatching(
             TradingCoreRuntime state, long sequence) {
         // 指定原序号的 Matcher 结果，尚未就绪时为空
-        com.surprising.aeron.service.matcher.MatchingResult matching = null;
+        com.surprising.aeron.service.matcher.OrderMatchingResult matching = null;
         // 当前撮合、结算或回调推进阶段的五秒截止时间，各阶段分别计算
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
@@ -1356,7 +1358,7 @@ class RuntimeCommitRecoveryTest {
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
     private static void assertNoUnfinishedCommands(TradingCoreRuntime state) throws Exception {
-        assertThat(state.factContextActive).isFalse();
+        assertThat(state.factContextActive()).isFalse();
         assertThat(state.directCommand.active()).isFalse();
         assertThat(state.pendingMatching().size()).isZero();
         assertThat(state.pendingMatching().inFlight()).isZero();
@@ -1380,7 +1382,7 @@ class RuntimeCommitRecoveryTest {
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
     private static Map<String, Map<String, Object>> allIndexSnapshots(TradingCoreRuntime state) throws Exception {
-        var indexes = state.factIndexes;
+        var indexes = state.factIndexes();
         return Map.ofEntries(
                 Map.entry("position-user", indexSnapshot(indexes.positionUsers())),
                 Map.entry("open-interest", indexSnapshot(indexes.openInterest())),
@@ -1451,7 +1453,7 @@ class RuntimeCommitRecoveryTest {
     private static Object canonicalIndexValue(Object value) {
         if (value instanceof com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry /* 当前冷重建或规范化取内容的原身份字典 */ identities)
             return com.surprising.aeron.service.core.identity.IdentityTestContents.capture(identities); // 比较身份事实，不导出另一套可恢复格式。
-        if (value instanceof com.surprising.aeron.service.order.state.OrderRuntime /* 当前原订单，取文本比较跨恢复合约对象身份 */ order)
+        if (value instanceof com.surprising.aeron.service.order.Order /* 当前原订单，取文本比较跨恢复合约对象身份 */ order)
             return order.toString(); // 恢复后合约对象身份可不同，用本测试既有订单文本规则对照。
         if (value == null) return "<null>";
         if (value.getClass().getName().startsWith("com.surprising.aeron.service.core.index.OpenInterestIndex$")) {

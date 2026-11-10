@@ -30,7 +30,6 @@ import com.surprising.marketmaker.provider.repository.MarketMakerRunEventReposit
 import com.surprising.marketmaker.provider.store.MarketMakerStrategyOverrideStore;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPriceResponse;
-import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.BatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -87,7 +86,7 @@ public class MarketMakerService {
 
     private final MarketMakerProperties properties;
     private final InstrumentSnapshotCache instrumentSnapshotCache;
-    private final LatestMarkPriceCache markPriceCache;
+    private final MarketMakerMarkPriceCache markPriceCache;
     private final MarketDataRpcApi marketDataRpcApi;
     private final OrderRpcApi orderRpcApi;
     private final AccountRpcApi accountRpcApi;
@@ -108,7 +107,7 @@ public class MarketMakerService {
 
     @Autowired
     public MarketMakerService(MarketMakerProperties properties,
-                              LatestMarkPriceCache markPriceCache,
+                              MarketMakerMarkPriceCache markPriceCache,
                               MarketDataRpcApi marketDataRpcApi,
                               OrderRpcApi orderRpcApi,
                               AccountRpcApi accountRpcApi,
@@ -626,6 +625,39 @@ public class MarketMakerService {
             completed |= runStrategySymbol(strategy, state, cycleSequence, instrumentId, tradeAfterQuote);
         }
         return completed;
+    }
+
+    /**
+     * 当合约规格或状态发生变更时，由定时刷新器实时调用以动态调整做市状态。
+     * 若合约处于非交易状态（如停牌或交割），立即撤销盘口挂单排空流动性，防止非交易状态残留挂单。
+     */
+    public void onInstrumentStatusChanged(ProductLine productLine, String instrumentId, boolean isTradable) {
+        if (!isTradable) {
+            Instant now = Instant.now();
+            ProductLine previousProductLine = MarketMakerProductLineContext.current();
+            MarketMakerProductLineContext.set(productLine);
+            try {
+                for (var strategy : properties.getStrategies()) {
+                    if (strategy.getProductLine() == productLine && strategy.getInstrumentIds().contains(instrumentId)) {
+                        StrategyRuntimeState state = state(strategy);
+                        for (long accountId : strategy.getAccountIds()) {
+                            String prefix = accountPrefix(strategy, instrumentId, accountId);
+                            var requests = openOrders(productLine, accountId, instrumentId, now).stream()
+                                    .filter(this::isLive).filter(order -> ownsOrder(prefix, order))
+                                    .map(order -> new CancelOrderRequest(accountId, order.orderId())).toList();
+                            if (!requests.isEmpty()) {
+                                var result = cancelOrders(productLine, accountId, instrumentId, requests);
+                                state.addCanceled(result.completed());
+                                recordRunEvent(strategy, instrumentId, accountId, state.cycleSequence(), "INSTRUMENT_SUSPENDED_DRAIN",
+                                        0, result.completed(), result.failed().size(), "INSTRUMENT_NOT_TRADING", null, now);
+                            }
+                        }
+                    }
+                }
+            } finally {
+                MarketMakerProductLineContext.set(previousProductLine);
+            }
+        }
     }
 
     private boolean runStrategySymbol(MarketMakerProperties.Strategy strategy,

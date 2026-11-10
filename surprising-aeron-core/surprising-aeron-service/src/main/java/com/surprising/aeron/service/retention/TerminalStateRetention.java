@@ -2,7 +2,7 @@ package com.surprising.aeron.service.retention;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.change.LaneCommitDelta;
+import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.result.FundsCommandIndex;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -60,7 +60,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      * @param delta 已经完成的 Lane 回执，读取其终态订单槽
      */
     @Override
-    public void acceptBatch(LaneCommitDelta delta) {
+    public void acceptBatch(AccountPartitionCommit.Delta delta) {
         for (/* 当前回执槽或快照记录的遍历下标 */ int index = 0; index < delta.terminalOrderCount(); index++) {
             accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
                     delta.terminalOrderClient(index));

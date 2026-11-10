@@ -1,8 +1,10 @@
 package com.surprising.aeron.service.matcher;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 
 import static com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
@@ -14,7 +16,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
@@ -35,23 +37,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DeterministicExchangeCoreAdapterTest {
 
     @Test void controlBatchPreservesEmptySuccessAndFailureBeforeAnyMutation() {
-        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (var adapter = new OrderBookEngine()) {
             placeDirect(adapter, 7, bid(3, 80));
             var empty = adapter.cancelControlOrders(2, new java.util.UUID(7, 2), 1000, List.of());
             assertThat(empty.accepted()).isTrue();
             assertThat(empty.cancellations()).isEmpty();
             assertThat(empty.matcherEvents()).isEmpty();
             var rejected = adapter.cancelControlOrders(3, new java.util.UUID(7, 3), 1000, List.of(
-                    new DeterministicExchangeCoreAdapter.CancellationOrder(2, 7, "1"),
-                    new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
-            assertThat(rejected.outcome()).isEqualTo(MatchingResult.Outcome.REJECTED_UNCHANGED);
+                    new OrderBookEngine.CancellationOrder(2, 7, "1"),
+                    new OrderBookEngine.CancellationOrder(3, 7, "1")));
+            assertThat(rejected.outcome()).isEqualTo(OrderMatchingResult.Outcome.REJECTED_UNCHANGED);
             assertThat(rejected.resultCode()).isEqualTo("MATCHING_UNKNOWN_ORDER_ID");
             assertThat(rejected.cancellations()).containsExactly(
-                    new CoreCancellationResult(2, false), new CoreCancellationResult(3, false));
+                    new OrderCancelResult(2, false), new OrderCancelResult(3, false));
             var single = adapter.cancelControlOrders(4, new java.util.UUID(7, 4), 1000, List.of(
-                    new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
+                    new OrderBookEngine.CancellationOrder(3, 7, "1")));
             assertThat(single.accepted()).isTrue();
-            assertThat(single.cancellations()).containsExactly(new CoreCancellationResult(3, true));
+            assertThat(single.cancellations()).containsExactly(new OrderCancelResult(3, true));
             assertThat(single.matcherEvents()).hasSize(1);
         }
     }
@@ -60,16 +62,16 @@ class DeterministicExchangeCoreAdapterTest {
         var first = MatcherEventFixtures.trade(1, 7, 100, 1, false, true);
         var second = MatcherEventFixtures.trade(2, 8, 100, 1, true, true);
         var source = new ArrayList<MatcherResult.MatcherEvent>(List.of(first));
-        var one = new CoreMatchingResult(true, "SUCCESS", List.of(), false, source);
-        var two = new CoreMatchingResult(true, "SUCCESS", List.of(), false, List.of(second));
-        var events = CoreMatchingResult.concatenateEvents(List.of(one, result(true, "SUCCESS"), two));
+        var one = new OrderMatchingResult.Control(true, "SUCCESS", List.of(), false, source);
+        var two = new OrderMatchingResult.Control(true, "SUCCESS", List.of(), false, List.of(second));
+        var events = OrderMatchingResult.Control.concatenateEvents(List.of(one, result(true, "SUCCESS"), two));
         source.clear();
         assertThat(events).containsExactly(first, second);
         assertThat(events.get(0)).isSameAs(first);
         assertThat(events.get(1)).isSameAs(second);
         assertThatThrownBy(() -> events.add(first)).isInstanceOf(UnsupportedOperationException.class);
-        var combined = new CoreMatchingResult(true, "SUCCESS", List.of(), false, events);
-        assertThat(CoreMatchingResult.concatenateEvents(List.of(combined, two)))
+        var combined = new OrderMatchingResult.Control(true, "SUCCESS", List.of(), false, events);
+        assertThat(OrderMatchingResult.Control.concatenateEvents(List.of(combined, two)))
                 .containsExactly(first, second, second);
     }
 
@@ -78,7 +80,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void directCommandRejectsMissingSettlementBeforeChangingTheBook() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 1, 7, 1, 1000, 7, bid(1, 90), null))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
@@ -90,7 +92,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void failedDirectPrefixRetainsEarlierCancellationAndNeverSubmitsThePlacement() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             placeDirect(adapter, 7, bid(1, 90));
             // 本次待提交或用于前置 Core 元数据的订单。
             var order = bid(3, 80);
@@ -105,7 +107,7 @@ class DeterministicExchangeCoreAdapterTest {
             adapter.publishDirectPrefixFailure(adapter.matcherShardId("1"), 3, id, 3, failure, target);
             assertThat(target.accepted()).isFalse();
             assertThat(target.plan().preCancellationCount()).isEqualTo(1);
-            assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.FATAL_DIVERGENCE);
+            assertThat(target.outcome()).isEqualTo(OrderMatchingResult.Outcome.FATAL_DIVERGENCE);
             assertThat(target.nativeMatches(id.getMostSignificantBits(), id.getLeastSignificantBits())).isTrue();
             assertThat(target.plan().takerOrderId()).isEqualTo(3);
             assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
@@ -117,7 +119,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void depthQueriesDoNotDiscardRestingOrdersBeyondVisibleLevels() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             for (/* 当前正在构造的价格档位下标。 */ int level = 0; level < 151; level++) {
                 assertThat(placeDirect(adapter, 11, DirectMatcherTestInputs.order(
                         ProductLine.SPOT, 1000 + level, "21", CoreOrderSide.SELL, CoreOrderType.LIMIT,
@@ -147,7 +149,7 @@ class DeterministicExchangeCoreAdapterTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.MethodSource("linearMarketSides")
     void linearMarketOrderCannotSweepBeyondOneBasisPoint(ProductLine product, CoreOrderSide side) {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             // 当前参数是否买入，决定 Maker 方向和递进价格符号。
             boolean buy = side == CoreOrderSide.BUY;
             // 为市价单提供深度的反向 Maker 方向。
@@ -184,7 +186,7 @@ class DeterministicExchangeCoreAdapterTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "LINEAR_DELIVERY"})
     void marketSlippageRoundingDoesNotAllowAnExtraTick(ProductLine product) {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             placeDirect(adapter, 11, DirectMatcherTestInputs.order(
                     product, 101, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 99, 2));
             placeDirect(adapter, 11, DirectMatcherTestInputs.order(
@@ -203,7 +205,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void nativeCancellationPreservesEvidenceForPartialFillsAndRepeatedCancellation() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             // 本次待提交或用于前置 Core 元数据的订单。
             var order = DirectMatcherTestInputs.order(
                     ProductLine.SPOT, 901, "31", CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
@@ -219,7 +221,7 @@ class DeterministicExchangeCoreAdapterTest {
             // 第二次撤相同订单时的未改状态拒绝结果。
             var rejected = cancelDirect(adapter, 4, new java.util.UUID(7, 4), 4000, 7, 901, "31");
             assertThat(rejected.accepted()).isFalse();
-            assertThat(rejected.outcome()).isEqualTo(MatchingResult.Outcome.REJECTED_UNCHANGED);
+            assertThat(rejected.outcome()).isEqualTo(OrderMatchingResult.Outcome.REJECTED_UNCHANGED);
             assertThat(rejected.nativeCoreSequence()).isEqualTo(4);
             assertThat(rejected.nativeMatches(7, 4)).isTrue();
             assertThat(rejected.plan().takerOrderId()).isEqualTo(901);
@@ -233,7 +235,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void nativePlacementHonorsPoisonAndValidatesEvidenceBeforeMatching() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             // 本次待提交或用于前置 Core 元数据的订单。
             var order = bid(901, 90);
             // 原命令 UUID，或构造控制分片前置订单时的普通订单编号。
@@ -257,9 +259,9 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void directPlacementRetainsEvidenceWithoutChangingEarlierSlots() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             // 首个直接命令回执，或当前时间复用测试的第一条回执。
-            MatchingResult first = null;
+            OrderMatchingResult first = null;
             for (/* 当前连续下单或发起异步查询的循环下标。 */ int i = 1; i <= 4; i++) {
                 // 本次待提交或用于前置 Core 元数据的订单。
                 var order = DirectMatcherTestInputs.order(
@@ -288,7 +290,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void registeredSymbolLookupDoesNotAcquireRegistrationMonitor() throws Exception {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             // 先注册币对二十二后得到的预期分片编号。
             int expected = adapter.matcherShardId("22");
             synchronized (adapter) {
@@ -313,7 +315,7 @@ class DeterministicExchangeCoreAdapterTest {
         // 测试前系统属性原值，结束时按是否为空恢复或移除。
         String previous = System.getProperty("surprising.aeron.matching-engines");
         System.setProperty("surprising.aeron.matching-engines", "2");
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             // 正在寻找与第一币对不同分片的第二币对编号文本。
             // 第一个测试币对编号文本，作为高原生序号的前置分片。
             String first = "25", second = "26";
@@ -327,12 +329,12 @@ class DeterministicExchangeCoreAdapterTest {
             var firstNative = adapter.cancelControlOrder(1000, 7, 16, Integer.parseInt(first));
             // 第一控制撤单完成后的业务证据回执。
             var a = adapter.completeControlCancellations(18, new java.util.UUID(7, 18), 1000,
-                    List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(16, 7, first)), List.of(firstNative));
+                    List.of(new OrderBookEngine.CancellationOrder(16, 7, first)), List.of(firstNative));
             // 另一实际订单簿分片上的控制撤单原生结果。
             var secondNative = adapter.cancelControlOrder(1000, 8, 17, Integer.parseInt(second));
             // 第二控制撤单完成后的业务证据回执。
             var b = adapter.completeControlCancellations(19, new java.util.UUID(8, 19), 1000,
-                    List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(17, 8, second)), List.of(secondNative));
+                    List.of(new OrderBookEngine.CancellationOrder(17, 8, second)), List.of(secondNative));
             assertThat(a.accepted()).isTrue();
             assertThat(b.accepted()).isTrue();
             // 从实际 Matcher 输出比较两个订单簿的原生进度，不要求控制回执保存原生对象。
@@ -351,7 +353,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void reusedCommandScopeDoesNotLeakTimestampIntoTheNextCommand() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             // 首个直接命令回执，或当前时间复用测试的第一条回执。
             var first = placeDirect(adapter, 1, new java.util.UUID(0, 1), 1234, 7, bid(901, 90));
             // 时间复用场景的第二条直接命令回执。
@@ -369,18 +371,18 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void cancelBatchStopsAtFirstFailureAndReturnsSuccessfulPrefix() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             placeDirect(adapter, 7, bid(1, 90));
             placeDirect(adapter, 7, bid(3, 80));
             // 当前直接命令取得的撮合回执。
             var result = adapter.cancelControlOrders(4, new java.util.UUID(7, 4), 1000, List.of(
-                    new DeterministicExchangeCoreAdapter.CancellationOrder(1, 7, "1"),
-                    new DeterministicExchangeCoreAdapter.CancellationOrder(2, 7, "1"),
-                    new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
+                    new OrderBookEngine.CancellationOrder(1, 7, "1"),
+                    new OrderBookEngine.CancellationOrder(2, 7, "1"),
+                    new OrderBookEngine.CancellationOrder(3, 7, "1")));
             assertThat(result.accepted()).isFalse();
-            assertThat(result.outcome()).isEqualTo(MatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
+            assertThat(result.outcome()).isEqualTo(OrderMatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
             assertThat(result.resultCode()).isEqualTo("MATCHING_UNKNOWN_ORDER_ID");
-            assertThat(result.cancellations()).extracting(CoreCancellationResult::orderId, CoreCancellationResult::accepted)
+            assertThat(result.cancellations()).extracting(OrderCancelResult::orderId, OrderCancelResult::accepted)
                     .containsExactly(org.assertj.core.groups.Tuple.tuple(1L, true),
                             org.assertj.core.groups.Tuple.tuple(2L, false), org.assertj.core.groups.Tuple.tuple(3L, false));
             assertThat(cancelDirect(adapter, 5, new java.util.UUID(7, 5), 1000, 7, 3, "1").accepted()).isTrue();
@@ -392,7 +394,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void rejectedPostOnlyPlacementRetainsSuccessfulDirectCancellationPrefix() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             placeDirect(adapter, 7, bid(1, 100));
             placeDirect(adapter, 8, ask(2, 110));
             // 当前需要准备并直接执行的撮合订单。
@@ -407,7 +409,7 @@ class DeterministicExchangeCoreAdapterTest {
             adapter.placeDirect(adapter.matcherShardId("1"), 3, id.getMostSignificantBits(), id.getLeastSignificantBits(), 1000, 7, command, target);
             assertThat(target.accepted()).isFalse();
             assertThat(target.plan().preCancellationCount()).isEqualTo(1);
-            assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
+            assertThat(target.outcome()).isEqualTo(OrderMatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
         }
     }
 
@@ -416,7 +418,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void consumesImmutableMatcherResultWithoutPerCommandStateReports() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             placeDirect(adapter, 11, ask(101, 100));
             placeDirect(adapter, 12, ask(102, 100));
             // 当前需要准备并直接执行的撮合订单。
@@ -436,11 +438,11 @@ class DeterministicExchangeCoreAdapterTest {
     /** 控制业务证据递增并保留原 Core 序号、UUID 和固定控制分片。 */
     @Test
     void matcherEvidenceAdvancesSequences() {
-        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
+        var ledger = new OrderBookEngine.MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
         var first = ledger.bindControl(1, new java.util.UUID(0, 1),
-                ledger.nextSequence(-1), new CoreMatchingResult(true, "SUCCESS"));
+                ledger.nextSequence(-1), new OrderMatchingResult.Control(true, "SUCCESS"));
         var second = ledger.bindControl(2, new java.util.UUID(0, 2),
-                ledger.nextSequence(-1), new CoreMatchingResult(true, "SUCCESS"));
+                ledger.nextSequence(-1), new OrderMatchingResult.Control(true, "SUCCESS"));
         assertThat(first.nativeMatcherSequence()).isEqualTo(1);
         assertThat(second.nativeMatcherSequence()).isEqualTo(2);
         assertThat(first.nativeCoreSequence()).isEqualTo(1);
@@ -454,7 +456,7 @@ class DeterministicExchangeCoreAdapterTest {
     /** 实际原生登记入口拒绝同一分片的倒退及重复，拒绝后仍能继续推进。 */
     @Test
     void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
-        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
+        var ledger = new OrderBookEngine.MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
         ledger.recordControlNative(0, 2);
         assertThatThrownBy(() -> ledger.recordControlNative(0, 1))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("native sequence is not strictly increasing");
@@ -468,7 +470,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void poisonRejectsPreparedDirectCommandWithoutAdvancingEvidence() throws Exception {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new OrderBookEngine()) {
             // 当前需要准备并直接执行的撮合订单。
             var command = bid(1, 90);
             // 原命令 UUID，或构造控制分片前置订单时的普通订单编号。
@@ -491,18 +493,18 @@ class DeterministicExchangeCoreAdapterTest {
      */
     @Test
     void singleSymbolBookQueryAndBootstrapUseSeparateScopes() {
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ OrderBookEngine adapter = new OrderBookEngine()) {
             assertThat(placeDirect(adapter, 7, bid(1, 100)).accepted()).isTrue();
             assertThat(placeDirect(adapter, 8, bid(2, "2", 200)).accepted()).isTrue();
 
             assertThat(adapter.orderBookLevels("1", 30))
                     .extracting(/* 当前用于提取币对名称的盘口档位。 */ value -> value.instrumentId()).containsOnly("1");
             // 包含所有币对范围和档位的盘口启动快照。
-            var shards = new java.util.ArrayList<BookBootstrapSnapshot>();
+            var shards = new java.util.ArrayList<OrderBookDepthSnapshot>();
             for (int shardId = 0; shardId < adapter.topology().matchingEngineCount(); shardId++) {
                 shards.add(adapter.orderBookBootstrapShard(shardId, 30));
             }
-            BookBootstrapSnapshot bootstrap = adapter.mergeBookBootstrapShards(shards);
+            OrderBookDepthSnapshot bootstrap = adapter.mergeBookBootstrapShards(shards);
             assertThat(bootstrap.symbols()).containsExactly("1", "2");
             assertThat(bootstrap.levels()).extracting(/* 当前用于提取币对名称的盘口档位。 */ value -> value.instrumentId())
                     .containsExactly("1", "2");
@@ -522,12 +524,12 @@ class DeterministicExchangeCoreAdapterTest {
         // 只为配对原生挂单快照构造的 Core 元数据，未真实冻结账户资金。
         TradingCoreState state = stateWithOpenBid(100, instrumentId);
         // 从当前原生引擎取得的模块及配对清单。
-        MatcherSnapshot snapshot;
+        OrderBookSnapshot snapshot;
         // 快照前原生订单簿内容哈希。
         int bookHash;
         // 生成快照前成功挂单的直接命令回执。
-        MatchingResult beforeSnapshot;
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+        OrderMatchingResult beforeSnapshot;
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ OrderBookEngine adapter = new OrderBookEngine()) {
             beforeSnapshot = placeDirect(adapter, 1, new java.util.UUID(0, 100), 1000, 7,
                     bid(1, instrumentId, 100));
             assertThat(beforeSnapshot.accepted()).isTrue();
@@ -537,19 +539,19 @@ class DeterministicExchangeCoreAdapterTest {
         }
 
         // Matcher 清单编码字节，损坏测试只修改内存副本。
-        byte[] encoded = MatcherSnapshotCodec.encode(snapshot,
+        byte[] encoded = OrderBookSnapshotCodec.encode(snapshot,
                 com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
         // 同一真实小快照：恰好预算成功，少一字节及很小预算均在有界正文缓冲拒绝。
-        assertThat(MatcherSnapshotCodec.encode(snapshot, encoded.length)).containsExactly(encoded);
-        assertThatThrownBy(() -> MatcherSnapshotCodec.encode(snapshot, encoded.length - 1))
+        assertThat(OrderBookSnapshotCodec.encode(snapshot, encoded.length)).containsExactly(encoded);
+        assertThatThrownBy(() -> OrderBookSnapshotCodec.encode(snapshot, encoded.length - 1))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("maximum size");
-        assertThatThrownBy(() -> MatcherSnapshotCodec.encode(snapshot, 64))
+        assertThatThrownBy(() -> OrderBookSnapshotCodec.encode(snapshot, 64))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("maximum size");
-        assertThatThrownBy(() -> MatcherSnapshotCodec.encode(snapshot, Long.BYTES))
+        assertThatThrownBy(() -> OrderBookSnapshotCodec.encode(snapshot, Long.BYTES))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("byte limit");
 
         // 从编码字节恢复出的 Matcher 清单。
-        MatcherSnapshot decoded = MatcherSnapshotCodec.decode(encoded, snapshot.topology());
+        OrderBookSnapshot decoded = OrderBookSnapshotCodec.decode(encoded, snapshot.topology());
         assertThat(decoded.symbols()).containsEntry(instrumentId, Integer.parseInt(instrumentId));
         assertThat(decoded.matcherShardProgress()).isEqualTo(snapshot.matcherShardProgress());
         assertThat(decoded.symbols()).containsExactlyEntriesOf(snapshot.symbols());
@@ -568,8 +570,8 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(actual.data()).containsExactly(expected.data());
         });
 
-        try (/* 从 Core 元数据和原生模块恢复的适配器，结束时关闭。 */ DeterministicExchangeCoreAdapter restored =
-                     new DeterministicExchangeCoreAdapter(state, activeOrders(state), 1, decoded)) {
+        try (/* 从 Core 元数据和原生模块恢复的适配器，结束时关闭。 */ OrderBookEngine restored =
+                     new OrderBookEngine(state, activeOrders(state), 1, decoded)) {
             assertThat(matcherSnapshot(restored, 92, 1, state.businessStateHash(), state, activeOrders(state)).engineStateHash()).isEqualTo(bookHash);
             // 恢复后继续提交新买单得到的回执。
             var afterRestore = placeDirect(restored, 2, new java.util.UUID(0, 101), 1001, 8,
@@ -589,27 +591,27 @@ class DeterministicExchangeCoreAdapterTest {
         // 与原生快照买价一百配对的原 Core 订单元数据。
         TradingCoreState original = stateWithOpenBid(100);
         // 从当前原生引擎取得的模块及配对清单。
-        MatcherSnapshot snapshot;
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+        OrderBookSnapshot snapshot;
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ OrderBookEngine adapter = new OrderBookEngine()) {
             assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
             snapshot = matcherSnapshot(adapter,
                     92, 1, original.businessStateHash(), original, activeOrders(original));
         }
-        assertThatThrownBy(() -> new DeterministicExchangeCoreAdapter(
+        assertThatThrownBy(() -> new OrderBookEngine(
                 null, activeOrders(original), 1, snapshot))
                 .isInstanceOf(FatalMatchingDivergenceException.class)
                 .hasRootCauseInstanceOf(IllegalStateException.class);
         // 故意把同笔 Core 买价改为一百零一的分歧元数据。
         TradingCoreState divergent = stateWithOpenBid(101);
         // 业务哈希也改为分歧 Core 的清单，但其原生模块仍保存旧订单簿。
-        MatcherSnapshot divergentManifest = new MatcherSnapshot(
+        OrderBookSnapshot divergentManifest = new OrderBookSnapshot(
                 snapshot.productLine(), snapshot.topology(), snapshot.snapshotId(),
                 snapshot.coreSequence(), snapshot.matcherSequence(), snapshot.matcherShardProgress(),
                 divergent.businessStateHash(),
                 snapshot.engineStateHash(),
                 snapshot.symbols(), snapshot.users(), snapshot.modules());
 
-        assertThatThrownBy(() -> new DeterministicExchangeCoreAdapter(
+        assertThatThrownBy(() -> new OrderBookEngine(
                 divergent, activeOrders(divergent), 1, divergentManifest))
                 .isInstanceOf(FatalMatchingDivergenceException.class)
                 .hasMessageContaining("Core OPEN orders do not exactly match exchange-core open orders");
@@ -619,28 +621,28 @@ class DeterministicExchangeCoreAdapterTest {
     void snapshotRejectsMissingDuplicateAndUnorderedShardEvidence() {
         var topology = new com.surprising.aeron.config.LaneTopology(2, 2, 1, 64, 64, 64);
         var state = TradingCoreState.empty(ProductLine.SPOT);
-        MatcherSnapshot snapshot;
-        try (var adapter = new DeterministicExchangeCoreAdapter(topology, true)) {
+        OrderBookSnapshot snapshot;
+        try (var adapter = new OrderBookEngine(topology, true)) {
             snapshot = matcherSnapshot(adapter, 94, 0, state.businessStateHash(), state, List.of());
         }
         var progress = snapshot.matcherShardProgress();
         for (var invalid : List.of(progress.subList(1, progress.size()), progress.reversed(),
                 List.of(progress.get(0), progress.get(0), progress.get(2)),
-                List.of(progress.get(0), progress.get(1), new MatcherShardProgress(Integer.MAX_VALUE, 0)))) {
-            assertThatThrownBy(() -> new MatcherSnapshot(snapshot.productLine(), snapshot.topology(),
+                List.of(progress.get(0), progress.get(1), new OrderBookSnapshot.ShardProgress(Integer.MAX_VALUE, 0)))) {
+            assertThatThrownBy(() -> new OrderBookSnapshot(snapshot.productLine(), snapshot.topology(),
                     snapshot.snapshotId(), snapshot.coreSequence(), snapshot.matcherSequence(), invalid,
                     snapshot.coreBusinessStateHash(), snapshot.engineStateHash(), snapshot.symbols(),
                     snapshot.users(), snapshot.modules())).isInstanceOf(IllegalArgumentException.class);
         }
         var modules = snapshot.modules();
         for (var invalid : List.of(modules.subList(0, 1), List.of(modules.get(0), modules.get(0)))) {
-            assertThatThrownBy(() -> new MatcherSnapshot(snapshot.productLine(), snapshot.topology(),
+            assertThatThrownBy(() -> new OrderBookSnapshot(snapshot.productLine(), snapshot.topology(),
                     snapshot.snapshotId(), snapshot.coreSequence(), snapshot.matcherSequence(), progress,
                     snapshot.coreBusinessStateHash(), snapshot.engineStateHash(), snapshot.symbols(),
                     snapshot.users(), invalid)).isInstanceOf(IllegalArgumentException.class);
         }
         // 模块允许换序；完整性来自实例编号唯一、范围合法和数量相等。
-        assertThat(new MatcherSnapshot(snapshot.productLine(), snapshot.topology(), snapshot.snapshotId(),
+        assertThat(new OrderBookSnapshot(snapshot.productLine(), snapshot.topology(), snapshot.snapshotId(),
                 snapshot.coreSequence(), snapshot.matcherSequence(), progress, snapshot.coreBusinessStateHash(),
                 snapshot.engineStateHash(), snapshot.symbols(), snapshot.users(), modules.reversed()).modules())
                 .containsExactlyElementsOf(modules.reversed());
@@ -655,15 +657,15 @@ class DeterministicExchangeCoreAdapterTest {
         TradingCoreState state = stateWithOpenBid(100);
         // Matcher 清单编码字节，损坏测试只修改内存副本。
         byte[] encoded;
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ OrderBookEngine adapter = new OrderBookEngine()) {
             assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
-            encoded = MatcherSnapshotCodec.encode(matcherSnapshot(adapter,
+            encoded = OrderBookSnapshotCodec.encode(matcherSnapshot(adapter,
                     93, 1, state.businessStateHash(), state, activeOrders(state)),
                     com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
         }
         encoded[encoded.length / 2] ^= 1;
 
-        assertThatThrownBy(() -> MatcherSnapshotCodec.decode(encoded, com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY))
+        assertThatThrownBy(() -> OrderBookSnapshotCodec.decode(encoded, com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY))
                 .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)
                 .hasMessageContaining("checksum");
     }
@@ -681,7 +683,7 @@ class DeterministicExchangeCoreAdapterTest {
      * 构造默认订单一、币对一、两份数量的限价 GTC 买单。
      * @param priceTicks 测试订单价格
      */
-    private static ResolvedPlaceOrder bid(long priceTicks) {
+    private static OrderCommand.ResolvedPlaceOrder bid(long priceTicks) {
         return bid(1, priceTicks);
     }
 
@@ -690,7 +692,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static ResolvedPlaceOrder bid(long orderId, long priceTicks) {
+    private static OrderCommand.ResolvedPlaceOrder bid(long orderId, long priceTicks) {
         return bid(orderId, "1", priceTicks);
     }
 
@@ -700,7 +702,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param instrumentId 测试使用的永久币对十进制编号文本
      * @param priceTicks 测试订单价格
      */
-    private static ResolvedPlaceOrder bid(long orderId, String instrumentId, long priceTicks) {
+    private static OrderCommand.ResolvedPlaceOrder bid(long orderId, String instrumentId, long priceTicks) {
         return DirectMatcherTestInputs.order(
                 ProductLine.SPOT, orderId, instrumentId, CoreOrderSide.BUY, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, priceTicks, 2);
@@ -711,7 +713,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static ResolvedPlaceOrder ask(long orderId, long priceTicks) {
+    private static OrderCommand.ResolvedPlaceOrder ask(long orderId, long priceTicks) {
         return DirectMatcherTestInputs.order(
                 ProductLine.SPOT, orderId, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 priceTicks, 2);
@@ -722,7 +724,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static ResolvedPlaceOrder postOnlyBid(long orderId, long priceTicks) {
+    private static OrderCommand.ResolvedPlaceOrder postOnlyBid(long orderId, long priceTicks) {
         return DirectMatcherTestInputs.order(
                 ProductLine.SPOT, orderId, "1", CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTX,
                 priceTicks, 2);
@@ -746,7 +748,7 @@ class DeterministicExchangeCoreAdapterTest {
         CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, instrumentId,
                 CoreOrderSide.BUY, priceTicks, 2, 0, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(1L, order),
+                Map.of(7L, new UserAccountSnapshot(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(1L, order),
                 Map.of(instrumentId, CoreInstrument.from(ProductLine.SPOT,
                         new RegisterInstrumentCommand(
                                 instrumentId, "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0))),
@@ -766,19 +768,19 @@ class DeterministicExchangeCoreAdapterTest {
      * @param accepted 普通回执是否接受
      * @param resultCode 普通回执结果码
      */
-    private static CoreMatchingResult result(boolean accepted, String resultCode) {
-        return new CoreMatchingResult(accepted, resultCode);
+    private static OrderMatchingResult.Control result(boolean accepted, String resultCode) {
+        return new OrderMatchingResult.Control(accepted, resultCode);
     }
 
     /**
      * 反射取得适配器内部证据账本并导出当前分片进度；本辅助方法不额外建立跨分片快照栅栏。
      * @param adapter 需要读取内部证据进度的当前适配器
      */
-    private static List<MatcherShardProgress> matcherProgress(
-            DeterministicExchangeCoreAdapter adapter) throws Exception {
+    private static List<OrderBookSnapshot.ShardProgress> matcherProgress(
+            OrderBookEngine adapter) throws Exception {
         // 反射取得的 matcherEvidence 字段句柄，只用于读取内部进度。
-        var field = DeterministicExchangeCoreAdapter.class.getDeclaredField("matcherEvidence");
+        var field = OrderBookEngine.class.getDeclaredField("matcherEvidence");
         field.setAccessible(true);
-        return ((MatcherEvidenceLedger) field.get(adapter)).snapshot();
+        return ((OrderBookEngine.MatcherEvidenceLedger) field.get(adapter)).snapshot();
     }
 }

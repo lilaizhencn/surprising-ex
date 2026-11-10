@@ -3,8 +3,7 @@ package com.surprising.aeron.service.core.change;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.position.RuntimePositionIndexValue;
+import com.surprising.aeron.service.position.Position;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
@@ -17,8 +16,8 @@ class PositionPublicationReuseTest {
      * @param user 测试持仓所属用户编号
      * @param quantity 带方向的测试数量步数
      */
-    private static PositionRuntime position(long user, long quantity) {
-        return new PositionRuntime(user, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
+    private static Position position(long user, long quantity) {
+        return new Position(user, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreStateTestFixtures.runtimeInstrument(), quantity, 100, Math.abs(quantity) * 100, 0, 40);
     }
 
@@ -27,9 +26,9 @@ class PositionPublicationReuseTest {
      */
     @Test void laneCopiesStayStableAcrossHandoffAndReusableCellsFollowTheirPhysicalBuffer() {
         // 模拟 Lane 的持仓专用变化缓冲。
-        var lane = new RuntimePositionChangeBuffer();
+        var lane = new StateChangeBuffer.Positions();
         // 模拟 Owner 接管后的持仓变化缓冲。
-        var owner = new RuntimePositionChangeBuffer();
+        var owner = new StateChangeBuffer.Positions();
         // 测试最初的权威持仓值，后续直接原位更新。
         var first = position(7, 2);
         // 原持仓的独立普通值快照，不参与发布槽复用。
@@ -59,7 +58,7 @@ class PositionPublicationReuseTest {
      */
     @Test void repeatedUpdatesAndGrowthDoNotOverwriteOtherPublishedKeys() {
         // 反复更新并测试增长的持仓发布缓冲。
-        var values = new RuntimePositionChangeBuffer();
+        var values = new StateChangeBuffer.Positions();
         for (/* 本轮创建的持仓键及构造用户编号。 */ int i = 1; i <= 33; i++) values.put(i, position(i, i));
         // 键五对应的复用发布槽，同键更新应保留对象身份但更新字段。
         var cell = values.get(5);
@@ -67,7 +66,7 @@ class PositionPublicationReuseTest {
         assertThat(values.get(5)).isSameAs(cell);
         assertThat(cell.signedQuantitySteps()).isEqualTo(-8);
         assertThat(values.get(33).signedQuantitySteps()).isEqualTo(33);
-        values.putPrepared(5, new RuntimePositionIndexValue(5, "1", "USDT", CorePositionSide.NET, -8));
+        values.putPrepared(5, new Position.IndexValue(5, "1", "USDT", CorePositionSide.NET, -8));
         values.clear();
         assertThat(cell.instrument()).isNull();
         values.put(1, position(99, 9));

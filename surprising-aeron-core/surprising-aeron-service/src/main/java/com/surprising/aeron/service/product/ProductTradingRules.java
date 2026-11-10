@@ -4,15 +4,16 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.position.PositionRuntime;
+import com.surprising.aeron.service.order.*;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.position.Position;
+import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import java.util.Objects;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 
-/**
- * 六条产品线共同使用的规则入口，只描述“怎么算”和“是否允许”，不拥有账户或订单状态。
- * 各产品分别实现冻结、盈亏、资金费和到期现金规则，不支持的能力默认明确拒绝。
- */
 public interface ProductTradingRules {
 
     /**
@@ -24,8 +25,8 @@ public interface ProductTradingRules {
      * @param pendingQuantitySteps 本次风险评估需要计入的其他在途委托数量，单位为数量步数
      * @return 所属预留资产的最小整数金额，资产由产品和买卖方向决定
      */
-    long reservationUnits(CoreInstrument instrument, PositionRuntime position,
-                          ResolvedPlaceOrder order, long leverage,
+    long reservationUnits(CoreInstrument instrument, Position position,
+                          OrderCommand.ResolvedPlaceOrder order, long leverage,
                           long pendingQuantitySteps);
 
     /** 返回本规则唯一支持的产品线，用于隔离运行时与账户。 */
@@ -141,4 +142,183 @@ public interface ProductTradingRules {
         throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
                 "lifecycle settlement is unsupported for " + productLine());
     }
+
+
+    static final ProductTradingRules SPOT = new Spot();
+    /** U 本位永续规则，使用线性合约盈亏、资金费和准入计算。 */
+    static final ProductTradingRules LINEAR_PERPETUAL = new Perpetual(ContractType.LINEAR_PERPETUAL);
+    /** 币本位永续规则，使用反向合约盈亏、资金费和准入计算。 */
+    static final ProductTradingRules INVERSE_PERPETUAL = new Perpetual(ContractType.INVERSE_PERPETUAL);
+    /** U 本位交割规则，处理线性合约交易及到期或维护结算。 */
+    static final ProductTradingRules LINEAR_DELIVERY = new Delivery(ContractType.LINEAR_DELIVERY);
+    /** 币本位交割规则，处理反向合约交易及到期或维护结算。 */
+    static final ProductTradingRules INVERSE_DELIVERY = new Delivery(ContractType.INVERSE_DELIVERY);
+    /** 期权规则，区分权利金现金收支、卖方保证金和到期现金结算。 */
+    static final ProductTradingRules OPTION = new OptionTradingRules();
+
+    /**
+     * 根据币对真实合约类型选规则，并再次检查规则与币对匹配，防止跨产品使用。
+     * @param instrument 本次交易或结算使用的币对配置，不能为 null
+     * @return 与该币对产品线一致的共用规则对象
+     */
+    public static ProductTradingRules forInstrument(CoreInstrument instrument) {
+        if (instrument == null) throw new IllegalArgumentException("settlement instrument is required");
+        // 先按合约所属产品线选规则，再由规则自身核对合约类型，不能只信调用方的产品标记。
+        ProductTradingRules kernel = forProductLine(instrument.contractType().productLine());
+        kernel.requireInstrument(instrument);
+        return kernel;
+    }
+
+    /**
+     * 从六条产品线中选择固定规则；没有产品线就直接报错，不默认改用现货或另一类合约。
+     * @param productLine 当前命令或运行时已经确定的产品线
+     * @return 这条产品线专属的交易规则
+     */
+    public static ProductTradingRules forProductLine(ProductLine productLine) {
+        if (productLine == null) throw new IllegalArgumentException("product line is required");
+        return switch (productLine) {
+            case SPOT -> SPOT;
+            case LINEAR_PERPETUAL -> LINEAR_PERPETUAL;
+            case INVERSE_PERPETUAL -> INVERSE_PERPETUAL;
+            case LINEAR_DELIVERY -> LINEAR_DELIVERY;
+            case INVERSE_DELIVERY -> INVERSE_DELIVERY;
+            case OPTION -> OPTION;
+        };
+    }
+
+
+    final class Spot implements ProductTradingRules {
+    /** 返回现货产品线，供命令和状态隔离检查使用。 */
+    public ProductLine productLine() { return ProductLine.SPOT; }
+    /** 返回本规则接受的现货合约类型，不允许借此处理永续、交割或期权。 */
+    public ContractType contractType() { return ContractType.SPOT; }
+    /**
+     * 计算现货订单需要预留的资产，买单同时覆盖手续费扣款所需额度。
+     * @param instrument 当前现货币对的精度和资产配置
+     * @param position 统一接口传入的持仓参数；现货冻结计算不读取它
+     * @param order 已解析的买卖方向、数量、冻结价格和有效费率
+     * @param leverage 统一接口传入的杠杆参数；现货冻结计算不读取它
+     * @param pendingQuantitySteps 统一接口传入的其他在途数量；现货冻结计算不读取它
+     * @return 冻结资产的最小整数单位，买入时为报价资产，卖出时为基础资产
+     */
+    @Override
+    public long reservationUnits(CoreInstrument instrument, Position position,
+                                 OrderCommand.ResolvedPlaceOrder order, long leverage,
+                                 long pendingQuantitySteps) {
+        if (order.side() == CoreOrderSide.SELL) return CoreContractMath.spotBaseUnits(instrument, order.quantitySteps());
+        long notional = CoreContractMath.spotQuoteUnits(instrument, order.reservationPriceTicks(), order.quantitySteps());
+        long feeDebit = CoreContractMath.fragmentationSafeFeeDebit(instrument, order);
+        return Math.addExact(notional, feeDebit);
+    }
+}
+
+
+    abstract class AbstractFutures implements ProductTradingRules {
+    protected final ContractType contractType;
+
+    protected AbstractFutures(ContractType contractType) {
+        this.contractType = Objects.requireNonNull(contractType, "contractType is required");
+    }
+
+    @Override
+    public ProductLine productLine() { return contractType.productLine(); }
+
+    @Override
+    public ContractType contractType() { return contractType; }
+
+    @Override
+    public long realizedPnlUnits(CoreInstrument instrument, long quantity, long entry, long execution) {
+        requireInstrument(instrument);
+        return CoreContractMath.pnlUnits(instrument, quantity, entry, execution);
+    }
+
+    @Override
+    public long reservationUnits(CoreInstrument instrument, Position position,
+                                 OrderCommand.ResolvedPlaceOrder order, long leverage, long pendingQuantitySteps) {
+        // 现有持仓的带方向数量；没有持仓时以 0 参与风险规模计算。
+        long current = position == null ? 0 : position.signedQuantitySteps();
+
+        // 只减仓不预留开仓保证金；其他订单按整个委托数量计算开仓部分。
+        long openSteps = order.reduceOnly() ? 0 : order.quantitySteps();
+        // 用已有持仓绝对量加新单数量选风险档位，不把这个估算值当作真实成交后持仓。
+        long projectedRisk = Math.addExact(Math.absExact(current), order.quantitySteps());
+        // 按合约风险档位、指定杠杆和冻结价格得到开仓保证金。
+        long margin = openingMargin(instrument, projectedRisk, openSteps, order.reservationPriceTicks(), leverage);
+        // 覆盖订单拆成多次成交时的费用舍入，返佣不抵减这项冻结。
+        long feeDebit = CoreContractMath.fragmentationSafeFeeDebit(instrument, order);
+        return Math.max(1, Math.addExact(margin, feeDebit));
+    }
+
+    /**
+     * 选择风险档位，并从币对、档位和杠杆三个要求中取最严格的开仓保证金率。
+     */
+    private static long openingMargin(
+            CoreInstrument instrument, long projectedQuantity, long openSteps, long priceTicks, long leveragePpm) {
+        if (openSteps == 0) return 0;
+        long projectedNotional = CoreContractMath.riskNotionalUnits(instrument,
+                Math.absExact(projectedQuantity), priceTicks);
+        var bracket = CoreContractMath.maintenanceRiskBracket(instrument, projectedNotional);
+        long rate = Math.max(Math.max(instrument.initialMarginRatePpm(), bracket.initialMarginRatePpm()),
+                CoreContractMath.initialMarginRateFromLeverage(leveragePpm));
+        return com.surprising.instrument.api.math.PerpetualContractMath.initialMarginUnits(
+                instrument.contractType(), openSteps, priceTicks, instrument.notionalMultiplierUnits(),
+                instrument.priceTickUnits(), instrument.settleScaleUnits(), rate);
+    }
+
+    @Override
+    public long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument,
+                                                  long quantity, long entry, long settlement) {
+        return realizedPnlUnits(instrument, quantity, entry, settlement);
+    }
+}
+
+
+    final class Perpetual extends AbstractFutures {
+
+    public Perpetual(ContractType contractType) {
+        super(contractType);
+        if (contractType != ContractType.LINEAR_PERPETUAL && contractType != ContractType.INVERSE_PERPETUAL) {
+            throw new IllegalArgumentException("perpetual contract type is required");
+        }
+    }
+
+    /** 永续只允许经过维护门禁批准的管理结算。 */
+    @Override
+    public void validateLifecycleSettlementProductRule(CoreInstrument instrument, SettleInstrumentCommand command) {
+        if (!instrument.administrativeSettlement(command)) {
+            throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
+                    "perpetual settlement requires an approved maintenance gate");
+        }
+    }
+
+    @Override
+    public long fundingDeltaUnits(CoreInstrument instrument, long quantity, long mark, long rate) {
+        requireInstrument(instrument);
+        return CoreContractMath.fundingDeltaUnits(instrument, quantity, mark, rate);
+    }
+}
+
+
+    final class Delivery extends AbstractFutures {
+
+    public Delivery(ContractType contractType) {
+        super(contractType);
+        if (contractType != ContractType.LINEAR_DELIVERY && contractType != ContractType.INVERSE_DELIVERY) {
+            throw new IllegalArgumentException("delivery contract type is required");
+        }
+    }
+
+    @Override
+    public void validateLifecycleSettlementProductRule(CoreInstrument instrument, SettleInstrumentCommand command) {
+        // 公共入口已经核对产品、维护批准条件及结算价，无额外的交割产品门槛。
+    }
+
+    @Override
+    public long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument, long quantity, long entry, long settlement) {
+        requireInstrument(instrument);
+        return CoreContractMath.pnlUnits(instrument, quantity, entry, settlement);
+    }
+
+}
+
 }

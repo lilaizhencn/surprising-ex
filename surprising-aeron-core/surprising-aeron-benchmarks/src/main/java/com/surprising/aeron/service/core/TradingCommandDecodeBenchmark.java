@@ -1,7 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
+import com.surprising.aeron.service.order.OrderCommand.Decoded;
 import com.surprising.aeron.support.ingress.CoreMessageFlyweightDecoder;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -23,7 +25,7 @@ public class TradingCommandDecodeBenchmark {
     public String commandType;
     @Param({"FIXED", "VARIABLE"}) public String lengths;
     private final CoreMessageFlyweightDecoder decoder = new CoreMessageFlyweightDecoder();
-    private final DecodedMatchingCommand[] decoded = new DecodedMatchingCommand[WINDOW];
+    private final OrderCommand.Decoded[] decoded = new OrderCommand.Decoded[WINDOW];
     private final CoreMessage[] leased = new CoreMessage[WINDOW];
     private final UnsafeBuffer[][] frames = new UnsafeBuffer[3][WINDOW];
     private int generation;
@@ -31,7 +33,7 @@ public class TradingCommandDecodeBenchmark {
 
     @Setup public void setup() {
         type = CoreMessageType.valueOf(commandType);
-        for (int index = 0; index < WINDOW; index++) decoded[index] = DecodedMatchingCommand.commandSlot();
+        for (int index = 0; index < WINDOW; index++) decoded[index] = OrderCommand.Decoded.commandSlot();
         for (int bank = 0; bank < frames.length; bank++) for (int index = 0; index < WINDOW; index++) {
             int totalText = lengths.equals("VARIABLE") ? bank * WINDOW + index : 0;
             byte[] payload;
@@ -70,7 +72,7 @@ public class TradingCommandDecodeBenchmark {
     }
 
     /** Consume every decoded item, including text, so the benchmark retains the real decode work. */
-    private long decodedChecksum(DecodedMatchingCommand value) {
+    private long decodedChecksum(OrderCommand.Decoded value) {
         return switch (type) {
             case CANCEL_ORDER -> value.cancelOrder().orderId();
             case CANCEL_ORDER_BATCH -> {

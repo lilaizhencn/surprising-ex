@@ -1,11 +1,9 @@
 package com.surprising.aeron.service.core.index;
 
-import com.surprising.aeron.service.core.change.OwnerIndexedChanges;
-import com.surprising.aeron.service.core.change.RuntimeIndexedChangeBuffer;
+import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.position.RuntimePositionIndexValue;
-import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
+import com.surprising.aeron.service.position.Position;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
@@ -85,7 +83,7 @@ public final class RuntimeFactIndexes {
      * @param laneMask 本次需要消费的账户 Lane 位图
      * @param identities 内部资产及标的编号对应的已准备身份表
      */
-    public void applySettlementPositions(MatcherSettlementChanges changes, long laneMask,
+    public void applySettlementPositions(TradeSettlement.Changes changes, long laneMask,
             RuntimeIdentityRegistry identities) {
         while (laneMask != 0) {
             // 当前从结算 Lane 位图取出的最低置位下标
@@ -101,15 +99,15 @@ public final class RuntimeFactIndexes {
      * @param identities 内部资产及标的编号对应的已准备身份表
      * @param undo 可空的控制范围持仓撤销记录，不需要回滚时为空
      */
-    public void applyPositions(RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions, RuntimeIdentityRegistry identities,
+    public void applyPositions(StateChangeBuffer.Indexed<Position, Position.IndexValue> positions, RuntimeIdentityRegistry identities,
             PositionUndo undo) {
         for (/* 当前消费的变化槽，或倒序撤销的原值槽 */ int slot = 0; slot < positions.size(); slot++) {
             // 当前槽的确定性持仓身份键
             long key = positions.keyAt(slot);
             // 原账户可变持仓正文，仅在没有 prepared 标记时读取
-            PositionRuntime value = positions.valueAt(slot);
+            Position value = positions.valueAt(slot);
             // 本槽冻结持仓值；hasPrepared 为真且此值为空表示权威删除
-            RuntimePositionIndexValue prepared = positions.preparedAt(slot);
+            Position.IndexValue prepared = positions.preparedAt(slot);
             // 是否已经冻结本槽结果，与 prepared 是否为空分别判断
             boolean hasPrepared = positions.hasPreparedAt(slot);
             // 本槽解析出的新用户，删除为零
@@ -143,7 +141,7 @@ public final class RuntimeFactIndexes {
      * @param identities 内部资产及标的编号对应的已准备身份表
      * @param undo 可空的控制范围持仓撤销记录，不需要回滚时为空
      */
-    public void applyControlPositions(OwnerIndexedChanges<PositionRuntime, RuntimePositionIndexValue> positions,
+    public void applyControlPositions(StateChangeBuffer.OwnerIndexed<Position, Position.IndexValue> positions,
             RuntimeIdentityRegistry identities, PositionUndo undo) {
         applyPositions(positions.directBuffer(), identities, undo);
         // 还未消费的控制变化保留 Lane 位图
@@ -255,7 +253,7 @@ public final class RuntimeFactIndexes {
      * @param identities 运行时已经绑定的资产及标的身份表
      * @param after 变更后的真实状态，空值表示删除
      */
-    public void applyPosition(long positionKey, PositionRuntime after, RuntimeIdentityRegistry identities) {
+    public void applyPosition(long positionKey, Position after, RuntimeIdentityRegistry identities) {
         applyPosition(positionKey, after == null ? 0 : after.userId(),
                 after == null ? null : identities.instrumentId(after.symbolId()),
                 after == null ? null : identities.asset(after.assetId()),

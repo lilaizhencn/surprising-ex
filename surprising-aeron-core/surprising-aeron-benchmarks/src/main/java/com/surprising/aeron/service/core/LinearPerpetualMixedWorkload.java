@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.position.Position;
+
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -40,7 +42,7 @@ import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Harness;
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
+import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import java.util.ArrayList;
@@ -417,7 +419,7 @@ public final class LinearPerpetualMixedWorkload {
                         CommandSource.OPERATIONS, 0,
                         TradingCommandCodec.encodeExecuteLiquidationBatch(batch)));
 
-                LiquidationRuntime liquidated = liquidation(target, liquidationId);
+                RiskScanner.LiquidationOrder liquidated = liquidation(target, liquidationId);
                 long insurance = target.state().tradingState().treasuryState()
                         .insuranceBalances().getOrDefault(SETTLE_ASSET, 0L);
                 long coverage = Math.min(insurance, Math.subtractExact(liquidated.deficitUnits(), 1));
@@ -428,7 +430,7 @@ public final class LinearPerpetualMixedWorkload {
                         TradingCommandCodec.encodeResolveLiquidation(new ResolveLiquidationCommand(
                                 liquidationId, ResolveLiquidationCommand.Resolution.INSURANCE, coverage))));
 
-                LiquidationRuntime adlRequired = liquidation(target, liquidationId);
+                RiskScanner.LiquidationOrder adlRequired = liquidation(target, liquidationId);
                 int liquidationSymbolIndex = source.liquidationSymbolIndex();
                 var makerPosition = target.state().tradingState().users().get(source.positionMakers().get(liquidationSymbolIndex)).positions()
                         .get(source.symbols().get(liquidationSymbolIndex));
@@ -444,7 +446,7 @@ public final class LinearPerpetualMixedWorkload {
                                 makerPosition.signedQuantitySteps(), makerPosition.entryPriceTicks(),
                                 adlRequired.triggerPriceSequence(),
                                 closeQuantity, adlRequired.deficitUnits()))));
-                LiquidationRuntime completed = liquidation(target, liquidationId);
+                RiskScanner.LiquidationOrder completed = liquidation(target, liquidationId);
                 if (completed.status() != CoreLiquidationState.Status.COMPLETED
                         || completed.deficitUnits() != 0) {
                     throw new IllegalStateException("mixed workload loss lifecycle did not complete");
@@ -816,8 +818,8 @@ public final class LinearPerpetualMixedWorkload {
         return next;
     }
 
-    private static LiquidationRuntime liquidation(Harness harness, long liquidationId) {
-        LiquidationRuntime liquidation = harness.state().runtimeLiquidation(liquidationId);
+    private static RiskScanner.LiquidationOrder liquidation(Harness harness, long liquidationId) {
+        RiskScanner.LiquidationOrder liquidation = harness.state().runtimeLiquidation(liquidationId);
         if (liquidation == null) throw new IllegalStateException("liquidation state is missing");
         return liquidation;
     }

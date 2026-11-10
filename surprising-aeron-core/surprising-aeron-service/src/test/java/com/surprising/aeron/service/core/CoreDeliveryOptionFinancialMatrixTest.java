@@ -1,6 +1,10 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.service.account.AccountControlTask;
+import com.surprising.aeron.service.position.Position;
+
+import com.surprising.aeron.service.order.*;
+
+import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -31,14 +35,14 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.query.state.*;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
-import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation;
+import com.surprising.aeron.service.query.CoreQueryService;
+import com.surprising.aeron.service.risk.RiskScanner;
+import com.surprising.aeron.service.settlement.ContractExpirySettlementService;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -167,7 +171,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ var runtime = RuntimeStateProjector.project(opening, identities)) {
             runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
-            var work = RuntimeLifecycleSettlementContinuation.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID),
+            var work = ContractExpirySettlementService.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID),
                     new ActiveOrderIndex(opening), runtime, identities);
             LedgerControlTestSupport.await(runtime, work::poll);
             assertThat(work.result().complete()).isTrue();
@@ -200,7 +204,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             var index = new ActiveOrderIndex(opening);
             runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
-            var work = RuntimeLifecycleSettlementContinuation.prepare(null, command, List.of(USER_ID), index, runtime, identities);
+            var work = ContractExpirySettlementService.prepare(null, command, List.of(USER_ID), index, runtime, identities);
             LedgerControlTestSupport.await(runtime, work::poll);
             assertThat(work.result().requiredInsuranceUnits()).isEqualTo(20);
             assertThat(work.result().nextCursorUserId()).isZero();
@@ -213,7 +217,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             LedgerControlTestSupport.await(runtime, InsuranceFundCommands.prepare(runtime, identities, topUp));
             LedgerControlTestSupport.await(cold, InsuranceFundCommands.prepare(cold, coldIdentities, topUp));
             LedgerControlTestSupport.commit(runtime, identities, true); cold.clearChangedKeys();
-            work = RuntimeLifecycleSettlementContinuation.prepare(work, command, List.of(USER_ID), index, runtime, identities);
+            work = ContractExpirySettlementService.prepare(work, command, List.of(USER_ID), index, runtime, identities);
             LedgerControlTestSupport.await(runtime, work::poll);
             assertThat(work.result().complete()).isTrue();
             RuntimeLifecycleSettlementFixture.applyRuntime(command, List.of(USER_ID), index, cold, coldIdentities);
@@ -325,7 +329,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState wrongLine = TradingCoreState.empty(ProductLine.LINEAR_DELIVERY);
         // 跨线注册前的业务哈希，拒绝后不能变化
         long wrongLineHash = wrongLine.businessStateHash();
-        assertThatThrownBy(() -> com.surprising.aeron.service.product.ProductTradingRulesRegistry
+        assertThatThrownBy(() -> com.surprising.aeron.service.product.ProductTradingRules
                 .forProductLine(wrongLine.productLine())
                 .requireInstrument(CoreInstrument.from(ProductLine.OPTION, instrument(VARIANTS.get(4)))))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -433,13 +437,13 @@ class CoreDeliveryOptionFinancialMatrixTest {
         state = reducer.placeOrder(state, USER_ID, deliveryOrder(701, cross, crossSymbol));
 
         // 逐仓结算前的用户值，供余额、全仓持仓及预留不变断言
-        CoreUserState beforeUser = state.users().get(USER_ID);
+        UserAccountSnapshot beforeUser = state.users().get(USER_ID);
         // 逐仓结算前的 USDT 余额，包含自由资金和各类锁定
         AssetBalance beforeBalance = beforeUser.balances().get("USDT");
         // 逐仓结算前保留的另一个全仓持仓，不得被改写
         CorePositionState beforeCrossPosition = beforeUser.positions().get(crossSymbol);
         // 结算前保存的未成交订单预留，供隔离或释放断言
-        OrderReservation beforeReservation = beforeUser.reservations().get(701L);
+        OrderFundsReservation.Snapshot beforeReservation = beforeUser.reservations().get(701L);
         // 用户总额扣除目标逐仓保证金后的全仓可用抵押口径，应保持一百八十
         long beforeCrossCollateral = CoreStateTestFixtures.totalUnits(beforeBalance)
                 - beforeUser.positions().get(isolatedSymbol).positionMarginUnits();
@@ -463,7 +467,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState settled = reducer.settleInstrument(state, command);
 
         // 保险补足并结算后用户值，核对其他持仓和挂单保留
-        CoreUserState afterUser = settled.users().get(USER_ID);
+        UserAccountSnapshot afterUser = settled.users().get(USER_ID);
         // 逐仓亏损结算后 USDT 余额，自由资金应保持原值
         AssetBalance afterBalance = afterUser.balances().get("USDT");
         assertThat(afterUser.positions().get(crossSymbol)).isEqualTo(beforeCrossPosition);
@@ -499,7 +503,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             var shortPosition = new CorePositionState(instrumentId, "USDT", CoreMarginMode.CROSS,
                     CorePositionSide.SHORT, -1, direction > 0 ? 100 : 300, direction > 0 ? 100 : 300, 0, 10);
             // 当前需要构造或检查持仓、锁定或合计资金的用户值
-            var user = new CoreUserState(state.productLine(), USER_ID, 2,
+            var user = new UserAccountSnapshot(state.productLine(), USER_ID, 2,
                     Map.of("USDT", new AssetBalance("USDT", 0, 20)), Map.of(),
                     Map.of(longPosition.key(), longPosition, shortPosition.key(), shortPosition),
                     com.surprising.aeron.protocol.CorePositionMode.HEDGE);
@@ -525,7 +529,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState state = fundedState(delivery, USER_ID, WALLET);
         state = reducer.placeOrder(state, USER_ID, deliveryOrder(702, delivery, delivery.instrumentId()));
         // 结算前保存的未成交订单预留，供隔离或释放断言
-        OrderReservation beforeReservation = state.users().get(USER_ID).reservations().get(702L);
+        OrderFundsReservation.Snapshot beforeReservation = state.users().get(USER_ID).reservations().get(702L);
         // 外部补保险或结算前的用户与财库总额基线
         long beforeTotal = total(state, delivery.settleAsset());
 
@@ -534,7 +538,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 new SettleInstrumentCommand(411, delivery.instrumentId(), delivery.settlementPriceTicks()));
 
         // 到期撤单后的预留，原总量不变、剩余零、全部记为已释放
-        OrderReservation afterReservation = settled.users().get(USER_ID).reservations().get(702L);
+        OrderFundsReservation.Snapshot afterReservation = settled.users().get(USER_ID).reservations().get(702L);
         assertThat(settled.orders().get(702L).status()).isEqualTo(CoreOrderStatus.CANCELED);
         assertThat(afterReservation.reservedUnits()).isEqualTo(beforeReservation.reservedUnits());
         assertThat(afterReservation.remainingUnits()).isZero();
@@ -638,7 +642,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(marked),
                     ProductLine.OPTION)).isEqualTo(marked);
             // 即使已经存在排队强平计划，也不能绕过非组合保证金期权多头保护。
-            runtime.putLiquidation(new LiquidationRuntime(99, USER_ID,
+            runtime.putLiquidation(new RiskScanner.LiquidationOrder(99, USER_ID,
                     identities.symbolId(option.instrumentId()), CoreMarginMode.CROSS, CorePositionSide.NET,
                     runtime.instrument(option.instrumentId()), 1, 1, 1, 0, 0, 0, 0,
                     CoreLiquidationState.Status.PLANNED, 0));
@@ -835,7 +839,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities)) {
-            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareLeverageChange(runtime, identities, USER_ID, command)))
+            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareLeverageChange(runtime, identities, USER_ID, command)))
                     .isInstanceOfSatisfying(CoreStateRejectedException.class,
                             /* 本次预期的业务拒绝异常，用稳定业务代码核对原因 */ exception -> assertThat(exception.code())
                                     .isEqualTo("OPTION_LEVERAGE_UNSUPPORTED"));
@@ -1005,7 +1009,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
     private TradingCoreState addPosition(TradingCoreState state, long userId, String instrumentId, long quantity,
                                          long entryPrice, long positionMargin, Variant variant) {
         // 手工加入持仓前的原用户值
-        CoreUserState current = state.users().get(userId);
+        UserAccountSnapshot current = state.users().get(userId);
         // 该用户结算资产的余额，保证金为正时先从可用移到锁定
         AssetBalance balance = current.balances().get(variant.settleAsset());
         if (positionMargin > 0) balance = new AssetBalance(balance.asset(), Math.subtractExact(balance.availableUnits(), positionMargin),
@@ -1019,11 +1023,11 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 CorePositionSide.NET, quantity, entryPrice,
                 Math.multiplyExact(Math.absExact(quantity), entryPrice), 0, positionMargin));
         // 手工建立持仓并增加用户修订后的新用户值
-        CoreUserState next = new CoreUserState(current.productLine(), userId,
+        UserAccountSnapshot next = new UserAccountSnapshot(current.productLine(), userId,
                 Math.incrementExact(current.revision()), balances, current.reservations(), positions,
                 current.positionMode());
         // 复制的用户表，只替换本次手工变更的用户
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        Map<Long, UserAccountSnapshot> users = new TreeMap<>(state.users());
         users.put(userId, next);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 state.orders(), state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());

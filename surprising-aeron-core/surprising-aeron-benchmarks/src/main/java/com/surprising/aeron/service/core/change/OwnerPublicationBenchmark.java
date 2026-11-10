@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core.change;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -12,14 +14,14 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.account.UserRuntime;
+import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.order.OrderFundsReservation;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -44,27 +46,27 @@ import org.openjdk.jmh.annotations.Warmup;
 @Fork(1)
 public class OwnerPublicationBenchmark {
     private final TradingAccountRuntime runtime = new TradingAccountRuntime();
-    private final LaneCommitDelta delta = new LaneCommitDelta();
-    private final RuntimeIndexedChangeBuffer<String, String> lane = new RuntimeIndexedChangeBuffer<>();
-    private final OwnerIndexedChanges<String, String> owner = new OwnerIndexedChanges<>(new RuntimeIndexedChangeBuffer<>());
-    private final UserRuntime[] users = new UserRuntime[20];
+    private final AccountPartitionCommit.Delta delta = new AccountPartitionCommit.Delta();
+    private final StateChangeBuffer.Indexed<String, String> lane = new StateChangeBuffer.Indexed<>();
+    private final StateChangeBuffer.OwnerIndexed<String, String> owner = new StateChangeBuffer.OwnerIndexed<>(new StateChangeBuffer.Indexed<>());
+    private final UserAccount[] users = new UserAccount[20];
     private final com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedIds =
             new com.surprising.aeron.support.collection.PrimitiveLongChangeSet(20);
     private long coreSequence;
-    private MatcherSettlementChanges settlement;
-    private AccountLaneState settlementLane;
+    private TradeSettlement.Changes settlement;
+    private AccountPartition settlementLane;
     private final RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-    private final OrderRuntime[] settlementOrders = new OrderRuntime[20];
-    private final ReservationRuntime[] settlementReservations = new ReservationRuntime[20];
+    private final Order[] settlementOrders = new Order[20];
+    private final OrderFundsReservation[] settlementReservations = new OrderFundsReservation[20];
 
     @Setup public void setup() {
         for (int i = 0; i < users.length; i++) {
-            users[i] = new UserRuntime(i + 1);
+            users[i] = new UserAccount(i + 1);
             runtime.accountLane(runtime.topology().accountLaneId(i + 1L)).storeUser(i + 1, users[i]);
         }
         int laneId = runtime.topology().accountLaneId(7);
         settlementLane = runtime.accountLane(laneId);
-        settlement = new MatcherSettlementChanges(runtime.topology().accountLaneCount());
+        settlement = new TradeSettlement.Changes(runtime.topology().accountLaneCount());
         settlement.ensureOrderCapacity(settlementOrders.length, 1L << laneId);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand(
@@ -75,13 +77,13 @@ public class OwnerPublicationBenchmark {
                         0, 0, 0, -1, 0));
         for (int i = 0; i < settlementOrders.length; i++) {
             boolean terminal = i % 4 == 0;
-            settlementOrders[i] = new OrderRuntime(i + 1, ProductLine.LINEAR_PERPETUAL,
+            settlementOrders[i] = new Order(i + 1, ProductLine.LINEAR_PERPETUAL,
                     7, 0, instrument, CoreOrderSide.BUY, 100, 1, terminal ? 1 : 0,
                     terminal ? 0 : 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-" + i,
                     new UUID(1, i + 1), 0, 0, 0, 1000, 1000, 2000,
                     terminal ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN, 1);
-            settlementReservations[i] = new ReservationRuntime(i + 1, 7, 0,
+            settlementReservations[i] = new OrderFundsReservation(i + 1, 7, 0,
                     ReservationKind.DERIVATIVE_MARGIN, 0, 100, 0, terminal ? 100 : 0, 1);
         }
     }

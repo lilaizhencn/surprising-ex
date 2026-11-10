@@ -21,7 +21,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
-import com.surprising.aeron.service.matcher.MatchingResult;
+import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.order.BenchmarkMatchingAwait;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherEventType;
@@ -138,7 +138,7 @@ public final class CorePerpetualEndToEndBenchmark {
         }
         long sequence = state.pendingMatching().firstSequence();
         if (sequence == 0) throw new IllegalStateException("matching was not queued");
-        MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, sequence, 30_000_000_000L);
+        OrderMatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, sequence, 30_000_000_000L);
         if (matching == null) throw new IllegalStateException("matching timed out");
         // The Matcher fact is borrowed until terminal retirement. Retain only the scalar result.
         long matchedQuantity = 0;

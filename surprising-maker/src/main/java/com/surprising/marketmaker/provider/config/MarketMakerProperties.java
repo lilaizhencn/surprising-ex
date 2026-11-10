@@ -86,15 +86,8 @@ public class MarketMakerProperties {
     @Valid
     private List<Strategy> strategies = new ArrayList<>();
 
-    @Valid
-    private Kafka kafka = new Kafka();
-
     public void setReferenceMarket(ReferenceMarket referenceMarket) {
         this.referenceMarket = referenceMarket == null ? new ReferenceMarket() : referenceMarket;
-    }
-
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka == null ? new Kafka() : kafka;
     }
 
     @Getter
@@ -107,15 +100,6 @@ public class MarketMakerProperties {
         private Duration quoteWatchdogInterval = Duration.ofSeconds(1);
         @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration tradeInterval = Duration.ZERO;
-
-    }
-
-    /** 合约快照事件的消费配置。市场做市只在本地快照上读取合约规格。 */
-    @Getter
-    @Setter
-    public static class Kafka {
-        private String bootstrapServers = "localhost:9092";
-        private String instrumentSnapshotGroupId = "surprising-market-maker-instrument-snapshot-v1";
 
     }
 

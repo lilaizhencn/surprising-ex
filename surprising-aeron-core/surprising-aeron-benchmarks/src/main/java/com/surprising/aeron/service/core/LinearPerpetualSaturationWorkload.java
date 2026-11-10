@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -11,7 +13,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.order.OwnerCommandPipelineState;
+import com.surprising.aeron.service.order.OrderCommandQueue.PipelineState;
 import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
@@ -239,7 +241,7 @@ public final class LinearPerpetualSaturationWorkload {
             private int fillWindow(LinearPerpetualBenchmarkSupport.Harness target) {
                 int filled = 0;
                 while (readySize != 0 && scheduledOperations < operationsPerRun
-                        && filled < OwnerCommandPipelineState.COMPLETION_BATCH_SIZE
+                        && filled < OrderCommandQueue.PipelineState.COMPLETION_BATCH_SIZE
                         && target.pendingSubmissions() <= maxInFlight - 2) {
                     int symbolIndex = dequeue();
                     long makerId = template.hftMakers().get(symbolIndex);

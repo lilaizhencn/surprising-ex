@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreOrderState;
@@ -15,11 +17,11 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderReservation;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
+import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
@@ -45,21 +47,21 @@ class MatcherTreasurySettlementTest {
     @Test
     void shrinkingLaneRoutesRetainTreasurySlotsAndExcludeInactiveContributions() throws Exception {
         // 本次待准备、投递和收集的可复用撮合结算事件。
-        var event = new MatcherSettlementEvent();
+        var event = new TradeSettlement();
         // 反射取得的财务槽容量准备方法。
-        var prepare = MatcherSettlementEvent.class.getDeclaredMethod("prepareTreasuryDeltas", long.class, boolean.class);
+        var prepare = TradeSettlement.class.getDeclaredMethod("prepareTreasuryDeltas", long.class, boolean.class);
         prepare.setAccessible(true);
         // 反射取得的参与 Lane 财务槽数组字段。
-        var storage = MatcherSettlementEvent.class.getDeclaredField("touchedLaneTreasuryDeltas");
+        var storage = TradeSettlement.class.getDeclaredField("touchedLaneTreasuryDeltas");
         storage.setAccessible(true);
         // 反射取得的实际参与 Lane 位图字段。
-        var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask");
+        var mask = TradeSettlement.class.getDeclaredField("requiredLaneMask");
         mask.setAccessible(true);
         // 反射取得的本代是否存在成交标记。
-        var trades = MatcherSettlementEvent.class.getDeclaredField("treasuryTrades");
+        var trades = TradeSettlement.class.getDeclaredField("treasuryTrades");
         trades.setAccessible(true);
         // 反射取得的财务差额合并方法。
-        var merge = MatcherSettlementEvent.class.getDeclaredMethod("mergeTreasuryDeltas");
+        var merge = TradeSettlement.class.getDeclaredMethod("mergeTreasuryDeltas");
         merge.setAccessible(true);
 
         prepare.invoke(event, 1L, false);
@@ -141,7 +143,7 @@ class MatcherTreasurySettlementTest {
         var identities = new RuntimeIdentityRegistry();
         try (/* 由冷状态投影得到并在用例退出时关闭的交易运行时。 */ var runtime = RuntimeStateProjector.project(before, identities)) {
             // 投影后权威主动订单引用，后续事件复用仍以其身份准备撤单。
-            OrderRuntime originalTaker = runtime.order(11);
+            Order originalTaker = runtime.order(11);
             // 首代成交事实对应的命令 UUID。
             UUID commandId = new UUID(1, 2);
             // maker 与 taker 两账户 Lane 的联合位图。
@@ -249,10 +251,10 @@ class MatcherTreasurySettlementTest {
      * @param userId 测试用户编号
      * @param order 需要在冷用户状态中建立保证金预留的订单
      */
-    private static CoreUserState user(long userId, CoreOrderState order) {
-        return new CoreUserState(ProductLine.LINEAR_PERPETUAL, userId, 1,
+    private static UserAccountSnapshot user(long userId, CoreOrderState order) {
+        return new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, userId, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, 100)),
-                Map.of(order.orderId(), new OrderReservation(order.orderId(), "1",
+                Map.of(order.orderId(), new OrderFundsReservation.Snapshot(order.orderId(), "1",
                         ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 0, 0, 1)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
     }
 

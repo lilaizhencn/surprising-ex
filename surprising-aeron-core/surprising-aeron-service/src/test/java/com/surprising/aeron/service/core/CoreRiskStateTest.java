@@ -18,11 +18,11 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.FundsStateHash;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
@@ -233,7 +233,7 @@ class CoreRiskStateTest {
         // 应用标记价前的全局修订号，用来确认行情登记只增加一次修订。
         long revisionBefore = runtime.revision();
 
-        RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(
+        RiskMarginCalculator.applyMarkPriceRuntime(
                 new ApplyMarkPriceCommand("1", 80, 1, 1_700_000_000_000L),
                 runtime, identities);
 
@@ -262,7 +262,7 @@ class CoreRiskStateTest {
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
         var runtime = RuntimeStateProjector.project(state, identities);
         for (/* 本轮需要登记行情并安排风险扫描的测试币对编号。 */ String instrumentId : List.of("1", "2"))
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 100, 1, 1000), runtime, identities);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 100, 1, 1000), runtime, identities);
         // 调度器首先选中的币对整数编号，完成后会立刻再次刷新它的行情。
         int first = runtime.firstRiskIncompleteScan().symbolId();
         // 另一份尚未访问的币对编号，应该优先于刚刷新的已完成币对。
@@ -270,7 +270,7 @@ class CoreRiskStateTest {
         RuntimeDerivativeRiskFixture.continueRiskBudget(1,
                 new PositionUserIndex(state, runtime.topology()), runtime, identities);
         assertThat(runtime.riskScan(first).riskComplete()).isTrue();
-        RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(identities.instrumentId(first), 100, 2, 1001), runtime, identities);
+        RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(identities.instrumentId(first), 100, 2, 1001), runtime, identities);
         assertThat(runtime.firstRiskIncompleteScan().symbolId()).as("a refreshed completed instrumentId must go behind unvisited work").isEqualTo(other);
         // 保留当前扫描顺序和调度修订号的运行时状态物化结果。
         var materialized = RuntimeStateMaterializer.materialize(runtime, identities);
@@ -299,11 +299,11 @@ class CoreRiskStateTest {
         var ids = new RuntimeIdentityRegistry();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
         var runtime = RuntimeStateProjector.project(state, ids);
-        RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 1, 1, 1000), runtime, ids);
+        RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 1, 1, 1000), runtime, ids);
         // 与运行时拓扑一致的持仓用户索引，续扫不枚举无持仓账户。
         var positions = new PositionUserIndex(state, runtime.topology());
         for (/* 模拟币对 1 连续行情刷新的次数，同时作为递增价格序号。 */ int i = 1; i <= 4; i++) {
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("1", 100, i, 1000+i), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("1", 100, i, 1000+i), runtime, ids);
             RuntimeDerivativeRiskFixture.continueRiskBudget(64, positions, runtime, ids);
         }
         // 风险处理后的运行时物化结果，便于按业务编号核对强平与资金事实。
@@ -334,7 +334,7 @@ class CoreRiskStateTest {
         // 从初始持仓构造的用户索引，供分批风险扫描定位真正需要估值的账户。
         var positions = new PositionUserIndex(state, runtime.topology());
         for (/* 本轮需要登记行情并安排风险扫描的测试币对编号。 */ String instrumentId : List.of("1", "4", "2"))
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 1, 1, 1000), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 1, 1, 1000), runtime, ids);
         // 这次共享预算实际消耗的工作项数量，不能超过 64。
         int work = RuntimeDerivativeRiskFixture.continueRiskBudget(64, positions, runtime, ids);
         assertThat(work).isBetween(3,64);
@@ -701,7 +701,7 @@ class CoreRiskStateTest {
             long userId,
             CorePositionState position) {
         // 加入测试持仓前的用户记录，余额和已有冻结、持仓都从它复制。
-        CoreUserState current = state.users().get(userId);
+        UserAccountSnapshot current = state.users().get(userId);
         // 该用户的余额映射副本，将持仓保证金从可用转到冻结后装回新用户。
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         // 保证金资产原有的余额，新增持仓只调整这项资产的可用与冻结部分。
@@ -713,10 +713,10 @@ class CoreRiskStateTest {
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
         positions.put(position.key(), position);
         // 包含新余额和持仓、修订号已增加的用户记录。
-        CoreUserState user = new CoreUserState(state.productLine(), userId, current.revision() + 1,
+        UserAccountSnapshot user = new UserAccountSnapshot(state.productLine(), userId, current.revision() + 1,
                 balances, current.reservations(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 根状态的用户映射副本，只替换本次需要加入持仓的用户。
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        Map<Long, UserAccountSnapshot> users = new TreeMap<>(state.users());
         users.put(userId, user);
         return new TradingCoreState(state.productLine(), state.revision() + 1, users, state.orders(),
                 state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());

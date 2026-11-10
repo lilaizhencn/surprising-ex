@@ -1,8 +1,9 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.core.change.AccountPartitionCommit;
+
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.result.ResponseArena;
 import com.surprising.aeron.service.result.ResponseArenaTestAccess;
 import com.surprising.product.api.ProductLine;
@@ -20,7 +21,7 @@ class LaneReplacementResponseTest {
     @Test
     void encodingFailureDoesNotPublishAnEmptySuccessfulResponse() {
         // 当前可复用的单笔或改单 Lane 结果目标
-        var target = new CommandSlot.LaneResultTarget();
+        var target = new OrderCommand.LaneResultTarget();
         // 当前测试响应槽分配器
         var arena = new ResponseArena(1, 4096);
         target.bind(11, 0, arena);
@@ -62,12 +63,12 @@ class LaneReplacementResponseTest {
             // 用户七所属的权威账户 Lane
             var lane = runtime.accountLaneForUser(7);
             // 当前可复用的单笔或改单 Lane 结果目标
-            var target = new CommandSlot.LaneResultTarget();
+            var target = new OrderCommand.LaneResultTarget();
             // 当前测试响应槽分配器
             var arena = new ResponseArena(1, 4096);
             target.bind(11, 12, arena);
-            com.surprising.aeron.service.order.state.LaneOrderResultTarget.capture(target,
-                    new com.surprising.aeron.service.core.change.LaneCommitDelta(), identities, lane);
+            com.surprising.aeron.service.order.OrderCommand.ResultTarget.capture(target,
+                    new com.surprising.aeron.service.core.change.AccountPartitionCommit.Delta(), identities, lane);
             assertThat(target.resultPrepared(0)).isTrue();
             assertThat(target.resultPrepared(1)).isTrue();
             // 已编码响应重新解码后的命令结果
@@ -79,8 +80,8 @@ class LaneReplacementResponseTest {
             target.bind(11, 0, arena);
             assertThat(target.resultPrepared(0)).isFalse();
             target.resultOrder(0, order(11, true), "1");
-            com.surprising.aeron.service.order.state.LaneOrderResultTarget.capture(target,
-                    new com.surprising.aeron.service.core.change.LaneCommitDelta(), identities, lane);
+            com.surprising.aeron.service.order.OrderCommand.ResultTarget.capture(target,
+                    new com.surprising.aeron.service.core.change.AccountPartitionCommit.Delta(), identities, lane);
             view = CoreCommandResultCodec.decode(Arrays.copyOf(
                     target.preparedResponse(), target.preparedResponseLength()));
             assertThat(view.orders()).extracting(CoreOrderStateView::status).containsExactly("CANCELED");
@@ -102,8 +103,8 @@ class LaneReplacementResponseTest {
      * @param id 要构造的测试订单编号
      * @param canceled 订单是否带取消终态标记
      */
-    private static OrderRuntime order(long id, boolean canceled) {
-        return new OrderRuntime(id, 7, 0, INSTRUMENT, CoreOrderSide.BUY, 0,
+    private static Order order(long id, boolean canceled) {
+        return new Order(id, 7, 0, INSTRUMENT, CoreOrderSide.BUY, 0,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, 0, 0, 10, 0, 10, canceled);
     }
@@ -113,7 +114,7 @@ class LaneReplacementResponseTest {
      */
     @Test void accountLaneEncodesBothOrderImagesAndReusesTargetAcrossSingleAndDoubleResults() {
         // 当前可复用的单笔或改单 Lane 结果目标
-        var target = new CommandSlot.LaneResultTarget();
+        var target = new OrderCommand.LaneResultTarget();
         // 当前测试响应槽分配器
         var arena = new ResponseArena(8, 4096);
         // 单独复制并保留的首代双订单响应

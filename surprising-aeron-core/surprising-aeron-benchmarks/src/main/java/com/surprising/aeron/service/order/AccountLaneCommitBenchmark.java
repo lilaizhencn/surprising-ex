@@ -3,12 +3,10 @@ package com.surprising.aeron.service.order;
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.UserRuntime;
+import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.change.LaneCommitEvent;
+import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.result.ResponseArena;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
@@ -71,8 +69,8 @@ public class AccountLaneCommitBenchmark {
         private long[] users;
         private java.util.List<Long> metadataUsers;
         private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap metadataOrders;
-        private LaneCommitEvent[] commits;
-        private OrderBatchPending[] responses;
+        private AccountPartitionCommit[] commits;
+        private OrderBatchProcessor.PendingBatch[] responses;
         private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
         private long sequence;
         private String previousAccountLanes;
@@ -85,14 +83,14 @@ public class AccountLaneCommitBenchmark {
             LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
             runtime = new TradingAccountRuntime(topology);
             users = new long[accountLanes];
-            commits = new LaneCommitEvent[maxInFlight];
-            responses = new OrderBatchPending[maxInFlight];
+            commits = new AccountPartitionCommit[maxInFlight];
+            responses = new OrderBatchProcessor.PendingBatch[maxInFlight];
             identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
             int symbolId = identities.symbolId("1");
             var responseArena = new ResponseArena(maxInFlight, 4096);
             for (int index = 0; index < responses.length; index++) {
-                var response = new OrderBatchPending(1, responseArena);
-                response.kind = com.surprising.aeron.service.order.command.OrderBatchKind.AMEND;
+                var response = new OrderBatchProcessor.PendingBatch(1, responseArena);
+                response.kind = com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND;
                 response.addItem(10000, 10000, 10000, null);
                 response.items.getFirst().status = ResponseStatus.APPLIED;
                 response.items.getFirst().resultCode = CoreResultCode.NONE;
@@ -100,7 +98,7 @@ public class AccountLaneCommitBenchmark {
             }
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 users[laneId] = userForLane(topology, laneId);
-                runtime.putUser(new UserRuntime(users[laneId]));
+                runtime.putUser(new UserAccount(users[laneId]));
             }
             var userList = new java.util.ArrayList<Long>(accountLanes);
             var orderUsers = new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(accountLanes);
@@ -113,13 +111,13 @@ public class AccountLaneCommitBenchmark {
                             0, 0, 0, -1, 0));
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 long user = users[laneId];
-                runtime.putBalance(new com.surprising.aeron.service.account.BalanceRuntime(user, 3, 900, 100));
+                runtime.putBalance(new com.surprising.aeron.service.account.AccountBalance(user, 3, 900, 100));
                 long orderId = 10000L + laneId;
-                var order = new OrderRuntime(orderId, ProductLine.LINEAR_PERPETUAL, user, symbolId,
+                var order = new Order(orderId, ProductLine.LINEAR_PERPETUAL, user, symbolId,
                         instrument, CoreOrderSide.BUY, 20_000 + laneId, false, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                         0, 0, 1, 0, 1, false);
-                var reservation = new ReservationRuntime(orderId, user, symbolId,
+                var reservation = new OrderFundsReservation(orderId, user, symbolId,
                         ReservationKind.DERIVATIVE_MARGIN, 3, 100, 0, 0, 1);
                 runtime.putOrder(order);
                 runtime.putReservation(reservation);
@@ -161,7 +159,7 @@ public class AccountLaneCommitBenchmark {
                         : runtime.dispatchLaneMutation(next, metadataUsers, null, null, 0, 0);
             }
             for (int index = 0; index < commits.length; index++) {
-                LaneCommitEvent commit = commits[index];
+                AccountPartitionCommit commit = commits[index];
                 while (!runtime.laneCommitComplete(commit)) Thread.onSpinWait();
                 runtime.releaseLaneCommit(commit);
                 commits[index] = null;

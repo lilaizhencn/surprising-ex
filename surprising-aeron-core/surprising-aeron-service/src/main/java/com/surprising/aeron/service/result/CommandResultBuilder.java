@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.result;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
@@ -13,11 +15,11 @@ import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
-import com.surprising.aeron.service.matcher.MatchingResult;
-import com.surprising.aeron.service.order.CommandSlot;
-import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
+import com.surprising.aeron.service.matcher.OrderMatchingResult;
+import com.surprising.aeron.service.order.OrderCommand;
+import com.surprising.aeron.service.order.OrderCommand.ReplacementAdmission;
+import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import com.surprising.aeron.support.collection.PrimitiveLongView;
 import java.util.AbstractList;
@@ -56,7 +58,7 @@ public final class CommandResultBuilder {
     }
 
     /** 当前单订单编码直接借用的可空运行订单。 */
-    private OrderRuntime commandSingleOrder;
+    private Order commandSingleOrder;
     /** 单订单编码使用的复用协议源适配器。 */
     private final OrderRuntimeSource commandSingleOrderSource = new OrderRuntimeSource();
     /** 多订单编码使用的复用源列表，容量按实际需要增长。 */
@@ -272,7 +274,7 @@ public final class CommandResultBuilder {
      * Lane 已准备结果时清普通订单引用，后续直接采用 Lane 编码；其余按下单、撤单、改单、触发路径确定订单，通用路径按变更订单 ID 顺序借取仍存在的订单。
      * @param pending 当前撮合命令槽，包含操作、准入及可能已编码的 Lane 响应
      */
-    public void materializeCommandOrderViews(CommandSlot pending) {
+    public void materializeCommandOrderViews(OrderCommand pending) {
         if (pending.laneResultPrepared()) {
             clearOrderViews();
             return;
@@ -288,7 +290,7 @@ public final class CommandResultBuilder {
             }
             case REPLACE, AMEND -> {
                 // 改单已解析准入，给出原订单与新订单身份
-                ResolvedMatchingAdmission admission = owner.requireMatchingAdmission(pending);
+                OrderCommand.ReplacementAdmission admission = owner.requireMatchingAdmission(pending);
                 materializeResponseOrders(pending, admission.originalOrderId(), admission.command().orderId());
                 return;
             }
@@ -304,7 +306,7 @@ public final class CommandResultBuilder {
             // 当前需要尝试读取并加入响应的订单 ID
             long orderId = primitiveOrderId(commandChangedOrderIds, index);
             // 本轮借用的现存订单或撤单条目，空项按当前入口规则跳过
-            OrderRuntime order = owner.runtimeOrder(orderId);
+            Order order = owner.runtimeOrder(orderId);
             if (order != null) commandOrderSources.add(order, owner.identities().instrumentId(order.symbolId()));
         }
     }
@@ -326,7 +328,7 @@ public final class CommandResultBuilder {
     void materializeResponseOrder(long orderId) {
         commandOrderSources.clear();
         // 本轮借用的现存订单或撤单条目，空项按当前入口规则跳过
-        OrderRuntime order = owner.runtimeOrder(orderId);
+        Order order = owner.runtimeOrder(orderId);
         commandSingleOrder = order;
     }
 
@@ -335,7 +337,7 @@ public final class CommandResultBuilder {
      * @param pending 当前撮合命令槽，包含操作、准入及可能已编码的 Lane 响应
      * @param orderId 本次需要收集或编码的订单 ID
      */
-    private OrderRuntime responseOrder(CommandSlot pending, long orderId) {
+    private Order responseOrder(OrderCommand pending, long orderId) {
         if (pending != null && pending.laneResultPrepared()) {
             return pending.laneResultOrder(orderId);
         }
@@ -348,7 +350,7 @@ public final class CommandResultBuilder {
      * @param orderId 本次需要收集或编码的订单 ID
      * @param order 当前有效状态读取边界中借用的订单
      */
-    private String responseOrderSymbol(CommandSlot pending, long orderId, OrderRuntime order) {
+    private String responseOrderSymbol(OrderCommand pending, long orderId, Order order) {
         if (pending != null && pending.laneResultPrepared()) {
             return pending.laneResultSymbol(orderId);
         }
@@ -360,7 +362,7 @@ public final class CommandResultBuilder {
      * @param pending 当前撮合命令槽，包含操作、准入及可能已编码的 Lane 响应
      * @param orderId 本次需要收集或编码的订单 ID
      */
-    private void materializeResponseOrder(CommandSlot pending, long orderId) {
+    private void materializeResponseOrder(OrderCommand pending, long orderId) {
         commandOrderSources.clear();
         commandSingleOrder = responseOrder(pending, orderId);
     }
@@ -371,12 +373,12 @@ public final class CommandResultBuilder {
      * @param firstOrderId 原单或双订单响应中的第一个 ID
      * @param secondOrderId 新单或双订单响应中的第二个 ID
      */
-    private void materializeResponseOrders(CommandSlot pending, long firstOrderId, long secondOrderId) {
+    private void materializeResponseOrders(OrderCommand pending, long firstOrderId, long secondOrderId) {
         commandOrderSources.clear();
         // 按第一个 ID 查到的可空订单
-        OrderRuntime first = responseOrder(pending, firstOrderId);
+        Order first = responseOrder(pending, firstOrderId);
         // 按第二个 ID 查到的可空订单
-        OrderRuntime second = responseOrder(pending, secondOrderId);
+        Order second = responseOrder(pending, secondOrderId);
         if (first == null) {
             if (second == null) {
                 commandSingleOrder = null;
@@ -405,8 +407,8 @@ public final class CommandResultBuilder {
      * @param matchingResult 普通订单编码分支的存在性条件，当前实现不读取其内部字段
      */
     public byte[] commandResultData(
-            CommandSlot pending,
-            MatchingResult matchingResult) {
+            OrderCommand pending,
+            OrderMatchingResult matchingResult) {
         if (commandRiskScanControl != null) {
             return setResponse(CoreRiskScanControlCodec.encodeView(commandRiskScanControl));
         }
@@ -557,7 +559,7 @@ public final class CommandResultBuilder {
          * @param order 当前有效状态读取边界中借用的订单
          * @param instrumentId 与该订单配对的协议币对文本
          */
-        private void add(OrderRuntime order, String instrumentId) {
+        private void add(Order order, String instrumentId) {
             if (size == values.length) {
                 values = java.util.Arrays.copyOf(values, Math.multiplyExact(values.length, 2));
             }

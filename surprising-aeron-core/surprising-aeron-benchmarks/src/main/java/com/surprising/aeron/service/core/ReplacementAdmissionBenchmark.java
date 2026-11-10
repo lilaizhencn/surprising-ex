@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
@@ -8,14 +10,14 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
-import com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.market.MarkPrice;
+import com.surprising.aeron.service.order.OrderAdmissionService;
+import com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
@@ -41,9 +43,9 @@ public class ReplacementAdmissionBenchmark {
     @Param({"LINEAR_PERPETUAL", "SPOT"}) public String productLine;
     private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
-    private RuntimeOrderAdmission.Context decision;
+    private OrderAdmissionService.Context decision;
     private final AmendOrderCommand[] commands = new AmendOrderCommand[WINDOW];
-    private final ReplacementAdmissionEvent[] pending = new ReplacementAdmissionEvent[WINDOW];
+    private final OrderCommand.ReplacementAdmissionEvent[] pending = new OrderCommand.ReplacementAdmissionEvent[WINDOW];
     private long sequence;
 
     @Setup public void setup() {
@@ -55,13 +57,13 @@ public class ReplacementAdmissionBenchmark {
                                 100_000, 10_000_000, 10_000, 0, 10_000,
                                 List.of(new CoreRiskLimitBracket(10_000, 10_000_000, 100_000, 50_000))) : null),
                         0, 0, 0, -1, 0));
-        var users = new HashMap<Long, CoreUserState>();
+        var users = new HashMap<Long, UserAccountSnapshot>();
         var orders = new HashMap<Long, CoreOrderState>();
         for (int i = 0; i < WINDOW; i++) {
             long user = i + 1, original = 1_000 + user;
-            users.put(user, new CoreUserState(product, user, 1,
+            users.put(user, new UserAccountSnapshot(product, user, 1,
                     Map.of("USDT", new AssetBalance("USDT", 800, 100)),
-                    Map.of(original, new OrderReservation(original, "1", product == ProductLine.SPOT ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
+                    Map.of(original, new OrderFundsReservation.Snapshot(original, "1", product == ProductLine.SPOT ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
                             "USDT", 100, 0, 0, 1)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
             orders.put(original, new CoreOrderState(original, product, user, "1",
                     CoreOrderSide.BUY, 100, 1, 0, false, CoreMarginMode.CROSS, CorePositionSide.NET,
@@ -75,8 +77,8 @@ public class ReplacementAdmissionBenchmark {
         runtime = RuntimeStateProjector.project(new TradingCoreState(product, 1,
                 users, orders, Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()),
                 identities, new LaneTopology(1, laneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, WINDOW, WINDOW, WINDOW));
-        decision = new RuntimeOrderAdmission.Context(instrument, identities.symbolId("1"),
-                new MarkPriceRuntime(identities.symbolId("1"), instrument, 100, 1, 1_000),
+        decision = new OrderAdmissionService.Context(instrument, identities.symbolId("1"),
+                new MarkPrice(identities.symbolId("1"), instrument, 100, 1, 1_000),
                 FeePolicyBook.EMPTY, 1_001, runtime.treasury().settlementStatus(identities.symbolId("1")));
         runtime.startAccountLanes();
     }

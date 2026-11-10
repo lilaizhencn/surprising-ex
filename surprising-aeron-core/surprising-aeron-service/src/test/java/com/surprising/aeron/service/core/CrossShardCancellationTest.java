@@ -56,7 +56,7 @@ class CrossShardCancellationTest {
             String first = "37";
             // 第二组品种字符串，要求路由不同分片；追加 X 仅是原有搜索分支，数字品种解析不接受此前缀。
             String second = "38";
-            while (state.matchingAdapter.matcherShardId(first) == state.matchingAdapter.matcherShardId(second))
+            while (state.matchingAdapter().matcherShardId(first) == state.matchingAdapter().matcherShardId(second))
                 second = "X" + second;
             register(state, first);
             register(state, second);
@@ -81,7 +81,7 @@ class CrossShardCancellationTest {
             // 确认阻塞控制动作已经进入目标 Matcher 的门闩。
             var entered = new CountDownLatch(1);
             // 第一品种所在的 Matcher 分片，测试通过控制调用阻塞它。
-            int shard = state.matchingAdapter.matcherShardId(first);
+            int shard = state.matchingAdapter().matcherShardId(first);
             // 阻塞控制调用的负 token，放行后须先收集该队头结果。
             long token = state.matcherPipeline().submitControl(shard, () -> {
                 entered.countDown();

@@ -21,7 +21,7 @@ class OrdinaryLifecycleOverlapTest {
     void ordinaryChecksRetainAccountAndSymbolIsolationUntilLifecycleRetires(ProductLine line) {
         try (/* 当前产品线创建并自动关闭的 Core */ var core = new TradingCoreRuntime(line)) {
             // 用户七、品种一的在途强平范围，反复检查时仍应保留同一对象
-            var liquidation = new MatchingCommandAdmission.PendingLifecycleRanges(1);
+            var liquidation = new OrderAdmissionService.PendingLifecycleRanges(1);
             liquidation.add(7, "1", false);
             core.admissions().pendingLifecycleScopes.put(91, liquidation);
             for (/* 重复检查次数下标，验证冲突探测不会消耗原范围 */ int cycle = 0; cycle < 3; cycle++) {
@@ -33,7 +33,7 @@ class OrdinaryLifecycleOverlapTest {
             }
             core.admissions().pendingLifecycleScopes.remove(91);
             assertThatCode(() -> check(core, 7, "1")).doesNotThrowAnyException();
-            var settlement = new MatchingCommandAdmission.PendingLifecycleRanges(1);
+            var settlement = new OrderAdmissionService.PendingLifecycleRanges(1);
             settlement.add(0, "1", true);
             core.admissions().pendingLifecycleScopes.put(92, settlement);
             assertThatThrownBy(() -> check(core, 8, "1")).isInstanceOf(CoreStateRejectedException.class);
@@ -56,6 +56,6 @@ class OrdinaryLifecycleOverlapTest {
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100, symbol, CoreOrderSide.BUY,
                         100, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                         CoreTimeInForce.GTC, false, "ordinary")));
-        core.admissions().rejectLifecycleOverlap(message, CommandSlot.Operation.PLACE, core.decodeMatchingCommand(message));
+        core.admissions().rejectLifecycleOverlap(message, OrderCommand.Operation.PLACE, core.decodeMatchingCommand(message));
     }
 }

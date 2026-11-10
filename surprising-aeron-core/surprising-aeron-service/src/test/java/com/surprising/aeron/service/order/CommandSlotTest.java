@@ -13,7 +13,6 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.result.CommandResultBuilder;
 import com.surprising.aeron.service.result.ResponseArena;
 import com.surprising.product.api.ProductLine;
@@ -34,8 +33,8 @@ class CommandSlotTest {
     void laneEmptyResultIsFinalAndNeverQueriesOwnerState() {
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
         CoreMessage command = command(1000);
-        var pending = new CommandSlot().initialize(1000, CommandSlot.Operation.PLACE, command,
-                CommandFingerprint.of(command), List.of(), DecodedMatchingCommand.decode(command), null);
+        var pending = new OrderCommand().initialize(1000, OrderCommand.Operation.PLACE, command,
+                CommandFingerprint.of(command), List.of(), OrderCommand.Decoded.decode(command), null);
         pending.prepareLaneResultTarget(new ResponseArena(1, 16));
         // 普通命令槽提供的 Lane 结果写入接口。
         var target = pending.laneResultTarget();
@@ -67,8 +66,8 @@ class CommandSlotTest {
             assertThat(userView).isInstanceOf(com.surprising.aeron.support.collection.PrimitiveLongView.class);
             // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
             CoreMessage command = command(1);
-            var pending = new CommandSlot().initialize(1, CommandSlot.Operation.PLACE, command,
-                    CommandFingerprint.of(command), List.of(), DecodedMatchingCommand.decode(command), null);
+            var pending = new OrderCommand().initialize(1, OrderCommand.Operation.PLACE, command,
+                    CommandFingerprint.of(command), List.of(), OrderCommand.Decoded.decode(command), null);
             pending.suspendCommitContext(builder, false);
             builder.commandChangedUserIds = List.of();
             builder.commandChangedOrderIds = List.of();
@@ -88,13 +87,13 @@ class CommandSlotTest {
     }
 
     /**
-     * 实际验证 DirectCommandSlot：先写控制任务、拒绝结果和终结标记，清理后复用，要求旧任务和结果为空、边界及检查点换为新命令值。
+     * 实际验证 OrderCommand.Direct：先写控制任务、拒绝结果和终结标记，清理后复用，要求旧任务和结果为空、边界及检查点换为新命令值。
      */
     @Test
     void clearsControlResultAndWorkBeforeReusingTheSameSlot() {
         try (var runtime = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             // 本方法实际测试的直接命令槽。
-            DirectCommandSlot slot = runtime.directCommand;
+            OrderCommand.Direct slot = runtime.directCommand;
             // 首条直接命令，批次代际测试中则为当前代首个 Core 序号。
             CoreMessage first = command(1000);
             slot.initialize(first, CommandFingerprint.of(first), new TradingCoreRuntime.SourceKey(
@@ -128,14 +127,14 @@ class CommandSlotTest {
         // 当前下单输入消息。
         CoreMessage command = command(1000);
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
-        var pending = new CommandSlot().initialize(1000, CommandSlot.Operation.PLACE, command,
-                CommandFingerprint.of(command), List.of(), DecodedMatchingCommand.decode(command), null);
+        var pending = new OrderCommand().initialize(1000, OrderCommand.Operation.PLACE, command,
+                CommandFingerprint.of(command), List.of(), OrderCommand.Decoded.decode(command), null);
         // 人工绑定到槽上的批次上下文。
-        var batch = new OrderBatchPending(1, new ResponseArena(1, 4096));
+        var batch = new OrderBatchProcessor.PendingBatch(1, new ResponseArena(1, 4096));
         pending.orderBatch = batch;
-        pending.initialize(2000, CommandSlot.Operation.PLACE, command,
+        pending.initialize(2000, OrderCommand.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(),
-                DecodedMatchingCommand.decode(command), null);
+                OrderCommand.Decoded.decode(command), null);
         assertThat(pending.orderBatch).isNull();
     }
 
@@ -149,14 +148,14 @@ class CommandSlotTest {
                 // 首条直接命令，批次代际测试中则为当前代首个 Core 序号。
                 long first = 1000L + (long) generation * owner.pendingMatching().capacity();
                 // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
-                var pending = new CommandSlot[3];
+                var pending = new OrderCommand[3];
                 // 本代三个批次上下文数组。
-                var batches = new OrderBatchPending[3];
+                var batches = new OrderBatchProcessor.PendingBatch[3];
                 for (/* 当前创建或清理的三个批次/命令下标。 */ int i = 0; i < 3; i++) {
                     pending[i] = owner.admissions().newPendingMatching(first + i,
-                            CommandSlot.Operation.PLACE, command(first + i));
+                            OrderCommand.Operation.PLACE, command(first + i));
                     owner.pendingMatching().put(pending[i]);
-                    batches[i] = new OrderBatchPending(1, owner.responseArena());
+                    batches[i] = new OrderBatchProcessor.PendingBatch(1, owner.responseArena());
                     batches[i].sequence = first + i;
                     owner.batches().registerBatch(pending[i], batches[i]);
                     assertThat(owner.batches().batch(first + i)).isSameAs(pending[i].orderBatch).isSameAs(batches[i]);
@@ -194,13 +193,13 @@ class CommandSlotTest {
         // 原命令已计算的指纹，更新列表后要求保持同一引用。
         CommandFingerprint fingerprint = CommandFingerprint.of(command);
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
-        CommandSlot pending = new CommandSlot().initialize(7, CommandSlot.Operation.PLACE, command, fingerprint,
-                List.of(17L), DecodedMatchingCommand.decode(command), null);
+        OrderCommand pending = new OrderCommand().initialize(7, OrderCommand.Operation.PLACE, command, fingerprint,
+                List.of(17L), OrderCommand.Decoded.decode(command), null);
 
         // 更新前保留的解码引用。
         var decoded = pending.decodedCommand();
         // 更新先撤列表后返回的原命令槽引用。
-        CommandSlot updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
+        OrderCommand updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
 
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
         assertThat(updatedCancellations.command()).isSameAs(command);

@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.service.core.change.LaneCommitDelta;
+import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,7 +17,7 @@ class LaneTerminalSummaryTest {
         // 接收测试发布结果的独立冷运行时，不启动账户线程
         var state = new TradingAccountRuntime();
         // 本测试反复准备发布和清空的 Lane 变化缓冲
-        var changes = new LaneCommitDelta();
+        var changes = new AccountPartitionCommit.Delta();
         // 偶数取消订单应触发的终态 ID 列表
         var expected = new ArrayList<Long>();
         for (/* 四十个测试订单的当前订单号 */ long id = 1; id <= 40; id++) {
@@ -51,7 +51,7 @@ class LaneTerminalSummaryTest {
         // 接收测试发布结果的独立冷运行时，不启动账户线程
         var state = new TradingAccountRuntime();
         // 本测试反复准备发布和清空的 Lane 变化缓冲
-        var changes = new LaneCommitDelta();
+        var changes = new AccountPartitionCommit.Delta();
         // 本轮终态回调记录的 ID 列表，每轮使用前清空
         var retained = new ArrayList<Long>();
         // 固定终态接收回调，只记录订单 ID
@@ -89,7 +89,7 @@ class LaneTerminalSummaryTest {
         // 接收测试发布结果的独立冷运行时，不启动账户线程
         var state = new TradingAccountRuntime();
         // 本测试反复准备发布和清空的 Lane 变化缓冲
-        var changes = new LaneCommitDelta();
+        var changes = new AccountPartitionCommit.Delta();
         changes.putOrder(11, CoreStateTestFixtures.order(11, 7, 5, 10).withStatus(CoreOrderStatus.CANCELED, 2, -1, -1));
         changes.preparePublication();
         // 本轮终态回调记录的 ID 列表，每轮使用前清空

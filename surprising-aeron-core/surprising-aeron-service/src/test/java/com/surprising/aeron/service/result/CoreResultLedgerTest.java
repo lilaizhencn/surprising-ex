@@ -62,7 +62,7 @@ class CoreResultLedgerTest {
             }
             input.releaseDecoderSlot();
             expected.put(id, stable);
-            if (expected.size() > TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS)
+            if (expected.size() > TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS)
                 expected.remove(expected.keySet().iterator().next());
             for (var /* 仍应保留的参照 Map 当前键值项 */ entry : expected.entrySet())
                 assertThat(ledger.get(entry.getKey()).fingerprint()).isEqualTo(entry.getValue());
@@ -98,7 +98,7 @@ class CoreResultLedgerTest {
             // 参照模型本次沿用或新增的保留序号
             long retention = expected.containsKey(id) ? expected.get(id)[1] : nextRetention++;
             expected.put(id, new long[]{sequence, retention});
-            if (expected.size() > TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS)
+            if (expected.size() > TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS)
                 expected.remove(expected.keySet().iterator().next());
             ledger.storeOwnedResult(id, stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
                     sequence, 0, new byte[]{(byte) sequence}, 0).fingerprint(), ResponseStatus.APPLIED,
@@ -183,7 +183,7 @@ class CoreResultLedgerTest {
             UUID firstCommandId = UUID.randomUUID();
             assertThat(CoreTestCompletion.applyAsynchronously(state, checkpoint(firstCommandId, 1, 1)).status())
                     .isEqualTo(ResponseStatus.APPLIED);
-            for (/* 当前写入或应用的探针序号 */ int sequence = 2; sequence <= TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
+            for (/* 当前写入或应用的探针序号 */ int sequence = 2; sequence <= TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
                 assertThat(CoreTestCompletion.applyAsynchronously(state, checkpoint(UUID.randomUUID(), sequence, 1)).status())
                         .isEqualTo(ResponseStatus.APPLIED);
             }

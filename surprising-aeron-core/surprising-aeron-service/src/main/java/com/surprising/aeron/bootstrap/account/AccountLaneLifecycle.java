@@ -2,13 +2,13 @@ package com.surprising.aeron.bootstrap.account;
 
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.TradingCpuAffinity;
-import com.surprising.aeron.service.account.AccountLaneState;
+import com.surprising.aeron.service.account.AccountPartition;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 账户执行资源的唯一生命周期：创建/回滚/关闭工作线程，并按原栅栏协议交接账户所有权。 */
 public final class AccountLaneLifecycle implements AutoCloseable {
-    private final AccountLaneState[] lanes;
+    private final AccountPartition[] lanes;
     private final SettlementLaneWorker[] workers;
     private final LaneTopology topology;
     private final Runnable assertOwner;
@@ -19,7 +19,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     private boolean handoffRequested;
     private long handoffDeadline;
 
-    public AccountLaneLifecycle(AccountLaneState[] lanes, LaneTopology topology, Runnable assertOwner) {
+    public AccountLaneLifecycle(AccountPartition[] lanes, LaneTopology topology, Runnable assertOwner) {
         this.lanes = lanes;
         this.topology = topology;
         this.assertOwner = assertOwner;
@@ -67,7 +67,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
                 return false;
             }
         }
-        for (AccountLaneState lane : lanes) lane.assertOwner();
+        for (AccountPartition lane : lanes) lane.assertOwner();
         ownerHasAccess = true;
         return true;
     }
@@ -75,7 +75,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     public void releaseOwnerAccess() {
         assertOwner.run();
         if (ownerHasAccess && started)
-            for (AccountLaneState lane : lanes) lane.releaseOwnerForHandoff();
+            for (AccountPartition lane : lanes) lane.releaseOwnerForHandoff();
         ownerHasAccess = false;
         if (handoffRequested) {
             for (SettlementLaneWorker worker : workers) worker.resumeHandoff(handoffEpoch);

@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.replay.CommittedTradeReplay;
 import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult;
-import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.model.CommittedProjectionRows.DeliveryLedgerEntry;
 import com.surprising.realtime.provider.export.model.CommittedProjectionRows.ExecutionWrite;

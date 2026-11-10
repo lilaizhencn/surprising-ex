@@ -37,14 +37,15 @@ import org.mockito.ArgumentCaptor;
 class OrderBatchServiceTest {
 
     private final OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-    private AeronOrderCommandService service;
+    private OrderService service;
 
     @BeforeEach
     void setUp() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        service = new AeronOrderCommandService(aeron, properties,
-                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class));
+        service = new OrderService(properties, null, aeron, null,
+                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class),
+                null, null, null);
         when(aeron.commandOutcome(any(), any(), anyLong(), any(byte[].class)))
                 .thenReturn(new CoreCommandOutcome.Terminal(new CoreResponse(
                         ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
@@ -64,8 +65,8 @@ class OrderBatchServiceTest {
                 ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1L, com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResult(aggregate))));
 
-        AeronOrderCommandService.CommandExecution first = service.placeBatchCommand("place-batch", requests);
-        AeronOrderCommandService.CommandExecution second = service.placeBatchCommand("place-batch", requests);
+        OrderService.CommandExecution first = service.submitPlaceBatchCommand("place-batch", requests);
+        OrderService.CommandExecution second = service.submitPlaceBatchCommand("place-batch", requests);
 
         assertThat(first.commandId()).isEqualTo(second.commandId());
         OrderCommandReceipt firstReceipt = service.receipt(first);
@@ -88,27 +89,27 @@ class OrderBatchServiceTest {
     @Test
     void mapsTerminalConflictAdmissionBackpressureAndUnknownWithoutFallback() {
         UUID commandId = UUID.fromString("55555555-5555-5555-5555-555555555555");
-        AeronOrderCommandService.CommandExecution conflict = new AeronOrderCommandService.CommandExecution(
+        OrderService.CommandExecution conflict = new OrderService.CommandExecution(
                 commandId, List.of(7001L), new CoreCommandOutcome.Terminal(new CoreResponse(
                 ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.IDEMPOTENCY_CONFLICT,
-                4L, new byte[0])), AeronOrderCommandService.CommandKind.PLACE);
+                4L, new byte[0])), OrderService.CommandKind.PLACE);
         OrderCommandReceipt conflictReceipt = service.receipt(conflict);
         assertThat(conflictReceipt.outcome()).isEqualTo("TERMINAL");
         assertThat(conflictReceipt.code()).isEqualTo("IDEMPOTENCY_CONFLICT");
 
-        AeronOrderCommandService.CommandExecution backpressure = new AeronOrderCommandService.CommandExecution(
+        OrderService.CommandExecution backpressure = new OrderService.CommandExecution(
                 commandId, List.of(7001L), new CoreCommandOutcome.NotAccepted(
                 CoreCommandOutcome.NotAcceptedReason.CLIENT_BACKPRESSURED, -1L),
-                AeronOrderCommandService.CommandKind.PLACE);
+                OrderService.CommandKind.PLACE);
         OrderCommandReceipt backpressureReceipt = service.receipt(backpressure);
         assertThat(backpressureReceipt.outcome()).isEqualTo("NOT_ACCEPTED");
         assertThat(backpressureReceipt.code()).isEqualTo("CLIENT_BACKPRESSURED");
         assertThat(backpressureReceipt.commandResultUrl()).isNull();
         assertThat(backpressureReceipt.rawOfferResult()).isEqualTo(-1L);
 
-        AeronOrderCommandService.CommandExecution unknown = new AeronOrderCommandService.CommandExecution(
+        OrderService.CommandExecution unknown = new OrderService.CommandExecution(
                 commandId, List.of(7001L), new CoreCommandOutcome.ResultUnknown(commandId),
-                AeronOrderCommandService.CommandKind.PLACE);
+                OrderService.CommandKind.PLACE);
         OrderCommandReceipt unknownReceipt = service.receipt(unknown);
         assertThat(unknownReceipt.outcome()).isEqualTo("RESULT_UNKNOWN");
         assertThat(unknownReceipt.code()).isEqualTo("RESULT_UNKNOWN");
@@ -120,13 +121,13 @@ class OrderBatchServiceTest {
         UUID commandId = UUID.fromString("66666666-6666-6666-6666-666666666666");
         CoreResponse pendingResponse = new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
                 CoreResultCode.MATCHING_PENDING, 4L, new byte[0]);
-        AeronOrderCommandService.CommandExecution execution = new AeronOrderCommandService.CommandExecution(
+        OrderService.CommandExecution execution = new OrderService.CommandExecution(
                 commandId, List.of(7001L), new CoreCommandOutcome.Terminal(pendingResponse),
-                AeronOrderCommandService.CommandKind.PLACE);
+                OrderService.CommandKind.PLACE);
         when(aeron.commandResult(commandId)).thenReturn(pendingResponse);
 
         OrderCommandReceipt initial = service.receipt(execution);
-        OrderCommandReceipt queried = service.commandResult(commandId);
+        OrderCommandReceipt queried = service.commandResultFromCore(commandId);
 
         assertThat(initial.outcome()).isEqualTo("MATCHING_PENDING");
         assertThat(initial.code()).isEqualTo("MATCHING_PENDING");
@@ -146,8 +147,8 @@ class OrderBatchServiceTest {
         List<CancelOrderRequest> cancels = java.util.stream.IntStream.range(0, 50)
                 .mapToObj(index -> new CancelOrderRequest(1001L, 20_000L + index)).toList();
 
-        service.amendBatchCommand("amend-batch", amends);
-        service.cancelBatchCommand("cancel-batch", cancels);
+        service.submitAmendBatchCommand("amend-batch", amends);
+        service.submitCancelBatchCommand("cancel-batch", cancels);
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
         verify(aeron).commandOutcome(eq(CoreMessageType.AMEND_ORDER_BATCH), any(UUID.class), eq(1001L),

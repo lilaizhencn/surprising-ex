@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core.identity;
 
-import com.surprising.aeron.service.account.LaneClientIdentities;
+import com.surprising.aeron.service.account.ClientOrderIdRegistry;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import java.util.HashMap;
 import java.util.List;
@@ -19,7 +19,7 @@ public final class IdentityTestContents {
             for (int lane = 0; lane < runtime.accountLaneCount(); lane++)
                 clients(runtime.accountLane(lane).clientIdentities(), clients);
         } else {
-            LongObjectHashMap<LaneClientIdentities> tables = field(identities, "unboundClients");
+            LongObjectHashMap<ClientOrderIdRegistry> tables = field(identities, "unboundClients");
             if (tables != null) tables.forEachValue(table -> clients(table, clients));
         }
         Map<String, Integer> assets = field(identities, "assetIds");
@@ -32,7 +32,7 @@ public final class IdentityTestContents {
                 "positions", Map.copyOf(positions), "clients", Map.copyOf(clients));
     }
 
-    private static void clients(LaneClientIdentities table, Map<List<Object>, Long> target) {
+    private static void clients(ClientOrderIdRegistry table, Map<List<Object>, Long> target) {
         long[] keys = field(table, "keys");
         long[] users = field(table, "users");
         long[] references = field(table, "references");

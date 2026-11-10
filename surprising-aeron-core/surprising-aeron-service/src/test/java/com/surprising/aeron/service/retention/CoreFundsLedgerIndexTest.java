@@ -202,7 +202,7 @@ class CoreFundsLedgerIndexTest {
      * @param user 当前命令或查询用户 ID
      */
     private void evictOldResults(TradingCoreRuntime core, long user) {
-        for (/* 挤出响应缓存时逐次增加的费率版本 */ int revision = 1; revision <= TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 1; revision++) {
+        for (/* 挤出响应缓存时逐次增加的费率版本 */ int revision = 1; revision <= TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS + 1; revision++) {
             // 本轮用于填近期结果窗口的费率策略
             var policy = new UpsertFeePolicyCommand(33, revision, user, "", 0, 0, 1, true, TIME - 1, 0);
             applied(core, command(core, CoreMessageType.UPSERT_FEE_POLICY, user, TradingCommandCodec.encodeUpsertFeePolicy(policy)));

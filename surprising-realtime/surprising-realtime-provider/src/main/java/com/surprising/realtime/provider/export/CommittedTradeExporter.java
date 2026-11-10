@@ -2,7 +2,7 @@ package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.replay.CommittedTradeReplay;
-import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.PortfolioIncomePeriod;
 import com.surprising.realtime.provider.export.config.TradeExportProperties;

@@ -4,7 +4,7 @@ import com.surprising.aeron.model.CoreFeePolicyState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.MatcherSnapshot;
+import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.result.CommandResultLedger;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.product.api.ProductLine;
@@ -42,7 +42,7 @@ public record CoreSnapshotImage(
         long fundsStateHash,
         long clusterTimestamp,
         long clusterPosition,
-        MatcherSnapshot matcherSnapshot,
+        OrderBookSnapshot matcherSnapshot,
         TradingCoreState tradingState,
         Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
         Map<UUID, CommandResultLedger.StoredResult> commandResults,

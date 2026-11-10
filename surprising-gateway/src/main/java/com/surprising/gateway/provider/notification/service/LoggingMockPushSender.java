@@ -3,7 +3,6 @@ package com.surprising.gateway.provider.notification.service;
 import com.surprising.gateway.provider.notification.model.PushOutboxItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.stereotype.Component;
 
 /**
@@ -11,7 +10,6 @@ import org.springframework.stereotype.Component;
  * 负责解析设备平台、校验 payload 格式并安全记录推送日志。
  */
 @Component
-@ConditionalOnMissingBean(PushSender.class)
 public class LoggingMockPushSender implements PushSender {
 
     private static final Logger log = LoggerFactory.getLogger(LoggingMockPushSender.class);

@@ -11,16 +11,16 @@ import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.AccountBalance;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.risk.RiskScanCoordinator;
-import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
+import com.surprising.aeron.service.risk.RiskScanner;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -63,10 +63,10 @@ class ParallelRiskScanTest {
                     new com.surprising.aeron.service.core.index.CancelAllAfterIndex(source),
                     new com.surprising.aeron.service.core.index.ActiveOrderIndex(source),
                     new AdlPositionIndex(source, ids)), ids);
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
             runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
-            var work = new RiskScanCoordinator(budget, index, runtime, ids);
+            var work = new RiskScanner(budget, index, runtime, ids);
             for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; runtime.firstRiskIncompleteScan() != null; page++) {
                 assertThat(page).isLessThan(4096);
                 if (page != 0) work.resetForCommand(budget);
@@ -114,10 +114,10 @@ class ParallelRiskScanTest {
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
             runtime.startAccountLanes();
             // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
-            var work = new RiskScanCoordinator(TOPOLOGY.accountLaneCount(), index, runtime, ids);
+            var work = new RiskScanner(TOPOLOGY.accountLaneCount(), index, runtime, ids);
             while (!work.poll()) {
                 Thread.onSpinWait();
             }
@@ -138,7 +138,7 @@ class ParallelRiskScanTest {
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
             runtime.startAccountLanes();
             run(runtime, ids, index, TOPOLOGY.accountLaneCount());
             // 只完成首批工作量的检查点，每条 Lane 都应留下进行中的用户。
@@ -156,9 +156,9 @@ class ParallelRiskScanTest {
                 // 恢复状态上的持仓用户索引，使用恢复后的身份映射。
                 var restoredIndex = new PositionUserIndex(restoredState, TOPOLOGY);
                 var previousProgress = runtime.riskScan(ids.findSymbolIdValue(1)).laneProgress();
-                RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(2, 70), runtime, ids);
+                RiskMarginCalculator.applyMarkPriceRuntime(mark(2, 70), runtime, ids);
                 assertThat(runtime.riskScan(ids.findSymbolIdValue(1)).laneProgress()).isSameAs(previousProgress);
-                RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(2, 70), restored, restoredIds);
+                RiskMarginCalculator.applyMarkPriceRuntime(mark(2, 70), restored, restoredIds);
                 // 循环交替使用的 1、3、7 项预算，让不同 Lane 和用户阶段反复跨页。
                 int[] budgets = {1, 3, 7};
                 for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; page < 128 && runtime.firstRiskIncompleteScan() != null; page++) {
@@ -208,7 +208,7 @@ class ParallelRiskScanTest {
             var positions = new TreeMap<>(user.positions());
             positions.put("2", new CorePositionState("2", "USDT", CoreMarginMode.CROSS,
                     CorePositionSide.NET, 1, 100, 100, 0, 0));
-            users.put(user.userId(), new CoreUserState(source.productLine(), user.userId(), user.revision() + 1,
+            users.put(user.userId(), new UserAccountSnapshot(source.productLine(), user.userId(), user.revision() + 1,
                     user.balances(), user.reservations(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
         }
         source = new TradingCoreState(source.productLine(), source.revision() + 1, users, source.orders(),
@@ -216,8 +216,8 @@ class ParallelRiskScanTest {
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
         var ids = new RuntimeIdentityRegistry();
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_000L), runtime, ids);
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 120), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_000L), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 120), runtime, ids);
             runtime.startAccountLanes();
             run(runtime, ids, new PositionUserIndex(source, TOPOLOGY), TOPOLOGY.accountLaneCount());
             // 从初始账户中选出的一个用户，用它模拟扫描中途盈利平仓。
@@ -228,7 +228,7 @@ class ParallelRiskScanTest {
             // 按平仓结算后的实际形态更新账户：200 盈利进入钱包，BTC 持仓消失，ETH 仍在。
             runtime.acquireOwnerLaneAccess();
             try {
-                runtime.replaceBalance(new BalanceRuntime(userId, ids.assetId("USDT"), 300, 0));
+                runtime.replaceBalance(new AccountBalance(userId, ids.assetId("USDT"), 300, 0));
                 com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, ids.preparedPositionKey(userId, SYMBOL), userId);
                 runtime.advanceUserRevision(userId);
             } finally {
@@ -269,7 +269,7 @@ class ParallelRiskScanTest {
             var positions = new TreeMap<>(user.positions());
             positions.put("2", new CorePositionState("2", "USDT", CoreMarginMode.CROSS,
                     CorePositionSide.NET, 1, 100, 100, 0, 0));
-            users.put(user.userId(), new CoreUserState(source.productLine(), user.userId(), user.revision() + 1,
+            users.put(user.userId(), new UserAccountSnapshot(source.productLine(), user.userId(), user.revision() + 1,
                     user.balances(), user.reservations(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
         }
         source = new TradingCoreState(source.productLine(), source.revision() + 1, users, source.orders(),
@@ -277,8 +277,8 @@ class ParallelRiskScanTest {
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
         var ids = new RuntimeIdentityRegistry();
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 100), runtime, ids);
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_001L), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 100), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_001L), runtime, ids);
             // 共享调度先给 BTC、再给 ETH 两个单位，保留两币对的未完成组合累计。
             var index = new PositionUserIndex(source, TOPOLOGY);
             run(runtime, ids, index, 2 * TOPOLOGY.accountLaneCount());
@@ -289,7 +289,7 @@ class ParallelRiskScanTest {
                     .allMatch(cursor -> cursor.userId() > 0 && !cursor.complete());
             assertThat(RuntimeStateMaterializer.materialize(runtime, ids).riskState().liquidations()).isEmpty();
             // ETH 扫描已经累计完两个持仓，此时 BTC 新价格只更新 BTC 扫描入口。
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(2, 120), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(2, 120), runtime, ids);
             // ETH 尚在分批估值、BTC 已刷新价格时保存的业务状态检查点。
             var checkpoint = RuntimeStateMaterializer.materialize(runtime, ids);
             // 把扫描检查点编码成快照再恢复的业务状态。
@@ -332,7 +332,7 @@ class ParallelRiskScanTest {
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
             runtime.setNextLiquidationId(Long.MAX_VALUE - 1);
             runtime.startAccountLanes();
             assertThatThrownBy(() -> run(runtime, ids, index, TOPOLOGY.accountLaneCount()))
@@ -353,7 +353,7 @@ class ParallelRiskScanTest {
     private static int run(TradingAccountRuntime runtime, RuntimeIdentityRegistry ids, PositionUserIndex index, int budget) {
 
         // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
-        var work = new RiskScanCoordinator(budget, index, runtime, ids);
+        var work = new RiskScanner(budget, index, runtime, ids);
         await(work::poll);
         return work.completedWork();
     }
@@ -401,7 +401,7 @@ class ParallelRiskScanTest {
             var users = new TreeMap<>(state.users());
             // 当前遍历或替换的测试账户，保留其其他余额、冻结和持仓。
             var user = state.users().get(userId);
-            users.put(userId, new CoreUserState(state.productLine(), userId, user.revision() + 1,
+            users.put(userId, new UserAccountSnapshot(state.productLine(), userId, user.revision() + 1,
                     Map.of("USDT", new AssetBalance("USDT", 0, 100)), user.reservations(),
                     Map.of(position.key(), position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
             state = new TradingCoreState(state.productLine(), state.revision() + 1, users, state.orders(),

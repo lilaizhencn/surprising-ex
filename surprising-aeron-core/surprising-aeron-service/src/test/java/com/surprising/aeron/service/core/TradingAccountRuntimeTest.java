@@ -1,30 +1,31 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
-import com.surprising.aeron.service.account.AccountLaneState;
+import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.AccountLaneTestAccess;
-import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.change.LaneCommitEvent;
-import com.surprising.aeron.service.core.change.RuntimeChangeBuffer;
+import com.surprising.aeron.service.account.AccountBalance;
+import com.surprising.aeron.service.account.UserAccount;
+import com.surprising.aeron.service.core.change.AccountPartitionCommit;
+import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.order.admission.PendingReservationTracker;
-import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
-import com.surprising.aeron.service.order.OrderBatchPending;
+import com.surprising.aeron.service.order.OrderFundsReservation.PendingTracker;
+import com.surprising.aeron.service.order.OrderBatchProcessor.PlaceBatchAdmissionEvent;
+import com.surprising.aeron.service.order.OrderBatchProcessor.PendingBatch;
 import com.surprising.aeron.service.result.ResponseArena;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.position.PositionRuntime;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.order.OrderFundsReservation;
+import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.risk.*;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
-import com.surprising.aeron.service.risk.RiskScanRuntime;
-import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
+import com.surprising.aeron.service.risk.RiskScanner;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
@@ -49,8 +50,8 @@ class TradingAccountRuntimeTest {
         try (var state = new TradingAccountRuntime(topology)) {
             long second = 8;
             while (topology.accountLaneId(second) == topology.accountLaneId(7)) second++;
-            state.putUser(new UserRuntime(7));
-            state.putUser(new UserRuntime(second));
+            state.putUser(new UserAccount(7));
+            state.putUser(new UserAccount(second));
             state.putOrder(CoreStateTestFixtures.order(11, 7, 0, 10, true));
             state.putOrder(CoreStateTestFixtures.order(12, second, 0, 10));
             var routes = state.metadataOrderUsers(java.util.List.of(11L, 12L, 999L));
@@ -75,24 +76,24 @@ class TradingAccountRuntimeTest {
     @Test
     void futureBatchAdmissionDoesNotEnterEarlierCommandsRollbackBuffers() throws Exception {
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ var state = new TradingAccountRuntime()) {
-            state.putUser(new UserRuntime(7));
-            state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
+            state.putUser(new UserAccount(7));
+            state.putBalance(new AccountBalance(7, 3, 1000, 0));
             state.clearChangedKeys();
             // 当前用户所属 Lane 下标或回调提供的实际账户 Lane
             int lane = state.topology().accountLaneId(7);
             // 本次模拟未来批次发布的原 Matcher 变化缓冲
-            var changes = new MatcherSettlementChanges(state.topology().accountLaneCount());
+            var changes = new TradeSettlement.Changes(state.topology().accountLaneCount());
             changes.ensureActiveLanes(1L << lane);
-            changes.balancePatch(lane).add(7, 3, new BalanceRuntime(7, 3, 1000, 0), 0);
-            changes.balancePatch(lane).after(7, 3, new BalanceRuntime(7, 3, 800, 200), 200);
+            changes.balancePatch(lane).add(7, 3, new AccountBalance(7, 3, 1000, 0), 0);
+            changes.balancePatch(lane).after(7, 3, new AccountBalance(7, 3, 800, 200), 200);
             // 仅登记完成回执的未来原批次事件，不执行真实意图源
-            var admission = new PlaceBatchAdmissionEvent().prepare(2, 7, java.util.UUID.randomUUID(),
-                    new ResolvedPlaceOrder[1], new long[1],
-                    new OrderRuntime[]{CoreStateTestFixtures.order(11, 7, 5, 2)},
+            var admission = new OrderBatchProcessor.PlaceBatchAdmissionEvent().prepare(2, 7, java.util.UUID.randomUUID(),
+                    new OrderCommand.ResolvedPlaceOrder[1], new long[1],
+                    new Order[]{CoreStateTestFixtures.order(11, 7, 5, 2)},
                     1, lane, 0, state, changes, new RuntimeIdentityRegistry(),
-                    new OrderBatchPending(1, new ResponseArena()), 0, 0);
+                    new OrderBatchProcessor.PendingBatch(1, new ResponseArena()), 0, 0);
             // 通过反射仅用于本测试标记该原批次已完成的字段
-            var complete = PlaceBatchAdmissionEvent.class.getDeclaredField("completed");
+            var complete = OrderBatchProcessor.PlaceBatchAdmissionEvent.class.getDeclaredField("completed");
             complete.setAccessible(true);
             complete.setBoolean(admission, true);
             state.registerPlaceBatchAdmission(admission);
@@ -113,8 +114,8 @@ class TradingAccountRuntimeTest {
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void rollbackPublishesRestoredBalanceEvenWhenMutationFailedBeforeWriting(boolean wroteBalance) {
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ var state = new TradingAccountRuntime()) {
-            state.putUser(new UserRuntime(7));
-            state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
+            state.putUser(new UserAccount(7));
+            state.putBalance(new AccountBalance(7, 3, 1000, 0));
             state.clearChangedKeys();
             if (wroteBalance) state.replaceBalance(7, 3, 800, 0);
             else state.accountRollback.captureBalanceBefore(7, 3);
@@ -152,8 +153,8 @@ class TradingAccountRuntimeTest {
             long second = 8;
             while (topology.accountLaneId(second) == topology.accountLaneId(7)) second++;
             for (long /* 当前为不同 Lane 初始化的原用户 ID */ user : new long[]{7, second}) {
-                state.putUser(new UserRuntime(user));
-                state.putBalance(new BalanceRuntime(user, 3, 1000, 0));
+                state.putUser(new UserAccount(user));
+                state.putBalance(new AccountBalance(user, 3, 1000, 0));
             }
             CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
             CoreStateTestFixtures.reserveOrder(state, 12, second, 92, 5, 2, 3, 200);
@@ -163,7 +164,7 @@ class TradingAccountRuntimeTest {
             // 替换各 Lane 原订单表的测试保护器数组
             var maps = new OwnerForbiddenOrderMap[topology.accountLaneCount()];
             // 仅供本测试替换原账户订单表的反射字段
-            var ordersField = AccountLaneState.class.getDeclaredField("orders");
+            var ordersField = AccountPartition.class.getDeclaredField("orders");
             ordersField.setAccessible(true);
             for (/* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ int id = 0; id < maps.length; id++) {
                 maps[id] = new OwnerForbiddenOrderMap(AccountLaneTestAccess.orders(state.accountLanes[id]), Thread.currentThread());
@@ -201,7 +202,7 @@ class TradingAccountRuntimeTest {
      * 仅覆盖 get/put 的测试订单表保护器，用来发现这两条路径上 Owner 越界；inspect 供断言有意绕过。
      */
     private static final class OwnerForbiddenOrderMap
-            extends org.agrona.collections.Long2ObjectHashMap<OrderRuntime> {
+            extends org.agrona.collections.Long2ObjectHashMap<Order> {
         /** 禁止调用该测试表 get/put 的 Owner 线程。 */
         private final Thread forbidden;
         /**
@@ -209,7 +210,7 @@ class TradingAccountRuntimeTest {
          * @param source 原 Lane 订单表，复制其成员但复用订单正文引用
          * @param owner 要禁止直接 get/put 该测试订单表的原 Owner 线程
          */
-        OwnerForbiddenOrderMap(org.agrona.collections.Long2ObjectHashMap<OrderRuntime> source, Thread owner) {
+        OwnerForbiddenOrderMap(org.agrona.collections.Long2ObjectHashMap<Order> source, Thread owner) {
             super(source);
             forbidden = owner;
         }
@@ -217,7 +218,7 @@ class TradingAccountRuntimeTest {
          * 若当前为被禁止 Owner 则失败，其他线程沿原表 get；本保护只覆盖此重载。
          * @param id 要读取或写入的原订单号
          */
-        @Override public OrderRuntime get(long id) {
+        @Override public Order get(long id) {
             if (Thread.currentThread() == forbidden) throw new AssertionError("Owner read an account order table");
             if ((id == 11 || id == 12) && !containsKey(id))
                 throw new AssertionError("Lane received another Lane metadata candidate");
@@ -228,7 +229,7 @@ class TradingAccountRuntimeTest {
          * @param id 要读取或写入的原订单号
          * @param order 占位捕获方法收到的原订单，或测试表 put 要写入的原订单
          */
-        @Override public OrderRuntime put(long id, OrderRuntime order) {
+        @Override public Order put(long id, Order order) {
             if (Thread.currentThread() == forbidden) throw new AssertionError("Owner wrote an account order table");
             return super.put(id, order);
         }
@@ -236,7 +237,7 @@ class TradingAccountRuntimeTest {
          * 只供测试断言绕过 get 保护，读取已由 Lane 修改的原订单。
          * @param id 要读取或写入的原订单号
          */
-        OrderRuntime inspect(long id) { return super.get(id); }
+        Order inspect(long id) { return super.get(id); }
     }
 
     /**
@@ -244,7 +245,7 @@ class TradingAccountRuntimeTest {
      * @param state 本测试原账户运行时，按其所有权边界操作
      * @param event 尚未归还的原 Lane 元数据提交事件
      */
-    private static void awaitMetadataCommit(TradingAccountRuntime state, LaneCommitEvent event) {
+    private static void awaitMetadataCommit(TradingAccountRuntime state, AccountPartitionCommit event) {
         // 当前回执、回滚或控制收集阶段的五秒单调截止值
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         while (!state.laneCommitComplete(event)) {
@@ -261,8 +262,8 @@ class TradingAccountRuntimeTest {
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void asynchronousRollbackRestoresReservedFundsAndBothReservationIndexes(boolean batch) {
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ var state = new TradingAccountRuntime()) {
-            state.putUser(new UserRuntime(7));
-            state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
+            state.putUser(new UserAccount(7));
+            state.putBalance(new AccountBalance(7, 3, 1000, 0));
             state.clearChangedKeys();
             state.startAccountLanes();
             // 当前要派发、反射或读取的原账户 Lane 下标
@@ -272,11 +273,11 @@ class TradingAccountRuntimeTest {
                     CoreStateTestFixtures.reserveOrder(state, 11 + index, 7, 91 + index, 5, 2, 3, 200);
                     state.accountLanes[id].markPendingReservation(11 + index, 4);
                 }
-                return new OrderRuntime[]{state.order(11), state.order(12)};
+                return new Order[]{state.order(11), state.order(12)};
             });
             awaitControlLanes(state);
             // 账户实际返回的两份原准入订单数组
-            var admitted = (OrderRuntime[]) state.controlLaneResult(laneId);
+            var admitted = (Order[]) state.controlLaneResult(laneId);
             if (batch) {
                 state.pendingReservations.registerBatch(4, 7, admitted, 2);
             } else {
@@ -348,7 +349,7 @@ class TradingAccountRuntimeTest {
     @Test
     void admissionOnlyPreallocatesWrittenBuffersInItsOwnerLane() throws Exception {
         // 只供反射建立指定 Lane 数结算变化缓冲的原构造器
-        var constructor = MatcherSettlementChanges.class.getDeclaredConstructor(int.class);
+        var constructor = TradeSettlement.Changes.class.getDeclaredConstructor(int.class);
         constructor.setAccessible(true);
         // 本次模拟未来批次发布的原 Matcher 变化缓冲
         var changes = constructor.newInstance(4);
@@ -362,7 +363,7 @@ class TradingAccountRuntimeTest {
                 // 反射取得的原用户/订单/预留/持仓变化缓冲对象
                 Object buffer = bufferField.get(changes.laneDelta(lane));
                 // 原变化缓冲 keys 数组的反射字段
-                Field keys = RuntimeChangeBuffer.class.getDeclaredField("keys");
+                Field keys = StateChangeBuffer.class.getDeclaredField("keys");
                 keys.setAccessible(true);
                 assertThat(((long[]) keys.get(buffer)).length).as("lane %s %s", lane, name)
                         .isEqualTo(lane == 2 && (name.equals("orders") || name.equals("reservations")) ? 32 : 8);
@@ -413,7 +414,7 @@ class TradingAccountRuntimeTest {
                 "src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java"));
         assertThat(methodSource(runtimeSource, "public long revision", "public void beginOrderBatch"))
                 .contains("return revision")
-                .doesNotContain("onLane(", "new CommandCheckpoint", "AccountLaneState.Checkpoint");
+                .doesNotContain("onLane(", "new CommandCheckpoint", "AccountPartition.Checkpoint");
     }
 
     /**
@@ -470,9 +471,9 @@ class TradingAccountRuntimeTest {
     void keepsHotIndexesFlatAndTracksChangedKeys() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        // 当前原余额值，独立 BalanceRuntime 用例可直接冻结/释放
-        BalanceRuntime balance = new BalanceRuntime(7, 3, 1_000, 0);
+        state.putUser(new UserAccount(7));
+        // 当前原余额值，独立 AccountBalance 用例可直接冻结/释放
+        AccountBalance balance = new AccountBalance(7, 3, 1_000, 0);
         state.putBalance(balance);
         state.putOrder(CoreStateTestFixtures.order(11, 7, 5, 2));
         state.putReservation(CoreStateTestFixtures.reservation(11, 7, 3, 200));
@@ -524,10 +525,10 @@ class TradingAccountRuntimeTest {
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 本次内部用户 ID，部分用例按固定 Lane 路由寻找
         long userId = userForLane(topology, 0);
-        state.putUser(new UserRuntime(userId));
-        state.putBalance(new BalanceRuntime(userId, 3, 1_000, 0));
+        state.putUser(new UserAccount(userId));
+        state.putBalance(new AccountBalance(userId, 3, 1_000, 0));
         // 从冷运行时取得并可独立修改的原余额副本
-        BalanceRuntime retained = state.balance(userId, 3);
+        AccountBalance retained = state.balance(userId, 3);
         // 模拟越界调用或修改已脱离副本的另一普通线程
         Thread other = new Thread(() -> retained.credit(1));
         other.start();
@@ -595,8 +596,8 @@ class TradingAccountRuntimeTest {
      */
     @Test
     void reservesAndReleasesWithoutOverflow() {
-        // 当前原余额值，独立 BalanceRuntime 用例可直接冻结/释放
-        BalanceRuntime balance = new BalanceRuntime(7, 3, 1_000, 0);
+        // 当前原余额值，独立 AccountBalance 用例可直接冻结/释放
+        AccountBalance balance = new AccountBalance(7, 3, 1_000, 0);
         balance.reserve(250);
         assertThat(balance.availableUnits()).isEqualTo(750);
         assertThat(balance.lockedUnits()).isEqualTo(250);
@@ -611,8 +612,8 @@ class TradingAccountRuntimeTest {
      */
     @Test
     void failedReserveDoesNotPartiallyChangeBalance() {
-        // 当前原余额值，独立 BalanceRuntime 用例可直接冻结/释放
-        BalanceRuntime balance = new BalanceRuntime(7, 3, 100, Long.MAX_VALUE);
+        // 当前原余额值，独立 AccountBalance 用例可直接冻结/释放
+        AccountBalance balance = new AccountBalance(7, 3, 100, Long.MAX_VALUE);
 
         assertThatThrownBy(() -> balance.reserve(1)).isInstanceOf(ArithmeticException.class);
         assertThat(balance.availableUnits()).isEqualTo(100);
@@ -626,8 +627,8 @@ class TradingAccountRuntimeTest {
     void reservesOrderAndFundsAsOneRuntimeTransition() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
 
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
 
@@ -644,7 +645,7 @@ class TradingAccountRuntimeTest {
     void rejectedReservationCompletionPreservesCountersAndCanCompleteLater() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
+        state.putUser(new UserAccount(7));
         state.putReservation(CoreStateTestFixtures.reservation(11, 7, 3, 200));
         CoreStateTestFixtures.markPendingReservation(state, 7, 11, 4);
 
@@ -665,8 +666,8 @@ class TradingAccountRuntimeTest {
     void reservationCompletionUsesTheOrderToClientReverseIndex() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         CoreStateTestFixtures.markPendingReservation(state, 7, 11, 4);
         state.clearChangedKeys();
@@ -683,8 +684,8 @@ class TradingAccountRuntimeTest {
     void removingAClientOrderAlsoRemovesItsReverseIndexEntry() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         CoreStateTestFixtures.markPendingReservation(state, 7, 11, 4);
         state.onLane(7L, lane -> TradingAccountRuntime.removeClientOrderIndex(lane, 7, 91));
@@ -702,8 +703,8 @@ class TradingAccountRuntimeTest {
     void reassigningAliasesDoesNotLeaveStaleReverseMappings() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         CoreStateTestFixtures.reserveOrder(state, 12, 7, 92, 5, 2, 3, 200);
         state.putClientOrder(7, 93, 11);
@@ -732,7 +733,7 @@ class TradingAccountRuntimeTest {
         // 当前创建或核对的原订单业务号
         long orderId = 1;
         for (/* 本次内部用户 ID，部分用例按固定 Lane 路由寻找 */ long userId = 1; userId <= 100; userId++) {
-            state.putUser(new UserRuntime(userId));
+            state.putUser(new UserAccount(userId));
             for (/* 当前内部资产编号，注册身份场景由字典分配 */ int assetId = 1; assetId <= 10; assetId++) {
                 for (/* 当前用户、资产组合内十份预留的构造下标 */ int reservation = 0; reservation < 10; reservation++) {
                     state.putReservation(CoreStateTestFixtures.reservation(orderId, userId, assetId, assetId));
@@ -777,8 +778,8 @@ class TradingAccountRuntimeTest {
         // 准备一份已登记 pending 且冻结二百的原预留。
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         CoreStateTestFixtures.markPendingReservation(state, 7, 11, 4);
 
@@ -787,7 +788,7 @@ class TradingAccountRuntimeTest {
         // 首次正确完成原预留后的修订，失败重试不能改变它
         long revisionAfterFirstCompletion = state.revision();
         // 首次正确完成原预留后复制的余额对照
-        BalanceRuntime balanceAfterFirstCompletion = state.balance(7, 3);
+        AccountBalance balanceAfterFirstCompletion = state.balance(7, 3);
         assertThatThrownBy(() -> state.pendingReservations().completePendingReservation(7, 11, 4))
                 .isInstanceOf(IllegalStateException.class);
 
@@ -809,8 +810,8 @@ class TradingAccountRuntimeTest {
         // 准备一份只标记过一次 pending 的原预留。
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         CoreStateTestFixtures.markPendingReservation(state, 7, 11, 4);
 
@@ -840,8 +841,8 @@ class TradingAccountRuntimeTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 当前内部资产编号，注册身份场景由字典分配
         int assetId = identities.assetId("USDT");
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, assetId, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, assetId, 1_000, 0));
         // 用于 Lane 快照围栏校验的原冷全局状态
         TradingCoreState global = RuntimeStateMaterializer.materialize(state, identities);
         // 同一原围栏捕获的全部账户 Lane 快照列表
@@ -881,8 +882,8 @@ class TradingAccountRuntimeTest {
         // 准备一份仍待完成且资金已冻结的原预留。
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         CoreStateTestFixtures.markPendingReservation(state, 7, 11, 4);
 
@@ -894,7 +895,7 @@ class TradingAccountRuntimeTest {
             lane.updatePendingReservationInPlace(reservation, previous);
             return null;
         });
-        state.replaceBalance(new BalanceRuntime(7, 3, 800, 150));
+        state.replaceBalance(new AccountBalance(7, 3, 800, 150));
         assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isEqualTo(150);
         state.cancelOrder(11, 7, 150);
 
@@ -912,7 +913,7 @@ class TradingAccountRuntimeTest {
     void laneCounterOverflowFailsBeforePendingStateChanges() {
         // 在独立冷账户 Lane 准备一份 long 上限金额的 pending。
         // 当前用户所属 Lane 下标或回调提供的实际账户 Lane
-        AccountLaneState lane = new AccountLaneState(0, 8);
+        AccountPartition lane = new AccountPartition(0, 8);
         AccountLaneTestAccess.reservations(lane).put(1, CoreStateTestFixtures.reservation(1, 7, 3, Long.MAX_VALUE));
         lane.markPendingReservation(1, 1);
         AccountLaneTestAccess.reservations(lane).put(2, CoreStateTestFixtures.reservation(2, 7, 3, 1));
@@ -960,18 +961,18 @@ class TradingAccountRuntimeTest {
         long laterUser = userForLane(topology, 1);
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
-        state.putUser(new UserRuntime(firstUser));
-        state.putUser(new UserRuntime(laterUser));
-        state.putBalance(new BalanceRuntime(firstUser, 3, 1_000, 0));
-        state.putBalance(new BalanceRuntime(laterUser, 3, 1_000, 0));
+        state.putUser(new UserAccount(firstUser));
+        state.putUser(new UserAccount(laterUser));
+        state.putBalance(new AccountBalance(firstUser, 3, 1_000, 0));
+        state.putBalance(new AccountBalance(laterUser, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, firstUser, 91, 5, 2, 3, 200);
         CoreStateTestFixtures.reserveOrder(state, 12, laterUser, 92, 5, 2, 3, 200);
         CoreStateTestFixtures.markPendingReservation(state, firstUser, 11, 4);
         CoreStateTestFixtures.markPendingReservation(state, laterUser, 12, 4);
         // 故障预检查前首 Lane 原预留正文
-        ReservationRuntime firstReservation = state.reservation(11);
+        OrderFundsReservation firstReservation = state.reservation(11);
         // 故障预检查前首用户原独立余额对照
-        BalanceRuntime firstBalance = state.balance(firstUser, 3);
+        AccountBalance firstBalance = state.balance(firstUser, 3);
         // 首用户原所属 Lane 下标
         int firstLaneId = topology.accountLaneId(firstUser);
         // 故障预检查前首 Lane 修订、水位及本地哈希对照
@@ -1014,8 +1015,8 @@ class TradingAccountRuntimeTest {
     void rejectsDuplicateOrderAndClientWithoutChangingFunds() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
 
         assertThatThrownBy(() -> CoreStateTestFixtures.reserveOrder(state, 11, 7, 92, 5, 2, 3, 100))
@@ -1033,8 +1034,8 @@ class TradingAccountRuntimeTest {
     void insufficientFundsRejectsBeforeCreatingRuntimeEntities() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 100, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 100, 0));
 
         assertThatThrownBy(() -> CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 101))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -1052,9 +1053,9 @@ class TradingAccountRuntimeTest {
     void doesNotUseCompositeBalanceKeys() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.putBalance(new BalanceRuntime(7, 4, 2_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
+        state.putBalance(new AccountBalance(7, 4, 2_000, 0));
 
         assertThat(state.snapshotProjectionStateDirty()).isTrue();
         state.clearChangedKeys();
@@ -1075,8 +1076,8 @@ class TradingAccountRuntimeTest {
     void capturesDeterministicImmutableSnapshot() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
 
         // 本次捕获的独立只读运行时数字快照
@@ -1098,9 +1099,9 @@ class TradingAccountRuntimeTest {
     void snapshotIncludesPositionsAndTreasury() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        state.putPosition(9, new PositionRuntime(7, 5, 3,
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
+        state.putPosition(9, new Position(7, 5, 3,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 CoreStateTestFixtures.runtimeInstrument(), 2, 100, 200, 0, 40));
@@ -1127,7 +1128,7 @@ class TradingAccountRuntimeTest {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
         // 当前原 PLANNED 强平记录，按用户标的方向可定位
-        LiquidationRuntime planned = new LiquidationRuntime(1, 7, 5,
+        RiskScanner.LiquidationOrder planned = new RiskScanner.LiquidationOrder(1, 7, 5,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2, 0, 0, 0, 0,
@@ -1138,7 +1139,7 @@ class TradingAccountRuntimeTest {
                 com.surprising.aeron.protocol.CorePositionSide.NET)).isSameAs(planned);
 
         // 同身份原强平被替换为取消的状态
-        LiquidationRuntime canceled = new LiquidationRuntime(1, 7, 5,
+        RiskScanner.LiquidationOrder canceled = new RiskScanner.LiquidationOrder(1, 7, 5,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2, 0, 0, 0, 0,
@@ -1156,8 +1157,8 @@ class TradingAccountRuntimeTest {
     void routesStateAndReadFencesThroughThePermanentLaneOwner() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY);
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.putUser(new UserAccount(7));
+        state.putBalance(new AccountBalance(7, 3, 1_000, 0));
         state.startAccountLanes();
         try {
             // 本次原 Lane 阶段调用返回的实际参与位图
@@ -1191,7 +1192,7 @@ class TradingAccountRuntimeTest {
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 按拓扑路由到最后 Lane 的原用户
         long userInLastLane = userForLane(topology, topology.accountLaneCount() - 1);
-        state.putUser(new UserRuntime(userInLastLane));
+        state.putUser(new UserAccount(userInLastLane));
         state.startAccountLanes();
         try {
             stageLaneMutation(state, 1, java.util.List.of(userInLastLane));
@@ -1215,8 +1216,8 @@ class TradingAccountRuntimeTest {
         long laneZeroUser = userForLane(topology, 0);
         // 固定路由到一号 Lane 的原用户
         long laneOneUser = userForLane(topology, 1);
-        state.putUser(new UserRuntime(laneZeroUser));
-        state.putUser(new UserRuntime(laneOneUser));
+        state.putUser(new UserAccount(laneZeroUser));
+        state.putUser(new UserAccount(laneOneUser));
         state.startAccountLanes();
         try {
             stageLaneMutation(state, 1, java.util.List.of(laneZeroUser, laneOneUser));
@@ -1246,7 +1247,7 @@ class TradingAccountRuntimeTest {
             // 本次内部用户 ID，部分用例按固定 Lane 路由寻找
             long userId = userForLane(topology, laneId);
             users.add(userId);
-            state.putUser(new UserRuntime(userId));
+            state.putUser(new UserAccount(userId));
         }
         state.clearChangedKeys();
         // 本轮原阶段返回的实际 Lane 完成位图
@@ -1277,7 +1278,7 @@ class TradingAccountRuntimeTest {
         // 用户七原净仓确定性身份键
         long positionKey = identities.positionKey(7, "1:NET");
         // 删除前的逐仓净仓原持仓对象，作为 typed before 保留
-        PositionRuntime open = new PositionRuntime(7, symbolId, assetId,
+        Position open = new Position(7, symbolId, assetId,
                 com.surprising.aeron.protocol.CoreMarginMode.ISOLATED,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 CoreStateTestFixtures.runtimeInstrument(), 2, 100, 200, 0, 40);
@@ -1303,8 +1304,8 @@ class TradingAccountRuntimeTest {
         long laneZeroUser = userForLane(topology, 0);
         // 固定路由到一号 Lane 的原用户
         long laneOneUser = userForLane(topology, 1);
-        state.putUser(new UserRuntime(laneZeroUser));
-        state.putUser(new UserRuntime(laneOneUser));
+        state.putUser(new UserAccount(laneZeroUser));
+        state.putUser(new UserAccount(laneOneUser));
         state.startAccountLanes();
         try {
             stageLaneMutation(state, 2, java.util.List.of(laneZeroUser));
@@ -1354,7 +1355,7 @@ class TradingAccountRuntimeTest {
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 本次内部用户 ID，部分用例按固定 Lane 路由寻找
         long userId = userForLane(topology, 0);
-        state.putUser(new UserRuntime(userId));
+        state.putUser(new UserAccount(userId));
         state.startAccountLanes();
         try {
             stageLaneMutation(state, 1, java.util.List.of(userId));
@@ -1382,17 +1383,17 @@ class TradingAccountRuntimeTest {
         long[] users = new long[topology.accountLaneCount()];
         for (/* 当前要派发、反射或读取的原账户 Lane 下标 */ int laneId = 0; laneId < users.length; laneId++) {
             users[laneId] = userForLane(topology, laneId);
-            state.putUser(new UserRuntime(users[laneId]));
+            state.putUser(new UserAccount(users[laneId]));
         }
         var committedUsers = java.util.Arrays.stream(users).boxed().toList();
         state.startAccountLanes();
         try {
             // 先派发、后逐个收集的二百五十六个原 Lane 提交事件
-            LaneCommitEvent[] commits = new LaneCommitEvent[256];
+            AccountPartitionCommit[] commits = new AccountPartitionCommit[256];
             for (/* 当前数组或订单循环下标 */ int index = 0; index < commits.length; index++) {
                 commits[index] = state.dispatchLaneMutation(index + 1L, committedUsers, null, null, 0, 0);
             }
-            for (LaneCommitEvent /* 当前待完成、核对实际掩码并归还的原提交事件 */ commit : commits) {
+            for (AccountPartitionCommit /* 当前待完成、核对实际掩码并归还的原提交事件 */ commit : commits) {
                 while (!state.laneCommitComplete(commit)) Thread.onSpinWait();
                 assertThat(commit.completedLaneMask()).isEqualTo(commit.requiredLaneMask());
                 state.releaseLaneCommit(commit);
@@ -1422,7 +1423,7 @@ class TradingAccountRuntimeTest {
         java.util.List<AccountLaneSnapshot> snapshots = state.accountLaneSnapshots(1, global);
         // 固定路由到零号 Lane 的原用户
         long laneZeroUser = userForLane(topology, 0);
-        state.putUser(new UserRuntime(laneZeroUser));
+        state.putUser(new UserAccount(laneZeroUser));
         stageLaneMutation(state, 2, java.util.List.of(laneZeroUser));
         // 坏快照组恢复前零号 Lane 原数字对照
         LaneValues beforeRestore = laneValues(state, 0);
@@ -1489,8 +1490,8 @@ class TradingAccountRuntimeTest {
                 // 本次内部用户 ID，部分用例按固定 Lane 路由寻找
                 long userId = userForLane(topology, laneId);
                 users.add(userId);
-                state.putUser(new UserRuntime(userId));
-                state.putBalance(new BalanceRuntime(userId, 3, 1_000 + laneId, 0));
+                state.putUser(new UserAccount(userId));
+                state.putBalance(new AccountBalance(userId, 3, 1_000 + laneId, 0));
             }
             state.startAccountLanes();
             state.dispatchControlLanes((1L << topology.accountLaneCount()) - 1, /* 当前要派发、反射或读取的原账户 Lane 下标 */ laneId -> {
@@ -1532,12 +1533,12 @@ class TradingAccountRuntimeTest {
     @Test
     void preparedReservationInstallsExactValuesAndRejectsBeforeFreezing() {
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ TradingAccountRuntime state = new TradingAccountRuntime()) {
-            state.putUser(new UserRuntime(7));
-            state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+            state.putUser(new UserAccount(7));
+            state.putBalance(new AccountBalance(7, 3, 1_000, 0));
             // 当前原准入或测试成员订单
-            OrderRuntime order = CoreStateTestFixtures.order(11, 7, 5, 2);
+            Order order = CoreStateTestFixtures.order(11, 7, 5, 2);
             // 准备由所属 Lane 接管的两百单位衍生品保证金预留原实例
-            ReservationRuntime reservation = new ReservationRuntime(11, 7, 5,
+            OrderFundsReservation reservation = new OrderFundsReservation(11, 7, 5,
                     com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
             state.startAccountLanes();
             assertThatThrownBy(() -> state.order(11)).isInstanceOf(IllegalStateException.class);
@@ -1552,7 +1553,7 @@ class TradingAccountRuntimeTest {
                 // 下一次复用原提交事件，预留用例中为候选第二单
                 var next = CoreStateTestFixtures.order(12, 7, 5, 2);
                 // 重复客户端身份时准备的第二单原预留，不能被半冻结安装
-                var nextReservation = new ReservationRuntime(12, 7, 5,
+                var nextReservation = new OrderFundsReservation(12, 7, 5,
                         com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
                 assertThatThrownBy(() -> state.reserveOrder(next, nextReservation, 91))
                         .isInstanceOf(IllegalArgumentException.class);
@@ -1576,7 +1577,7 @@ class TradingAccountRuntimeTest {
         LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ TradingAccountRuntime state = new TradingAccountRuntime(topology)) {
             for (/* 当前用户所属 Lane 下标或回调提供的实际账户 Lane */ int lane = 0; lane < topology.accountLaneCount(); lane++) {
-                state.putUser(new UserRuntime(userForLane(topology, lane)));
+                state.putUser(new UserAccount(userForLane(topology, lane)));
             }
             state.startAccountLanes();
             state.dispatchControlLanes((1L << topology.accountLaneCount()) - 1, /* 当前用户所属 Lane 下标或回调提供的实际账户 Lane */ lane -> {
@@ -1606,13 +1607,13 @@ class TradingAccountRuntimeTest {
     @Test
     void activeOrderMembershipSurvivesUpdatesGrowthAndTerminalRemoval() {
         // 当前用户所属 Lane 下标或回调提供的实际账户 Lane
-        AccountLaneState lane = new AccountLaneState(0, 16);
+        AccountPartition lane = new AccountPartition(0, 16);
         for (/* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ long id = 1; id <= 100; id++) lane.putOrder(CoreStateTestFixtures.order(id, 7, 5, 2));
         // 账户 Lane 用户七原活单成员集合，更新及变空仍保留同一对象
         var membership = AccountLaneTestAccess.activeOrderIdsByUser(lane).get(7);
         for (/* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ long id = 1; id <= 100; id++) {
             // 当前原准入或测试成员订单
-            OrderRuntime order = lane.order(id);
+            Order order = lane.order(id);
             lane.putOrder(CoreStateTestFixtures.filledOrder(order, 1, 1, 0, CoreOrderStatus.OPEN, 2));
             assertThat(AccountLaneTestAccess.activeOrderIdsByUser(lane).get(7)).isSameAs(membership);
         }
@@ -1630,8 +1631,8 @@ class TradingAccountRuntimeTest {
     @Test
     void pendingReservationBatchLookupUsesTheExistingBatchReceipt() {
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ var state = new TradingAccountRuntime()) {
-            state.putUser(new UserRuntime(7));
-            state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+            state.putUser(new UserAccount(7));
+            state.putBalance(new AccountBalance(7, 3, 1_000, 0));
             CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
             CoreStateTestFixtures.reserveOrder(state, 12, 7, 92, 5, 2, 3, 200);
             state.onLane(7L, /* 当前用户所属 Lane 下标或回调提供的实际账户 Lane */ lane -> {
@@ -1640,7 +1641,7 @@ class TradingAccountRuntimeTest {
                 return null;
             });
             state.pendingReservations.registerBatch(4, 7,
-                    new OrderRuntime[]{state.order(11), state.order(12)}, 2);
+                    new Order[]{state.order(11), state.order(12)}, 2);
 
             assertThat(state.pendingReservations.pendingReservation(11, 7)).isTrue();
             assertThat(state.pendingReservations.pendingReservation(12, 7)).isTrue();
@@ -1662,7 +1663,7 @@ class TradingAccountRuntimeTest {
     }
 
     /**
-     * 按 Maven 测试类输出位置向上定位模块，再读原 AccountLaneState 源文件，依赖本仓库测试目录布局。
+     * 按 Maven 测试类输出位置向上定位模块，再读原 AccountPartition 源文件，依赖本仓库测试目录布局。
      */
     private static String accountLaneSource() throws Exception {
         // 本测试类实际输出目录，通常为 Maven target/test-classes
@@ -1670,7 +1671,7 @@ class TradingAccountRuntimeTest {
                 .getCodeSource().getLocation().toURI());
         // 按原测试输出目录向上定位的 Maven 模块根
         Path module = testClasses.getParent().getParent();
-        return Files.readString(module.resolve("src/main/java/com/surprising/aeron/service/account/AccountLaneState.java"));
+        return Files.readString(module.resolve("src/main/java/com/surprising/aeron/service/account/AccountPartition.java"));
     }
 
     /**
@@ -1678,11 +1679,11 @@ class TradingAccountRuntimeTest {
      * @param state 本测试原账户运行时，按其所有权边界操作
      * @param laneId 要定位、读取或选用户的原账户 Lane 下标
      */
-    private static AccountLaneState accountLaneState(TradingAccountRuntime state, int laneId) throws Exception {
+    private static AccountPartition accountLaneState(TradingAccountRuntime state, int laneId) throws Exception {
         // 仅供测试取原内部状态的反射字段
         Field field = TradingAccountRuntime.class.getDeclaredField("accountLanes");
         field.setAccessible(true);
-        return ((AccountLaneState[]) field.get(state))[laneId];
+        return ((AccountPartition[]) field.get(state))[laneId];
     }
 
     /**
@@ -1741,7 +1742,7 @@ class TradingAccountRuntimeTest {
      */
     private static long pendingReservationOwner(TradingAccountRuntime state, long orderId) throws Exception {
         // 仅供测试取原内部状态的反射字段
-        Field field = PendingReservationTracker.class.getDeclaredField("pendingReservationUsers");
+        Field field = OrderFundsReservation.PendingTracker.class.getDeclaredField("pendingReservationUsers");
         field.setAccessible(true);
         // 原 pending 订单到用户的 primitive 反向表，测试只读
         var owners = (org.agrona.collections.Long2LongHashMap) field.get(state.pendingReservations);
@@ -1768,16 +1769,16 @@ class TradingAccountRuntimeTest {
      * @param symbolId 内部稠密标的编号
      * @param lastUserId 测试风险扫描已到的用户游标
      */
-    private static RiskScanRuntime incompleteRiskScan(int symbolId, long lastUserId) {
+    private static RiskScanner.State incompleteRiskScan(int symbolId, long lastUserId) {
         var cursors = new java.util.ArrayList<>(java.util.Collections.nCopies(
                 com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology().accountLaneCount(),
                 new com.surprising.aeron.model.RiskLaneProgress(0, false, 0, 0, "-", 0, 0, 0, 0, 0)));
         cursors.set(0, new com.surprising.aeron.model.RiskLaneProgress(lastUserId, false, 0, 0, "-", 0, 0, 0, 0, 0));
-        return new RiskScanRuntime(symbolId, 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors);
+        return new RiskScanner.State(symbolId, 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors);
     }
-    private static com.surprising.aeron.service.risk.RiskScanRuntime scheduledAt(
-            com.surprising.aeron.service.risk.RiskScanRuntime scan, long revision) {
-        return new com.surprising.aeron.service.risk.RiskScanRuntime(scan.symbolId(), scan.accountLaneId(),
+    private static com.surprising.aeron.service.risk.RiskScanner.State scheduledAt(
+            com.surprising.aeron.service.risk.RiskScanner.State scan, long revision) {
+        return new com.surprising.aeron.service.risk.RiskScanner.State(scan.symbolId(), scan.accountLaneId(),
                 scan.priceSequence(), scan.scanStartPriceSequence(), scan.riskComplete(), scan.triggerComplete(),
                 scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                 scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),

@@ -1,9 +1,11 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.order.state.OrderReservation;
-import com.surprising.aeron.service.position.RuntimePositionIndexValue;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
+import com.surprising.aeron.service.position.Position;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -63,7 +65,7 @@ public final class OpenInterestIndex {
     public long openInterestSteps(String instrumentId) {
         assertBusinessOwner();
         // 当前合约的索引自有累计桶，只读取其多空数字，不交给查询调用方修改。
-        MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
+        MutableTotals value = totals.get(OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId));
         return value == null ? 0 : Math.max(value.longQuantity, value.shortQuantity);
     }
 
@@ -72,7 +74,7 @@ public final class OpenInterestIndex {
      * @param previous 变更前的精简持仓索引值，null 表示无旧贡献
      * @param current 变更后的精简持仓索引值，null 表示删除旧贡献
      */
-    void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
+    void apply(Position.IndexValue previous, Position.IndexValue current) {
         applyQuantities(previous == null ? null : previous.instrumentId(), previous == null ? 0 : previous.signedQuantitySteps(),
                 current == null ? null : current.instrumentId(), current == null ? 0 : current.signedQuantitySteps());
     }

@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-gateway", contextId = "orderRpcApi")
+@FeignClient(name = "surprising-gateway", url = "${surprising.clients.order.base-url:${surprising.clients.gateway.url:http://127.0.0.1:9094}}", contextId = "orderRpcApi")
 public interface OrderRpcApi {
 
     @PostMapping("/api/v1/trading/orders")

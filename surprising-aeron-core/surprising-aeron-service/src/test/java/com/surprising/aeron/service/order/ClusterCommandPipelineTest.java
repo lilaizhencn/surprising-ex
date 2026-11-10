@@ -9,7 +9,7 @@ import com.surprising.aeron.service.core.OwnerAccountReadGuard;
 import com.surprising.aeron.service.core.PipelinedExecutionExtension;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.TradingOwnerTestSupport;
-import com.surprising.aeron.service.matcher.pipeline.MatcherPipelineGroup;
+import com.surprising.aeron.service.matcher.OrderBookRouter;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -893,7 +893,7 @@ class ClusterCommandPipelineTest {
             serial.applyAll(live.setup());
             // 该产品准入或流动性准备使用的资产名称
             String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
-            for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < ClusterCommandWindow.DEFAULT_CAPACITY; i++) {
+            for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < OrderCommandQueue.IngressWindow.DEFAULT_CAPACITY; i++) {
                 // 为本轮测试账户或做市账户加资的原消息
                 var funds = live.message(CoreMessageType.ADJUST_BALANCE, 10000 + i,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20000)));
@@ -902,7 +902,7 @@ class ClusterCommandPipelineTest {
             }
             // 当前普通或批量测试使用的有序订单列表
             var orders = new ArrayList<CoreMessage>();
-            for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < ClusterCommandWindow.DEFAULT_CAPACITY; i++)
+            for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < OrderCommandQueue.IngressWindow.DEFAULT_CAPACITY; i++)
                 orders.add(live.place(10000 + i, "1", 1000 + i, 80, 1, CoreOrderSide.BUY));
             orders.forEach(live::send);
             // 满窗口本身就是确定性提交边界；后续日志回调只轮询，不再注入额外timer栅栏。
@@ -1812,7 +1812,7 @@ class ClusterCommandPipelineTest {
             // 当前撤单之后可独立登记的另一账户订单消息
             var independent = live.place(other, "1", 4200, 80, 1, CoreOrderSide.BUY);
             // 当前正在检查依赖或缓存解码对象的命令窗口
-            var window = new ClusterCommandWindow();
+            var window = new OrderCommandQueue.IngressWindow();
             // 当前 Fixture 内的实际 Core 运行时
             var state = live.service.state();
             assertThat(state.prepareClusterPipelineScope(cancel, window)).isTrue();
@@ -1853,7 +1853,7 @@ class ClusterCommandPipelineTest {
         try (/* 当前待初始化、重放或比对的测试 Fixture */ var fixture = new Fixture(product)) {
             fixture.setup();
             // 当前正在检查依赖或缓存解码对象的命令窗口
-            var window = new ClusterCommandWindow();
+            var window = new OrderCommandQueue.IngressWindow();
             // 当前输入、比较或续扫的原 Core 消息
             var command = fixture.placeBatch(11, "1", 5000);
             // 当前 Fixture 内的实际 Core 运行时
@@ -2073,7 +2073,7 @@ class ClusterCommandPipelineTest {
             // 固定未提交边界，直接检查命令与请求状态；后台进展计数也包含准入和派发。
             var matcherField = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
             matcherField.setAccessible(true);
-            var matcher = (MatcherPipelineGroup) matcherField.get(f.service.state());
+            var matcher = (OrderBookRouter) matcherField.get(f.service.state());
             CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
             var held = matcher.readAtSubmissionFence(0, () -> {
                 entered.countDown();
@@ -2157,7 +2157,7 @@ class ClusterCommandPipelineTest {
             // 运行时 Matcher 管线字段的反射句柄
             var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
             // 实际 Matcher 管线组，用于安排精确执行栅栏
-            var matcher = (MatcherPipelineGroup) field.get(live.service.state());
+            var matcher = (OrderBookRouter) field.get(live.service.state());
             // 确认后缀仍未放行的 Matcher 栅栏 Future
             var blocked = matcher.readAtSubmissionFence(0, () -> {
                 entered.countDown();
@@ -2838,7 +2838,7 @@ class ClusterCommandPipelineTest {
             // 当前正在检查依赖或缓存解码对象的命令窗口
             var window = live.service.commandWindow();
             // 窗口保留当前解码对象的反射字段
-            var decodedField = ClusterCommandWindow.class.getDeclaredField("decoded");
+            var decodedField = OrderCommandQueue.IngressWindow.class.getDeclaredField("decoded");
             decodedField.setAccessible(true);
             try {
                 assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();

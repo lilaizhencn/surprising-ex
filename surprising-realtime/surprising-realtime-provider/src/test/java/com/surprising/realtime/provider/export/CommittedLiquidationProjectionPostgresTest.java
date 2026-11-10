@@ -4,8 +4,8 @@ import com.surprising.aeron.model.CoreLiquidationState.Status;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
+import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.repository.LiquidationInitializationRepository;
 import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
@@ -93,7 +93,7 @@ class CommittedLiquidationProjectionPostgresTest {
         when(instrument.instrumentId()).thenReturn("73");
         when(instrument.instrumentIdValue()).thenReturn(73);
         when(instrument.settleAsset()).thenReturn("USDT");
-        return new LiquidationChange(new LiquidationRuntime(7, 42, 0, CoreMarginMode.ISOLATED, CorePositionSide.NET,
+        return new LiquidationChange(new RiskScanner.LiquidationOrder(7, 42, 0, CoreMarginMode.ISOLATED, CorePositionSide.NET,
                 instrument, 1, 10, 10, status == Status.ADL_REQUIRED ? 5 : 0,
                 price, price == 0 ? 0 : 100_000, fee, status, 0), position, 1_700_000_000_000L + position);
     }

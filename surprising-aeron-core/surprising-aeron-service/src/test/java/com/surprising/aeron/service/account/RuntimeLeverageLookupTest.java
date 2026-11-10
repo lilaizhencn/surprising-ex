@@ -31,7 +31,7 @@ class RuntimeLeverageLookupTest {
             // 另一条 Lane 查找及清理完成后释放被阻塞读取的门闩。
             var otherFinished = new CountDownLatch(1);
             // 实际持有被阻塞用户的账户 Lane。
-            AccountLaneState blockedLane = runtime.accountLane(runtime.accountLaneId(blockedUser));
+            AccountPartition blockedLane = runtime.accountLane(runtime.accountLaneId(blockedUser));
             // 反射替换前的原杠杆表，在 finally 中恢复。
             var original = blockedLane.cold.leverages;
             // 带受控阻塞 get 的测试表，用来观察同一查询键在并发窗口中的稳定性。
@@ -93,8 +93,8 @@ class RuntimeLeverageLookupTest {
             // 确定属于另一条 Lane 的第二个用户编号。
             long second = candidate;
             for (long /* 当前初始化或回调操作的用户编号，每条 Lane 只能写自己账户。 */ user : new long[]{first, second}) {
-                runtime.putUser(new com.surprising.aeron.service.account.UserRuntime(user));
-                runtime.putBalance(new com.surprising.aeron.service.account.BalanceRuntime(user, 3, 1000, 0));
+                runtime.putUser(new com.surprising.aeron.service.account.UserAccount(user));
+                runtime.putBalance(new com.surprising.aeron.service.account.AccountBalance(user, 3, 1000, 0));
             }
             runtime.putLeverage(new CoreLeverageKey(first, "1", CoreMarginMode.CROSS), 2_000_000);
             runtime.putLeverage(new CoreLeverageKey(second, "2", CoreMarginMode.ISOLATED), 3_000_000);

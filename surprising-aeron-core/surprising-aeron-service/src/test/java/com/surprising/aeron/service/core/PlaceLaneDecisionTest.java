@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreRiskState;
@@ -13,12 +15,12 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
-import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
+import com.surprising.aeron.service.market.MarkPrice;
+import com.surprising.aeron.service.order.OrderAdmissionService;
+import com.surprising.aeron.service.order.OrderCommand.PlaceAdmissionEvent;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
@@ -46,7 +48,7 @@ class PlaceLaneDecisionTest {
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
         // 用户七一万 USDT 可用余额、无订单持仓的冷状态
-        var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
+        var user = new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 1,
                 Map.of("USDT", new AssetBalance("USDT", 10_000, 0)), Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 原用户和合约组成的本产品线冷状态
         var state = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1, Map.of(7L, user), Map.of(),
@@ -57,7 +59,7 @@ class PlaceLaneDecisionTest {
             // USDT 内部资产编号
             // 标的一的内部稠密编号
             int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
-            runtime.putMarkPrice(new MarkPriceRuntime(symbol, instrument, 100, 1, 1_000));
+            runtime.putMarkPrice(new MarkPrice(symbol, instrument, 100, 1, 1_000));
             runtime.upsertFeePolicy(new UpsertFeePolicyCommand(1, 1, 7, "1", -10, 20, 0, true, 1, 0));
             runtime.startAccountLanes();
             // 通知测试线程阻塞工作已进入账户 Lane 的门闩
@@ -79,7 +81,7 @@ class PlaceLaneDecisionTest {
                         CoreTimeInForce.IOC, false, "client");
                 // 首次以过期业务时间派发、随后应拒绝的准入槽
                 var rejected = runtime.acquirePlaceAdmission();
-                RuntimeOrderAdmission.prepare(rejected, runtime, identities, 7, command, 6_001);
+                OrderAdmissionService.prepare(rejected, runtime, identities, 7, command, 6_001);
                 runtime.dispatchPlaceAdmission(2, 7, rejected, new UUID(1, 2), runtime.treasury().settlementStatus(symbol), asset,
                         identities, 6_001, 2);
                 assertThat(rejected.complete()).isFalse();
@@ -99,7 +101,7 @@ class PlaceLaneDecisionTest {
                 var oversized = new PlaceOrderCommand(12, "1", CoreOrderSide.BUY, 0, 1_000_000, false,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                         CoreTimeInForce.IOC, false, "client");
-                RuntimeOrderAdmission.prepare(insufficient, runtime, identities, 7, oversized, 1_001);
+                OrderAdmissionService.prepare(insufficient, runtime, identities, 7, oversized, 1_001);
                 runtime.dispatchPlaceAdmission(3, 7, insufficient, new UUID(1, 3), runtime.treasury().settlementStatus(symbol), asset,
                         identities, 1_001, 3);
                 await(runtime, insufficient);
@@ -112,7 +114,7 @@ class PlaceLaneDecisionTest {
                 // 拒绝槽归还后再次借出的同一实例，本轮使用有效价格时间
                 var accepted = runtime.acquirePlaceAdmission();
                 assertThat(accepted).isSameAs(rejected);
-                RuntimeOrderAdmission.prepare(accepted, runtime, identities, 7, command, 1_001);
+                OrderAdmissionService.prepare(accepted, runtime, identities, 7, command, 1_001);
                 runtime.dispatchPlaceAdmission(4, 7, accepted, new UUID(1, 4), runtime.treasury().settlementStatus(symbol), asset,
                         identities, 1_001, 4);
                 await(runtime, accepted);
@@ -133,7 +135,7 @@ class PlaceLaneDecisionTest {
      * @param runtime 拥有真实账户工作资源的原运行时
      * @param event 已派发且仍保留租约的准入事件
      */
-    private static void await(TradingAccountRuntime runtime, PlaceAdmissionEvent event) {
+    private static void await(TradingAccountRuntime runtime, OrderCommand.PlaceAdmissionEvent event) {
         // 等本次准入完成的三秒单调时钟截止时间
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!event.complete()) {

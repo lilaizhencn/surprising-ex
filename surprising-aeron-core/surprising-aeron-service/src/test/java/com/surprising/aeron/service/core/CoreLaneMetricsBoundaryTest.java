@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -57,7 +57,7 @@ class CoreLaneMetricsBoundaryTest {
             // 账户工作已改风险状态但尚未完成的门闩
             var entered = new CountDownLatch(1);
             core.runtimeState.dispatchControlLanes(mask, /* 控制任务传入的 Lane 编号，当前夹具使用已固定的运行时 */ actualLane -> {
-                core.runtimeState.putRiskSnapshot(key, new RiskSnapshotRuntime(1, symbol, CorePositionSide.NET,
+                core.runtimeState.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(1, symbol, CorePositionSide.NET,
                         1, 100, 0, 1, 1));
                 com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(core.runtimeState, key);
                 entered.countDown();

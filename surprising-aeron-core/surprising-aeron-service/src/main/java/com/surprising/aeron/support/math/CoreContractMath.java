@@ -1,5 +1,7 @@
 package com.surprising.aeron.support.math;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.instrument.api.model.ContractType;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
@@ -7,7 +9,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.math.BigInteger;
 import lombok.AccessLevel;
@@ -391,7 +393,7 @@ public final class CoreContractMath {
      * @return 覆盖逐步成交手续费扣款的冻结金额；返佣不会抵减这项预留
      */
     public static long fragmentationSafeFeeDebit(CoreInstrument instrument,
-                                                  ResolvedPlaceOrder order) {
+                                                  OrderCommand.ResolvedPlaceOrder order) {
         long feePerStep = feeDeltaUnits(
                 instrument, order.reservationPriceTicks(), 1, order.takerFeeRatePpm());
         long debitPerStep = Math.max(0, Math.negateExact(feePerStep));

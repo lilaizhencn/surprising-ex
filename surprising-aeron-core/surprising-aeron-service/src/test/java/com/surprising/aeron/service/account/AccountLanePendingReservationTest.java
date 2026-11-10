@@ -16,14 +16,14 @@ class AccountLanePendingReservationTest {
     @Test
     void completedUsersLeaveNoEntriesAndAssetsReuseTheirTables() throws Exception {
         // 当前线程持有的独立测试 Lane，直接维护预留权威表及待完成索引。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         lane.assertOwner();
         // 读取分资产待完成金额表的反射字段。
-        var field = AccountLaneState.class.getDeclaredField("pendingReservedUnitsByAsset");
+        var field = AccountExposureIndex.class.getDeclaredField("pendingReservedUnitsByAsset");
         field.setAccessible(true);
         // 资产编号到用户金额表的实际内部索引。
         @SuppressWarnings("unchecked")
-        var assets = (IntObjectHashMap<LongLongHashMap>) field.get(lane);
+        var assets = (IntObjectHashMap<LongLongHashMap>) field.get(lane.admissionOrderIndex);
         // 首轮保存的资产零用户金额表，用于验证后续不更换容器。
         LongLongHashMap first = null;
         for (/* 当前周转的近 long 上限用户编号。 */ long user = Long.MAX_VALUE - 2048; user < Long.MAX_VALUE; user++) {
@@ -53,7 +53,7 @@ class AccountLanePendingReservationTest {
     @Test
     void assetMigrationOverflowAndReverseReplacementPreserveOtherReservations() {
         // 当前线程持有的独立测试 Lane，直接维护预留权威表及待完成索引。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         lane.assertOwner();
         // 用户七在资产零上待完成的四十单位预留。
         var previous = CoreStateTestFixtures.reservation(1, 7, 0, 40);

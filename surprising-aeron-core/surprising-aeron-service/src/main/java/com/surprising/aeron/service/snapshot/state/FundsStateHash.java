@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.snapshot.state;
 
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import java.util.Map;
 import lombok.AccessLevel;
@@ -23,12 +23,12 @@ public final class FundsStateHash {
         Aggregate users = new Aggregate();
         // 逐用户或逐财库表清空并复用的余额条目聚合器。
         Aggregate balances = new Aggregate();
-        for (Map.Entry<Long, CoreUserState> /* 当前用户编号及其只读状态。 */ userEntry : state.users().entrySet()) {
+        for (Map.Entry<Long, UserAccountSnapshot> /* 当前用户编号及其只读状态。 */ userEntry : state.users().entrySet()) {
             balances.clear();
             // 正在加入哈希的用户编号。
             long userId = userEntry.getKey();
             // 当前用户状态，只读取其资产余额表。
-            CoreUserState user = userEntry.getValue();
+            UserAccountSnapshot user = userEntry.getValue();
             for (var /* 当前用户的一条资产余额。 */ balanceEntry : user.balances().entrySet()) {
                 // 当前余额的业务资产名称。
                 String asset = balanceEntry.getKey();

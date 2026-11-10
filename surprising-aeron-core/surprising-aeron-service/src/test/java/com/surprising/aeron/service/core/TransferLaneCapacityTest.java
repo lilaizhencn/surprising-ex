@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.service.account.AccountControlTask;
+import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -22,26 +22,26 @@ class TransferLaneCapacityTest {
         // 本例冷投影与账户任务共用的身份表
         var identities = new RuntimeIdentityRegistry();
         try (/* 先冷准备再启动账户线程的原运行时 */ var runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.SPOT), identities)) {
-            LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareBalanceAdjustment(runtime, identities, 7, "USDT", 100));
+            LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareBalanceAdjustment(runtime, identities, 7, "USDT", 100));
             // 预填第一项与后续相同重试共用的划转参数
             var first = command(1);
             // 直接冷填有限容量状态，再启动账户线程；本例没有快照恢复。
-            for (/* 预填待完成记录的正值身份循环下标 */ int id = 1; id <= TradingAccountRuntime.MAX_PENDING_TRANSFERS; id++)
+            for (/* 预填待完成记录的正值身份循环下标 */ int id = 1; id <= com.surprising.aeron.service.treasury.TreasuryRuntime.MAX_PENDING_TRANSFERS; id++)
                 runtime.putPendingTransfer(id == 1 ? first : command(id));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
             assertThat(runtime.hasPendingTransferCapacity()).isFalse();
             // 超过初始容量的下一个新划转身份
-            var next = command(TradingAccountRuntime.MAX_PENDING_TRANSFERS + 1L);
+            var next = command(com.surprising.aeron.service.treasury.TreasuryRuntime.MAX_PENDING_TRANSFERS + 1L);
             // 复用的账户转出控制任务
-            var task = new AccountControlTask();
+            var task = new AccountCommandService();
             assertThatThrownBy(() -> task.prepareTransferOut(runtime, identities, 7, next))
                     .hasMessageContaining("capacity is full");
             task.prepareTransferOut(runtime, identities, 7, first);
             LedgerControlTestSupport.await(runtime, task::getAsBoolean);
             assertThat(runtime.pendingTransferUser(1)).isEqualTo(7);
             // 释放第一条待转记录的完成续步
-            var completion = new AccountControlTask().prepareTransferCompletion(runtime, 7, 1);
+            var completion = new AccountCommandService().prepareTransferCompletion(runtime, 7, 1);
             LedgerControlTestSupport.await(runtime, completion);
             assertThat(runtime.hasPendingTransferCapacity()).isTrue();
             task.prepareTransferOut(runtime, identities, 7, next);

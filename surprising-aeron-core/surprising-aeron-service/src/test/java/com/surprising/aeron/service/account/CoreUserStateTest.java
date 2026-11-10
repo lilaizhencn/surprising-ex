@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CorePositionState;
@@ -7,7 +9,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
@@ -26,35 +28,35 @@ class CoreUserStateTest {
     @Test
     void reservationSnapshotsMaintainExplainedLocks() {
         // 本场景转换之前的用户冷状态，后续快照使用独立的业务映射。
-        CoreUserState user = fundedUser(1_000, 0);
+        UserAccountSnapshot user = fundedUser(1_000, 0);
         // 本场景新增并随后释放的保证金预留。
-        OrderReservation reservation = reservation(11, 300);
+        OrderFundsReservation.Snapshot reservation = reservation(11, 300);
 
         // 从原预留表直接派生、准备放入新预留的独立 Map。
-        Map<Long, OrderReservation> reservations = new TreeMap<>(user.reservations());
+        Map<Long, OrderFundsReservation.Snapshot> reservations = new TreeMap<>(user.reservations());
         reservations.put(reservation.orderId(), reservation);
         // 本次变化对应的余额独立 Map，保持可用与冻结合计一千。
         Map<String, AssetBalance> balances = new TreeMap<>(user.balances());
         balances.put("USDT", new AssetBalance("USDT", 700, 300));
         // 已加入预留的完整用户快照。
-        CoreUserState reserved = new CoreUserState(user.productLine(), user.userId(), 1, balances, reservations, user.positions(), user.positionMode());
+        UserAccountSnapshot reserved = new UserAccountSnapshot(user.productLine(), user.userId(), 1, balances, reservations, user.positions(), user.positionMode());
 
         // 从冻结后状态派生的预留变更，保留记录但把剩余量释放为零。
-        Map<Long, OrderReservation> releasedReservations = new TreeMap<>(reserved.reservations());
-        releasedReservations.put(reservation.orderId(), new OrderReservation(11, "1",
+        Map<Long, OrderFundsReservation.Snapshot> releasedReservations = new TreeMap<>(reserved.reservations());
+        releasedReservations.put(reservation.orderId(), new OrderFundsReservation.Snapshot(11, "1",
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 300, 300, 0, 1));
         // 恢复可用一千、冻结为零的余额完整。
         Map<String, AssetBalance> releasedBalances = new TreeMap<>(reserved.balances());
         releasedBalances.put("USDT", new AssetBalance("USDT", 1_000, 0));
         // 已经释放全部预留的中间用户状态。
-        CoreUserState released = new CoreUserState(reserved.productLine(), reserved.userId(), 2, releasedBalances, releasedReservations,
+        UserAccountSnapshot released = new UserAccountSnapshot(reserved.productLine(), reserved.userId(), 2, releasedBalances, releasedReservations,
                 reserved.positions(), reserved.positionMode());
 
         // 从释放后状态派生、准备删除空预留的完整表。
-        Map<Long, OrderReservation> removedReservations = new TreeMap<>(released.reservations());
+        Map<Long, OrderFundsReservation.Snapshot> removedReservations = new TreeMap<>(released.reservations());
         removedReservations.remove(reservation.orderId());
         // 空预留已被移除的最终用户状态。
-        CoreUserState removed = new CoreUserState(released.productLine(), released.userId(), 3, released.balances(), removedReservations,
+        UserAccountSnapshot removed = new UserAccountSnapshot(released.productLine(), released.userId(), 3, released.balances(), removedReservations,
                 released.positions(), released.positionMode());
 
         assertThat(reserved.reservations().get(11L).remainingUnits()).isEqualTo(300);
@@ -69,14 +71,14 @@ class CoreUserStateTest {
     @Test
     void positionMarginSnapshotsKeepLocksConsistent() {
         // 本场景转换之前的用户冷状态，后续快照使用独立的业务映射。
-        CoreUserState user = fundedUser(800, 200);
+        UserAccountSnapshot user = fundedUser(800, 200);
         // 保证金为二百的初始测试持仓。
         CorePositionState position = position(200);
         // 从原用户持仓表派生、准备加入初始持仓的独立 Map。
         Map<String, CorePositionState> positions = new TreeMap<>(user.positions());
         positions.put(position.key(), position);
         // 已登记初始仓位保证金的用户状态。
-        CoreUserState opened = new CoreUserState(user.productLine(), user.userId(), 1, user.balances(), user.reservations(), positions,
+        UserAccountSnapshot opened = new UserAccountSnapshot(user.productLine(), user.userId(), 1, user.balances(), user.reservations(), positions,
                 user.positionMode());
 
         // 把持仓保证金从二百减到七十五的完整表。
@@ -86,7 +88,7 @@ class CoreUserStateTest {
         Map<String, AssetBalance> balances = new TreeMap<>(opened.balances());
         balances.put("USDT", new AssetBalance("USDT", 925, 75));
         // 保证金和余额同步减仓后的用户状态。
-        CoreUserState reduced = new CoreUserState(opened.productLine(), opened.userId(), 2, balances, opened.reservations(), reducedPositions,
+        UserAccountSnapshot reduced = new UserAccountSnapshot(opened.productLine(), opened.userId(), 2, balances, opened.reservations(), reducedPositions,
                 opened.positionMode());
 
         // 准备删除该持仓记录的直接独立 Map。
@@ -96,7 +98,7 @@ class CoreUserStateTest {
         Map<String, AssetBalance> closedBalances = new TreeMap<>(reduced.balances());
         closedBalances.put("USDT", new AssetBalance("USDT", 1_000, 0));
         // 持仓删除且冻结归零的用户状态。
-        CoreUserState closed = new CoreUserState(reduced.productLine(), reduced.userId(), 3, closedBalances, reduced.reservations(), closedPositions,
+        UserAccountSnapshot closed = new UserAccountSnapshot(reduced.productLine(), reduced.userId(), 3, closedBalances, reduced.reservations(), closedPositions,
                 reduced.positionMode());
 
         assertThat(reduced.positions().get("1").positionMarginUnits()).isEqualTo(75);
@@ -111,18 +113,18 @@ class CoreUserStateTest {
     @Test
     void rejectsBalanceBelowExplainedLocks() {
         // 本场景转换之前的用户冷状态，后续快照使用独立的业务映射。
-        CoreUserState user = fundedUser(700, 300);
+        UserAccountSnapshot user = fundedUser(700, 300);
         // 从原预留表直接派生、准备放入新预留的独立 Map。
-        Map<Long, OrderReservation> reservations = new TreeMap<>(user.reservations());
+        Map<Long, OrderFundsReservation.Snapshot> reservations = new TreeMap<>(user.reservations());
         reservations.put(11L, reservation(11, 300));
         // 已加入预留的完整用户快照。
-        CoreUserState reserved = new CoreUserState(user.productLine(), user.userId(), 1, user.balances(), reservations, user.positions(),
+        UserAccountSnapshot reserved = new UserAccountSnapshot(user.productLine(), user.userId(), 1, user.balances(), reservations, user.positions(),
                 user.positionMode());
         // 本次变化对应的余额独立 Map，保持可用与冻结合计一千。
         Map<String, AssetBalance> balances = new TreeMap<>(reserved.balances());
         balances.put("USDT", new AssetBalance("USDT", 900, 100));
 
-        assertThatThrownBy(() -> new CoreUserState(reserved.productLine(), reserved.userId(), 2, balances, reserved.reservations(), reserved.positions(),
+        assertThatThrownBy(() -> new UserAccountSnapshot(reserved.productLine(), reserved.userId(), 2, balances, reserved.reservations(), reserved.positions(),
                 reserved.positionMode()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("reservation locks exceed balance");
@@ -136,26 +138,26 @@ class CoreUserStateTest {
     @Test
     void preservesFundsAcrossReserveAndReleaseSnapshots() {
         // 本场景转换之前的用户冷状态，后续快照使用独立的业务映射。
-        CoreUserState user = fundedUser(1_000, 0);
+        UserAccountSnapshot user = fundedUser(1_000, 0);
         // 同一命令中第一次状态转换的冻结余额完整。
         Map<String, AssetBalance> reservedBalances = new TreeMap<>(user.balances());
         reservedBalances.put("USDT", new AssetBalance("USDT", 700, 300));
         // 同一命令中第一次状态转换的新增预留完整。
-        Map<Long, OrderReservation> reservedOrders = new TreeMap<>(user.reservations());
+        Map<Long, OrderFundsReservation.Snapshot> reservedOrders = new TreeMap<>(user.reservations());
         reservedOrders.put(11L, reservation(11, 300));
         // 已加入预留的完整用户快照。
-        CoreUserState reserved = new CoreUserState(user.productLine(), user.userId(), 1, reservedBalances, reservedOrders, user.positions(),
+        UserAccountSnapshot reserved = new UserAccountSnapshot(user.productLine(), user.userId(), 1, reservedBalances, reservedOrders, user.positions(),
                 user.positionMode());
 
         // 从冻结后状态继续派生、准备恢复余额的完整表。
         Map<String, AssetBalance> settledBalances = new TreeMap<>(reserved.balances());
         settledBalances.put("USDT", new AssetBalance("USDT", 1_000, 0));
         // 从冻结后状态继续派生、准备释放预留的完整表。
-        Map<Long, OrderReservation> settledOrders = new TreeMap<>(reserved.reservations());
-        settledOrders.put(11L, new OrderReservation(11, "1",
+        Map<Long, OrderFundsReservation.Snapshot> settledOrders = new TreeMap<>(reserved.reservations());
+        settledOrders.put(11L, new OrderFundsReservation.Snapshot(11, "1",
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 300, 300, 0, 1));
         // 完成第二次完整快照构造的最终用户。
-        CoreUserState settled = new CoreUserState(reserved.productLine(), reserved.userId(), 2, settledBalances, settledOrders, reserved.positions(),
+        UserAccountSnapshot settled = new UserAccountSnapshot(reserved.productLine(), reserved.userId(), 2, settledBalances, settledOrders, reserved.positions(),
                 reserved.positionMode());
 
         assertThat(CoreStateTestFixtures.totalUnits(settled, "USDT")).isEqualTo(1_000);
@@ -169,12 +171,12 @@ class CoreUserStateTest {
     @Test
     void derivedLocksDoNotChangeSnapshotValueSemantics() {
         // 同时包含一百预留和二百持仓保证金的原用户值。
-        CoreUserState original = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 3,
+        UserAccountSnapshot original = new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 3,
                 Map.of("USDT", new AssetBalance("USDT", 700, 300)),
                 Map.of(11L, reservation(11, 100)),
                 Map.of("1", position(200)), CorePositionMode.ONE_WAY);
         // 使用相同字段重新构造的用户；变量名虽为 decoded，本用例没有执行解码器。
-        CoreUserState decoded = new CoreUserState(original.productLine(), original.userId(), original.revision(),
+        UserAccountSnapshot decoded = new UserAccountSnapshot(original.productLine(), original.userId(), original.revision(),
                 original.balances(), original.reservations(), original.positions(), original.positionMode());
 
         assertThat(decoded).isEqualTo(original);
@@ -183,7 +185,7 @@ class CoreUserStateTest {
 
     @Test
     void rejectsOverflowWhileAccumulatingLocks() {
-        assertThatThrownBy(() -> new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+        assertThatThrownBy(() -> new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 0,
                 Map.of("USDT", new AssetBalance("USDT", 0, Long.MAX_VALUE)),
                 Map.of(11L, reservation(11, Long.MAX_VALUE), 12L, reservation(12, 1)),
                 Map.of(), CorePositionMode.ONE_WAY))
@@ -192,19 +194,19 @@ class CoreUserStateTest {
 
     @Test
     void rejectsMissingAssetForPositiveOrderOrPositionLocks() {
-        assertThatThrownBy(() -> new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+        assertThatThrownBy(() -> new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 0,
                 Map.of(), Map.of(11L, reservation(11, 1)), Map.of(), CorePositionMode.ONE_WAY))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("asset=USDT");
-        assertThatThrownBy(() -> new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+        assertThatThrownBy(() -> new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 0,
                 Map.of(), Map.of(), Map.of("1", position(1)), CorePositionMode.ONE_WAY))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("asset=USDT");
     }
 
     @Test
     void zeroRemainingLocksDoNotRequireAnAssetBalance() {
-        var released = new OrderReservation(11, "1", ReservationKind.DERIVATIVE_MARGIN,
+        var released = new OrderFundsReservation.Snapshot(11, "1", ReservationKind.DERIVATIVE_MARGIN,
                 "USDT", 1, 1, 0, 1);
-        var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+        var user = new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 0,
                 Map.of(), Map.of(11L, released), Map.of("1", position(0)), CorePositionMode.ONE_WAY);
         assertThat(user.balances()).isEmpty();
         assertThat(user.reservations().get(11L).remainingUnits()).isZero();
@@ -216,8 +218,8 @@ class CoreUserStateTest {
      * @param availableUnits 初始 USDT 可用整数金额
      * @param lockedUnits 初始 USDT 冻结整数金额
      */
-    private static CoreUserState fundedUser(long availableUnits, long lockedUnits) {
-        return new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+    private static UserAccountSnapshot fundedUser(long availableUnits, long lockedUnits) {
+        return new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 0,
                 Map.of("USDT", new AssetBalance("USDT", availableUnits, lockedUnits)),
                 Map.of(), Map.of(), CorePositionMode.ONE_WAY);
     }
@@ -227,8 +229,8 @@ class CoreUserStateTest {
      * @param orderId 测试预留对应的订单编号
      * @param units 测试预留总金额
      */
-    private static OrderReservation reservation(long orderId, long units) {
-        return new OrderReservation(orderId, "1", ReservationKind.DERIVATIVE_MARGIN,
+    private static OrderFundsReservation.Snapshot reservation(long orderId, long units) {
+        return new OrderFundsReservation.Snapshot(orderId, "1", ReservationKind.DERIVATIVE_MARGIN,
                 "USDT", units, 0, 0, 1);
     }
 

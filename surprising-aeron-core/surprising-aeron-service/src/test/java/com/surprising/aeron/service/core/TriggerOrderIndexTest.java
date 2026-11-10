@@ -11,9 +11,9 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.CoreTriggerCondition;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
-import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.change.LaneCommitEvent;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
+import com.surprising.aeron.service.account.UserAccount;
+import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
@@ -60,8 +60,8 @@ class TriggerOrderIndexTest {
             while (runtime.topology().accountLaneId(second) == runtime.topology().accountLaneId(7)) second++;
             // 固定给断言闭包捕获的第二用户 ID
             final long secondUser = second;
-            runtime.putUser(new UserRuntime(7));
-            runtime.putUser(new UserRuntime(second));
+            runtime.putUser(new UserAccount(7));
+            runtime.putUser(new UserAccount(second));
             runtime.putTriggerOrder(trigger(901, 7, 100));
             runtime.putTriggerOrder(trigger(902, second, 100));
             // 供各 Owner 派生索引初始化使用的空现货冷状态
@@ -110,7 +110,7 @@ class TriggerOrderIndexTest {
      * @param runtime 本次负责关闭的运行时，等待现有账户工作完成
      * @param event 本次需要等待的 Lane 提交事件，完成后由用例显式释放
      */
-    private static void awaitCommit(TradingAccountRuntime runtime, LaneCommitEvent event) {
+    private static void awaitCommit(TradingAccountRuntime runtime, AccountPartitionCommit event) {
         // 等待本次 Lane 提交完成的单调时钟五秒期限
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         while (!runtime.laneCommitComplete(event)) {
@@ -163,7 +163,7 @@ class TriggerOrderIndexTest {
         var initial = trigger(901, 7, 100);
         // 手工装入本用例触发状态的冷状态，供投影或索引重建
         var state = new TradingCoreState(ProductLine.SPOT, 0,
-                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
+                Map.of(7L, new UserAccountSnapshot(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), Map.of(901L, initial));
         try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = RuntimeStateProjector.project(state, new RuntimeIdentityRegistry())) {
             runtime.startAccountLanes();
@@ -211,7 +211,7 @@ class TriggerOrderIndexTest {
         }
         // 手工装入本用例触发状态的冷状态，供投影或索引重建
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 0,
-                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
+                Map.of(7L, new UserAccountSnapshot(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
         // 本用例独立的触发派生索引，由空状态或手工候选状态创建
         TriggerOrderIndex index = new TriggerOrderIndex(state);
@@ -270,7 +270,7 @@ class TriggerOrderIndexTest {
         triggers.put(304L, trailing(304, CoreOrderSide.BUY, 0, 100_000, 0, 100, 1_000));
         // 手工装入本用例触发状态的冷状态，供投影或索引重建
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 0,
-                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
+                Map.of(7L, new UserAccountSnapshot(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
         // 本用例独立的触发派生索引，由空状态或手工候选状态创建
         TriggerOrderIndex index = new TriggerOrderIndex(state);

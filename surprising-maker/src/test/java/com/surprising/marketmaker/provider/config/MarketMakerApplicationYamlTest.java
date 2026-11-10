@@ -7,19 +7,13 @@ import org.springframework.core.io.ClassPathResource;
 
 class MarketMakerApplicationYamlTest {
     @Test
-    void priceConsumerDefaultsToOneAndRetainsExplicitConcurrencyOverride() throws Exception {
+    void realtimeConfigurationLoadsFromYaml() throws Exception {
         var env = new org.springframework.core.env.StandardEnvironment();
-        env.getPropertySources().remove(org.springframework.core.env.StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
-        var overrides = new java.util.HashMap<String, Object>();
-        overrides.put("PRODUCT_LINE", "LINEAR_PERPETUAL");
-        env.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("test", overrides));
         new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yml"))
                 .forEach(env.getPropertySources()::addLast);
-        var binder = org.springframework.boot.context.properties.bind.Binder.get(env);
-        var type = org.springframework.boot.context.properties.bind.Bindable.of(com.surprising.price.consumer.config.MarkPriceConsumerProperties.class);
-        assertThat(binder.bind("surprising.price.consumer", type).get().getConcurrency()).isEqualTo(1);
-        overrides.put("PRICE_CONSUMER_CONCURRENCY", "4");
-        assertThat(binder.bind("surprising.price.consumer", type).get().getConcurrency()).isEqualTo(4);
+        assertThat(env.getProperty("surprising.realtime.enabled")).isEqualTo("true");
+        assertThat(env.getProperty("surprising.realtime.channel")).isEqualTo("aeron:udp?endpoint=127.0.0.1:40130");
+        assertThat(env.getProperty("surprising.realtime.stream")).isEqualTo("2103");
     }
 
     @Test

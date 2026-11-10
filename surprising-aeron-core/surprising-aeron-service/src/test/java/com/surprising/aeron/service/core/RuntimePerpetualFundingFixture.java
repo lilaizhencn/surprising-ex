@@ -4,7 +4,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import static com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor.*;
+import static com.surprising.aeron.service.funding.FundingSettlementService.*;
 
 /**
  * 从只读交易状态构建独立运行时，供资金费状态对照测试使用。计算仍调用同一个生产资金费处理器，因此对照结果不是独立的资金公式证明，也不等于真实 Cluster 日志恢复。
@@ -33,7 +33,7 @@ public final class RuntimePerpetualFundingFixture {
     /** 在测试拥有的运行时推进真实资金费工作，返回原计算结果。 */
     public static FundingResult applyRuntime(ApplyFundingCommand command, Iterable<Long> userIds,
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        var work = com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor.prepare(
+        var work = com.surprising.aeron.service.funding.FundingSettlementService.prepare(
                 null, command, userIds, runtime, identities);
         com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work::poll);
         var result = work.result();

@@ -1,13 +1,15 @@
 package com.surprising.aeron.service.snapshot.state;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.model.TradingCoreState.ClientOrderKey;
-import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.account.UserRuntime;
+import com.surprising.aeron.service.account.AccountBalance;
+import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.*;
@@ -21,15 +23,14 @@ import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.state.OrderReservation;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.position.PositionRuntime;
+import com.surprising.aeron.service.market.MarkPrice;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.order.OrderFundsReservation;
+import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.risk.*;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
-import com.surprising.aeron.service.risk.RiskScanRuntime;
-import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
+import com.surprising.aeron.service.risk.RiskScanner;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.Map;
 import lombok.AccessLevel;
@@ -74,13 +75,13 @@ public final class RuntimeStateProjector {
             identities.assetId(instrument.settleAsset());
         });
         source.users().forEach((/* 当前被恢复用户的编号。 */ userId, /* 该用户原修订号、账户模式及余额持仓等只读数据。 */ user) -> {
-            runtime.putUser(new UserRuntime(user.productLine(), userId, user.revision(), user.positionMode()));
-            user.balances().forEach((/* 当前余额或财库条目的资产名称，需要转换为内部资产编号。 */ asset, /* 当前用户资产的可用和冻结余额。 */ balance) -> runtime.putBalance(new BalanceRuntime(
+            runtime.putUser(new UserAccount(user.productLine(), userId, user.revision(), user.positionMode()));
+            user.balances().forEach((/* 当前余额或财库条目的资产名称，需要转换为内部资产编号。 */ asset, /* 当前用户资产的可用和冻结余额。 */ balance) -> runtime.putBalance(new AccountBalance(
                     userId, identities.assetId(asset), balance.availableUnits(), balance.lockedUnits())));
             user.reservations().forEach((/* 当前订单或预留在旧状态中的订单编号。 */ orderId, /* 当前要恢复的订单资金预留值。 */ reservation) -> runtime.putReservation(toRuntimeReservation(
                     userId, reservation, identities)));
             user.positions().forEach((/* 旧状态中的持仓业务键，用来还原用户持仓身份。 */ positionKey, /* 当前需要还原数量、成本、盈亏及保证金的持仓值。 */ position) -> runtime.putPosition(
-                    identities.positionKey(userId, positionKey), new PositionRuntime(userId,
+                    identities.positionKey(userId, positionKey), new Position(userId,
                             identities.symbolId(position.instrumentId()), identities.assetId(position.marginAsset()),
                             position.marginMode(), position.positionSide(), requireInstrument(source, position.instrumentId()),
                             position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
@@ -122,7 +123,7 @@ public final class RuntimeStateProjector {
                             progress.requiredInsuranceUnits()));
         });
         source.riskState().liquidations().forEach((/* 当前强平业务记录的编号。 */ liquidationId, /* 需要恢复状态、亏空、费用及撤单游标的强平记录。 */ liquidation) ->
-                runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
+                runtime.putLiquidation(new RiskScanner.LiquidationOrder(liquidationId, liquidation.userId(),
                         identities.symbolId(liquidation.instrumentId()), liquidation.marginMode(),
                         liquidation.positionSide(), requireInstrument(source, liquidation.instrumentId()),
                         liquidation.triggerPriceSequence(), liquidation.signedQuantitySteps(),
@@ -130,16 +131,16 @@ public final class RuntimeStateProjector {
                         liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
                         liquidation.liquidationFeeUnits(), liquidation.status(),
                         liquidation.nextCancelOrderId())));
-        source.riskState().markPrices().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 该币对保存的标记价、其他参考价及价格序号。 */ mark) -> runtime.putMarkPrice(new MarkPriceRuntime(
+        source.riskState().markPrices().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 该币对保存的标记价、其他参考价及价格序号。 */ mark) -> runtime.putMarkPrice(new MarkPrice(
                 identities.symbolId(instrumentId), requireInstrument(source, instrumentId), mark.markPriceTicks(),
                 mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                 mark.generatedAtEpochMillis(), mark.lastPriceTicks())));
         source.riskState().snapshots().forEach((/* 旧风险快照的映射键；此处按快照内用户、币对及方向重新取得内部持仓身份，不读取该键。 */ key, /* 需要恢复权益、保证金与风险状态的风险快照。 */ risk) -> runtime.putRiskSnapshot(
                 identities.positionKey(risk.userId(), positionKey(risk.instrumentId(), risk.positionSide())),
-                new RiskSnapshotRuntime(risk.userId(), identities.symbolId(risk.instrumentId()), risk.positionSide(),
+                new RiskMarginCalculator.Snapshot(risk.userId(), identities.symbolId(risk.instrumentId()), risk.positionSide(),
                         risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
                         risk.maintenanceMarginUnits(), risk.marginRatioPpm())));
-        source.riskState().scans().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 需要恢复风险及触发扫描阶段、游标和已累计中间值的记录。 */ scan) -> runtime.putRiskScan(new RiskScanRuntime(
+        source.riskState().scans().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 需要恢复风险及触发扫描阶段、游标和已累计中间值的记录。 */ scan) -> runtime.putRiskScan(new RiskScanner.State(
                 identities.symbolId(instrumentId), scan.accountLaneId(), scan.priceSequence(),
                 scan.scanStartPriceSequence(),
                 scan.riskComplete(), scan.triggerComplete(),
@@ -205,14 +206,14 @@ public final class RuntimeStateProjector {
     }
 
     /**
-     * 把只读订单的数量、状态、价格、费用、时间和成交值等字段完整装入新的 OrderRuntime，并关联已解析的币对与内部编号。
+     * 把只读订单的数量、状态、价格、费用、时间和成交值等字段完整装入新的 Order，并关联已解析的币对与内部编号。
      * @param order 要转换的只读订单值
      * @param identities 本次恢复使用并绑定账户 Lane 的身份表，不是在本方法内新建的副本
      * @param instrument 订单币对对应的注册配置
      */
-    public static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities,
+    public static Order toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities,
                                               CoreInstrument instrument) {
-        return new OrderRuntime(order.orderId(), order.productLine(), order.userId(),
+        return new Order(order.orderId(), order.productLine(), order.userId(),
                 identities.symbolId(order.instrumentId()), instrument, order.side(),
                 order.matchingPriceTicks(),
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
@@ -224,14 +225,14 @@ public final class RuntimeStateProjector {
     }
 
     /**
-     * 恢复订单预留的总额、已释放额和已消耗额；总额使用 OrderReservation.reservedUnits，不能误当作当前剩余额度。
+     * 恢复订单预留的总额、已释放额和已消耗额；总额使用 OrderFundsReservation.Snapshot.reservedUnits，不能误当作当前剩余额度。
      * @param userId 预留所属用户编号
      * @param reservation 包含预留总额及累计释放、消耗的只读值
      * @param identities 本次恢复使用并绑定账户 Lane 的身份表，不是在本方法内新建的副本
      */
-    static ReservationRuntime toRuntimeReservation(long userId, OrderReservation reservation,
+    static OrderFundsReservation toRuntimeReservation(long userId, OrderFundsReservation.Snapshot reservation,
                                                     RuntimeIdentityRegistry identities) {
-        return new ReservationRuntime(reservation.orderId(), userId, identities.symbolId(reservation.instrumentId()),
+        return new OrderFundsReservation(reservation.orderId(), userId, identities.symbolId(reservation.instrumentId()),
                 reservation.kind(), identities.assetId(reservation.asset()),
                 reservation.reservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
                 reservation.orderQuantitySteps());
@@ -244,7 +245,7 @@ public final class RuntimeStateProjector {
      */
     private static String positionKey(String instrumentId, com.surprising.aeron.protocol.CorePositionSide side) {
         // 经过币对名规范化后的持仓键主体。
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
+        String normalized = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
     }
 
@@ -255,7 +256,7 @@ public final class RuntimeStateProjector {
      */
     private static CoreInstrument requireInstrument(TradingCoreState source, String instrumentId) {
         // 从旧状态中找到的注册币对配置。
-        CoreInstrument instrument = source.instruments().get(OrderReservation.requireInstrumentId(instrumentId));
+        CoreInstrument instrument = source.instruments().get(OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId));
         if (instrument == null) throw new IllegalStateException("instrument is not registered: " + instrumentId);
         return instrument;
     }

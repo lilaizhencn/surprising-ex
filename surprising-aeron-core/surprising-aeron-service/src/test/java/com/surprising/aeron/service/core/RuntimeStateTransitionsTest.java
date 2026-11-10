@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.service.account.AccountControlTask;
+import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -14,7 +14,6 @@ import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
@@ -74,7 +73,7 @@ class RuntimeStateTransitionsTest {
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
                 "transfer-91", "product allocation", 7L, 7L);
 
-        var task = new AccountControlTask();
+        var task = new AccountCommandService();
         LedgerControlTestSupport.await(runtime, task.prepareTransferOut(runtime, identities, 7L, transfer));
         assertThat(task.stateChanged()).isTrue();
         assertThat(runtime.pendingTransfer(91L)).isNotNull();
@@ -84,9 +83,9 @@ class RuntimeStateTransitionsTest {
         assertThat(runtime.revision()).isEqualTo(beforeRetry);
         assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
 
-        assertThat(AccountControlTask.completeTransfer(runtime, 7L, 91L)).isTrue();
+        assertThat(AccountCommandService.completeTransfer(runtime, 7L, 91L)).isTrue();
         assertThat(runtime.pendingTransfer(91L)).isNull();
-        assertThat(AccountControlTask.completeTransfer(runtime, 7L, 91L)).isFalse();
+        assertThat(AccountCommandService.completeTransfer(runtime, 7L, 91L)).isFalse();
     }
 
     /**
@@ -129,7 +128,7 @@ class RuntimeStateTransitionsTest {
             // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
             TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-            LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareBalanceAdjustment(runtime, identities, 7, command.asset(), command.deltaUnits()));
+            LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareBalanceAdjustment(runtime, identities, 7, command.asset(), command.deltaUnits()));
 
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .as(productLine.name())
@@ -150,7 +149,7 @@ class RuntimeStateTransitionsTest {
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareBalanceAdjustment(runtime, identities, 7, "USDT", -11)))
+        assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareBalanceAdjustment(runtime, identities, 7, "USDT", -11)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(before);
     }
@@ -216,7 +215,7 @@ class RuntimeStateTransitionsTest {
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        var task = new AccountControlTask();
+        var task = new AccountCommandService();
         LedgerControlTestSupport.await(runtime, task.preparePositionModeChange(runtime, 7, command));
         assertThat(task.stateChanged()).isTrue();
 
@@ -250,7 +249,7 @@ class RuntimeStateTransitionsTest {
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        var task = new AccountControlTask();
+        var task = new AccountCommandService();
         LedgerControlTestSupport.await(runtime, task.prepareLeverageChange(runtime, identities, 7, command));
         assertThat(task.stateChanged()).isTrue();
 

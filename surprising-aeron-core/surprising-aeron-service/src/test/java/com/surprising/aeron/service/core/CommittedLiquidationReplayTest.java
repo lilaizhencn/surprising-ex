@@ -1,8 +1,10 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary;
+
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
 import com.surprising.aeron.service.replay.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;

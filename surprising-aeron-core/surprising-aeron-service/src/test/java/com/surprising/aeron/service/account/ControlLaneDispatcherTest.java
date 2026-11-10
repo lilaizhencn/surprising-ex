@@ -101,8 +101,8 @@ class ControlLaneDispatcherTest {
     @Test
     void reservationAndAccountStateAccessibleAfterDispatch() {
         try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime()) {
-            runtime.putUser(new UserRuntime(7));
-            runtime.putBalance(new com.surprising.aeron.service.account.BalanceRuntime(7, 3, 1000, 0));
+            runtime.putUser(new UserAccount(7));
+            runtime.putBalance(new com.surprising.aeron.service.account.AccountBalance(7, 3, 1000, 0));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
             // 用户七实际所属的 Lane 编号，只向该分片派发账户操作。

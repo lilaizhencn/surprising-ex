@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -13,8 +15,8 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -32,7 +34,7 @@ public final class CoreStateTestFixtures {
 
 
     /** 核对冷用户的资产总额，缺失资产按零计；不执行余额变更。 */
-    public static long totalUnits(com.surprising.aeron.service.account.CoreUserState user, String asset) {
+    public static long totalUnits(com.surprising.aeron.service.account.UserAccountSnapshot user, String asset) {
         var balance = user.balances().get(com.surprising.aeron.model.AssetBalance.normalizeAsset(asset));
         return balance == null ? 0 : totalUnits(balance);
     }
@@ -134,7 +136,7 @@ public final class CoreStateTestFixtures {
      * @param symbolId 测试运行时的内部标的索引，不会据此替换共享标的配置
      * @param quantitySteps 测试订单数量，按数量步保存
      */
-    public static OrderRuntime order(long orderId, long userId, int symbolId, long quantitySteps) {
+    public static Order order(long orderId, long userId, int symbolId, long quantitySteps) {
         return order(orderId, userId, symbolId, quantitySteps, false);
     }
 
@@ -146,8 +148,8 @@ public final class CoreStateTestFixtures {
      * @param quantitySteps 测试订单数量，按数量步保存
      * @param canceled 传给运行时订单构造器的取消标志
      */
-    public static OrderRuntime order(long orderId, long userId, int symbolId, long quantitySteps, boolean canceled) {
-        return new OrderRuntime(orderId, userId, symbolId, RUNTIME_INSTRUMENT, CoreOrderSide.BUY, 0,
+    public static Order order(long orderId, long userId, int symbolId, long quantitySteps, boolean canceled) {
+        return new Order(orderId, userId, symbolId, RUNTIME_INSTRUMENT, CoreOrderSide.BUY, 0,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, 0, 0, quantitySteps, 0, quantitySteps, canceled);
     }
@@ -159,8 +161,8 @@ public final class CoreStateTestFixtures {
      * @param assetId 预留及冻结使用的内部资产索引
      * @param remainingUnits 希望构造的预留量；正文总量取该值与一的较大者，释放和消耗都为零
      */
-    public static ReservationRuntime reservation(long orderId, long userId, int assetId, long remainingUnits) {
-        return new ReservationRuntime(orderId, userId, 0, ReservationKind.DERIVATIVE_MARGIN,
+    public static OrderFundsReservation reservation(long orderId, long userId, int assetId, long remainingUnits) {
+        return new OrderFundsReservation(orderId, userId, 0, ReservationKind.DERIVATIVE_MARGIN,
                 assetId, Math.max(1, remainingUnits), 0, 0, 1);
     }
 
@@ -178,9 +180,9 @@ public final class CoreStateTestFixtures {
     public static void reserveOrder(TradingAccountRuntime runtime, long orderId, long userId, long clientKey,
                              int symbolId, long quantitySteps, int assetId, long reservedUnits) {
         // 本次待直接登记的测试订单
-        OrderRuntime order = order(orderId, userId, symbolId, quantitySteps);
+        Order order = order(orderId, userId, symbolId, quantitySteps);
         // 本次和订单一起登记的预留正文，总预留至少一
-        ReservationRuntime reservation = new ReservationRuntime(orderId, userId, symbolId,
+        OrderFundsReservation reservation = new OrderFundsReservation(orderId, userId, symbolId,
                 ReservationKind.DERIVATIVE_MARGIN, assetId,
                 Math.max(1, reservedUnits), 0, 0, quantitySteps);
         runtime.reserveOrder(order, reservation, clientKey, reservedUnits);
@@ -284,9 +286,9 @@ public final class CoreStateTestFixtures {
     }
 
     /** 为索引、准入和快照测试准备独立成交后值，不为生产保留冷复制入口。 */
-    public static OrderRuntime filledOrder(OrderRuntime order, long executed, long remaining, long feeUnits,
+    public static Order filledOrder(Order order, long executed, long remaining, long feeUnits,
             com.surprising.aeron.model.CoreOrderStatus status, long revision) {
-        return new OrderRuntime(order.orderId(), order.productLine(), order.userId(), order.symbolId(),
+        return new Order(order.orderId(), order.productLine(), order.userId(), order.symbolId(),
                 order.instrument(), order.side(), order.matchingPriceTicks(), order.quantitySteps(), executed,
                 remaining, order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(),
                 order.timeInForce(), order.postOnly(), order.clientOrderId(), order.commandId(),

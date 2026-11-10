@@ -1,10 +1,12 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.service.order.ClusterCommandWindow;
+import com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.aeron.support.ingress.CoreMessageFlyweightDecoder;
 import com.surprising.product.api.ProductLine;
@@ -249,7 +251,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
         try { runtime = owner.state(); } catch (RuntimeException ignoredFailure) {}
         try { owner.terminate(); }
         catch (/* 关闭真实 Owner 时产生的运行时异常，只有原故障已记录时才抑制 */ RuntimeException failure) {
-            if (runtime == null || runtime.fatalFailure == null) throw failure;
+            if (runtime == null || runtime.fatalFailure() == null) throw failure;
         }
         finally { egress.clear(); }
         cluster = null;
@@ -323,7 +325,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
     /**
      * 借出真实 Owner 的窗口，测试不得当成独立状态修改。
      */
-    public ClusterCommandWindow commandWindow() { return owner.commandWindow(); }
+    public OrderCommandQueue.IngressWindow commandWindow() { return owner.commandWindow(); }
     /**
      * 借出真实实时边界的有界快照请求队列。
      */

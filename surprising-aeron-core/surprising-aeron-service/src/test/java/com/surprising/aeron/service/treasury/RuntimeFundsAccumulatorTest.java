@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.treasury;
 
-import com.surprising.aeron.service.settlement.FundsPosting;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -17,19 +17,19 @@ class RuntimeFundsAccumulatorTest {
     void validatesConservationWithoutMaterializingFundsDelta() {
         // 含两个资产平衡分录的原语资金缓冲。
         RuntimeFundsAccumulator accumulator = new RuntimeFundsAccumulator();
-        accumulator.add(7, FundsPosting.OwnerKind.USER, 11,
-                FundsPosting.Subledger.AVAILABLE, -100);
-        accumulator.add(7, FundsPosting.OwnerKind.TREASURY, 0,
-                FundsPosting.Subledger.FEE, 100);
-        accumulator.add(9, FundsPosting.OwnerKind.USER, 12,
-                FundsPosting.Subledger.LOCKED, -40);
-        accumulator.add(9, FundsPosting.OwnerKind.USER, 13,
-                FundsPosting.Subledger.AVAILABLE, 40);
+        accumulator.add(7, TradeSettlement.Posting.OwnerKind.USER, 11,
+                TradeSettlement.Posting.Subledger.AVAILABLE, -100);
+        accumulator.add(7, TradeSettlement.Posting.OwnerKind.TREASURY, 0,
+                TradeSettlement.Posting.Subledger.FEE, 100);
+        accumulator.add(9, TradeSettlement.Posting.OwnerKind.USER, 12,
+                TradeSettlement.Posting.Subledger.LOCKED, -40);
+        accumulator.add(9, TradeSettlement.Posting.OwnerKind.USER, 13,
+                TradeSettlement.Posting.Subledger.AVAILABLE, 40);
 
         assertThatCode(() -> accumulator.requireConserved(false)).doesNotThrowAnyException();
 
-        accumulator.add(9, FundsPosting.OwnerKind.TREASURY, 0,
-                FundsPosting.Subledger.INSURANCE, 1);
+        accumulator.add(9, TradeSettlement.Posting.OwnerKind.TREASURY, 0,
+                TradeSettlement.Posting.Subledger.INSURANCE, 1);
         assertThatThrownBy(() -> accumulator.requireConserved(false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("asset 9");

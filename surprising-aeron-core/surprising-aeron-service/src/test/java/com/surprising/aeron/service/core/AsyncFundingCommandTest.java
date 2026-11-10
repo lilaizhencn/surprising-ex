@@ -99,7 +99,7 @@ class AsyncFundingCommandTest {
                     state.runtimeState.instruments.put(original.instrumentIdValue(), original.captureForQuery());
                     try {
                         var validPage = new ApplyFundingCommand(900, "1", 10_000, cursor, 1);
-                        assertThatThrownBy(() -> com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor
+                        assertThatThrownBy(() -> com.surprising.aeron.service.funding.FundingSettlementService
                                 .prepare(null, validPage, java.util.List.of(), state.runtimeState, state.identities))
                                 .isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
                                 .hasMessage("funding cursor does not match progress");

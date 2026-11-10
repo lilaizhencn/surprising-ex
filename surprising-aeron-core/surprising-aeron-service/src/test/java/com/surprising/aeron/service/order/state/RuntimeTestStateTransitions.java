@@ -1,7 +1,9 @@
 package com.surprising.aeron.service.order.state;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.service.core.LedgerControlTestSupport;
-import com.surprising.aeron.service.account.AccountControlTask;
+import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.service.core.RuntimeDerivativeLiquidationFixture;
 
 import com.surprising.aeron.service.core.RuntimeLifecycleSettlementFixture;
@@ -39,10 +41,10 @@ import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
-import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
-import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
+import com.surprising.aeron.service.funding.FundingSettlementService;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.OrderAdmissionService;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchFixture;
 import com.surprising.aeron.service.settlement.RuntimeSpotMatchFixture;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
@@ -54,7 +56,7 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
-import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
+import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import java.util.Collection;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -102,7 +104,7 @@ public final class RuntimeTestStateTransitions {
      */
     public TradingCoreState adjustBalance(TradingCoreState before, long userId, BalanceAdjustmentCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareBalanceAdjustment(runtime, identities, userId, command.asset(), command.deltaUnits())));
+                LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareBalanceAdjustment(runtime, identities, userId, command.asset(), command.deltaUnits())));
     }
 
     /**
@@ -125,7 +127,7 @@ public final class RuntimeTestStateTransitions {
      */
     public TradingCoreState updatePositionMode(TradingCoreState before, long userId, UpdatePositionModeCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                LedgerControlTestSupport.await(runtime, new AccountControlTask().preparePositionModeChange(runtime, userId, command)));
+                LedgerControlTestSupport.await(runtime, new AccountCommandService().preparePositionModeChange(runtime, userId, command)));
     }
 
     /**
@@ -136,7 +138,7 @@ public final class RuntimeTestStateTransitions {
      */
     public TradingCoreState updateLeverage(TradingCoreState before, long userId, UpdateLeverageCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareLeverageChange(runtime, identities, userId, command)));
+                LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareLeverageChange(runtime, identities, userId, command)));
     }
 
     /**
@@ -148,7 +150,7 @@ public final class RuntimeTestStateTransitions {
     public TradingCoreState adjustPositionMargin(TradingCoreState before, long userId,
                                           AdjustPositionMarginCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                LedgerControlTestSupport.await(runtime, new AccountControlTask().preparePositionMarginAdjustment(runtime, identities, userId, command)));
+                LedgerControlTestSupport.await(runtime, new AccountCommandService().preparePositionMarginAdjustment(runtime, identities, userId, command)));
     }
 
     /**
@@ -184,9 +186,9 @@ public final class RuntimeTestStateTransitions {
         long decisionTimestamp = mark == null ? 1 : mark.generatedAtEpochMillis();
         UUID commandId = UUID.randomUUID();
         return mutate(before, (runtime, identities) -> {
-            ResolvedPlaceOrder resolved = RuntimeOrderAdmission.resolve(
+            OrderCommand.ResolvedPlaceOrder resolved = OrderAdmissionService.resolve(
                     runtime, identities, userId, command, decisionTimestamp);
-            long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
+            long required = OrderAdmissionService.requiredReservation(runtime, identities, userId,
                     resolved, 0);
             runtime.placePreparedOrder(userId, resolved, commandId, required,
                     identities.clientKey(userId, resolved.clientOrderId()),
@@ -200,10 +202,10 @@ public final class RuntimeTestStateTransitions {
      * @param userId 当前测试命令或风险查询使用的用户编号
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      */
-    public TradingCoreState placeOrder(TradingCoreState before, long userId, ResolvedPlaceOrder command) {
+    public TradingCoreState placeOrder(TradingCoreState before, long userId, OrderCommand.ResolvedPlaceOrder command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> {
             // 生产账户准入根据本单和原运行态挂单算出的应预留金额。
-            long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
+            long required = OrderAdmissionService.requiredReservation(runtime, identities, userId,
                     command, 0);
             runtime.placePreparedOrder(userId, command, UUID.randomUUID(), required,
                     identities.clientKey(userId, command.clientOrderId()),
@@ -367,9 +369,9 @@ public final class RuntimeTestStateTransitions {
      * 把测试业务订单投影成订单、用户和永久币对组成的撤单路由列表，不在此执行撤单。
      * @param orders 需要转换为撤单路由的测试业务订单集合
      */
-    public static java.util.List<com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder> cancellationRoutes(
+    public static java.util.List<com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder> cancellationRoutes(
             Collection<CoreOrderState> orders) {
-        return orders.stream().map(/* 当前需要投影撤单路由、执行取消或按终态过滤的测试业务订单。 */ order -> new com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder(
+        return orders.stream().map(/* 当前需要投影撤单路由、执行取消或按终态过滤的测试业务订单。 */ order -> new com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder(
                 order.orderId(), order.userId(), order.instrumentId())).toList();
     }
 
@@ -430,9 +432,9 @@ public final class RuntimeTestStateTransitions {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> {
             for (CoreOrderState /* 当前需要投影撤单路由、执行取消或按终态过滤的测试业务订单。 */ order : canceledOrders) {
                 // 夹具当前读取但后续未使用的运行态订单局部值，实际取消使用原订单身份和冻结余额。
-                OrderRuntime current = runtime.order(order.orderId());
+                Order current = runtime.order(order.orderId());
                 // 当前待取消订单的运行态冻结记录，按其剩余额度调用原取消入口。
-                ReservationRuntime reservation = runtime.reservation(order.orderId());
+                OrderFundsReservation reservation = runtime.reservation(order.orderId());
                 runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
             }
             runtime.incrementCommandRevision();
@@ -654,7 +656,7 @@ public final class RuntimeTestStateTransitions {
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
-        RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(command, runtime, identities);
+        RiskMarginCalculator.applyMarkPriceRuntime(command, runtime, identities);
         if (runtime.riskScanControl().enabled()) {
             com.surprising.aeron.service.core.RuntimeDerivativeRiskFixture.continueRiskBudget(
                     runtime.riskScanControl().scanBatchSize(),
@@ -675,7 +677,7 @@ public final class RuntimeTestStateTransitions {
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
-    public static RuntimePerpetualFundingProcessor.FundingResult applyFundingRuntime(TradingCoreState before, ApplyFundingCommand command,
+    public static FundingSettlementService.FundingResult applyFundingRuntime(TradingCoreState before, ApplyFundingCommand command,
                                       Iterable<Long> indexedUserIds,
                                       TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()

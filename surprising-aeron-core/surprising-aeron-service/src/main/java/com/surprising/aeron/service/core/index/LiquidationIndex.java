@@ -1,11 +1,13 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.order.state.OrderReservation;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
+import com.surprising.aeron.service.risk.RiskScanner;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.TreeMap;
@@ -76,7 +78,7 @@ public final class LiquidationIndex {
      * @param after 账户已变更的真实强平运行时状态，空表示删除
      * @param identities 把账户内部标的索引还原为协议数字文本的原身份表
      */
-    public void apply(long liquidationId, LiquidationRuntime after, RuntimeIdentityRegistry identities) {
+    public void apply(long liquidationId, RiskScanner.LiquidationOrder after, RuntimeIdentityRegistry identities) {
         // 该 ID 原路由，未结束时先撤掉旧集合成员
         LiquidationRoute previous = keysById.remove(liquidationId);
         if (previous != null && previous.unresolved()) remove(liquidationId, previous.key());
@@ -114,7 +116,7 @@ public final class LiquidationIndex {
      * 对运行时强平使用同样的未结束判断，不把它等同于可执行减仓。
      * @param value 需要判断未结束、增加或移除的强平状态/原路由
      */
-    private static boolean isActive(LiquidationRuntime value) {
+    private static boolean isActive(RiskScanner.LiquidationOrder value) {
         return value != null && value.status() != CoreLiquidationState.Status.COMPLETED
                 && value.status() != CoreLiquidationState.Status.CANCELED;
     }
@@ -168,7 +170,7 @@ public final class LiquidationIndex {
          * 要求标的文本符合规范数字身份，其他字段按既有调用约定提供。
          */
         private LiquidationKey {
-            instrumentId = OrderReservation.requireInstrumentId(instrumentId);
+            instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         }
 
         /**

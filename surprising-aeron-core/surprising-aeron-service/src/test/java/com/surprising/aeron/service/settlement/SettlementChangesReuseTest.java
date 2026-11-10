@@ -5,10 +5,10 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.account.AccountLaneTestAccess;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.change.LaneCommitDelta;
+import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.core.change.LaneCommitTestAccess;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.position.PositionRuntime;
+import com.surprising.aeron.service.position.Position;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
@@ -26,7 +26,7 @@ class SettlementChangesReuseTest {
             // 本用例持有的账户 Lane，或池轮转用例当前 Lane 数组下标。
             var lane = runtime.accountLane(laneId);
             // 本次创建或借出的结算变化缓冲。
-            var changes = new MatcherSettlementChanges(runtime.topology().accountLaneCount());
+            var changes = new TradeSettlement.Changes(runtime.topology().accountLaneCount());
             changes.ensureOrderCapacity(2, 1L << laneId);
             // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
             var delta = changes.laneDeltas[laneId];
@@ -90,7 +90,7 @@ class SettlementChangesReuseTest {
     @Test void terminalReceiptReuseReadsOnlyTheNewCountAndReleasesReferences() throws Exception {
         try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingAccountRuntime()) {
             // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
-            var delta = new LaneCommitDelta();
+            var delta = new AccountPartitionCommit.Delta();
             // 跨复用轮次单调增加的测试订单编号。
             long nextId = 1;
             for (int /* 当前轮需要构造的终态身份数量，包含零项轮次。 */ count : new int[]{65, 1, 0, 7, 0}) {
@@ -112,7 +112,7 @@ class SettlementChangesReuseTest {
                 assertThat(delta.terminalOrderCount()).isZero();
                 assertThat(delta.orders().isEmpty()).isTrue();
                 // 反射取得的终态客户身份引用数组字段。
-                var field = LaneCommitDelta.class.getDeclaredField("terminalOrderClients");
+                var field = AccountPartitionCommit.Delta.class.getDeclaredField("terminalOrderClients");
                 field.setAccessible(true);
                 assertThat((Object[]) field.get(delta)).containsOnlyNulls();
             }
@@ -147,11 +147,11 @@ class SettlementChangesReuseTest {
     @Test void positionPublicationTracksChangedPositions() {
         try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingAccountRuntime()) {
             // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
-            var delta = new LaneCommitDelta();
+            var delta = new AccountPartitionCommit.Delta();
             // 直接构造测试持仓使用的规范币对对象。
             var instrument = CoreStateTestFixtures.runtimeInstrument();
             // 用于检查初值、原位更新和删除发布的持仓运行时值。
-            var source = new PositionRuntime(7, 0, 0,
+            var source = new Position(7, 0, 0,
                     com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                     com.surprising.aeron.protocol.CorePositionSide.NET,
                     instrument, 2, 100, 200, 0, 20);

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
@@ -21,13 +23,13 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.account.UserRuntime;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
+import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.RuntimeStateParityChecker;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -119,7 +121,7 @@ class RuntimeDerivativeMatchProcessorTest {
         // 当前成交的相反方向对手冷订单。
         CoreOrderState maker = order(12, 8, CoreOrderSide.SELL, 1);
         // 不参与本次成交的用户九十九的初始冷状态。
-        CoreUserState unrelated = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 99, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
+        UserAccountSnapshot unrelated = new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 99, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 包含用户、订单、币对及系统账本的操作前冷状态。
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100), 99L, unrelated),
@@ -133,7 +135,7 @@ class RuntimeDerivativeMatchProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        runtime.putUser(new UserRuntime(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
+        runtime.putUser(new UserAccount(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
 
         RuntimeDerivativeMatchFixture.applyTransition(before, expected, 11, matches, runtime, identities);
 
@@ -319,9 +321,9 @@ class RuntimeDerivativeMatchProcessorTest {
         // 测试起点已有的两单位多仓、均价一百且保证金二十的冷持仓。
         CorePositionState position = new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 2, 100, 200, 0, 20);
         // 已有多仓并持有本次主动卖出预留的用户七冷状态。
-        CoreUserState takerUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
+        UserAccountSnapshot takerUser = new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, 20 + takerReservation)),
-                Map.of(11L, new OrderReservation(11, "1",
+                Map.of(11L, new OrderFundsReservation.Snapshot(11, "1",
                         ReservationKind.DERIVATIVE_MARGIN, "USDT", takerReservation, 0, 0, quantity)),
                 Map.of(position.key(), position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 包含用户、订单、币对及系统账本的操作前冷状态。
@@ -356,12 +358,12 @@ class RuntimeDerivativeMatchProcessorTest {
      * @param order 需要为其建立保证金预留的冷订单
      * @param reservedUnits 新建用户中该订单的冻结预留金额
      */
-    private static CoreUserState user(long userId, CoreOrderState order, long reservedUnits) {
+    private static UserAccountSnapshot user(long userId, CoreOrderState order, long reservedUnits) {
         // 给测试订单建立的衍生品保证金预留。
-        OrderReservation reservation = new OrderReservation(order.orderId(), order.instrumentId(),
+        OrderFundsReservation.Snapshot reservation = new OrderFundsReservation.Snapshot(order.orderId(), order.instrumentId(),
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", reservedUnits, 0, 0,
                 order.quantitySteps());
-        return new CoreUserState(ProductLine.LINEAR_PERPETUAL, userId, 1,
+        return new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, userId, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, reservedUnits)),
                 Map.of(order.orderId(), reservation), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
     }

@@ -1,15 +1,16 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.change.RuntimeOrderChangeBuffer;
-import com.surprising.aeron.service.core.change.RuntimePositionChangeBuffer;
+import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.position.PositionRuntime;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.aeron.support.ingress.CoreMessageFlyweightDecoder;
 import com.surprising.product.api.ProductLine;
@@ -33,24 +34,24 @@ public class HotCommandSlotAllocationBenchmark {
     private static final int WINDOW = 256, SYMBOL = 10_001;
     @Param({"EMPTY", "ASCII", "UNICODE"}) public String clientId;
     private final UUID commandId = new UUID(1, 2);
-    private final ResolvedPlaceOrder[] resolved = new ResolvedPlaceOrder[WINDOW];
+    private final OrderCommand.ResolvedPlaceOrder[] resolved = new OrderCommand.ResolvedPlaceOrder[WINDOW];
     private final PlaceOrderCommand[] decoded = new PlaceOrderCommand[WINDOW];
-    private final RuntimeOrderChangeBuffer[] changes = new RuntimeOrderChangeBuffer[WINDOW];
-    private final RuntimePositionChangeBuffer[] positionChanges = new RuntimePositionChangeBuffer[WINDOW];
-    private final PositionRuntime[] sourcePositions = new PositionRuntime[WINDOW];
-    private final OrderRuntime[] sourceOrders = new OrderRuntime[WINDOW];
+    private final StateChangeBuffer.Orders[] changes = new StateChangeBuffer.Orders[WINDOW];
+    private final StateChangeBuffer.Positions[] positionChanges = new StateChangeBuffer.Positions[WINDOW];
+    private final Position[] sourcePositions = new Position[WINDOW];
+    private final Order[] sourceOrders = new Order[WINDOW];
     private final MatcherResult[] nativeSlots = new MatcherResult[WINDOW];
     private final java.nio.ByteBuffer[] encodingBuffers = new java.nio.ByteBuffer[WINDOW];
     private final byte[][] payloads = new byte[WINDOW][];
     private final UnsafeBuffer[] frames = new UnsafeBuffer[WINDOW];
     private final CoreMessageFlyweightDecoder frameDecoder = new CoreMessageFlyweightDecoder();
-    private AccountLaneState lane;
+    private AccountPartition lane;
     private SynchronousMatchingEngine matcher;
-    private com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context decision;
+    private com.surprising.aeron.service.order.OrderAdmissionService.Context decision;
     private long retiredSequence;
 
     @Setup public void setup() {
-        lane = new AccountLaneState(0, WINDOW); lane.assertOwner();
+        lane = new AccountPartition(0, WINDOW); lane.assertOwner();
         matcher = new SynchronousMatchingEngine(ExchangeConfiguration.defaultBuilder()
                 .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
                         .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.MATCHING_ONLY)
@@ -66,8 +67,8 @@ public class HotCommandSlotAllocationBenchmark {
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
-        decision = new com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context(
-                instrument, 0, new com.surprising.aeron.service.market.MarkPriceRuntime(0, instrument, 100, 1, 1),
+        decision = new com.surprising.aeron.service.order.OrderAdmissionService.Context(
+                instrument, 0, new com.surprising.aeron.service.market.MarkPrice(0, instrument, 100, 1, 1),
                 FeePolicyBook.from(java.util.Map.of(1L, new com.surprising.aeron.model.CoreFeePolicyState(
                         1, 1, 7, "1", -10, 20, 0, true, 1, 0))), 1_000,
                 new TreasuryRuntime().settlementStatus(0));
@@ -75,15 +76,15 @@ public class HotCommandSlotAllocationBenchmark {
             String client = switch (clientId) { case "EMPTY" -> ""; case "ASCII" -> "client-" + index; default -> "客户-" + index; };
             var order = new PlaceOrderCommand(index + 1, "1", CoreOrderSide.BUY, 100, 10, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, client);
-            resolved[index] = new ResolvedPlaceOrder(order, instrument, 0, 100, 100, 100, 0, 0,
+            resolved[index] = new OrderCommand.ResolvedPlaceOrder(order, instrument, 0, 100, 100, 100, 0, 0,
                     ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
             sourceOrders[index] = TradingAccountRuntime.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7,
                     resolved[index], commandId, 0, 1, 1);
             decoded[index] = PlaceOrderCommand.commandSlot();
             nativeSlots[index] = MatcherResult.commandSlot();
-            changes[index] = new RuntimeOrderChangeBuffer();
-            positionChanges[index] = new RuntimePositionChangeBuffer();
-            sourcePositions[index] = new PositionRuntime(index + 1, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
+            changes[index] = new StateChangeBuffer.Orders();
+            positionChanges[index] = new StateChangeBuffer.Positions();
+            sourcePositions[index] = new Position(index + 1, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
                     instrument, 10, 100, 1000, 0, 200);
             payloads[index] = TradingCommandCodec.encodePlaceOrder(order);
             encodingBuffers[index] = java.nio.ByteBuffer.allocate(payloads[index].length).order(java.nio.ByteOrder.LITTLE_ENDIAN);
@@ -116,7 +117,7 @@ public class HotCommandSlotAllocationBenchmark {
         long checksum = 0;
         for (int index = 0; index < WINDOW; index++) {
             var target = resolved[index];
-            com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto(
+            com.surprising.aeron.service.order.OrderAdmissionService.resolveInto(
                     target, decision, 7, target.intent());
             checksum += target.matchingPriceTicks() + target.makerFeeRatePpm() + target.takerFeeRatePpm();
         }

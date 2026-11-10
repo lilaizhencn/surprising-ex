@@ -1,9 +1,11 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.query.CoreQueryService;
+
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.position.RuntimePositionIndexValue;
+import com.surprising.aeron.service.position.Position;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
@@ -82,7 +84,7 @@ class AdlPositionIndexTest {
         // 用户 7 的第一份 USDT 持仓，用来测试错误旧值被拒绝后仍保持原内容。
         var first = position("USDT", 1);
         // 另一用户 8 的 USDT 持仓，删除第一份持仓不能影响它。
-        var second = new RuntimePositionIndexValue(8, "1", "USDT", CorePositionSide.NET, 2);
+        var second = new Position.IndexValue(8, "1", "USDT", CorePositionSide.NET, 2);
         index.apply(1, null, first);
         index.apply(2, null, second);
         // 另建的独立索引，其中的同字段对象不是当前索引认可的旧值。
@@ -106,9 +108,9 @@ class AdlPositionIndexTest {
         // 本用例的独立 ADL 持仓索引，后续加入、修改和查询都在它上面执行。
         var index = emptyIndex();
         index.apply(1, null, position("USDT", 1));
-        index.apply(2, null, new RuntimePositionIndexValue(1, "1", "USDT", CorePositionSide.NET, 2));
+        index.apply(2, null, new Position.IndexValue(1, "1", "USDT", CorePositionSide.NET, 2));
         assertThatThrownBy(() -> index.positions("USDT", 1))
-                .isInstanceOf(com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException.class);
+                .isInstanceOf(com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException.class);
         assertThat(index.positions("USDT", 2)).extracting(AdlPositionIndex.PositionKey::userId).containsExactly(1L, 7L);
         assertThat(index.positions("BTC", 1)).isEmpty();
     }
@@ -126,7 +128,7 @@ class AdlPositionIndexTest {
      * @param asset 本索引值所属的结算资产代码，候选集合按它分组
      * @param quantity 带多空符号的持仓数量步数，0 表示不应进入候选集合的空仓
      */
-    private static RuntimePositionIndexValue position(String asset, long quantity) {
-        return new RuntimePositionIndexValue(7, "1", asset, CorePositionSide.NET, quantity);
+    private static Position.IndexValue position(String asset, long quantity) {
+        return new Position.IndexValue(7, "1", asset, CorePositionSide.NET, quantity);
     }
 }

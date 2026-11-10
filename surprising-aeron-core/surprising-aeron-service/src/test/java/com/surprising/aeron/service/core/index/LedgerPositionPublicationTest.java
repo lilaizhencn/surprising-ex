@@ -6,13 +6,12 @@ import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.LedgerControlTestSupport;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.change.RuntimeIndexedChangeBuffer;
+import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.position.RuntimePositionIndexValue;
+import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
@@ -49,7 +48,7 @@ class LedgerPositionPublicationTest {
         var position = new com.surprising.aeron.model.CorePositionState("1", "USDT",
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS, CorePositionSide.NET, 10, 100, 1000, 0, 100);
         // 带可用九百、冻结一百及唯一净仓的用户七冷状态
-        var user = new CoreUserState(product, 7, 1,
+        var user = new UserAccountSnapshot(product, 7, 1,
                 java.util.Map.of("USDT", new com.surprising.aeron.model.AssetBalance("USDT", 900, 100)),
                 java.util.Map.of(), java.util.Map.of("1", position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 用于投影运行时的原始产品线冷状态
@@ -125,7 +124,7 @@ class LedgerPositionPublicationTest {
             assertThat(users.higherUserId("1", 0)).isZero();
             assertThat(adl.positions("USDT", 2)).isEmpty();
             // 逐轮复用的冻结持仓变化缓冲，prepared 空值用于明确删除
-            var changes = new RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue>();
+            var changes = new StateChangeBuffer.Indexed<Position, Position.IndexValue>();
             changes.putIndexed(101, null, true, position(1, CorePositionSide.LONG, 10));
             changes.putIndexed(102, null, true, position(2, CorePositionSide.SHORT, -10));
             indexes.applyPositions(changes, ids, null);
@@ -190,8 +189,8 @@ class LedgerPositionPublicationTest {
      * @param side 冻结持仓值的净仓、多头或空头方向
      * @param quantity 带符号的数量步数
      */
-    private static RuntimePositionIndexValue position(long user, CorePositionSide side, long quantity) {
-        return new RuntimePositionIndexValue(user, "1", "USDT", side, quantity);
+    private static Position.IndexValue position(long user, CorePositionSide side, long quantity) {
+        return new Position.IndexValue(user, "1", "USDT", side, quantity);
     }
 
 

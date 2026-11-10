@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreMarkPriceState;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.OwnerAccountReadGuard;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
@@ -91,9 +91,9 @@ class CoreLedgerQueryTest {
         cursors.set(0, new com.surprising.aeron.model.RiskLaneProgress(999, false, 0, 0, "-", 0, 0, 0, 0, 0));
         // 含五个用户、当前标记价、强平计划和风险扫描游标的完整参照状态。
         var state = new TradingCoreState(LINE, 0,
-                Map.of(1001L, new CoreUserState(LINE, 1001, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1002L, new CoreUserState(LINE, 1002, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
-                        1003L, new CoreUserState(LINE, 1003, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1004L, new CoreUserState(LINE, 1004, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
-                        1005L, new CoreUserState(LINE, 1005, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+                Map.of(1001L, new UserAccountSnapshot(LINE, 1001, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1002L, new UserAccountSnapshot(LINE, 1002, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
+                        1003L, new UserAccountSnapshot(LINE, 1003, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1004L, new UserAccountSnapshot(LINE, 1004, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
+                        1005L, new UserAccountSnapshot(LINE, 1005, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
                 Map.of(), Map.of("1", instrument), new CoreRiskState(
                 Map.of("1", new CoreMarkPriceState("1", 100, 1, 1)), Map.of(), liquidations, Map.of("1", new CoreRiskState.RiskScan("1", 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors)), 6, CoreRiskState.defaultScanControl(), 0),
                 CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
@@ -159,7 +159,7 @@ class CoreLedgerQueryTest {
         var second = new CoreLiquidationState(2, 1002, "1", 1, 1, 30, CoreLiquidationState.Status.INSURANCE_REQUIRED);
         // 两笔总缺口 100 的保险请求和 25 单位基金余额，分页不能只按页内请求分配。
         var state = new TradingCoreState(LINE, 0,
-                Map.of(1001L, new CoreUserState(LINE, 1001, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1002L, new CoreUserState(LINE, 1002, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+                Map.of(1001L, new UserAccountSnapshot(LINE, 1001, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1002L, new UserAccountSnapshot(LINE, 1002, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
                 Map.of(), Map.of("1", instrument), new CoreRiskState(Map.of(), Map.of(), Map.of(1L, first, 2L, second), Map.of(), 3, CoreRiskState.defaultScanControl(), 0),
                 new CoreTreasuryState(Map.of(), Map.of("USDT", 25L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.product.api.ProductLine;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -17,9 +19,9 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.market.MarkPrice;
+import com.surprising.aeron.service.order.OrderAdmissionService;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 import com.surprising.instrument.api.model.ContractType;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -57,16 +59,16 @@ class CoreOrderDecisionResolverTest {
         try(/* 当前测试直接调用决策入口的运行时，保存规范币对、价格和费率。 */ var runtime=runtime(instrument)) {
             // 配置保护用例里币对 1 的稠密身份，价格和决策查找沿用此值。
             int symbol=identities.symbolId("1");
-            runtime.putMarkPrice(new MarkPriceRuntime(symbol,instrument,60_000,9,1_000));
+            runtime.putMarkPrice(new MarkPrice(symbol,instrument,60_000,9,1_000));
             // 原价格为零的衍生品市价买单，应由自定义滑点计算保护价。
             var buy=new PlaceOrderCommand(91,"1",CoreOrderSide.BUY,0,2,false,CoreMarginMode.CROSS,
                     CorePositionSide.NET,CoreOrderType.MARKET,CoreTimeInForce.IOC,false,"buy");
-            assertThat(RuntimeOrderAdmission.resolve(runtime,identities,1001,buy,7_000).matchingPriceTicks()).isEqualTo(61_200);
-            assertThatThrownBy(()->RuntimeOrderAdmission.resolve(runtime,identities,1001,buy,9_001)).isInstanceOf(CoreStateRejectedException.class);
+            assertThat(OrderAdmissionService.resolve(runtime,identities,1001,buy,7_000).matchingPriceTicks()).isEqualTo(61_200);
+            assertThatThrownBy(()->OrderAdmissionService.resolve(runtime,identities,1001,buy,9_001)).isInstanceOf(CoreStateRejectedException.class);
             // 高于配置价格保护带的限价买单，应返回带 price band 原因的拒绝。
             var limit=new PlaceOrderCommand(92,"1",CoreOrderSide.BUY,62_000,2,false,CoreMarginMode.CROSS,
                     CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"limit");
-            assertThatThrownBy(()->RuntimeOrderAdmission.resolve(runtime,identities,1001,limit,1_500))
+            assertThatThrownBy(()->OrderAdmissionService.resolve(runtime,identities,1001,limit,1_500))
                     .isInstanceOf(CoreStateRejectedException.class).hasMessageContaining("price band");
         }
         try(/* 只为注册及快照恢复断言创建的核心实例，结束时关闭。 */ var core=new com.surprising.aeron.service.core.TradingCoreRuntime(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL)) {
@@ -94,10 +96,10 @@ class CoreOrderDecisionResolverTest {
         try (/* 当前测试直接调用决策入口的运行时，保存规范币对、价格和费率。 */ var runtime = runtime(linearInstrument())) {
             // 当前币对 1 的稠密身份，所有价格替换使用同一编号。
             int symbolId = identities.symbolId("1");
-            runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
+            runtime.putMarkPrice(new MarkPrice(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
             // 在线价格和费率更新前保存的决策上下文，继续引用当时的价格及费率表。
-            var context = RuntimeOrderAdmission.context(runtime, identities, "1", 1_500);
-            runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 80_000, 10, 1_500));
+            var context = OrderAdmissionService.context(runtime, identities, "1", 1_500);
+            runtime.putMarkPrice(new MarkPrice(symbolId, runtime.instrument("1"), 80_000, 10, 1_500));
             runtime.upsertFeePolicy(new UpsertFeePolicyCommand(71, 1, 1001, "1", -25, 75, 0, true, 900, 0));
             // 同一旧上下文下的市价买单，用来核对旧价格上界及旧费率。
             var buy = new PlaceOrderCommand(91, "1", CoreOrderSide.BUY, 0, 2,
@@ -107,19 +109,19 @@ class CoreOrderDecisionResolverTest {
             var sell = new PlaceOrderCommand(92, "1", CoreOrderSide.SELL, 0, 2,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                     CoreTimeInForce.IOC, false, "sell");
-            assertThat(RuntimeOrderAdmission.resolve(context, 1001, buy).matchingPriceTicks()).isEqualTo(60_600);
-            assertThat(RuntimeOrderAdmission.resolve(context, 1001, buy).makerFeeRatePpm())
+            assertThat(OrderAdmissionService.resolve(context, 1001, buy).matchingPriceTicks()).isEqualTo(60_600);
+            assertThat(OrderAdmissionService.resolve(context, 1001, buy).makerFeeRatePpm())
                     .isEqualTo(runtime.instrument("1").makerFeeRatePpm());
-            assertThat(RuntimeOrderAdmission.resolve(runtime, identities, 1001, buy, 1_500).makerFeeRatePpm())
+            assertThat(OrderAdmissionService.resolve(runtime, identities, 1001, buy, 1_500).makerFeeRatePpm())
                     .isEqualTo(-25);
-            assertThat(RuntimeOrderAdmission.resolve(context, 1001, sell).matchingPriceTicks()).isEqualTo(59_400);
-            assertThat(RuntimeOrderAdmission.resolve(runtime, identities, 1001, buy, 1_500).markPriceTicks())
+            assertThat(OrderAdmissionService.resolve(context, 1001, sell).matchingPriceTicks()).isEqualTo(59_400);
+            assertThat(OrderAdmissionService.resolve(runtime, identities, 1001, buy, 1_500).markPriceTicks())
                     .isEqualTo(80_000);
             // 同一上下文下的普通限价单，应沿用订单限价而非市价保护边界。
             var limit = new PlaceOrderCommand(93, "1", CoreOrderSide.BUY, 100, 2,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                     CoreTimeInForce.GTC, false, "limit");
-            assertThat(RuntimeOrderAdmission.resolve(context, 1001, limit).matchingPriceTicks()).isEqualTo(100);
+            assertThat(OrderAdmissionService.resolve(context, 1001, limit).matchingPriceTicks()).isEqualTo(100);
         }
     }
 
@@ -134,7 +136,7 @@ class CoreOrderDecisionResolverTest {
         TradingAccountRuntime runtime = runtime(linearInstrument());
         // 当前币对 1 的稠密身份，所有价格替换使用同一编号。
         int symbolId = identities.symbolId("1");
-        runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
+        runtime.putMarkPrice(new MarkPrice(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
         runtime.upsertFeePolicy(new UpsertFeePolicyCommand(
                 71, 2, 1001, "1", -25, 75, 4, true, 900, 0));
         // 当前用例尚待解析的原始订单意图，按场景检查费率、鲜度或现货资产。
@@ -143,7 +145,7 @@ class CoreOrderDecisionResolverTest {
                 CoreTimeInForce.IOC, false, "client-91");
 
         // 决策入口返回的确定输入，核对实际撮合边界、预留价格、资产及费率。
-        ResolvedPlaceOrder resolved = RuntimeOrderAdmission.resolve(runtime, identities, 1001, intent, 1_500);
+        OrderCommand.ResolvedPlaceOrder resolved = OrderAdmissionService.resolve(runtime, identities, 1001, intent, 1_500);
 
         assertThat(resolved.matchingPriceTicks()).isEqualTo(60_600);
         assertThat(resolved.reservationPriceTicks()).isEqualTo(60_600);
@@ -163,14 +165,14 @@ class CoreOrderDecisionResolverTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 当前测试直接调用决策入口的运行时，保存规范币对、价格和费率。
         TradingAccountRuntime runtime = runtime(linearInstrument());
-        runtime.putMarkPrice(new MarkPriceRuntime(identities.symbolId("1"),
+        runtime.putMarkPrice(new MarkPrice(identities.symbolId("1"),
                 runtime.instrument("1"), 60_000, 9, 1_000));
         // 当前用例尚待解析的原始订单意图，按场景检查费率、鲜度或现货资产。
         PlaceOrderCommand intent = new PlaceOrderCommand(91, "1", CoreOrderSide.SELL, 59_000, 2,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-91");
 
-        assertThatThrownBy(() -> RuntimeOrderAdmission.resolve(runtime, identities, 1001, intent, 6_001))
+        assertThatThrownBy(() -> OrderAdmissionService.resolve(runtime, identities, 1001, intent, 6_001))
                 .isInstanceOf(CoreStateRejectedException.class)
                 .hasMessageContaining("freshness")
                 .satisfies(/* 断言捕获的过期价格异常，进一步检查具体业务码和协议映射。 */ exception -> {
@@ -198,7 +200,7 @@ class CoreOrderDecisionResolverTest {
                 CoreTimeInForce.GTC, false, "client-91");
 
         // 决策入口返回的确定输入，核对实际撮合边界、预留价格、资产及费率。
-        ResolvedPlaceOrder resolved = RuntimeOrderAdmission.resolve(runtime, identities, 1001, intent, 1_500);
+        OrderCommand.ResolvedPlaceOrder resolved = OrderAdmissionService.resolve(runtime, identities, 1001, intent, 1_500);
 
         assertThat(resolved.matchingPriceTicks()).isEqualTo(60_000);
         assertThat(resolved.reservationPriceTicks()).isEqualTo(60_000);
@@ -227,7 +229,7 @@ class CoreOrderDecisionResolverTest {
                             com.surprising.aeron.protocol.TradingCommandCodec.encodePlaceOrder(command));
                     assertThat(decoded).isEqualTo(command);
                     // 决策入口返回的确定输入，核对实际撮合边界、预留价格、资产及费率。
-                    var resolved = RuntimeOrderAdmission.resolve(runtime, identities, 1001, decoded, 1_500);
+                    var resolved = OrderAdmissionService.resolve(runtime, identities, 1001, decoded, 1_500);
                     assertThat(resolved.matchingPriceTicks()).isEqualTo(60_000);
                     assertThat(resolved.reservationPriceTicks()).isEqualTo(60_000);
                     assertThat(resolved.reservationKind()).isEqualTo(ReservationKind.SPOT_ASSET);
@@ -249,12 +251,12 @@ class CoreOrderDecisionResolverTest {
             // 价格边界为零的现货市价买单，违反现货必须有保护边界的约束。
             var unboundedSpot = new PlaceOrderCommand(91, "1", CoreOrderSide.BUY, 0, 2, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET, CoreTimeInForce.IOC, false, "spot");
-            assertThatThrownBy(() -> RuntimeOrderAdmission.resolve(spot, identities, 1001, unboundedSpot, 1_500))
+            assertThatThrownBy(() -> OrderAdmissionService.resolve(spot, identities, 1001, unboundedSpot, 1_500))
                     .isInstanceOf(CoreStateRejectedException.class).hasMessageContaining("protection bound");
             // 原请求携带非零限价的衍生品市价单，违反该产品的价格格式约束。
             var boundedDerivative = new PlaceOrderCommand(92, "1", CoreOrderSide.BUY, 60_000, 2, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET, CoreTimeInForce.IOC, false, "derivative");
-            assertThatThrownBy(() -> RuntimeOrderAdmission.resolve(derivative, identities, 1001, boundedDerivative, 1_500))
+            assertThatThrownBy(() -> OrderAdmissionService.resolve(derivative, identities, 1001, boundedDerivative, 1_500))
                     .isInstanceOf(CoreStateRejectedException.class).hasMessageContaining("price must be zero");
         }
     }
@@ -267,11 +269,11 @@ class CoreOrderDecisionResolverTest {
         // 大于九千万亿的价格整数，用来证明不必先构造会溢出的完整中间乘积。
         long value = 9_000_000_000_000_001L;
 
-        assertThat(RuntimeOrderAdmission.scalePpm(value, 990_000, false))
+        assertThat(OrderAdmissionService.scalePpm(value, 990_000, false))
                 .isEqualTo(8_910_000_000_000_000L);
-        assertThat(RuntimeOrderAdmission.scalePpm(value, 1_010_000, true))
+        assertThat(OrderAdmissionService.scalePpm(value, 1_010_000, true))
                 .isEqualTo(9_090_000_000_000_002L);
-        assertThatThrownBy(() -> RuntimeOrderAdmission.scalePpm(Long.MAX_VALUE, 1_010_000, true))
+        assertThatThrownBy(() -> OrderAdmissionService.scalePpm(Long.MAX_VALUE, 1_010_000, true))
                 .isInstanceOf(ArithmeticException.class);
     }
 

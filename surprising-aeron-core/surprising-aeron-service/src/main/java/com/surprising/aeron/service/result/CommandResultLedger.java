@@ -15,6 +15,7 @@ import java.util.UUID;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 import static com.surprising.aeron.service.core.TradingCoreRuntime.*;
+import static com.surprising.aeron.service.core.TradingCoreRuntime.Limits.*;
 
 /**
  * 交易步骤 5–6：Owner 独占的近期命令结果账本，按 UUID 保存指纹、原终态和响应字节，用于重复命令及结果查询。条数和协议字节都有上限，替换保留原顺序；它不是账户状态副本，资金命令的长期身份另由资金索引保留。

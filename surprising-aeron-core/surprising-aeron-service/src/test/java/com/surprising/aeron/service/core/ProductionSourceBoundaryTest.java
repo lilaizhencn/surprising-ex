@@ -1,14 +1,22 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
+import com.surprising.aeron.service.risk.RiskScanner;
+import com.surprising.aeron.service.settlement.TradeSettlement;
+import com.surprising.aeron.service.query.CoreQueryService;
+import com.surprising.aeron.service.core.command.DirectCommandDispatcher;
+
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.model.OwnerLogContext;
-import com.surprising.aeron.service.order.ClusterCommandWindow;
-import com.surprising.aeron.service.order.CommandSlot;
-import com.surprising.aeron.service.order.DirectCommandSlot;
-import com.surprising.aeron.service.order.OrderBatchPending;
-import com.surprising.aeron.service.order.OwnerCommandPipelineState;
-import com.surprising.aeron.service.order.PendingMatchingRing;
-import com.surprising.aeron.service.order.commit.OrderedCommitCoordinator;
+import com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow;
+import com.surprising.aeron.service.order.OrderCommand;
+import com.surprising.aeron.service.order.OrderCommand.Direct;
+import com.surprising.aeron.service.order.OrderBatchProcessor.PendingBatch;
+import com.surprising.aeron.service.order.OrderCommandQueue.PipelineState;
+import com.surprising.aeron.service.order.OrderCommandQueue;
+import com.surprising.aeron.service.order.OrderCommitService;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.aeron.support.ingress.OwnerIngressRing;
 import java.io.IOException;
@@ -42,11 +50,11 @@ class ProductionSourceBoundaryTest {
         for (Class<?> processor : java.util.List.of(
                 com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands.class,
                 com.surprising.aeron.service.insurance.command.InsuranceFundCommands.class,
-                com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor.class)) {
+                com.surprising.aeron.service.risk.RiskMarginCalculator.class)) {
             assertThat(java.util.Arrays.stream(processor.getDeclaredFields()).map(java.lang.reflect.Field::getName))
                     .doesNotContain("owner");
         }
-        assertThat(DirectCommandSlot.class.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
+        assertThat(OrderCommand.Direct.class.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
         // 从当前目录向上找到的交易仓库根，找不到即测试失败
         Path root = Path.of("").toAbsolutePath();
         while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {
@@ -69,13 +77,13 @@ class ProductionSourceBoundaryTest {
     void d4UsesOneInputRingWithoutAnOwnerRelayOrReturnQueue() throws Exception {
         assertThat(java.util.Arrays.stream(AeronTradingClusterService.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getName)).doesNotContain("availableInput", "unpublishedInput");
-        assertThat(java.util.Arrays.stream(OwnerCommandPipelineState.class.getDeclaredFields())
+        assertThat(java.util.Arrays.stream(OrderCommandQueue.PipelineState.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getName)).doesNotContain("pendingIngress");
         assertThat(java.util.Arrays.stream(TradingCoreOwner.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("enqueueCommittedCommand", "awaitIngressCapacity");
         assertThat(TradingCoreOwner.class.getDeclaredField("ingress").getType()).isEqualTo(OwnerIngressRing.class);
         assertThat(AeronTradingClusterService.class.getDeclaredField("input").getType()).isEqualTo(OwnerIngressRing.class);
-        assertThat(OwnerCommandPipelineState.class.getDeclaredField("activeControl").getType())
+        assertThat(OrderCommandQueue.PipelineState.class.getDeclaredField("activeControl").getType())
                 .isEqualTo(OwnerIngressRing.Entry.class);
     }
 
@@ -86,7 +94,7 @@ class ProductionSourceBoundaryTest {
     void d3TradingHasOnlyDirectApisAndNoOwnerSettlementFallback() throws Exception {
         // Matcher 适配器全部声明方法名，和列出的旧接口清单比较
         var adapterMethods = java.util.Arrays.stream(
-                com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.class.getDeclaredMethods())
+                com.surprising.aeron.service.matcher.OrderBookEngine.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName).toList();
         assertThat(adapterMethods).doesNotContain("place", "placeAsync", "placeWithEvidence",
                 "cancel", "cancelAsync", "cancelWithEvidence", "cancelForContinuation", "cancelBatchAsync",
@@ -96,15 +104,15 @@ class ProductionSourceBoundaryTest {
                 "cancelBatchOrderedAsync", "prepareOrderRoutesAsync");
         assertThat(java.util.Arrays.stream(TradingCoreRuntime.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("applyMatchesOnAccountLanes", "matchingOrder");
-        assertThat(java.util.Arrays.stream(OrderedCommitCoordinator.class.getDeclaredMethods())
+        assertThat(java.util.Arrays.stream(OrderCommitService.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("initialMatcherSettlementPlan",
                         "dispatchReadyPlaceSettlements", "dispatchPartitionSettlements", "completeDispatchedCancel");
-        assertThat(java.util.Arrays.stream(CommandSlot.class.getDeclaredMethods())
+        assertThat(java.util.Arrays.stream(OrderCommand.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("cancelEvent", "settlementPlanBuffer", "dispatchOnly");
-        assertThat(java.util.Arrays.stream(OrderBatchPending.class.getDeclaredFields())
+        assertThat(java.util.Arrays.stream(OrderBatchProcessor.PendingBatch.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getName)).doesNotContain("pipelinedMatchingResults",
                         "pipelinedMatchingResultCount", "deferredSettlementItemIndexes", "deferredCancellationOrderIds");
-        assertThat(java.util.Arrays.stream(PendingMatchingRing.class.getDeclaredMethods())
+        assertThat(java.util.Arrays.stream(OrderCommandQueue.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("readyPartitionMask",
                         "collectPartitionDispatchHeads", "completePartitionDispatchKnown", "dispatchHead");
         // 从当前目录向上找到的交易仓库根，找不到即测试失败
@@ -125,18 +133,18 @@ class ProductionSourceBoundaryTest {
         assertThat(java.util.Arrays.stream(com.surprising.aeron.service.core.TradingAccountRuntime.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName))
                 .doesNotContain("dispatchOwnerControlledSettlement");
-        assertThat(java.util.Arrays.stream(ClusterCommandWindow.class.getDeclaredMethods())
+        assertThat(java.util.Arrays.stream(OrderCommandQueue.IngressWindow.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("complete");
-        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.settlement.MatcherSettlementEvent.class
+        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.settlement.TradeSettlement.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName))
                 .doesNotContain("markMatcherOwnedPublication", "matcherOwnedPublication");
-        assertThat(java.util.Arrays.stream(OrderBatchPending.class.getDeclaredConstructors())
+        assertThat(java.util.Arrays.stream(OrderBatchProcessor.PendingBatch.class.getDeclaredConstructors())
                 .mapToInt(java.lang.reflect.Constructor::getParameterCount)).containsOnly(2);
         assertThat(java.util.Arrays.stream(com.surprising.aeron.service.core.index.ActiveOrderIndex.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName)).doesNotContain("ids");
         for (String /* 本次必须由 Lane 实际实现的响应方法名 */ name : java.util.List.of("preparedResponse", "preparedResponseLength")) {
             // 反射取得的 Lane 响应方法，检查不是默认实现
-            var method = com.surprising.aeron.service.order.state.LaneOrderResultTarget.class.getMethod(name);
+            var method = com.surprising.aeron.service.order.OrderCommand.ResultTarget.class.getMethod(name);
             assertThat(method.isDefault()).as("Lane response contract %s", name).isFalse();
         }
     }
@@ -155,7 +163,7 @@ class ProductionSourceBoundaryTest {
         // Aeron 服务生产 Java 源码根目录
         Path sources = root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java");
         for (Class<?> /* 当前待反射或读取源文件的类型；业务泛型检查中为待排除的正文类型名 */ type : java.util.List.of(TradingCoreOwner.class,
-                OwnerIngressRing.class, ClusterCommandWindow.class)) {
+                OwnerIngressRing.class, OrderCommandQueue.class)) {
             // 当前指定或遍历中的生产 Java 文件全文，检查时也包含注释
             String source = Files.readString(sources.resolve(type.getName().replace('.', '/') + ".java"));
             assertThat(source).as("Owner session boundary in %s", type.getSimpleName())
@@ -183,8 +191,9 @@ class ProductionSourceBoundaryTest {
             if (root == null) throw new AssertionError("repository root unavailable");
         }
         // 当前指定或遍历中的生产 Java 文件全文，检查时也包含注释
-        var source = Files.readString(root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
-                + "com/surprising/aeron/service/query/state/RuntimeStateQueryService.java"));
+        var fullSource = Files.readString(root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
+                + "com/surprising/aeron/service/query/CoreQueryService.java"));
+        var source = fullSource.substring(fullSource.indexOf("public static final class StateQueries"));
         assertThat(source).doesNotContain("currentLaneCommandScope", "accountLaneForUser", "onLane(");
         // 在账户查询正文中匹配指定 runtime 读取调用及首参的正则游标
         var reads = Pattern.compile("runtime\\.(?:user|order|reservation|position|balancesForUser|"
@@ -210,7 +219,7 @@ class ProductionSourceBoundaryTest {
                 "publishedOrders", "publishedUsers", "publishedAlgoOrders", "publishedTriggerOrders",
                 "publishedLiquidations", "publishedRiskSnapshots");
         // 不允许 Owner 持久表保存的四类账户正文类型名
-        var businessTypes = java.util.Set.of("CoreAlgoOrderState", "CoreTriggerOrderState", "LiquidationRuntime", "RiskSnapshotRuntime");
+        var businessTypes = java.util.Set.of("CoreAlgoOrderState", "CoreTriggerOrderState", "RiskScanner.LiquidationOrder", "RiskMarginCalculator.Snapshot");
         for (var /* 当前待核对类型或字段名的反射字段 */ field : com.surprising.aeron.service.core.TradingAccountRuntime.class.getDeclaredFields()) {
             if (!java.util.Map.class.isAssignableFrom(field.getType())
                     && !field.getType().getName().endsWith("LongObjectHashMap")) continue;

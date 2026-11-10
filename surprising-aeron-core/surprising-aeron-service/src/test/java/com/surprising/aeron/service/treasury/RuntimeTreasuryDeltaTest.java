@@ -10,7 +10,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.settlement.FundsPosting;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
@@ -58,13 +58,13 @@ class RuntimeTreasuryDeltaTest {
         treasury.appendFundsDelta(funds);
         funds.requireConserved(false);
         assertThat(postings(funds)).containsExactly(
-                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 10),
-                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE, -50),
-                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.DEFICIT, -5),
-                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.LIQUIDATION_FEE, 2),
-                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FUNDING_RESIDUAL, -4),
-                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.ROUNDING_RESIDUAL, 1),
-                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.CLEARING_PNL, 46));
+                new RuntimeFundsTestSupport.Posting(7, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.FEE, 10),
+                new RuntimeFundsTestSupport.Posting(7, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.INSURANCE, -50),
+                new RuntimeFundsTestSupport.Posting(7, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.DEFICIT, -5),
+                new RuntimeFundsTestSupport.Posting(7, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.LIQUIDATION_FEE, 2),
+                new RuntimeFundsTestSupport.Posting(7, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.FUNDING_RESIDUAL, -4),
+                new RuntimeFundsTestSupport.Posting(7, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.ROUNDING_RESIDUAL, 1),
+                new RuntimeFundsTestSupport.Posting(7, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.CLEARING_PNL, 46));
 
         treasury.rollbackChangedValues();
 
@@ -100,9 +100,9 @@ class RuntimeTreasuryDeltaTest {
             var postings = postings(funds);
             for (/* 当前设置或核对前值的资产编号。 */ int asset = 0; asset < 25; asset++) {
                 assertThat(postings).contains(new RuntimeFundsTestSupport.Posting(asset,
-                        FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 200));
+                        TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.FEE, 200));
                 assertThat(postings).contains(new RuntimeFundsTestSupport.Posting(asset,
-                        FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE, 300 + asset));
+                        TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.INSURANCE, 300 + asset));
             }
             treasury.rollbackChangedValues();
             for (/* 当前设置或核对前值的资产编号。 */ int asset = 0; asset < 25; asset++) {
@@ -119,9 +119,9 @@ class RuntimeTreasuryDeltaTest {
      * @param subledger 本轮参数化溢出测试选择的系统子账
      */
     @ParameterizedTest
-    @EnumSource(value = FundsPosting.Subledger.class, names = {
+    @EnumSource(value = TradeSettlement.Posting.Subledger.class, names = {
             "FEE", "INSURANCE", "DEFICIT", "FUNDING_RESIDUAL", "ROUNDING_RESIDUAL", "CLEARING_PNL"})
-    void rejectsOverflowInSingleOrLaterAssetBeforeWritingAnyFunds(FundsPosting.Subledger subledger) {
+    void rejectsOverflowInSingleOrLaterAssetBeforeWritingAnyFunds(TradeSettlement.Posting.Subledger subledger) {
         for (boolean /* 本轮是否在溢出资产前加入另一个正常资产，以检查跨资产预检。 */ anotherAsset : new boolean[] { false, true }) {
             // 本用例独占的权威 TreasuryRuntime，用于设置前值及检查变化和回滚。
             TreasuryRuntime treasury = new TreasuryRuntime();
@@ -154,8 +154,8 @@ class RuntimeTreasuryDeltaTest {
                 case CLEARING_PNL -> treasury.clearingPnl(2);
                 default -> throw new AssertionError("unexpected Treasury subledger");
             };
-            assertThat(unchanged).isEqualTo(subledger == FundsPosting.Subledger.ROUNDING_RESIDUAL
-                    || subledger == FundsPosting.Subledger.CLEARING_PNL ? Long.MIN_VALUE : Long.MAX_VALUE);
+            assertThat(unchanged).isEqualTo(subledger == TradeSettlement.Posting.Subledger.ROUNDING_RESIDUAL
+                    || subledger == TradeSettlement.Posting.Subledger.CLEARING_PNL ? Long.MIN_VALUE : Long.MAX_VALUE);
         }
     }
 
@@ -179,7 +179,7 @@ class RuntimeTreasuryDeltaTest {
         var funds = new RuntimeFundsAccumulator();
         treasury.appendFundsDelta(funds);
         assertThat(postings(funds)).containsExactly(new RuntimeFundsTestSupport.Posting(
-                7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 100));
+                7, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.FEE, 100));
         treasury.rollbackChangedValues();
         assertThat(treasury.fee(7)).isEqualTo(100);
         assertThat(treasury.hasChangedValues()).isFalse();

@@ -18,9 +18,9 @@ class OrderBatchSlotReuseTest {
      */
     @Test void admissionReceiptBelongsToItsItemAndSurvivesOtherBatchesAndReuse() {
         // 第一批上下文或其首项对象，具体类型见声明
-        var first = new OrderBatchPending(1, new ResponseArena(1, 4096));
+        var first = new OrderBatchProcessor.PendingBatch(1, new ResponseArena(1, 4096));
         // 第二批独立上下文
-        var second = new OrderBatchPending(1, new ResponseArena(1, 4096));
+        var second = new OrderBatchProcessor.PendingBatch(1, new ResponseArena(1, 4096));
         first.addItem(11, 0, 0, new Object());
         second.addItem(12, 0, 0, new Object());
         // 用于捕获的活跃订单，不能被副本复用改写
@@ -53,7 +53,7 @@ class OrderBatchSlotReuseTest {
      * @param id 测试订单编号
      * @param quantity 测试订单总数量和剩余数量步数
      */
-    private static com.surprising.aeron.service.order.state.OrderRuntime order(long id, long quantity) {
+    private static com.surprising.aeron.service.order.Order order(long id, long quantity) {
         // 订单复制测试使用的 U 本位永续品种配置
         var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(
                 com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
@@ -63,7 +63,7 @@ class OrderBatchSlotReuseTest {
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
-        return new com.surprising.aeron.service.order.state.OrderRuntime(id, 7, 1, instrument,
+        return new com.surprising.aeron.service.order.Order(id, 7, 1, instrument,
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, 0, false,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET,
                 com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC,
@@ -77,7 +77,7 @@ class OrderBatchSlotReuseTest {
         // 测试显式创建的有限响应分配器
         var arena = new ResponseArena(1, 4096);
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchPending(1, arena);
+        var batch = new OrderBatchProcessor.PendingBatch(1, arena);
         batch.addItem(1, 0, 0, new Object());
         // 当前设置状态或准备结果的批内项
         var item = batch.items.getFirst();
@@ -105,7 +105,7 @@ class OrderBatchSlotReuseTest {
      * 显式传空响应分配器必须失败，并说明缺少 response arena。
      */
     @Test void batchRequiresAnExplicitResponseArena() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new OrderBatchPending(1, null))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new OrderBatchProcessor.PendingBatch(1, null))
                 .isInstanceOf(NullPointerException.class).hasMessageContaining("response arena");
     }
 
@@ -116,7 +116,7 @@ class OrderBatchSlotReuseTest {
         // 测试显式创建的有限响应分配器
         var arena = new ResponseArena(1, 4096);
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchPending(2, arena);
+        var batch = new OrderBatchProcessor.PendingBatch(2, arena);
         batch.addItem(1, 0, 0, new Object());
         batch.addItem(2, 0, 0, new Object());
         for (var /* 当前设置状态或准备结果的批内项 */ item : batch.items) {
@@ -159,7 +159,7 @@ class OrderBatchSlotReuseTest {
      */
     @Test void reuseClearsPriorInputsAndLaneResultsAcrossDifferentBatchSizes() {
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchPending(20, new ResponseArena(1, 4096));
+        var batch = new OrderBatchProcessor.PendingBatch(20, new ResponseArena(1, 4096));
         // 批内多个项共用的输入标识对象
         var command = new Object();
         batch.addItem(1, 0, 0, command);

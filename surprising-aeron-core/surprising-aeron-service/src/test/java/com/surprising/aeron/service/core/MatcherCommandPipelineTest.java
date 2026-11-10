@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core;
 import com.surprising.aeron.config.TradingCpuAffinity;
-import com.surprising.aeron.service.matcher.CoreMatchingResult;
-import com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline;
+import com.surprising.aeron.service.matcher.OrderMatchingResult;
+import com.surprising.aeron.service.matcher.OrderBookRouter;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -10,13 +10,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 验证单分片 Matcher 流水线的队列顺序、查询栅栏、容量与异常转交。命令主要返回人工 CoreMatchingResult，不启动真实订单簿；并发用门闩制造明确顺序，等待大多限制五秒。
+ * 验证单分片 Matcher 流水线的队列顺序、查询栅栏、容量与异常转交。命令主要返回人工 OrderMatchingResult.Control，不启动真实订单簿；并发用门闩制造明确顺序，等待大多限制五秒。
  */
 class MatcherCommandPipelineTest {
 
     @Test
     void fatalReadCompletesItsFutureBeforeTheWorkerStops() {
-        try (var pipeline = new MatcherCommandPipeline(0, 4, null)) {
+        try (var pipeline = new OrderBookRouter.ShardPipeline(0, 4, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
             var failed = pipeline.readAtSubmissionFence(() -> { throw new AssertionError("capture failed"); });
             assertThatThrownBy(() -> failed.get(5, TimeUnit.SECONDS))
@@ -39,18 +39,18 @@ class MatcherCommandPipelineTest {
         var release = new CountDownLatch(1);
         // 模拟被命令写入、由查询读取的共享整数。
         var value = new java.util.concurrent.atomic.AtomicInteger();
-        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ var pipeline = new MatcherCommandPipeline(0, 4, null)) {
+        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ var pipeline = new OrderBookRouter.ShardPipeline(0, 4, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
             pipeline.submit(1, () -> {
                 entered.countDown(); await(release); value.set(1);
-                return new CoreMatchingResult(true, "ONE");
+                return new OrderMatchingResult.Control(true, "ONE");
             }, null);
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
             // 第一提交栅栏的读取 Future，循环测试中则是本轮首个命令序号。
             var first = pipeline.readAtSubmissionFence(value::get);
             // 与第一次查询处于同一提交位置的第二个读取 Future。
             var sameFence = pipeline.readAtSubmissionFence(value::get);
-            pipeline.submit(2, () -> { value.set(2); return new CoreMatchingResult(true, "TWO"); }, null);
+            pipeline.submit(2, () -> { value.set(2); return new OrderMatchingResult.Control(true, "TWO"); }, null);
             // 第二条命令提交后的读取 Future，要求看到值二。
             var later = pipeline.readAtSubmissionFence(value::get);
             // 读信箱容量内最后一个后栅栏读取 Future。
@@ -78,13 +78,13 @@ class MatcherCommandPipelineTest {
         var entered=new CountDownLatch(1);/* 测试线程放行被阻塞命令的门闩，finally 再次放行。 */ var release=new CountDownLatch(1);
         // 模拟被命令写入、由查询读取的共享整数。
         var value=new java.util.concurrent.atomic.AtomicInteger();
-        try(/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ var pipeline=new MatcherCommandPipeline(0, 4, null)) {
+        try(/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ var pipeline=new OrderBookRouter.ShardPipeline(0, 4, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
-            pipeline.submit(1,()->{entered.countDown();await(release);value.set(1);return new CoreMatchingResult(true,"ONE");}, null);
+            pipeline.submit(1,()->{entered.countDown();await(release);value.set(1);return new OrderMatchingResult.Control(true,"ONE");}, null);
             assertThat(entered.await(5,TimeUnit.SECONDS)).isTrue();
             // 两条模拟写入之间投递的整数查询 Future，不是真实交易快照。
             var snapshot=pipeline.readAtSubmissionFence(value::get);
-            pipeline.submit(2,()->{value.set(2);return new CoreMatchingResult(true,"TWO");}, null);
+            pipeline.submit(2,()->{value.set(2);return new OrderMatchingResult.Control(true,"TWO");}, null);
             release.countDown();
             assertThat(snapshot.get(5,TimeUnit.SECONDS)).isEqualTo(1);
             assertThat(await(pipeline, 1,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("ONE");
@@ -92,7 +92,7 @@ class MatcherCommandPipelineTest {
             // 读取函数主动抛异常的 Future，验证失败不会阻断后续普通命令。
             var failed=pipeline.readAtSubmissionFence(()->{throw new IllegalArgumentException("read failed");});
             assertThatThrownBy(()->failed.get(5,TimeUnit.SECONDS)).hasCauseInstanceOf(IllegalArgumentException.class);
-            pipeline.submit(3,()->new CoreMatchingResult(true,"THREE"), null);
+            pipeline.submit(3,()->new OrderMatchingResult.Control(true,"THREE"), null);
             assertThat(await(pipeline, 3,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("THREE");
         } finally {release.countDown();}
     }
@@ -106,21 +106,21 @@ class MatcherCommandPipelineTest {
         CountDownLatch firstStarted = new CountDownLatch(1);
         // 阻塞首条命令以填满窗口的放行门闩。
         CountDownLatch releaseFirst = new CountDownLatch(1);
-        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ MatcherCommandPipeline pipeline = new MatcherCommandPipeline(0, 4, null)) {
+        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ OrderBookRouter.ShardPipeline pipeline = new OrderBookRouter.ShardPipeline(0, 4, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
             pipeline.submit(1, () -> {
                 firstStarted.countDown();
                 await(releaseFirst);
-                return new CoreMatchingResult(true, "ONE");
+                return new OrderMatchingResult.Control(true, "ONE");
             }, null);
             assertThat(firstStarted.await(5, TimeUnit.SECONDS)).isTrue();
-            pipeline.submit(2, () -> new CoreMatchingResult(true, "TWO"), null);
-            pipeline.submit(3, () -> new CoreMatchingResult(true, "THREE"), null);
-            pipeline.submit(4, () -> new CoreMatchingResult(true, "FOUR"), null);
+            pipeline.submit(2, () -> new OrderMatchingResult.Control(true, "TWO"), null);
+            pipeline.submit(3, () -> new OrderMatchingResult.Control(true, "THREE"), null);
+            pipeline.submit(4, () -> new OrderMatchingResult.Control(true, "FOUR"), null);
 
             assertThat(pipeline.submissionDepth() + pipeline.completionDepth()).isEqualTo(4);
             assertThat(pipeline.submissionHighWaterMark()).isEqualTo(4);
-            assertThatThrownBy(() -> pipeline.submit(5, () -> new CoreMatchingResult(true, "FIVE"), null))
+            assertThatThrownBy(() -> pipeline.submit(5, () -> new OrderMatchingResult.Control(true, "FIVE"), null))
                     .isInstanceOf(RejectedExecutionException.class)
                     .hasMessageContaining("full");
 
@@ -139,7 +139,7 @@ class MatcherCommandPipelineTest {
      */
     @Test
     void propagatesMatcherFailureToTheOwner() {
-        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ MatcherCommandPipeline pipeline = new MatcherCommandPipeline(0, 2, null)) {
+        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ OrderBookRouter.ShardPipeline pipeline = new OrderBookRouter.ShardPipeline(0, 2, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
             pipeline.submit(1, () -> {
                 throw new IllegalStateException("matcher failed");
@@ -156,10 +156,10 @@ class MatcherCommandPipelineTest {
      */
     @Test
     void probingANonHeadCompletionDoesNotViolateShardOrder() {
-        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ MatcherCommandPipeline pipeline = new MatcherCommandPipeline(0, 4, null)) {
+        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ OrderBookRouter.ShardPipeline pipeline = new OrderBookRouter.ShardPipeline(0, 4, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
-            pipeline.submit(20, () -> new CoreMatchingResult(true, "FIRST-SUBMITTED"), null);
-            pipeline.submit(10, () -> new CoreMatchingResult(true, "SECOND-SUBMITTED"), null);
+            pipeline.submit(20, () -> new OrderMatchingResult.Control(true, "FIRST-SUBMITTED"), null);
+            pipeline.submit(10, () -> new OrderMatchingResult.Control(true, "SECOND-SUBMITTED"), null);
 
             assertThat(await(pipeline, 10, TimeUnit.MILLISECONDS.toNanos(1))).isNull();
             assertThat(await(pipeline, 20, TimeUnit.SECONDS.toNanos(5)).resultCode())
@@ -174,15 +174,15 @@ class MatcherCommandPipelineTest {
      */
     @Test
     void wakesAfterRepeatedIdleAndBurstCyclesWithoutLosingACompletion() {
-        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ MatcherCommandPipeline pipeline = new MatcherCommandPipeline(0, 8, null)) {
+        try (/* 测试创建的单分片流水线，资源退出时关闭 worker。 */ OrderBookRouter.ShardPipeline pipeline = new OrderBookRouter.ShardPipeline(0, 8, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
             for (/* 当前双命令空闲循环轮次，从一到一百。 */ long cycle = 1; cycle <= 100; cycle++) {
                 // 第一提交栅栏的读取 Future，循环测试中则是本轮首个命令序号。
                 long first = cycle * 2 - 1;
                 // 当前循环第二个命令序号。
                 long second = cycle * 2;
-                pipeline.submit(first, () -> new CoreMatchingResult(true, "FIRST"), null);
-                pipeline.submit(second, () -> new CoreMatchingResult(true, "SECOND"), null);
+                pipeline.submit(first, () -> new OrderMatchingResult.Control(true, "FIRST"), null);
+                pipeline.submit(second, () -> new OrderMatchingResult.Control(true, "SECOND"), null);
 
                 assertThat(await(pipeline, first, TimeUnit.SECONDS.toNanos(5)).resultCode())
                         .isEqualTo("FIRST");
@@ -214,8 +214,8 @@ class MatcherCommandPipelineTest {
      * @param sequence 期望收集的正 Core 序号
      * @param timeout 当前自旋等待的纳秒上限
      */
-    private static com.surprising.aeron.service.matcher.CoreMatchingResult await(
-            MatcherCommandPipeline pipeline, long sequence, long timeout) {
+    private static com.surprising.aeron.service.matcher.OrderMatchingResult.Control await(
+            OrderBookRouter.ShardPipeline pipeline, long sequence, long timeout) {
         // 本次轮询的 nanoTime 截止点。
         long deadline = System.nanoTime() + timeout;
         do {

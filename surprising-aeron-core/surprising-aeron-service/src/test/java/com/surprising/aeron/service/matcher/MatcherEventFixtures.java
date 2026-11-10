@@ -28,7 +28,7 @@ public final class MatcherEventFixtures {
                 makerUserId, makerCompleted, price, size, 0);
     }
     public static exchange.core2.core.common.MatcherResult nativeResult(
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent event) {
+            com.surprising.aeron.service.settlement.TradeSettlement event) {
         try {
             var field = event.getClass().getDeclaredField("directNativeResult");
             field.setAccessible(true);

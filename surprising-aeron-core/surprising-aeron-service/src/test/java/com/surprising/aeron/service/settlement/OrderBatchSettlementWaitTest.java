@@ -35,15 +35,15 @@ class OrderBatchSettlementWaitTest {
         // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
         var event = incompleteEvent();
         // 反射取得的 requiredLaneMask 字段，用来设置必需业务 Lane。
-        var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask"); mask.setAccessible(true);
+        var mask = TradeSettlement.class.getDeclaredField("requiredLaneMask"); mask.setAccessible(true);
         mask.setLong(event, 3);
         // 反射取得的 routedLaneMask 字段，用来设置必须消费票据的实际路由。
-        var route = MatcherSettlementEvent.class.getDeclaredField("routedLaneMask"); route.setAccessible(true);
+        var route = TradeSettlement.class.getDeclaredField("routedLaneMask"); route.setAccessible(true);
         route.setLong(event, 3);
         // 反射取得的每 Lane 完成标记数组字段。
-        var slotsField = MatcherSettlementEvent.class.getDeclaredField("completedLanes"); slotsField.setAccessible(true);
+        var slotsField = TradeSettlement.class.getDeclaredField("completedLanes"); slotsField.setAccessible(true);
         // 反射取得的完成数组及 Owner 缓存重置方法。
-        var reset = MatcherSettlementEvent.class.getDeclaredMethod("resetCompletions", int.class); reset.setAccessible(true);
+        var reset = TradeSettlement.class.getDeclaredMethod("resetCompletions", int.class); reset.setAccessible(true);
         reset.invoke(event, 2);
         // 实际完成标记数组，两个 Lane 的有效标记下标分别为零和十六。
         long[] slots = (long[]) slotsField.get(event);
@@ -66,25 +66,25 @@ class OrderBatchSettlementWaitTest {
     /**
      * 通过反射只设置直达事件已发布、一路由及空完成数组，隔离完成标记测试；不准备真实撮合计划、账户变化或财务事实。
      */
-    private static MatcherSettlementEvent incompleteEvent() throws Exception {
+    private static TradeSettlement incompleteEvent() throws Exception {
         // 这里只隔离直达完成位与观察缓存契约；真实成交及账本交接
         // 由 MatcherTreasurySettlementTest 中的原生成交事实用例覆盖。
         // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
-        var event = new MatcherSettlementEvent();
+        var event = new TradeSettlement();
         // 反射取得的 requiredLaneMask 字段，用来设置必需业务 Lane。
-        var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask");
+        var mask = TradeSettlement.class.getDeclaredField("requiredLaneMask");
         mask.setAccessible(true);
         mask.setLong(event, 1);
         // 反射取得的 routedLaneMask 字段，用来设置必须消费票据的实际路由。
-        var route = MatcherSettlementEvent.class.getDeclaredField("routedLaneMask");
+        var route = TradeSettlement.class.getDeclaredField("routedLaneMask");
         route.setAccessible(true);
         route.setLong(event, 1);
         // 反射取得的直达结果已发布字段。
-        var published = MatcherSettlementEvent.class.getDeclaredField("directPublished");
+        var published = TradeSettlement.class.getDeclaredField("directPublished");
         published.setAccessible(true);
         published.setBoolean(event, true);
         // 反射取得的账户完成数组字段，用于构造尚无完成位的事件。
-        var completed = MatcherSettlementEvent.class.getDeclaredField("completedLanes");
+        var completed = TradeSettlement.class.getDeclaredField("completedLanes");
         completed.setAccessible(true);
         completed.set(event, new long[16]);
         return event;

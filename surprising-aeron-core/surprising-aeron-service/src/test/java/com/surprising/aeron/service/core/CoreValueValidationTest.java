@@ -1,8 +1,10 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -18,9 +20,9 @@ class CoreValueValidationTest {
         long[][] amounts = {{100, 0, 0, 100}, {100, 0, 30, 70}, {100, 20, 30, 50},
                 {80, 20, 30, 30}, {80, 50, 30, 0}};
         for (long[] amount : amounts) {
-            var value = new OrderReservation(9, new String("1"), ReservationKind.SPOT_ASSET,
+            var value = new OrderFundsReservation.Snapshot(9, new String("1"), ReservationKind.SPOT_ASSET,
                     " usdt ", amount[0], amount[1], amount[2], 10);
-            var reconstructed = new OrderReservation(9, "1", ReservationKind.SPOT_ASSET,
+            var reconstructed = new OrderFundsReservation.Snapshot(9, "1", ReservationKind.SPOT_ASSET,
                     "USDT", amount[0], amount[1], amount[2], 10);
             assertThat(value.instrumentId()).isEqualTo("1");
             assertThat(value.asset()).isEqualTo("USDT");
@@ -31,11 +33,11 @@ class CoreValueValidationTest {
         }
         for (long[] invalid : new long[][]{{0, 0, 0}, {100, -1, 0}, {100, 0, -1},
                 {100, 0, 101}, {49, 20, 30}, {80, 51, 30}}) {
-            assertThatThrownBy(() -> new OrderReservation(9, "1", ReservationKind.SPOT_ASSET,
+            assertThatThrownBy(() -> new OrderFundsReservation.Snapshot(9, "1", ReservationKind.SPOT_ASSET,
                     "USDT", invalid[0], invalid[1], invalid[2], 10))
                     .isInstanceOf(IllegalArgumentException.class);
         }
-        assertThatThrownBy(() -> new OrderReservation(1, "1", ReservationKind.SPOT_ASSET,
+        assertThatThrownBy(() -> new OrderFundsReservation.Snapshot(1, "1", ReservationKind.SPOT_ASSET,
                 "USDT", Long.MAX_VALUE, Long.MAX_VALUE, 1, 1)).isInstanceOf(ArithmeticException.class);
     }
 
@@ -45,7 +47,7 @@ class CoreValueValidationTest {
     @Test
     void preservesCanonicalInstrumentIdAndNormalizesAsset() {
         // 使用小写带空白资产名创建的预留，供规范化断言
-        OrderReservation reservation = new OrderReservation(1, "1", ReservationKind.SPOT_ASSET, " usdt ", 100, 0, 0, 1);
+        OrderFundsReservation.Snapshot reservation = new OrderFundsReservation.Snapshot(1, "1", ReservationKind.SPOT_ASSET, " usdt ", 100, 0, 0, 1);
 
         assertThat(reservation.instrumentId()).isEqualTo("1");
         assertThat(reservation.asset()).isEqualTo("USDT");
@@ -56,11 +58,11 @@ class CoreValueValidationTest {
      */
     @Test
     void rejectsNamesAndInvalidInstrumentIds() {
-        assertThatThrownBy(() -> new OrderReservation(1, "-BTC", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
+        assertThatThrownBy(() -> new OrderFundsReservation.Snapshot(1, "-BTC", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new OrderReservation(1, "A", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
+        assertThatThrownBy(() -> new OrderFundsReservation.Snapshot(1, "A", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new OrderReservation(1, "BTC.USDT", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
+        assertThatThrownBy(() -> new OrderFundsReservation.Snapshot(1, "BTC.USDT", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

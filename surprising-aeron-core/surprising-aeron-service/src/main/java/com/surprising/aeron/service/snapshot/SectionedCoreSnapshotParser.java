@@ -9,8 +9,8 @@ import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.MatcherSnapshot;
-import com.surprising.aeron.service.matcher.MatcherSnapshotCodec;
+import com.surprising.aeron.service.matcher.OrderBookSnapshot;
+import com.surprising.aeron.service.matcher.OrderBookSnapshotCodec;
 import com.surprising.aeron.service.result.CommandResultLedger;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotValidation.HeaderManifest;
@@ -47,7 +47,7 @@ public final class SectionedCoreSnapshotParser {
         // 解码的幂等结果表，按输入条目顺序保存。
         Map<UUID, CommandResultLedger.StoredResult> commandResults = parseResults(payloads[2]);
         // 独立 Matcher 编解码器解出的原生模块与配对元数据。
-        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[3], deploymentTopology);
+        OrderBookSnapshot matcherSnapshot = OrderBookSnapshotCodec.decode(payloads[3], deploymentTopology);
         // 独立交易状态编解码器解出的不可变交易视图。
         TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[4], manifest.productLine());
         // 解码后的费率策略表，参与业务哈希配对。
@@ -138,7 +138,7 @@ public final class SectionedCoreSnapshotParser {
         // 来源水位段的小端读取视图。
         ByteBuffer sources = wrap(payload);
         // 通过上限检查的来源水位条目数。
-        int sourceCount = readCount(sources, TradingCoreRuntime.MAX_SOURCE_SEQUENCES, "source sequence");
+        int sourceCount = readCount(sources, TradingCoreRuntime.Limits.MAX_SOURCE_SEQUENCES, "source sequence");
         if (sources.remaining() != (long) sourceCount * SectionedCoreSnapshotCodec.SOURCE_SEQUENCE_LENGTH) {
             throw new ProtocolException("invalid snapshot source section length");
         }
@@ -166,7 +166,7 @@ public final class SectionedCoreSnapshotParser {
         // 幂等结果段的小端读取视图。
         ByteBuffer results = wrap(payload);
         // 通过上限检查的幂等结果条目数。
-        int resultCount = readCount(results, TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS, "result");
+        int resultCount = readCount(results, TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS, "result");
         // 解码的幂等结果表，按输入条目顺序保存。
         Map<UUID, CommandResultLedger.StoredResult> commandResults = new LinkedHashMap<>();
         for (/* 当前账户段、用户条目或来源/结果条目的零基下标。 */ int index = 0; index < resultCount; index++) {
@@ -287,7 +287,7 @@ public final class SectionedCoreSnapshotParser {
             long appliedCommandCount,
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
             Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
-            MatcherSnapshot matcherSnapshot,
+            OrderBookSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, CoreFeePolicyState> feePolicies,
             Map<Long, TransferFundsCommand> pendingTransfers,

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -10,8 +12,8 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.Order;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -34,7 +36,7 @@ class ControlOrderMetadataLeaseTest {
         try (/* 用户已入金的独立交易运行时，结束时自动关闭工作线程。 */ var state = fundedRuntime()) {
             state.startAccountLanes();
             // 把 Lane 创建的实际权威订单引用交给测试线程核对的原子槽。
-            var authority = new AtomicReference<OrderRuntime>();
+            var authority = new AtomicReference<Order>();
             // 用户七实际所属的账户 Lane 编号。
             int laneId = state.accountLaneId(7);
             state.dispatchControlLanes(1L << laneId, /* 控制回调提供的 Lane 编号，本用例按固定用户及订单执行，不读取此参数。 */ ignored -> {
@@ -72,7 +74,7 @@ class ControlOrderMetadataLeaseTest {
         try (/* 用户已入金的独立交易运行时，结束时自动关闭工作线程。 */ var state = fundedRuntime()) {
             state.startAccountLanes();
             // 把 Lane 创建的实际权威订单引用交给测试线程核对的原子槽。
-            var authority = new AtomicReference<OrderRuntime>();
+            var authority = new AtomicReference<Order>();
             state.dispatchControlLanes(state.topology().accountLaneMask(7), /* 控制回调提供的 Lane 编号，本用例按固定用户及订单执行，不读取此参数。 */ ignored -> {
                 state.placePreparedOrder(7, intent(11), new UUID(1, 11), 200, 91, 5, 3);
                 authority.set(state.order(11)); return null;
@@ -112,7 +114,7 @@ class ControlOrderMetadataLeaseTest {
     private static TradingAccountRuntime fundedRuntime() {
         // 用户已入金的独立交易运行时，结束时自动关闭工作线程。
         var state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7)); state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
+        state.putUser(new UserAccount(7)); state.putBalance(new AccountBalance(7, 3, 1000, 0));
         state.clearChangedKeys();
         return state;
     }
@@ -121,11 +123,11 @@ class ControlOrderMetadataLeaseTest {
      * 构造合约一、买入两步的已解析限价下单意图，带衍生品保证金预留类型供控制任务建立订单。
      * @param id 测试订单编号，同时用于固定的客户号文本
      */
-    private static ResolvedPlaceOrder intent(long id) {
+    private static OrderCommand.ResolvedPlaceOrder intent(long id) {
         // 构造已解析意图所用的限价下单业务命令。
         var command = new PlaceOrderCommand(id, "1", CoreOrderSide.BUY, 100, 2, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "control-" + id);
-        return new ResolvedPlaceOrder(command, CoreStateTestFixtures.runtimeInstrument(), 5,
+        return new OrderCommand.ResolvedPlaceOrder(command, CoreStateTestFixtures.runtimeInstrument(), 5,
                 100, 100, 100, 0, 0, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
 

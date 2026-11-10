@@ -1,9 +1,11 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.query.CoreQueryService;
+
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.position.RuntimePositionIndexValue;
+import com.surprising.aeron.service.position.Position;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -65,7 +67,7 @@ public final class AdlPositionIndex {
         LongHashSet values = keysByAsset.get(AssetBalance.normalizeAsset(asset));
         if (values == null || values.isEmpty()) return Set.of();
         if (values.size() > maximumPositions)
-            throw new com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException();
+            throw new com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException();
         // 已经通过数量上限检查后才分配的候选路由数组，最多与成员集合等长。
         PositionKey[] captured = new PositionKey[values.size()];
         // 数组已复制条数的单元素游标，供集合遍历回调递增。
@@ -101,7 +103,7 @@ public final class AdlPositionIndex {
      * @param previous 本索引持有的精确旧条目引用，没有旧记录时为 null，不能传其他索引的同字段对象
      * @param current 账户发布的最新持仓索引字段，null 表示删除目标记录
      */
-    void apply(long positionKey, IndexedPosition previous, RuntimePositionIndexValue current) {
+    void apply(long positionKey, IndexedPosition previous, Position.IndexValue current) {
         apply(positionKey, previous, current == null ? 0 : current.userId(),
                 current == null ? null : current.instrumentId(), current == null ? null : current.asset(),
                 current == null ? null : current.positionSide(), current == null ? 0 : current.signedQuantitySteps());

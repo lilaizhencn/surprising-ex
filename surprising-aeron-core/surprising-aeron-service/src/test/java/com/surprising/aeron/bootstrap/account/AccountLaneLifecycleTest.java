@@ -1,15 +1,15 @@
 package com.surprising.aeron.bootstrap.account;
 
 import com.surprising.aeron.config.TradingCpuAffinity;
-import com.surprising.aeron.service.account.AccountLaneState;
+import com.surprising.aeron.service.account.AccountPartition;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class AccountLaneLifecycleTest {
     @Test void partialStartupFailureStopsAlreadyStartedLanes() {
         var topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
-        var lanes = new AccountLaneState[topology.accountLaneCount()];
-        lanes[0] = new AccountLaneState(0, topology.accountLaneQueueCapacity());
+        var lanes = new AccountPartition[topology.accountLaneCount()];
+        lanes[0] = new AccountPartition(0, topology.accountLaneQueueCapacity());
         // 第二条 Lane 的非法输入模拟创建中途失败；第一条工作线程已经实际启动。
         var lifecycle = new AccountLaneLifecycle(lanes, topology,
                 () -> { });
@@ -22,9 +22,9 @@ class AccountLaneLifecycleTest {
 
     @Test void ownershipHandoffRemainsOnTheSameLanes() {
         var topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
-        var lanes = new AccountLaneState[topology.accountLaneCount()];
+        var lanes = new AccountPartition[topology.accountLaneCount()];
         for (int laneId = 0; laneId < lanes.length; laneId++)
-            lanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
+            lanes[laneId] = new AccountPartition(laneId, topology.accountLaneQueueCapacity());
         try (var lifecycle = new AccountLaneLifecycle(lanes, topology,
                 () -> { })) {
             lifecycle.start(TradingCpuAffinity.disabled());
@@ -38,9 +38,9 @@ class AccountLaneLifecycleTest {
     }
     @Test void ownershipReleaseFailureStillStopsAllWorkers() {
         var topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
-        var lanes = new AccountLaneState[topology.accountLaneCount()];
+        var lanes = new AccountPartition[topology.accountLaneCount()];
         for (int laneId = 0; laneId < lanes.length; laneId++)
-            lanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
+            lanes[laneId] = new AccountPartition(laneId, topology.accountLaneQueueCapacity());
         var rejectOwner = new java.util.concurrent.atomic.AtomicBoolean();
         var first = new IllegalStateException("ownership release failed");
         var lifecycle = new AccountLaneLifecycle(lanes, topology,

@@ -1,14 +1,16 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderState;
-import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
+import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderReservation;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
+import com.surprising.aeron.service.order.Order;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,7 +41,7 @@ public final class ActiveOrderIndex {
     /** 永久标的文本到 OPEN 订单号成员集合，Owner 更新。 */
     private final Map<String, LongHashSet> idsBySymbol =
             new org.agrona.collections.Object2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
-    /** 订单号到可变轻量路由，不保留账户 OrderRuntime。 */
+    /** 订单号到可变轻量路由，不保留账户 Order。 */
     private final Long2ObjectHashMap<IndexedOrder> ordersById =
             new Long2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
     /** Owner 独占的已清空路由对象池，随索引存活。 */
@@ -68,7 +70,7 @@ public final class ActiveOrderIndex {
         @Getter
         private String instrumentId;
         /**
-         * 建立只含订单、用户、标的的路由持有者，不保存余额、预留或 OrderRuntime。
+         * 建立只含订单、用户、标的的路由持有者，不保存余额、预留或 Order。
          * @param orderId 需要定位或更新的订单号
          * @param userId 用户 ID；page 中零表示不按用户筛选
          * @param instrumentId 永久数字标的文本；page 中空白或空值表示不按标的筛选
@@ -137,7 +139,7 @@ public final class ActiveOrderIndex {
             throw new IllegalArgumentException("invalid active-order page");
         }
         // 本次页查询验证后的标的文本，不筛选标的时为空
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : OrderReservation.requireInstrumentId(instrumentId);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         // 选中扫描的较小成员桶；分页无筛选时为空并遍历全订单表
         LongHashSet source;
         // 无用户和标的条件时使用的全订单键迭代器
@@ -256,9 +258,9 @@ public final class ActiveOrderIndex {
      * @param after 账户变更后的订单正文，空值或非 OPEN 状态删除路由
      * @param identities 内部编号到永久标的文本的身份表；冷构造器不读取此参数
      */
-    public void apply(long orderId, OrderRuntime after, RuntimeIdentityRegistry identities) {
+    public void apply(long orderId, Order after, RuntimeIdentityRegistry identities) {
         // 变更后仍为 OPEN 的订单正文，其他状态转换为空以删除路由
-        OrderRuntime current = after != null && after.status() == CoreOrderStatus.OPEN ? after : null;
+        Order current = after != null && after.status() == CoreOrderStatus.OPEN ? after : null;
         applyRoute(orderId, current == null ? 0 : current.userId(),
                 current == null ? null : identities.instrumentId(current.symbolId()));
     }

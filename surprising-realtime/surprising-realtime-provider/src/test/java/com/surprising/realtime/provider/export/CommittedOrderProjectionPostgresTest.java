@@ -79,7 +79,7 @@ class CommittedOrderProjectionPostgresTest {
         var result=new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(ProductLine.OPTION,7,new java.util.UUID(0,1),
                 CoreMessageType.PLACE_ORDER,"client","604",ResponseStatus.APPLIED,CoreResultCode.NONE,10,10,System.currentTimeMillis(),List.of());
         proxy.persist(ProductLine.OPTION,List.of(),List.of(result),10);
-        proxy.statistics().publish(ProductLine.OPTION,new com.surprising.aeron.service.query.state.CommittedTradingActivity(0,0,0,0,0,List.of()),10,System.currentTimeMillis());
+        proxy.statistics().publish(ProductLine.OPTION,new com.surprising.aeron.service.query.CommittedTradingActivity(0,0,0,0,0,List.of()),10,System.currentTimeMillis());
         assertThat(jdbc.queryForObject("SELECT sum(commands) FROM core_trading_command_statistics",Long.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_trading_statistics_snapshot",Integer.class)).isEqualTo(4);
     }

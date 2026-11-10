@@ -13,10 +13,10 @@ class OrderClientKeyIndexTest {
      */
     @Test void churnDoesNotRebuildTheSingleAliasTableOrLoseZeroAliases() throws Exception {
         // 当前测试独立创建的订单到客户别名反向索引。
-        var index = new OrderClientKeyIndex();
+        var index = new ClientOrderIdRegistry.OrderKeyIndex();
         index.add(1, 0);
         // 读取单别名原语表的反射字段。
-        var field = OrderClientKeyIndex.class.getDeclaredField("single");
+        var field = ClientOrderIdRegistry.OrderKeyIndex.class.getDeclaredField("single");
         field.setAccessible(true);
         // 索引内部实际使用的单别名表，缺失值为 -1。
         var map = (org.agrona.collections.Long2LongHashMap) field.get(index);
@@ -40,7 +40,7 @@ class OrderClientKeyIndexTest {
     @Test
     void handlesSingleAliasPromotionDemotionAndCompleteRetirement() {
         // 当前测试独立创建的订单到客户别名反向索引。
-        OrderClientKeyIndex index = new OrderClientKeyIndex();
+        ClientOrderIdRegistry.OrderKeyIndex index = new ClientOrderIdRegistry.OrderKeyIndex();
         index.add(11, 0);
         index.add(11, 0);
         index.add(12, 99);
@@ -68,7 +68,7 @@ class OrderClientKeyIndexTest {
      * @param index 要遍历客户别名的反向索引
      * @param orderId 需要收集别名的订单编号
      */
-    private static long[] keys(OrderClientKeyIndex index, long orderId) {
+    private static long[] keys(ClientOrderIdRegistry.OrderKeyIndex index, long orderId) {
         // 单次收集当前订单别名的独立原语集合，避免暴露索引内部集合。
         LongHashSet keys = new LongHashSet();
         index.forEach(orderId, keys::add);

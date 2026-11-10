@@ -7,12 +7,14 @@ import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.subaccount.model.SubAccountModels.*;
 import com.surprising.gateway.provider.subaccount.repository.SubAccountRepository;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,13 +24,25 @@ public class SubAccountService {
 
     private final SubAccountRepository subAccountRepository;
     private final AuthPersistenceService authPersistenceService;
+    private final GatewayProductServices products;
     private final AccountCommandGateway accountCommandGateway;
+
+    @Autowired
+    public SubAccountService(SubAccountRepository subAccountRepository,
+                             AuthPersistenceService authPersistenceService,
+                             GatewayProductServices products) {
+        this.subAccountRepository = subAccountRepository;
+        this.authPersistenceService = authPersistenceService;
+        this.products = products;
+        this.accountCommandGateway = null;
+    }
 
     public SubAccountService(SubAccountRepository subAccountRepository,
                              AuthPersistenceService authPersistenceService,
                              AccountCommandGateway accountCommandGateway) {
         this.subAccountRepository = subAccountRepository;
         this.authPersistenceService = authPersistenceService;
+        this.products = null;
         this.accountCommandGateway = accountCommandGateway;
     }
 
@@ -118,12 +132,16 @@ public class SubAccountService {
                 toUserId
         );
 
+        AccountCommandGateway gateway = this.accountCommandGateway != null
+                ? this.accountCommandGateway
+                : products.service(productLine, AccountCommandGateway.class);
+
         // 1. 出账方扣除
-        accountCommandGateway.transferOut(opRequest);
+        gateway.transferOut(opRequest);
         // 2. 入账方到账
-        accountCommandGateway.transferIn(opRequest);
+        gateway.transferIn(opRequest);
         // 3. 终态确认
-        accountCommandGateway.completeTransfer(opRequest);
+        gateway.completeTransfer(opRequest);
 
         log.info("SubAccount transfer success: from={}, to={}, asset={}, amount={}",
                 fromUserId, toUserId, request.asset(), request.amountUnits());

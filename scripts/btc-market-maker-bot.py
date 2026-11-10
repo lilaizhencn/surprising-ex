@@ -74,7 +74,9 @@ def place_order(user_id, side, price_ticks, qty_steps=1, tif="GTC", client_order
         "marginMode": "CROSS",
         "positionSide": "NET",
         "reduceOnly": False,
-        "postOnly": False
+        "postOnly": False,
+        "takeProfitPriceTicks": 0,
+        "stopLossPriceTicks": 0
     })
 
 

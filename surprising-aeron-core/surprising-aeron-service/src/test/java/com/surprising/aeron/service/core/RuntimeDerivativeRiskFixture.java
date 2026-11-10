@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.core;
 
-import static com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
+
+import static com.surprising.aeron.service.risk.RiskMarginCalculator.applyMarkPriceRuntime;
 
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -37,7 +39,7 @@ public final class RuntimeDerivativeRiskFixture {
     public static int continueRiskBudget(int maxWork,
             PositionUserIndex positionUsers,
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        var work = new com.surprising.aeron.service.risk.RiskScanCoordinator(maxWork, positionUsers, runtime, identities);
+        var work = new com.surprising.aeron.service.risk.RiskScanner(maxWork, positionUsers, runtime, identities);
         com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work::poll);
         return work.completedWork();
     }

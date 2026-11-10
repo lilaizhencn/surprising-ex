@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreAlgoOrderState;
@@ -23,12 +25,12 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.order.state.OrderReservation;
-import com.surprising.aeron.service.query.state.RuntimeOperationalQueryService;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
+import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -78,8 +80,8 @@ class CoreAlgoLaneQueryTest {
         var identities = new RuntimeIdentityRegistry();
         try (/* 由同一业务状态生成的冷运行时，直接查询它以构造协议字节参照，结束时关闭。 */ var cold = RuntimeStateProjector.project(state, identities); /* 本用例激活的在线核心，查询结果必须通过所属 Lane 返回，结束时释放工作资源。 */ var core = initial(state)) {
             // 冷运行时按 502、501、503 顺序汇总的父单视图，用于核对在线编码结果。
-            var expected = List.of(RuntimeOperationalQueryService.algoOrder(cold, 502),
-                    RuntimeOperationalQueryService.algoOrder(cold, 501), RuntimeOperationalQueryService.algoOrder(cold, 503));
+            var expected = List.of(CoreQueryService.OperationalQueries.algoOrder(cold, 502),
+                    CoreQueryService.OperationalQueries.algoOrder(cold, 501), CoreQueryService.OperationalQueries.algoOrder(cold, 503));
             core.activate();
             var alias = state.algoOrders().get(501L).clientAlgoOrderId();
             assertThat(AccountLaneQueryTestSupport.read(core.runtimeState(), 1,
@@ -212,11 +214,11 @@ class CoreAlgoLaneQueryTest {
                 104L, order(104, 1, 2, 1, CoreOrderStatus.CANCELED),
                 201L, order(201, 7, 10, 4, CoreOrderStatus.OPEN));
         // 用户 1 的账户，保留订单 103 的十单位保证金冻结。
-        var first = new CoreUserState(LINE, 1, 0, Map.of("USDT", new AssetBalance("USDT", 990, 10)),
-                Map.of(103L, new OrderReservation(103, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 10, 0, 0, 5)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
+        var first = new UserAccountSnapshot(LINE, 1, 0, Map.of("USDT", new AssetBalance("USDT", 990, 10)),
+                Map.of(103L, new OrderFundsReservation.Snapshot(103, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 10, 0, 0, 5)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 用户 7 的账户，保留订单 201 的六十单位保证金冻结。
-        var second = new CoreUserState(LINE, 7, 0, Map.of("USDT", new AssetBalance("USDT", 940, 60)),
-                Map.of(201L, new OrderReservation(201, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 60, 0, 0, 10)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
+        var second = new UserAccountSnapshot(LINE, 7, 0, Map.of("USDT", new AssetBalance("USDT", 940, 60)),
+                Map.of(201L, new OrderFundsReservation.Snapshot(201, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 60, 0, 0, 10)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 每父单9,000个扫描项均在单单上限内；两个Lane合起来超过全局16,384扫描项。
         var firstChildren = oversized ? Collections.nCopies(9000, 102L) : List.of(102L, 103L, 104L);
         // 父单 502 的子单引用；超限分支重复订单 201，用来增加扫描项。

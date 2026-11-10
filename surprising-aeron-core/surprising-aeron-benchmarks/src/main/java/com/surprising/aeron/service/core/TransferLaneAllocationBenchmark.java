@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.service.account.AccountControlTask;
+import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
@@ -17,7 +17,7 @@ import org.openjdk.jmh.annotations.*;
 public class TransferLaneAllocationBenchmark {
     private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
-    private final AccountControlTask task = new AccountControlTask();
+    private final AccountCommandService task = new AccountCommandService();
     private final TransferFundsCommand command = new TransferFundsCommand(91, ProductLine.SPOT,
             ProductLine.LINEAR_PERPETUAL, "SPOT", "USDT_PERPETUAL", "USDT", 1, "benchmark", "", 7, 8);
     private long transfers;

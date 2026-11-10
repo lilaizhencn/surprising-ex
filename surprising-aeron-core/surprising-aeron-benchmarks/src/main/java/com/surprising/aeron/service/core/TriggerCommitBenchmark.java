@@ -4,8 +4,8 @@ import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.account.UserRuntime;
+import com.surprising.aeron.service.account.AccountBalance;
+import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.*;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
@@ -69,8 +69,8 @@ public class TriggerCommitBenchmark {
             while (topology.accountLaneId(user) != lane) user++;
             accounts.add(user);
             ids.add(901L + lane);
-            runtime.putUser(new UserRuntime(user));
-            runtime.putBalance(new BalanceRuntime(user, 3, 1000, 0));
+            runtime.putUser(new UserAccount(user));
+            runtime.putBalance(new AccountBalance(user, 3, 1000, 0));
         }
         users = List.copyOf(accounts);
         triggerIds = List.copyOf(ids);

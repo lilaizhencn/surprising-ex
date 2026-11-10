@@ -56,15 +56,16 @@ class AeronOrderCommandServiceTest {
 
     @Mock
     private OrderAeronGateway aeron;
-    private AeronOrderCommandService service;
+    private OrderService service;
 
     @BeforeEach
     void setUp() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAeron().setNodeId(3);
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        service = new AeronOrderCommandService(aeron, properties,
-                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class));
+        service = new OrderService(properties, null, aeron, null,
+                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class),
+                null, null, null);
     }
 
     @Test
@@ -134,7 +135,7 @@ class AeronOrderCommandServiceTest {
                         ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, 0L, new byte[0])));
 
-        AeronOrderCommandService.CommandExecution execution = service.placeCommand(request);
+        OrderService.CommandExecution execution = service.submitPlaceCommand(request);
 
         assertThat(execution.outcome()).isInstanceOf(CoreCommandOutcome.Terminal.class);
         assertThat(((CoreCommandOutcome.Terminal) execution.outcome()).response().resultCode())
@@ -179,7 +180,7 @@ class AeronOrderCommandServiceTest {
                 eq(1001L), org.mockito.ArgumentMatchers.any(byte[].class)))
                 .thenReturn(new CoreCommandOutcome.Terminal(commandResponse(orderView(99, request), List.of())));
 
-        assertThat(service.cancel(1001, 99).orderId()).isEqualTo(99);
+        assertThat(service.cancelById(1001, 99).orderId()).isEqualTo(99);
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
         verify(aeron).commandOutcome(eq(CoreMessageType.CANCEL_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),
@@ -263,7 +264,7 @@ class AeronOrderCommandServiceTest {
                             List.of()))));
         });
 
-        assertThat(service.replace(request).replacementOrder().clientOrderId()).isEqualTo("new");
+        assertThat(service.amend(request).replacementOrder().clientOrderId()).isEqualTo("new");
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
         verify(aeron).commandOutcome(eq(CoreMessageType.AMEND_ORDER), org.mockito.ArgumentMatchers.any(UUID.class),

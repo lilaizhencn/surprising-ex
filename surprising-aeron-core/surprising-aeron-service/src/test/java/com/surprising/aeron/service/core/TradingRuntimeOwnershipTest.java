@@ -20,7 +20,7 @@ class TradingRuntimeOwnershipTest {
         try (/* 当前测试自动关闭的真实运行时 */ var runtime = new TradingCoreRuntime(product)) {
             // Core 与账户运行时共享恢复时装配的同一组索引，避免重新绑定第二套状态。
             var indexes = runtime.runtimeState().factIndexes();
-            assertThat(runtime.factIndexes).isSameAs(indexes);
+            assertThat(runtime.factIndexes()).isSameAs(indexes);
             assertThat(runtime.positionUserIndex()).isSameAs(indexes.positionUsers());
             assertThat(runtime.openInterestIndex()).isSameAs(indexes.openInterest());
             assertThat(runtime.triggerOrderIndex()).isSameAs(indexes.triggers());
@@ -42,10 +42,10 @@ class TradingRuntimeOwnershipTest {
             assertThat(thread.isAlive()).isFalse();
             assertThat(rejected.get()).isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("another thread");
-            assertThat(runtime.closed).as("a foreign caller must not claim shutdown").isFalse();
+            assertThat(runtime.closed()).as("a foreign caller must not claim shutdown").isFalse();
             assertThat(runtime.stateHash()).isEqualTo(initialHash);
             runtime.close();
-            assertThat(runtime.closed).isTrue();
+            assertThat(runtime.closed()).isTrue();
         }
     }
 }

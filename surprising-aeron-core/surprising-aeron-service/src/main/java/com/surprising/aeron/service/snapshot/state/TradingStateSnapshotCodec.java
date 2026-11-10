@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.snapshot.state;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreAlgoOrderState;
@@ -17,10 +19,10 @@ import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.model.RiskLaneProgress;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.CoreTreasuryState.FundingProgress;
 import com.surprising.aeron.service.treasury.CoreTreasuryState.LifecycleProgress;
@@ -80,8 +82,8 @@ public final class TradingStateSnapshotCodec {
             ProductLine product = SnapshotEnumCodes.readProductLine(r.integer(1));
             if (product != expectedProductLine) throw new ProtocolException("trading snapshot product line mismatch");
             // 按用户编号恢复的账户状态表。
-            Map<Long, CoreUserState> users = readValues(r.bytes(3), item -> readCoreUserState(item, product),
-                    CoreUserState::userId);
+            Map<Long, UserAccountSnapshot> users = readValues(r.bytes(3), item -> readCoreUserState(item, product),
+                    UserAccountSnapshot::userId);
             // 按订单编号恢复的订单状态表。
             Map<Long, CoreOrderState> orders = readValues(r.bytes(4), item -> readCoreOrderState(item, product),
                     CoreOrderState::orderId);
@@ -183,7 +185,7 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号写入订单资金预留，保存原预留总额、累计释放与消耗及对应订单数量；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的订单资金预留业务值
      */
-    private static byte[] writeOrderReservation(OrderReservation value) {
+    private static byte[] writeOrderReservation(OrderFundsReservation.Snapshot value) {
         return new SnapshotFields.Writer()
                 .number(1, value.orderId()) // 1：普通订单业务编号
                 .text(2, value.instrumentId()) // 2：币对或合约业务编号
@@ -199,10 +201,10 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号读取并构造订单资金预留，恢复原预留总额、累计释放与消耗及对应订单数量；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前订单资金预留的独立字段记录字节
      */
-    private static OrderReservation readOrderReservation(byte[] encoded) {
+    private static OrderFundsReservation.Snapshot readOrderReservation(byte[] encoded) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
-        return new OrderReservation(
+        return new OrderFundsReservation.Snapshot(
                 r.number(1), // 1：普通订单业务编号
                 r.text(2), // 2：币对或合约业务编号
                 SnapshotEnumCodes.readReservationKind(r.integer(3)), // 3：现货资产或衍生品保证金预留用途
@@ -870,7 +872,7 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号写入用户账户业务状态，保存产品线、用户修订、余额、预留、持仓和持仓模式；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的用户账户业务状态业务值
      */
-    private static byte[] writeCoreUserState(CoreUserState value) {
+    private static byte[] writeCoreUserState(UserAccountSnapshot value) {
         return new SnapshotFields.Writer()
                 .number(2, value.userId()) // 2：所属用户编号
                 .number(3, value.revision()) // 3：当前业务记录修订号
@@ -884,15 +886,15 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号读取并构造用户账户业务状态，恢复产品线、用户修订、余额、预留、持仓和持仓模式；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前用户账户业务状态的独立字段记录字节
      */
-    private static CoreUserState readCoreUserState(byte[] encoded, ProductLine productLine) {
+    private static UserAccountSnapshot readCoreUserState(byte[] encoded, ProductLine productLine) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
-        return new CoreUserState(
+        return new UserAccountSnapshot(
                 productLine, // 产品归属取自已校验的根字段
                 r.number(2), // 2：所属用户编号
                 r.number(3), // 3：当前业务记录修订号
                 readValues(r.bytes(4), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readAssetBalance(item), AssetBalance::asset), // 4：按资产保存的用户余额
-                readValues(r.bytes(5), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readOrderReservation(item), OrderReservation::orderId), // 5：按订单编号保存的资金预留
+                readValues(r.bytes(5), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readOrderReservation(item), OrderFundsReservation.Snapshot::orderId), // 5：按订单编号保存的资金预留
                 readValues(r.bytes(6), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCorePositionState(item), CorePositionState::key), // 6：按业务键保存的用户持仓
                 SnapshotEnumCodes.readCorePositionMode(r.integer(7))); // 7：单向或双向持仓模式
     }

@@ -2,8 +2,8 @@ package com.surprising.aeron.service.snapshot;
 
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.MatcherSnapshot;
-import com.surprising.aeron.service.matcher.MatcherSnapshotCodec;
+import com.surprising.aeron.service.matcher.OrderBookSnapshot;
+import com.surprising.aeron.service.matcher.OrderBookSnapshotCodec;
 import com.surprising.aeron.service.result.CommandResultLedger;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.aeron.service.snapshot.state.CoreFeePolicySnapshotCodec;
@@ -33,7 +33,7 @@ public final class SectionedCoreSnapshotWriter {
      */
     static CoreSnapshotImage capture(
             TradingCoreRuntime state,
-            MatcherSnapshot matcherSnapshot,
+            OrderBookSnapshot matcherSnapshot,
             long snapshotId,
             long coreSequence,
             long clusterTimestamp,
@@ -71,7 +71,7 @@ public final class SectionedCoreSnapshotWriter {
         if (maximumSnapshotBytes <= 0 || maximumSnapshotBytes > SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES)
             throw new IllegalArgumentException("invalid snapshot byte limit");
         // 本次镜像已经配对的 Matcher 快照引用。
-        MatcherSnapshot matcherSnapshot = image.matcherSnapshot();
+        OrderBookSnapshot matcherSnapshot = image.matcherSnapshot();
         // 捕获点物化的交易状态。
         var snapshotState = image.tradingState();
         // 按固定协议顺序排列的业务负载列表，尚未加上 CRC 页尾。
@@ -86,7 +86,7 @@ public final class SectionedCoreSnapshotWriter {
         for (byte[] payload : payloads) remainingMatcherBudget -= payload.length;
         if (remainingMatcherBudget <= Long.BYTES)
             throw new IllegalArgumentException("core snapshot exceeds maximum size before matcher encoding");
-        payloads.add(MatcherSnapshotCodec.encode(matcherSnapshot, (int) Math.min(remainingMatcherBudget,
+        payloads.add(OrderBookSnapshotCodec.encode(matcherSnapshot, (int) Math.min(remainingMatcherBudget,
                 SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES)));
         payloads.add(TradingStateSnapshotCodec.encode(snapshotState));
         payloads.add(CoreFeePolicySnapshotCodec.encode(image.feePolicies()));

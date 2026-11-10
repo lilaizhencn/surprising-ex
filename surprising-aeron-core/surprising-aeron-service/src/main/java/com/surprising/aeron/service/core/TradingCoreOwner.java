@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
@@ -11,10 +13,9 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.WireMessageKind;
-import com.surprising.aeron.service.order.ClusterCommandWindow;
-import com.surprising.aeron.service.order.OwnerCommandPipelineState;
+import com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow;
+import com.surprising.aeron.service.order.OrderCommandQueue.PipelineState;
 import com.surprising.aeron.service.realtime.TradingRealtimeBoundary;
-import com.surprising.aeron.service.realtime.state.RealtimeStateCapture;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.support.ingress.OwnerIngressRing;
 import com.surprising.product.api.ProductLine;
@@ -34,7 +35,7 @@ import static com.surprising.aeron.support.egress.ClusterServiceEgress.NO_SESSIO
 public final class TradingCoreOwner {
 
     /** Owner 独占的命令阶段、依赖等待、控制槽和有序提交状态。 */
-    private final OwnerCommandPipelineState commandPipeline;
+    private final OrderCommandQueue.PipelineState commandPipeline;
     /**  Cluster 到 Owner 的唯一单生产者、单消费者输入环。 返回 Cluster 与 Owner 共用的原输入环；调用方遵守单生产者、单消费者约定。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -99,7 +100,7 @@ public final class TradingCoreOwner {
         this.startupTopology = java.util.Objects.requireNonNull(startupTopology, "startupTopology");
         this.responseSink = java.util.Objects.requireNonNull(responseSink, "response sink");
         this.realtimeBoundary = new TradingRealtimeBoundary(productLine, realtimeConfiguration);
-        commandPipeline = new OwnerCommandPipelineState(configuration.ownerCommandWindow());
+        commandPipeline = new OrderCommandQueue.PipelineState(configuration.ownerCommandWindow());
         matchingCommitHandler = commandPipeline::completeControlMatching;
     }
 
@@ -130,14 +131,14 @@ public final class TradingCoreOwner {
     private void progressCommands() {
         state.bindOwner();
         // 当前 Owner 持有的流水命令窗口
-        ClusterCommandWindow window = commandPipeline.commandWindow();
+        OrderCommandQueue.IngressWindow window = commandPipeline.commandWindow();
 
         // 阶段一：批量排空与退休已就绪的队首命令，释放窗口容量
         if (!commandPipeline.hasCommittingHead() && window.size() != 0) {
             beginCommandCommit();
         }
         if (commandPipeline.hasCommittingHead()) {
-            pollCommandCommitBatch(true, OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
+            pollCommandCommitBatch(true, OrderCommandQueue.PipelineState.COMPLETION_BATCH_SIZE);
         }
         if (commandPipeline.hasActiveControl()) {
             if (!pollControl()) return;
@@ -167,7 +168,7 @@ public final class TradingCoreOwner {
                 if (!commandPipeline.hasCommittingHead()) {
                     beginCommandCommit();
                 }
-                if (pollCommandCommitBatch(true, OwnerCommandPipelineState.COMPLETION_BATCH_SIZE) > 0) {
+                if (pollCommandCommitBatch(true, OrderCommandQueue.PipelineState.COMPLETION_BATCH_SIZE) > 0) {
                     retry = eligible && !state.pendingMatching().isEmpty()
                             && state.matchingSequence(next.command().header().commandIdMsb(), next.command().header().commandIdLsb()) != 0;
                     prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
@@ -251,7 +252,7 @@ public final class TradingCoreOwner {
         // 本轮真正交出终态并退休的窗口条数
         int committedCount = 0;
         // 当前 Owner 持有的流水命令窗口
-        ClusterCommandWindow window = commandPipeline.commandWindow();
+        OrderCommandQueue.IngressWindow window = commandPipeline.commandWindow();
         while (committedCount < maxBatch) {
             if (!commandPipeline.hasCommittingHead()) {
                 if (window.size() == 0) break;
@@ -304,7 +305,7 @@ public final class TradingCoreOwner {
             commandPipeline.controlResponse(state.directCommand.poll());
             if (commandPipeline.controlResponse() == null) { checkProgressDeadline(); return false; }
         }
-        state.commits.commitReadyMatching(OwnerCommandPipelineState.COMPLETION_BATCH_SIZE,
+        state.commits.commitReadyMatching(OrderCommandQueue.PipelineState.COMPLETION_BATCH_SIZE,
                 activeControl.timestamp(), activeControl.position(), false, matchingCommitHandler);
         if (state.pendingMatching().firstSequence() != 0) { checkProgressDeadline(); return false; }
         if (commandPipeline.hasMatchingResponseSequence()) {
@@ -424,7 +425,7 @@ public final class TradingCoreOwner {
     /**
      * 借出命令流水线的窗口引用，供既有编排和测试查看；不复制也不转移所有权。
      */
-    ClusterCommandWindow commandWindow() { return commandPipeline.commandWindow(); }
+    OrderCommandQueue.IngressWindow commandWindow() { return commandPipeline.commandWindow(); }
 
     /**
      * 等待推进时先检查中断和显式截止时间，再调用忙等自旋；失败附带诊断，不把技术超时伪装成业务拒绝。
@@ -581,7 +582,7 @@ public final class TradingCoreOwner {
      * @param capture 可空实时变更捕获器
      */
     public void attachRealtime(RealtimeOutbox outbox,
-                        RealtimeStateCapture capture) {
+                        TradingRealtimeBoundary.StateCapture capture) {
         realtimeBoundary.attach(outbox, capture, state);
     }
 

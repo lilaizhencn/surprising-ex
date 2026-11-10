@@ -152,7 +152,7 @@ class SnapshotFieldEvolutionTest {
                             1, true, true, true, 3, 15, line.isDerivative() ? -99 : 7,
                             new com.surprising.aeron.protocol.CoreOrderProtection(20_000, 8_000, true, 30_000, 4_000)));
             var empty = TradingCoreState.empty(line);
-            var runtimeMark = new com.surprising.aeron.service.market.MarkPriceRuntime(
+            var runtimeMark = new com.surprising.aeron.service.market.MarkPrice(
                     instrument.instrumentIdValue(), instrument, 100, 99, option ? 98 : -99, 1, 1_000, 97);
             assertThat(runtimeMark.forwardPriceTicks()).isEqualTo(option ? 98 : 0);
             var mark = new com.surprising.aeron.model.CoreMarkPriceState("1", 100, 99,
@@ -251,7 +251,7 @@ class SnapshotFieldEvolutionTest {
             var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(line,
                     com.surprising.aeron.service.core.CoreStateTestFixtures.instrument(line, "1", "BTC", quote,
                             com.surprising.aeron.service.core.CoreStateTestFixtures.settleAsset(line)));
-            var user = new com.surprising.aeron.service.account.CoreUserState(
+            var user = new com.surprising.aeron.service.account.UserAccountSnapshot(
                     line, 7, 0, Map.of(), Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
             var empty = TradingCoreState.empty(line);
             for (long ratio : ratios) {

@@ -1,12 +1,14 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.product.ProductTradingRulesRegistry;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
@@ -32,7 +34,7 @@ public final class RuntimeSpotMatchFixture {
         }
         runtime.assertOwner();
         // 当前主动订单的权威值，每笔应用前重新读取以累计数量。
-        OrderRuntime taker = requireOpen(runtime, takerOrderId);
+        Order taker = requireOpen(runtime, takerOrderId);
         if (matches.isEmpty() && !taker.timeInForce().immediate()
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return;
@@ -42,7 +44,7 @@ public final class RuntimeSpotMatchFixture {
         if (instrument == null || instrument != taker.instrument()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
-        if (ProductTradingRulesRegistry.forInstrument(instrument).productLine()
+        if (ProductTradingRules.forInstrument(instrument).productLine()
                 != com.surprising.product.api.ProductLine.SPOT) {
             throw new IllegalStateException("spot matcher received a non-spot settlement kernel");
         }
@@ -59,13 +61,13 @@ public final class RuntimeSpotMatchFixture {
             if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
             // 本笔对应的权威对手订单，Lane 路径只读取本地对象。
-            OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+            Order maker = requireOpen(runtime, match.matchedOrderId());
             // 本笔成交量是否恰好耗尽 maker 剩余量。
             boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
             // 按订单方向选出的买方订单，不一定是 taker。
-            OrderRuntime buyer = taker.side() == CoreOrderSide.BUY ? taker : maker;
+            Order buyer = taker.side() == CoreOrderSide.BUY ? taker : maker;
             // 按订单方向选出的卖方订单，不一定是 maker。
-            OrderRuntime seller = taker.side() == CoreOrderSide.SELL ? taker : maker;
+            Order seller = taker.side() == CoreOrderSide.SELL ? taker : maker;
             applyFill(runtime, instrument, buyer, match.price(), match.size(),
                     buyer.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
             applyFill(runtime, instrument, seller, match.price(), match.size(),
@@ -94,10 +96,10 @@ public final class RuntimeSpotMatchFixture {
      * @param quoteAssetId 计价及收费资产的运行时编号
      * @param treasuryDelta 所属 Lane 系统费用差额接收槽
      */
-    private static OrderRuntime applyFill(TradingAccountRuntime runtime, CoreInstrument instrument, OrderRuntime order,
+    private static Order applyFill(TradingAccountRuntime runtime, CoreInstrument instrument, Order order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
                                   int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
-        return RuntimeSpotMatchProcessor.applyFill(runtime, runtime.accountLaneForUser(order.userId()), instrument, order, fillPriceTicks, fillQuantitySteps, taker,
+        return SpotTradeSettlementService.applyFill(runtime, runtime.accountLaneForUser(order.userId()), instrument, order, fillPriceTicks, fillQuantitySteps, taker,
                 baseAssetId, quoteAssetId, treasuryDelta, -1, -1);
     }
 
@@ -108,7 +110,7 @@ public final class RuntimeSpotMatchFixture {
      */
     private static void releaseTerminalReservation(TradingAccountRuntime runtime, long orderId) {
         // 当前首次累加、终态释放或读取时取得的权威订单。
-        OrderRuntime order = runtime.order(orderId);
+        Order order = runtime.order(orderId);
         if (order != null && com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, orderId) > 0)
             runtime.advanceUserRevision(order.userId());
     }
@@ -119,7 +121,7 @@ public final class RuntimeSpotMatchFixture {
      * @param taker 已经读取并确认可成交的主动订单
      * @param matches 原始撮合事件列表，非 TRADE 事件不应用成交
      */
-    private static void validateMatches(TradingAccountRuntime runtime, OrderRuntime taker,
+    private static void validateMatches(TradingAccountRuntime runtime, Order taker,
                                         List<MatcherEvent> matches) {
         // 验证过程中主动订单逐成交扣减后的累计剩余量。
         long takerRemaining = taker.remainingQuantitySteps();
@@ -138,7 +140,7 @@ public final class RuntimeSpotMatchFixture {
                     throw new IllegalArgumentException("invalid runtime match");
                 }
                 // 本笔对应的权威对手订单，Lane 路径只读取本地对象。
-                OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+                Order maker = requireOpen(runtime, match.matchedOrderId());
                 if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                         || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                     throw new IllegalStateException("runtime match does not match authoritative orders");
@@ -162,9 +164,9 @@ public final class RuntimeSpotMatchFixture {
      * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
      * @param orderId 当前要累加、读取或释放预留的订单编号
      */
-    private static OrderRuntime requireOpen(TradingAccountRuntime runtime, long orderId) {
+    private static Order requireOpen(TradingAccountRuntime runtime, long orderId) {
         // 当前首次累加、终态释放或读取时取得的权威订单。
-        OrderRuntime order = runtime.order(orderId);
+        Order order = runtime.order(orderId);
         if (order == null || order.canceled() || order.remainingQuantitySteps() == 0) {
             throw new IllegalStateException("runtime matched order is not open: " + orderId);
         }

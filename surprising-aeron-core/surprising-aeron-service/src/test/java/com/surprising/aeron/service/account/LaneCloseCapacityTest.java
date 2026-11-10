@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -8,9 +10,8 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.position.PositionCloseCapacity;
-import com.surprising.aeron.service.position.PositionRuntime;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.position.Position;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -26,10 +27,10 @@ class LaneCloseCapacityTest {
     @Test
     void capacityUsesOnlyLiveCommittedOrdersInTheSamePositionAndCancelsNewestFirst() {
         // 用户 7 测试持仓所属的账户 Lane，直接在此准备持仓及订单索引。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         // 所有测试订单和目标持仓使用的合约配置。
         var instrument = CoreStateTestFixtures.runtimeInstrument();
-        lane.positions.put(99, new PositionRuntime(7, 3, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
+        lane.positions.put(99, new Position(7, 3, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
                 instrument, 10, 100, 1000, 0, 100));
         lane.putOrder(order(201, 7, 3, CorePositionSide.NET, CoreOrderSide.SELL, true, 3, 10));
         lane.putOrder(order(202, 7, 3, CorePositionSide.NET, CoreOrderSide.SELL, true, 4, 20));
@@ -46,31 +47,31 @@ class LaneCloseCapacityTest {
         lane.markPendingReservation(209, 1);
         lane.putOrder(order(210, 7, 3, CorePositionSide.NET, CoreOrderSide.SELL, true, 100, 50));
 
-        assertThat(PositionCloseCapacity.conflictsFor(
+        assertThat(Position.CloseCapacity.conflictsFor(
                 lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.SELL, 210, 5)).containsExactly(202L);
-        assertThat(PositionCloseCapacity.conflictsFor(
+        assertThat(Position.CloseCapacity.conflictsFor(
                 lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.SELL, 210, 6)).containsExactly(202L, 201L);
-        assertThat(PositionCloseCapacity.conflictsFor(
+        assertThat(Position.CloseCapacity.conflictsFor(
                 lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.SELL, 210, 1)).isEmpty();
     }
 
     @Test
     void conflictOrderUsesOrderIdToBreakEqualLogPositionsAndStopsAtAvailableCandidates() {
-        var lane = new AccountLaneState(0, 256);
-        lane.positions.put(99, new PositionRuntime(7, 3, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
+        var lane = new AccountPartition(0, 256);
+        lane.positions.put(99, new Position(7, 3, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreStateTestFixtures.runtimeInstrument(), -10, 100, 1000, 0, 100));
         lane.putOrder(order(201, 7, 3, CorePositionSide.NET, CoreOrderSide.BUY, true, 3, 10));
         lane.putOrder(order(202, 7, 3, CorePositionSide.NET, CoreOrderSide.BUY, true, 4, 10));
-        assertThat(PositionCloseCapacity.conflictsFor(lane, 7, 3, 99,
+        assertThat(Position.CloseCapacity.conflictsFor(lane, 7, 3, 99,
                 CorePositionSide.NET, CoreOrderSide.BUY, 0, 3)).isEmpty();
-        assertThat(PositionCloseCapacity.conflictsFor(lane, 7, 3, 99,
+        assertThat(Position.CloseCapacity.conflictsFor(lane, 7, 3, 99,
                 CorePositionSide.NET, CoreOrderSide.BUY, 0, 4)).containsExactly(202L);
-        assertThat(PositionCloseCapacity.conflictsFor(lane, 7, 3, 99,
+        assertThat(Position.CloseCapacity.conflictsFor(lane, 7, 3, 99,
                 CorePositionSide.NET, CoreOrderSide.BUY, 0, 20)).containsExactly(202L, 201L);
-        assertThatThrownBy(() -> PositionCloseCapacity.conflictsFor(lane, 7, 3, 99,
+        assertThatThrownBy(() -> Position.CloseCapacity.conflictsFor(lane, 7, 3, 99,
                 CorePositionSide.NET, CoreOrderSide.BUY, 0, Long.MAX_VALUE))
                 .isInstanceOf(ArithmeticException.class);
-        assertThatIllegalArgumentException().isThrownBy(() -> PositionCloseCapacity.conflictsFor(
+        assertThatIllegalArgumentException().isThrownBy(() -> Position.CloseCapacity.conflictsFor(
                 lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.BUY, 0, 0));
     }
 
@@ -85,9 +86,9 @@ class LaneCloseCapacityTest {
      * @param quantity 该订单初始未成交数量步数
      * @param clusterPosition 用来比较订单新旧的集群日志位置
      */
-    private static OrderRuntime order(long id, long user, int symbol, CorePositionSide position,
+    private static Order order(long id, long user, int symbol, CorePositionSide position,
             CoreOrderSide side, boolean reduceOnly, long quantity, long clusterPosition) {
-        return new OrderRuntime(id, user, symbol, CoreStateTestFixtures.runtimeInstrument(), side, 100,
+        return new Order(id, user, symbol, CoreStateTestFixtures.runtimeInstrument(), side, 100,
                 reduceOnly, CoreMarginMode.CROSS, position, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 0, 0, quantity, 0, quantity, false).withCommitMetadata(1000, clusterPosition);
     }

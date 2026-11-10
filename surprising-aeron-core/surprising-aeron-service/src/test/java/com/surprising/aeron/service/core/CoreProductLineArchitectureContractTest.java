@@ -10,7 +10,6 @@ import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.product.ProductTradingRules;
-import com.surprising.aeron.service.product.ProductTradingRulesRegistry;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -82,7 +81,7 @@ class CoreProductLineArchitectureContractTest {
     void productRulesRejectForeignInstrumentsAndUnsupportedLifecycleOperations() {
         for (ProductLine /* 当前要验证规则及生命周期能力的产品线 */ line : ProductLine.values()) {
             // 该产品线唯一规则实现，其他线合约应拒绝
-            ProductTradingRules rules = ProductTradingRulesRegistry.forProductLine(line);
+            ProductTradingRules rules = ProductTradingRules.forProductLine(line);
             // 已经在本产品冷状态成功注册的原生合约
             CoreInstrument own = reducer.registerInstrument(TradingCoreState.empty(line), instrument(line))
                     .instruments().values().iterator().next();
@@ -125,7 +124,7 @@ class CoreProductLineArchitectureContractTest {
     void lifecycleSettlementAdmissionIsOwnedByTheProductRule() {
         for (ProductLine /* 当前要验证规则及生命周期能力的产品线 */ line : ProductLine.values()) {
             // 该产品线唯一规则实现，其他线合约应拒绝
-            ProductTradingRules rules = ProductTradingRulesRegistry.forProductLine(line);
+            ProductTradingRules rules = ProductTradingRules.forProductLine(line);
             // 已经在本产品冷状态成功注册的原生合约
             CoreInstrument own = reducer.registerInstrument(TradingCoreState.empty(line), instrument(line))
                     .instruments().values().iterator().next();

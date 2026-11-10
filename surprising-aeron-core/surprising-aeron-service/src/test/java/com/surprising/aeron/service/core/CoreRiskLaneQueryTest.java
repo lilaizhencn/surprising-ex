@@ -7,12 +7,12 @@ import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
+import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.query.state.RuntimeOperationalQueryService;
+import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.instrument.api.model.ContractType;
@@ -188,7 +188,7 @@ class CoreRiskLaneQueryTest {
                     instrument.updateConfiguration(instrument(ProductLine.LINEAR_PERPETUAL, name, 60_000));
                     // 当前币对的运行时整数编号，写入新标记价时用于定位。
                     int symbol = core.identities.findSymbolId(name);
-                    core.runtimeState.putMarkPrice(new MarkPriceRuntime(symbol, instrument, 120, 100, 100, 2, TIME));
+                    core.runtimeState.putMarkPrice(new MarkPrice(symbol, instrument, 120, 100, 100, 2, TIME));
                 }
                 assertThat(release.getCount()).isOne();
                 release.countDown();
@@ -238,8 +238,8 @@ class CoreRiskLaneQueryTest {
         // 所有测试用户共同持仓的合约配置。
         var instrument = instrument(line, "1", 50_000);
         // 超过查询实体数量上限一个用户的账户映射，用户会分布在不同 Lane。
-        var users = new LinkedHashMap<Long, CoreUserState>();
-        for (/* 批量构造持仓账户的用户编号，循环到查询上限加一。 */ long user = 1; user <= RuntimeOperationalQueryService.MAX_QUERY_ENTITIES + 1; user++)
+        var users = new LinkedHashMap<Long, UserAccountSnapshot>();
+        for (/* 批量构造持仓账户的用户编号，循环到查询上限加一。 */ long user = 1; user <= CoreQueryService.OperationalQueries.MAX_QUERY_ENTITIES + 1; user++)
             users.put(user, user(line, user, Map.of("1", position(line, "1", 1, CoreMarginMode.CROSS, 10))));
         // 包含超限用户数的根状态，用来验证限制按所有 Lane 的合计计算。
         var state = new TradingCoreState(line, 0, users, Map.of(), Map.of("1", instrument),
@@ -326,10 +326,10 @@ class CoreRiskLaneQueryTest {
      * @param id 本次创建的测试用户编号
      * @param positions 按持仓业务键保存的测试持仓映射
      */
-    private static CoreUserState user(ProductLine line, long id, Map<String, CorePositionState> positions) {
+    private static UserAccountSnapshot user(ProductLine line, long id, Map<String, CorePositionState> positions) {
         // 本用户所有持仓保证金之和，作为冻结余额，避免初始资金被重复使用。
         long locked = positions.values().stream().mapToLong(CorePositionState::positionMarginUnits).sum();
-        return new CoreUserState(line, id, 0, Map.of(asset(line), new AssetBalance(asset(line), 10_000 - locked, locked)),
+        return new UserAccountSnapshot(line, id, 0, Map.of(asset(line), new AssetBalance(asset(line), 10_000 - locked, locked)),
                 Map.of(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
     }
 

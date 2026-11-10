@@ -1,7 +1,9 @@
 package com.surprising.aeron.model;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 
 /**
  * 某个用户的一条手续费策略，可对所有币对或指定币对生效。构造器检查费率及时间范围，排序方法决定多条策略竞争时的先后顺序。
@@ -32,7 +34,7 @@ public record CoreFeePolicyState(
      * 统一全币对策略的空编号写法，并检查费率在正负一倍内、挂单费率不高于吃单费率以及生效区间有效。
      */
     public CoreFeePolicyState {
-        instrumentId = instrumentId == null || instrumentId.isBlank() ? "" : OrderReservation.requireInstrumentId(instrumentId);
+        instrumentId = instrumentId == null || instrumentId.isBlank() ? "" : OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         if (policyId <= 0 || policyRevision <= 0 || userId <= 0
                 || makerFeeRatePpm < -1_000_000 || makerFeeRatePpm > 1_000_000
                 || takerFeeRatePpm < -1_000_000 || takerFeeRatePpm > 1_000_000

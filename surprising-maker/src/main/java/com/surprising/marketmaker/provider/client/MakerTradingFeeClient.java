@@ -6,7 +6,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 /** Uses the gateway's authoritative fee selection, including account overrides and expiry. */
-@FeignClient(name = "surprising-gateway", contextId = "makerTradingFeeClient")
+@FeignClient(name = "surprising-gateway", url = "${surprising.clients.gateway.url:http://127.0.0.1:9094}", contextId = "makerTradingFeeClient")
 public interface MakerTradingFeeClient {
     @GetMapping("/internal/v1/trading/fees/effective")
     EffectiveFee effective(@RequestParam("userId") long userId,

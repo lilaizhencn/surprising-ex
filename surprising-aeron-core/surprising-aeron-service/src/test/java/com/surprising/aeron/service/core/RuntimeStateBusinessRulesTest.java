@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.service.account.AccountControlTask;
+import com.surprising.aeron.service.order.*;
+
+import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
@@ -25,10 +27,10 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
@@ -217,10 +219,10 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState state = funded(ProductLine.SPOT, "USDT", 1_000);
         state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("BTC", 10));
         // 显式固定挂单返佣的现货卖方准入结果
-        ResolvedPlaceOrder makerSell = feeOrder(state, 2, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET,
+        OrderCommand.ResolvedPlaceOrder makerSell = feeOrder(state, 2, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET,
                 "BTC", -50_000, 100_000);
         // 显式固定吃单收费的现货买方准入结果
-        ResolvedPlaceOrder takerBuy = feeOrder(state, 1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET,
+        OrderCommand.ResolvedPlaceOrder takerBuy = feeOrder(state, 1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET,
                 "USDT", 0, 100_000);
         state = reducer.placeOrder(state, 202, makerSell);
         state = reducer.placeOrder(state, 101, takerBuy);
@@ -516,7 +518,7 @@ class RuntimeStateBusinessRulesTest {
         // 本用例已经给用户一百零一注资的冷状态，后续转换不能改写它
         TradingCoreState funded = funded(product, asset, 10_000);
         // 手工建立逐仓持仓前的原用户状态
-        CoreUserState current = funded.users().get(101L);
+        UserAccountSnapshot current = funded.users().get(101L);
         // 复制的资产表，将一千从可用改为锁定以匹配手工持仓
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put(asset, new AssetBalance(asset, 9_000, 1_000));
@@ -524,10 +526,10 @@ class RuntimeStateBusinessRulesTest {
         CorePositionState position = new CorePositionState("1", asset, CoreMarginMode.ISOLATED,
                 CorePositionSide.NET, 10, 10, 100, 0, 1_000);
         // 替换了余额和逐仓持仓、用户修订加一的冷用户状态
-        CoreUserState user = new CoreUserState(current.productLine(), current.userId(), current.revision() + 1,
+        UserAccountSnapshot user = new UserAccountSnapshot(current.productLine(), current.userId(), current.revision() + 1,
                 balances, current.reservations(), Map.of(position.key(), position), current.positionMode());
         // 复制的用户表，只替换本用例用户的手工逐仓状态
-        Map<Long, CoreUserState> users = new TreeMap<>(funded.users());
+        Map<Long, UserAccountSnapshot> users = new TreeMap<>(funded.users());
         users.put(user.userId(), user);
         // 带手工逐仓持仓及对应锁定余额的完整冷状态
         TradingCoreState withPosition = new TradingCoreState(funded.productLine(), funded.revision() + 1,
@@ -552,14 +554,14 @@ class RuntimeStateBusinessRulesTest {
         var identities = new RuntimeIdentityRegistry();
         try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(withPosition, identities)) {
             for (long /* 超过可用、超过持仓保证金或取 long 极小负数的故意非法调整金额 */ rejected : new long[] {9_001, -1_001, Long.MIN_VALUE}) {
-                assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountControlTask().preparePositionMarginAdjustment(runtime, identities, 101, new AdjustPositionMarginCommand("1", CorePositionSide.NET, rejected))))
+                assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountCommandService().preparePositionMarginAdjustment(runtime, identities, 101, new AdjustPositionMarginCommand("1", CorePositionSide.NET, rejected))))
                         .isInstanceOf(RuntimeException.class);
                 assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(withPosition);
             }
             runtime.startAccountLanes();
             for (long /* 账户 Lane 依次执行的合法逐仓保证金调整额，先加五百后减三百 */ amount : new long[] {500, -300}) {
                 // 本次逐仓保证金调整的可轮询账户控制任务
-                var work = new AccountControlTask().preparePositionMarginAdjustment(runtime, identities, 101,
+                var work = new AccountCommandService().preparePositionMarginAdjustment(runtime, identities, 101,
                         new AdjustPositionMarginCommand("1", CorePositionSide.NET, amount));
                 // 本次控制任务轮询的单调时钟五秒期限
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
@@ -631,7 +633,7 @@ class RuntimeStateBusinessRulesTest {
         try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(before, identities)) {
             runtime.startAccountLanes();
             // 本次降低全仓杠杆并补足保证金的可轮询账户控制任务
-            var work = new AccountControlTask().prepareLeverageChange(runtime, identities, 101, command);
+            var work = new AccountCommandService().prepareLeverageChange(runtime, identities, 101, command);
             // 本次控制任务轮询的单调时钟五秒期限
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             // 账户控制任务是否完成，退出轮询后必须为真
@@ -656,7 +658,7 @@ class RuntimeStateBusinessRulesTest {
         try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(before, identities)) {
             // 显式允许已有持仓重计的全仓两倍目标杠杆命令
             var command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000, true);
-            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareLeverageChange(runtime, identities, 101, command)))
+            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareLeverageChange(runtime, identities, 101, command)))
                     .hasMessageContaining("insufficient available funds");
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(before);
         }
@@ -835,7 +837,7 @@ class RuntimeStateBusinessRulesTest {
      * @param makerFeeRatePpm 需要固定在本订单准入结果中的挂单费率，单位为百万分之一
      * @param takerFeeRatePpm 需要固定在本订单准入结果中的吃单费率，单位为百万分之一
      */
-    private static ResolvedPlaceOrder feeOrder(
+    private static OrderCommand.ResolvedPlaceOrder feeOrder(
             TradingCoreState state,
             long orderId,
             CoreOrderSide side,
@@ -860,12 +862,12 @@ class RuntimeStateBusinessRulesTest {
      * @param makerFeeRatePpm 需要固定在本订单准入结果中的挂单费率，单位为百万分之一
      * @param takerFeeRatePpm 需要固定在本订单准入结果中的吃单费率，单位为百万分之一
      */
-    private static ResolvedPlaceOrder resolved(
+    private static OrderCommand.ResolvedPlaceOrder resolved(
             TradingCoreState state, PlaceOrderCommand intent, ReservationKind kind, String asset,
             long makerFeeRatePpm, long takerFeeRatePpm) {
         // 意图所属的已有标的，供显式准入结果使用
         CoreInstrument instrument = state.instruments().get(intent.instrumentId());
-        return new ResolvedPlaceOrder(intent, instrument, 0, intent.limitPriceTicks(), intent.limitPriceTicks(),
+        return new OrderCommand.ResolvedPlaceOrder(intent, instrument, 0, intent.limitPriceTicks(), intent.limitPriceTicks(),
                 intent.limitPriceTicks(), 0, 0, kind, asset, makerFeeRatePpm, takerFeeRatePpm);
     }
 

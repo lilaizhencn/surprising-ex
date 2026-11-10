@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -9,14 +11,13 @@ import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.account.UserRuntime;
+import com.surprising.aeron.service.account.AccountBalance;
+import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.query.state.*;
-import com.surprising.aeron.service.query.state.RuntimeStateQueryService;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.aeron.service.order.OrderFundsReservation;
+import com.surprising.aeron.service.position.Position;
+import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -49,14 +50,14 @@ class RuntimeStateQueryServiceTest {
         long clientKey = identities.clientKey(1001, "client-71");
         // 用户 1001 在合约 1 的净持仓整数键。
         long positionKey = identities.positionKey(1001, "1");
-        runtime.putUser(new UserRuntime(ProductLine.LINEAR_PERPETUAL, 1001, 3, CorePositionMode.ONE_WAY));
-        runtime.putBalance(new BalanceRuntime(1001, assetId, 1_000, 150));
-        runtime.putReservation(new ReservationRuntime(71, 1001, symbolId,
+        runtime.putUser(new UserAccount(ProductLine.LINEAR_PERPETUAL, 1001, 3, CorePositionMode.ONE_WAY));
+        runtime.putBalance(new AccountBalance(1001, assetId, 1_000, 150));
+        runtime.putReservation(new OrderFundsReservation(71, 1001, symbolId,
                 ReservationKind.DERIVATIVE_MARGIN, assetId, 100, 0, 0, 2));
-        runtime.putPosition(positionKey, new PositionRuntime(1001, symbolId, assetId, CoreMarginMode.CROSS,
+        runtime.putPosition(positionKey, new Position(1001, symbolId, assetId, CoreMarginMode.CROSS,
                 CorePositionSide.NET, instrument, 2, 60_000, 120_000, 7, 50));
         runtime.putLeverage(new CoreLeverageKey(1001, "1", CoreMarginMode.CROSS), 5_000_000);
-        runtime.putOrder(new OrderRuntime(71, ProductLine.LINEAR_PERPETUAL, 1001, symbolId, instrument,
+        runtime.putOrder(new Order(71, ProductLine.LINEAR_PERPETUAL, 1001, symbolId, instrument,
                 CoreOrderSide.BUY, 60_000, 2, 0, 2, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-71",
                 UUID.fromString("10000000-0000-0000-0000-000000000071"), -10, 25, 0,
@@ -64,14 +65,14 @@ class RuntimeStateQueryServiceTest {
         runtime.putClientOrder(1001, clientKey, 71);
 
         // 在该用户所属 Lane 内组装的完整用户查询结果。
-        var user = RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false);
+        var user = CoreQueryService.StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false);
         // 按 Core 订单编号 71 直接查询的订单结果。
-        var order = RuntimeStateQueryService.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, false);
+        var order = CoreQueryService.StateQueries.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, false);
         // 按用户及客户端标识查询的结果，应与直接订单编号查询完全相同。
-        var clientOrder = RuntimeStateQueryService.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "client-71");
+        var clientOrder = CoreQueryService.StateQueries.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "client-71");
 
         assertThat(user.found()).isTrue();
-        assertThat(RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, true)
+        assertThat(CoreQueryService.StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, true)
                 .stateHash()).isEqualTo(4_392_142_050_606_229_068L);
         assertThat(user.stateHash()).isZero();
         assertThat(user.view().balances()).hasSize(1);
@@ -79,7 +80,7 @@ class RuntimeStateQueryServiceTest {
         assertThat(user.view().positions()).hasSize(1);
         assertThat(user.view().leverages()).hasSize(1);
         assertThat(order.found()).isTrue();
-        var orderHash = RuntimeStateQueryService.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, true);
+        var orderHash = CoreQueryService.StateQueries.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, true);
         assertThat(orderHash.stateHash()).isEqualTo(2_473_578_025_272_220_416L);
         assertThat(orderHash.view()).isNull();
         assertThat(order.stateHash()).isZero();
@@ -100,7 +101,7 @@ class RuntimeStateQueryServiceTest {
         long before = identities.clientIdentityCount();
 
         // 不存在客户端标识的只读查询结果，found 应为 false。
-        var result = RuntimeStateQueryService.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "missing");
+        var result = CoreQueryService.StateQueries.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "missing");
 
         assertThat(result.found()).isFalse();
         assertThat(identities.clientIdentityCount()).isEqualTo(before);
@@ -117,13 +118,13 @@ class RuntimeStateQueryServiceTest {
         TradingAccountRuntime runtime = new TradingAccountRuntime();
         identities.bindClientLanes(runtime);
         runtime.setMetadata(ProductLine.SPOT, 1);
-        runtime.putUser(new UserRuntime(ProductLine.SPOT, 1001, 1, CorePositionMode.ONE_WAY));
-        for (/* 给同一用户构造不同资产余额的循环下标，遍历到上限加一条。 */ int index = 0; index <= RuntimeStateQueryService.MAX_USER_QUERY_ENTITIES; index++) {
+        runtime.putUser(new UserAccount(ProductLine.SPOT, 1001, 1, CorePositionMode.ONE_WAY));
+        for (/* 给同一用户构造不同资产余额的循环下标，遍历到上限加一条。 */ int index = 0; index <= CoreQueryService.StateQueries.MAX_USER_QUERY_ENTITIES; index++) {
             // 当前测试资产的整数编号，基本用例为 USDT，超限用例每次创建不同资产。
             int assetId = identities.assetId("ASSET" + index);
-            runtime.putBalance(new BalanceRuntime(1001, assetId, 1, 0));
+            runtime.putBalance(new AccountBalance(1001, assetId, 1, 0));
         }
 
-        assertThat(RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false).tooLarge()).isTrue();
+        assertThat(CoreQueryService.StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false).tooLarge()).isTrue();
     }
 }

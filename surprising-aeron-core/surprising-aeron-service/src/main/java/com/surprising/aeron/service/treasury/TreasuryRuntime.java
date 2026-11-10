@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.treasury;
 
-import com.surprising.aeron.service.core.change.RuntimeChangeBuffer;
+import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.settlement.FundsPosting;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.Arrays;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
@@ -29,7 +29,7 @@ public final class TreasuryRuntime {
     /** 按稠密币对编号索引的 volatile 发布单元数组，扩容只复制单元引用，旧读者仍见同一单元。 */
     private volatile SettlementStatusCell[] settlementStates = new SettlementStatusCell[8];
     /** 当前范围首次写入资产的连续原语键索引，值列不用，槽号对应七列前值。 */
-    private final RuntimeChangeBuffer<Void> assetChanges = new RuntimeChangeBuffer<>();
+    private final StateChangeBuffer<Void> assetChanges = new StateChangeBuffer<>();
     /** 对应捕获槽的首个手续费前值。 */
     private long[] feeBefore = new long[8];
     /** 对应捕获槽的首个保险余额前值。 */
@@ -352,19 +352,19 @@ public final class TreasuryRuntime {
         for (/* 当前资产捕获列或返回页的有效原语下标。 */ int index = 0; index < assetChanges.size(); index++) {
             // 本次变化槽对应的资产编号。
             int assetId = (int) assetChanges.keyAt(index);
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE,
+            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.FEE,
                     Math.subtractExact(feeBalances.get(assetId), feeBefore[index]));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE,
+            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.INSURANCE,
                     Math.subtractExact(insuranceBalances.get(assetId), insuranceBefore[index]));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.DEFICIT,
+            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.DEFICIT,
                     Math.negateExact(Math.subtractExact(insuranceDeficits.get(assetId), deficitBefore[index])));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.LIQUIDATION_FEE,
+            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.LIQUIDATION_FEE,
                     Math.subtractExact(liquidationFeeBalances.get(assetId), liquidationFeeBefore[index]));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FUNDING_RESIDUAL,
+            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.FUNDING_RESIDUAL,
                     Math.subtractExact(fundingResidualBalances.get(assetId), fundingResidualBefore[index]));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.ROUNDING_RESIDUAL,
+            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.ROUNDING_RESIDUAL,
                     Math.subtractExact(roundingResidualBalances.get(assetId), roundingResidualBefore[index]));
-            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.CLEARING_PNL,
+            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.CLEARING_PNL,
                     Math.subtractExact(clearingPnlBalances.get(assetId), clearingPnlBefore[index]));
         }
     }

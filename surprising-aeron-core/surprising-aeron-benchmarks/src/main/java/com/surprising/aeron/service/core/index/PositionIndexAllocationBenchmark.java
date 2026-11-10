@@ -3,10 +3,10 @@ package com.surprising.aeron.service.core.index;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.change.RuntimePositionChangeBuffer;
+import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.position.PositionRuntime;
+import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
@@ -20,12 +20,12 @@ public class PositionIndexAllocationBenchmark {
     @Param({"RESIZE", "REVERSE", "CLOSE_REOPEN"}) public String transition;
     private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
-    private PositionRuntime source;
+    private Position source;
     private RuntimeFactIndexes indexes;
     private OpenInterestIndex openInterest;
     private AdlPositionIndex adl;
     private long generation, previousQuantity;
-    private final RuntimePositionChangeBuffer positions = new RuntimePositionChangeBuffer();
+    private final StateChangeBuffer.Positions positions = new StateChangeBuffer.Positions();
 
     @Setup public void setup() {
         var state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
@@ -39,7 +39,7 @@ public class PositionIndexAllocationBenchmark {
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
         int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
-        source = new PositionRuntime(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
+        source = new Position(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
                 instrument, 2, 100, 200, 0, 20);
         openInterest = new OpenInterestIndex(state);
         adl = new AdlPositionIndex(state, identities);

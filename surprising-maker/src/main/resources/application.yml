@@ -58,23 +58,15 @@ management:
         http.server.requests: 10ms, 50ms, 100ms, 200ms, 500ms, 1s, 2s
 
 surprising:
-  price:
-    consumer:
-      bootstrap-servers: localhost:9092
-      product-line: ${PRODUCT_LINE}
-      group-id: surprising-market-maker-mark-price-${HOSTNAME:${random.uuid}}
-      max-age: 3s
-      allowed-future-skew: 1s
-      concurrency: ${PRICE_CONSUMER_CONCURRENCY:1}
-      max-poll-records: 500
-      required-instrument-ids: ${PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS:}
+  realtime:
+    enabled: ${REALTIME_ENABLED:true}
+    directory: ${AERON_DIR:/dev/shm/aeron-surprising}
+    channel: ${SURPRISING_MAKER_UDP_CHANNEL:aeron:udp?endpoint=127.0.0.1:40130}
+    stream: ${SURPRISING_MAKER_UDP_STREAM:2103}
   market-maker:
     infrastructure:
       product-line: ${PRODUCT_LINE}
       node-id: ${MM_NODE_ID:}
-      kafka:
-        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-        instrument-snapshot-group-id: surprising-market-maker-instrument-snapshot-v1
     # 单实例；业务配置与策略由 YAML 初始化，后台热更新只保留在当前进程。
     engine:
       enabled: ${MM_ENGINE_ENABLED:false}

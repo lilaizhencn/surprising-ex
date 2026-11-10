@@ -1,7 +1,9 @@
 package com.surprising.aeron.model;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreMarginMode;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 
 /**
  * 用户杠杆配置的查找键，按用户、合约和全仓或逐仓模式区分，防止不同保证金模式共用一项设置。
@@ -16,7 +18,7 @@ public record CoreLeverageKey(long userId, String instrumentId, CoreMarginMode m
      * 规范合约编号，并要求用户编号和保证金模式有效。
      */
     public CoreLeverageKey {
-        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
+        instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         if (userId <= 0 || marginMode == null) {
             throw new IllegalArgumentException("invalid leverage key");
         }

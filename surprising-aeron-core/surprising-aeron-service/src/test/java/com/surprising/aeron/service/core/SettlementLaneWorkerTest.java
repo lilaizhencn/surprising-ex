@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
-import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
+import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
@@ -27,7 +27,7 @@ class SettlementLaneWorkerTest {
         var completed = new CountDownLatch(8);
         // 控制首任务退出的门闩，保证后续队列能在确定边界填充
         var release = new CountDownLatch(1);
-        try (/* 本例真实账户工作对象，按当前资源或 finally 边界关闭 */ var worker = new SettlementLaneWorker("ledger-input", new AccountLaneState(0, 8), 8)) {
+        try (/* 本例真实账户工作对象，按当前资源或 finally 边界关闭 */ var worker = new SettlementLaneWorker("ledger-input", new AccountPartition(0, 8), 8)) {
             try {
                 // 确认首任务已经进入并占住工作线程的门闩
                 var entered = new CountDownLatch(1);
@@ -49,7 +49,7 @@ class SettlementLaneWorkerTest {
                      * 要求本准入首先执行，记录顺序并减少本轮完成门闩。
                      * @param lane 该模拟准入任务实际执行时所属的账户 Lane
                      */
-                    @Override public void execute(AccountLaneState lane) {
+                    @Override public void execute(AccountPartition lane) {
                         if (executed.getAndIncrement() != 0) throw new AssertionError("input admission reordered");
                         completed.countDown();
                     }
@@ -89,7 +89,7 @@ class SettlementLaneWorkerTest {
         // 反射创建的容量八事件环，不执行事件业务内容
         Object ring = constructor.newInstance(8);
         // 私有环发布方法的反射入口
-        var publish = type.getDeclaredMethod("publish", MatcherSettlementEvent.class);
+        var publish = type.getDeclaredMethod("publish", TradeSettlement.class);
         // 私有环取走方法的反射入口
         var poll = type.getDeclaredMethod("poll");
         // 私有环深度采样方法的反射入口
@@ -104,7 +104,7 @@ class SettlementLaneWorkerTest {
         // 保存反射推进线程原异常的原子引用
         var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         // 仅占据环引用槽的空结算事件，本例不执行或验证其载荷
-        var event = new MatcherSettlementEvent();
+        var event = new TradeSettlement();
         // 同一线程反复 publish 与 poll，测试线程同时采样深度
         Thread advancing = Thread.ofPlatform().start(() -> {
             started.countDown();
@@ -142,7 +142,7 @@ class SettlementLaneWorkerTest {
         // 本例构造或捕获的原故障，按所在场景传播或转为测试失败
         var failure = new IllegalStateException("lane task failed");
         // 本例真实账户工作对象，按当前资源或 finally 边界关闭
-        var worker = new SettlementLaneWorker("failure", new AccountLaneState(0, 8), 8,
+        var worker = new SettlementLaneWorker("failure", new AccountPartition(0, 8), 8,
                 /* 故障发布器收到的原 Throwable，保存后通知测试线程 */ value -> { signal.compareAndSet(null, value); announced.countDown(); });
         try {
             worker.submit(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> { throw failure; });
@@ -165,7 +165,7 @@ class SettlementLaneWorkerTest {
         // 确认故障回调已进入的门闩，最终完整收尾仍等待 close
         var reported = new CountDownLatch(1);
         // 本例真实账户工作对象，按当前资源或 finally 边界关闭
-        var worker = new SettlementLaneWorker("fatal", new AccountLaneState(0, 8), 8, /* 发布器收到的原故障，本回调随后故意抛出报告异常 */ problem -> {
+        var worker = new SettlementLaneWorker("fatal", new AccountPartition(0, 8), 8, /* 发布器收到的原故障，本回调随后故意抛出报告异常 */ problem -> {
             reported.countDown();
             throw reportingFailure;
         });
@@ -186,7 +186,7 @@ class SettlementLaneWorkerTest {
     @Test
     void controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease() throws Exception {
         // 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容
-        var lane = new AccountLaneState(0, 8);
+        var lane = new AccountPartition(0, 8);
         try (/* 本例真实账户工作对象，按当前资源或 finally 边界关闭 */ var worker = new SettlementLaneWorker("handoff", lane, 8)) {
             for (/* 本例第几轮真实账户所有权交接，从一到八 */ long epoch = 1; epoch <= 8; epoch++) {
                 // 确认首任务已经进入并占住工作线程的门闩

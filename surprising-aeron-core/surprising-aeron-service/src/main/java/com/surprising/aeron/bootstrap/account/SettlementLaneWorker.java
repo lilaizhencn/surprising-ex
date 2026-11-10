@@ -1,8 +1,10 @@
 package com.surprising.aeron.bootstrap.account;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.config.TradingCpuAffinity;
-import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
+import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import lombok.Getter;
@@ -32,7 +34,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
          * 在本工作线程拥有账户时执行一条已就绪任务，完成交接由任务自身负责。
          * @param lane 任务执行的唯一所属账户 Lane
          */
-        void execute(AccountLaneState lane);
+        void execute(AccountPartition lane);
         /**
          * 判断普通或准入任务需要的账本输入是否已到齐，默认就绪；已经入队不等于可以执行。
          */
@@ -52,7 +54,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
     /** 独立准入邮箱下标掩码。 */
     private final int admissionIndexMask;
     /** 本工作线程唯一拥有的账户 Lane。 */
-    private final AccountLaneState lane;
+    private final AccountPartition lane;
     /**  构造时启动的实际 LaneThread，始终带有所属账户引用。 借出实际账户工作线程引用，供生命周期及诊断使用。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -83,7 +85,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param lane 任务执行的唯一所属账户 Lane
      * @param requestedCapacity 所需正值邮箱容量，构造时向上取二次幂，溢出报错
      */
-    public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity) {
+    public SettlementLaneWorker(String role, AccountPartition lane, int requestedCapacity) {
         this(role, lane, requestedCapacity, /* 默认构造不向外发布故障时忽略的原异常参数 */ ignored -> { });
     }
 
@@ -94,7 +96,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param requestedCapacity 所需正值邮箱容量，构造时向上取二次幂，溢出报错
      * @param failurePublisher 必须存在的原故障发布回调
      */
-    public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
+    public SettlementLaneWorker(String role, AccountPartition lane, int requestedCapacity,
                          java.util.function.Consumer<Throwable> failurePublisher) {
         this(role, lane, requestedCapacity, failurePublisher, 1);
     }
@@ -107,7 +109,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param failurePublisher 必须存在的原故障发布回调
      * @param matcherShardCount Matcher 分片正数量，每片建立一个独占生产的结算环
      */
-    public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
+    public SettlementLaneWorker(String role, AccountPartition lane, int requestedCapacity,
                          java.util.function.Consumer<Throwable> failurePublisher,
                          int matcherShardCount) {
         this(role, lane, requestedCapacity, failurePublisher, matcherShardCount,
@@ -123,7 +125,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param matcherShardCount Matcher 分片正数量，每片建立一个独占生产的结算环
      * @param affinity 工作线程使用的 CPU 亲和配置
      */
-    public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
+    public SettlementLaneWorker(String role, AccountPartition lane, int requestedCapacity,
             java.util.function.Consumer<Throwable> failurePublisher, int matcherShardCount,
             TradingCpuAffinity affinity) {
         this.failurePublisher = java.util.Objects.requireNonNull(failurePublisher);
@@ -226,7 +228,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param matcherShard 本事件生产者唯一所属的 Matcher 分片下标
      * @param event 已经准备就绪并在消费结束前保持有效的结算事件
      */
-    public long publishMatcherSettlement(int matcherShard, MatcherSettlementEvent event) {
+    public long publishMatcherSettlement(int matcherShard, TradeSettlement event) {
         if (event == null || !event.readyForLane()
                 || matcherShard < 0 || matcherShard >= matcherSettlementRings.length)
             throw new IllegalArgumentException("invalid Matcher settlement publication");
@@ -330,7 +332,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     cachedProducerSeq = producerSequence.value;
                 }
                 // 本轮选择的可空直接结算事件
-                MatcherSettlementEvent direct = peekMatcherSettlement();
+                TradeSettlement direct = peekMatcherSettlement();
                 // 本轮可空普通队首，与直接结算比较优先级
                 Command main = next < cachedProducerSeq ? commands[(int) next & indexMask] : null;
                 if (direct != null && shouldRunMatcherSettlement(direct, main)) {
@@ -413,7 +415,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param command 要发布、检查或执行的非空合法账户任务
      */
     private static boolean ready(Object command) {
-        return command instanceof MatcherSettlementEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event ? event.readyForLane()
+        return command instanceof TradeSettlement /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event ? event.readyForLane()
                 : ((Command) command).accountReady();
     }
 
@@ -428,14 +430,14 @@ public final class SettlementLaneWorker implements AutoCloseable {
     /**
      * 在每个 Matcher 环队首中选 Core 序号最小的一条；序号相同保留先遇到的分片，不取走事件。
      */
-    private MatcherSettlementEvent peekMatcherSettlement() {
+    private TradeSettlement peekMatcherSettlement() {
         // 当前选中的最早分片队首，尚未从环取走
-        MatcherSettlementEvent selected = null;
+        TradeSettlement selected = null;
         // 当前候选的最小 Core 序号，初始为 long 最大值
         long selectedSequence = Long.MAX_VALUE;
         for (MatcherSettlementRing /* 当前检查或消费的 Matcher 独占生产环 */ ring : matcherSettlementRings) {
             // 当前分片可空队首，非空才参与序号比较
-            MatcherSettlementEvent candidate = ring.peek();
+            TradeSettlement candidate = ring.peek();
             if (candidate == null) continue;
             // 当前候选直接结算的 Core 序号
             long sequence = candidate.coreSequence();
@@ -461,7 +463,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * 按对象身份找到此前选中的分片队首并释放其槽，找不到视为发布协议错误。
      * @param expected 此前从各分片环选中的原事件对象
      */
-    private void pollMatcherSettlement(MatcherSettlementEvent expected) {
+    private void pollMatcherSettlement(TradeSettlement expected) {
         for (MatcherSettlementRing /* 当前检查或消费的 Matcher 独占生产环 */ ring : matcherSettlementRings) {
             if (ring.peek() == expected) {
                 ring.poll();
@@ -476,7 +478,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param direct 各分片队首选出的最早直接结算事件
      * @param main 普通邮箱当前可空队首，用它决定控制优先与业务顺序
      */
-    private static boolean shouldRunMatcherSettlement(MatcherSettlementEvent direct, Command main) {
+    private static boolean shouldRunMatcherSettlement(TradeSettlement direct, Command main) {
         if (main == null) return true;
         // 普通队首已识别的 Core 序号，零表示无序号控制任务
         long mainSequence = commandSequence(main);
@@ -491,12 +493,12 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param command 要发布、检查或执行的非空合法账户任务
      */
     private static long commandSequence(Command command) {
-        if (command instanceof MatcherSettlementEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event) return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.core.change.LaneCommitEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
+        if (command instanceof TradeSettlement /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event) return event.coreSequence();
+        if (command instanceof com.surprising.aeron.service.core.change.AccountPartitionCommit /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
+        if (command instanceof com.surprising.aeron.service.order.OrderBatchProcessor.PlaceBatchAdmissionEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
+        if (command instanceof com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
             return event.coreSequence();
         return 0;
     }
@@ -557,7 +559,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
 
         /** 固定的结算事件引用数组，事件对象生命周期独立于环槽。 */
-        private final MatcherSettlementEvent[] events;
+        private final TradeSettlement[] events;
         /** 外层保证为二次幂的环容量减一。 */
         private final int mask;
 
@@ -566,7 +568,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
          * @param capacity 外层已保证合法的二次幂环容量
          */
         MatcherSettlementRing(int capacity) {
-            events = new MatcherSettlementEvent[capacity];
+            events = new TradeSettlement[capacity];
             mask = capacity - 1;
         }
 
@@ -587,7 +589,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
          * 单 Matcher 生产者检查容量及槽已释放，先放入事件再发布生产位置，返回零起始发布位置。
          * @param event 已经准备就绪并在消费结束前保持有效的结算事件
          */
-        long publish(MatcherSettlementEvent event) {
+        long publish(TradeSettlement event) {
             // 本环当前零起始生产或消费位置，具体写入权归对应一方
             long position = producerPosition;
             if (position - cachedConsumerPosition >= events.length) {
@@ -609,7 +611,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         /**
          * 账户消费者优先使用已见生产上界，必要时刷新后借出队首引用；没有发布项返回空。
          */
-        MatcherSettlementEvent peek() {
+        TradeSettlement peek() {
             // 本环当前零起始生产或消费位置，具体写入权归对应一方
             long position = consumerPosition;
             if (position >= cachedProducerPosition) {

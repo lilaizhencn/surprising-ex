@@ -1,9 +1,11 @@
 package com.surprising.aeron.service.replay;
 
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary;
+
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -19,9 +21,9 @@ public final class CommittedTradeReplay implements AutoCloseable {
     /** 本副本的有界实时捕获队列，最多六万五千五百三十六帧及三十二 MiB 字节预算。 */
     private final RealtimeOutbox outbox = new RealtimeOutbox(65536, 32 * 1024 * 1024);
     /** 仅输出订单投影的本副本实时捕获器。 */
-    private final com.surprising.aeron.service.realtime.state.RealtimeStateCapture capture;
+    private final com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture capture;
     /** 资金费观察器为当前命令暂存的计算完成事实，生成分页后清引用。 */
-    private com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor.FundingResult fundingResult;
+    private com.surprising.aeron.service.funding.FundingSettlementService.FundingResult fundingResult;
     /**  最近一次 apply 的可空资金费分页。 读取最近一次命令生成的可空已提交资金费分页。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -671,9 +673,9 @@ public final class CommittedTradeReplay implements AutoCloseable {
      * 要求副本回调工作已结束，再生成当前交易活动摘要。
      * @param now 活动摘要的当前毫秒观测时点
      */
-    public com.surprising.aeron.service.query.state.CommittedTradingActivity currentTradingActivity(long now) {
+    public com.surprising.aeron.service.query.CommittedTradingActivity currentTradingActivity(long now) {
         state.assertClusterCallbackComplete();
-        return com.surprising.aeron.service.query.state.CommittedTradingActivity.capture(state.runtimeState(), state.identities(), now);
+        return com.surprising.aeron.service.query.CommittedTradingActivity.capture(state.runtimeState(), state.identities(), now);
     }
 
     /**

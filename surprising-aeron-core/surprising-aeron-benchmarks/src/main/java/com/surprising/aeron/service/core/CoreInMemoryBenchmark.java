@@ -85,18 +85,24 @@ public final class CoreInMemoryBenchmark {
                 source, source == CommandSource.OPERATIONS ? 9 : 7, sourceSequence, USER_ID,
                 1_000, correlationId), payload);
         int pendingBefore = state.pendingMatching().size();
-        ResponseStatus status = state.apply(message).status();
+        CoreResponse initial = state.apply(message);
+        long directDeadline = System.nanoTime() + 30_000_000_000L;
+        while (state.directCommand.active()) {
+            state.assertHealthy();
+            initial = state.directCommand.poll();
+            if (System.nanoTime() >= directDeadline)
+                throw new IllegalStateException("direct command timed out: " + type);
+            if (initial == null) Thread.onSpinWait();
+        }
+        ResponseStatus status = initial.status();
         if (status != ResponseStatus.APPLIED && status != ResponseStatus.OK) {
             throw new IllegalStateException("benchmark command rejected type=" + type);
         }
         while (state.pendingMatching().size() > pendingBefore) {
             long sequence = state.pendingMatching().firstSequence();
-            com.surprising.aeron.service.matcher.MatchingResult matching = null;
             long deadline = System.nanoTime() + 30_000_000_000L;
-            while (matching == null && System.nanoTime() < deadline) {
-                matching = BenchmarkMatchingAwait.takeMatchingResult(state, sequence);
-                if (matching == null) Thread.onSpinWait();
-            }
+            com.surprising.aeron.service.matcher.OrderMatchingResult matching =
+                    BenchmarkMatchingAwait.awaitMatchingResult(state, sequence, 30_000_000_000L);
             if (matching == null) throw new IllegalStateException("benchmark matching timed out");
             CoreResponse completed = null;
             while (completed == null && System.nanoTime() < deadline) {

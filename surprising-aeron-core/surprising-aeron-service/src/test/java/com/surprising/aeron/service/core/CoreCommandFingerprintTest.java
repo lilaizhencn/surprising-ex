@@ -105,7 +105,7 @@ class CoreCommandFingerprintTest {
                 if (System.nanoTime() >= deadline) throw new AssertionError("funds command did not complete");
             }
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.resultLedger.get(id).fingerprint()).isSameAs(fingerprint);
+            assertThat(state.resultLedger().get(id).fingerprint()).isSameAs(fingerprint);
             try (/* 从原快照恢复的独立交易运行时 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
                 assertThat(CoreTestCompletion.applyAsynchronously(restored, message).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 // 同一 UUID 改成不同余额增量的冲突消息

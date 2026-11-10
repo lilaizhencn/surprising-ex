@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.settlement;
 
-import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.*;
+
+import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.config.LaneTopology;
@@ -15,10 +17,10 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.matcher.CoreMatchingResult;
-import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
+import com.surprising.aeron.service.matcher.OrderMatchingResult;
+import com.surprising.aeron.service.matcher.OrderBookEngine;
 import com.surprising.aeron.service.matcher.MatcherEventFixtures;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.Order;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
@@ -224,10 +226,10 @@ class MatcherSettlementPlanTest {
     @Test
     void settlementPublicationFailureReachesOwnerInsteadOfLeavingDeadMatcher() {
         try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime();
-             /* 用例实际启动并自动关闭的 Matcher 管线，用于检查故障传播。 */ var pipeline = new com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline(0, 256, null)) {
+             /* 用例实际启动并自动关闭的 Matcher 管线，用于检查故障传播。 */ var pipeline = new com.surprising.aeron.service.matcher.OrderBookRouter.ShardPipeline(0, 256, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
             // 当前需要预约、发布、收集并回收的撮合结算事件。
-            var event = new MatcherSettlementEvent();
+            var event = new TradeSettlement();
             event.batchStorage(1);
             event.prepareDirect(1, 1, 0, 0, new java.util.UUID(1, 2), 0,
                     runtime, new RuntimeIdentityRegistry(), 1, List.of(), null);
@@ -237,7 +239,7 @@ class MatcherSettlementPlanTest {
             }, 0);
             pipeline.submit(1, () -> {
                 event.failDirect(new IllegalArgumentException("command failed"));
-                return new CoreMatchingResult(false, "REJECTED");
+                return new OrderMatchingResult.Control(false, "REJECTED");
             }, event);
             assertThatThrownBy(() -> {
                 // 单调时钟计算的有界等待截止点，超时让测试失败。
@@ -248,7 +250,7 @@ class MatcherSettlementPlanTest {
                 }
                 throw new AssertionError("Owner was not notified of publication failure");
             }).isInstanceOf(IllegalStateException.class).hasMessage("settlement publication failed");
-            assertThatThrownBy(() -> pipeline.submit(2, () -> new CoreMatchingResult(true, "SUCCESS"), null))
+            assertThatThrownBy(() -> pipeline.submit(2, () -> new OrderMatchingResult.Control(true, "SUCCESS"), null))
                     .isInstanceOf(IllegalStateException.class).hasMessage("settlement publication failed");
         }
     }
@@ -378,7 +380,7 @@ class MatcherSettlementPlanTest {
     /** 实际 Matcher 连续处理两笔买单，共享卖单只能成交五个单位；这里不执行账户结算。 */
     @Test
     void nativeMatcherLimitsSharedMakerAcrossConsecutiveItemsBeforeLaneApplication() {
-        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+        try (var adapter = new OrderBookEngine()) {
             DirectMatcherTestInputs.placeDirect(adapter, 20,
                     DirectMatcherTestInputs.order(
                             ProductLine.SPOT, 10, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT,
@@ -413,7 +415,7 @@ class MatcherSettlementPlanTest {
             while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
             var taker = order(11, takerUser, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(taker);
-            var slot = new MatcherSettlementPlan();
+            var slot = new TradeSettlement.Plan();
             var result = nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                     List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false)));
             slot.buildDirectNative(1, taker, instrument(), result, runtime);
@@ -452,7 +454,7 @@ class MatcherSettlementPlanTest {
             var taker = order(11, takerUser, symbol, CoreOrderSide.BUY, 20);
             var events = new java.util.ArrayList<MatcherResult.MatcherEvent>();
             for (int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10, 20, 100, 1, false, false));
-            var slot = new MatcherSettlementPlan();
+            var slot = new TradeSettlement.Plan();
             slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1, events), runtime);
             int makerLane = topology.accountLaneId(20), count = 0;
             for (int event = slot.firstMatcherEvent(makerLane); event >= 0; event = slot.nextMatcherEvent(event, makerLane)) count++;
@@ -474,7 +476,7 @@ class MatcherSettlementPlanTest {
             int symbol = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
-            var event = new MatcherSettlementEvent();
+            var event = new TradeSettlement();
             var storage = event.batchStorage(20);
             long userId = 21;
             long laneMask = runtime.topology().accountLaneMask(userId);
@@ -503,7 +505,7 @@ class MatcherSettlementPlanTest {
             var identities = new RuntimeIdentityRegistry();
             int symbol = identities.symbolId("1");
             var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
-            var slot = new MatcherSettlementPlan();
+            var slot = new TradeSettlement.Plan();
             slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                     List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), runtime);
             long[] cancellations = {12};
@@ -536,7 +538,7 @@ class MatcherSettlementPlanTest {
         try (var runtime = new TradingAccountRuntime()) {
             var identities = new RuntimeIdentityRegistry();
             int symbol = identities.symbolId("1");
-            var slot = new MatcherSettlementPlan();
+            var slot = new TradeSettlement.Plan();
             slot.buildDirectNative(1, order(11, 21, symbol, CoreOrderSide.BUY, 3), instrument(),
                     nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                             List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), runtime);
@@ -551,7 +553,7 @@ class MatcherSettlementPlanTest {
     @Test
     void primitiveOrderPrefixTracksClearAndReuse() {
         try (var runtime = new TradingAccountRuntime()) {
-            var slot = new MatcherSettlementPlan();
+            var slot = new TradeSettlement.Plan();
             slot.buildDirectNativeCancellation(1, 21, 11,
                     nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), runtime);
             assertThat(slot.orderCount()).isOne();
@@ -569,7 +571,7 @@ class MatcherSettlementPlanTest {
     @Test
     void acceptedCancellationsAppendInExecutionOrderAndIgnoreUnusedTail() {
         try (var runtime = new TradingAccountRuntime()) {
-            var slot = new MatcherSettlementPlan();
+            var slot = new TradeSettlement.Plan();
             slot.buildDirectNativeCancellation(1, 21, 11,
                     nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), runtime);
             slot.acceptedReplacementCancellation(10);
@@ -597,7 +599,7 @@ class MatcherSettlementPlanTest {
             var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(maker);
             runtime.putOrder(taker);
-            var slot = new MatcherSettlementPlan();
+            var slot = new TradeSettlement.Plan();
             assertThatThrownBy(() -> slot.buildDirectNative(1, taker, instrument(),
                     nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                             List.of(MatcherEventFixtures.trade(10, 20, 100, 4, false, false))), runtime))
@@ -625,8 +627,8 @@ class MatcherSettlementPlanTest {
      * @param side 测试订单买卖方向
      * @param qty 测试订单总量及初始剩余量
      */
-    private static OrderRuntime order(long id,long user,int instrumentId,CoreOrderSide side,long qty) {
-        return new OrderRuntime(id,user,instrumentId,instrument(),side,100,false,CoreMarginMode.CROSS,CorePositionSide.NET,
+    private static Order order(long id,long user,int instrumentId,CoreOrderSide side,long qty) {
+        return new Order(id,user,instrumentId,instrument(),side,100,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                 CoreOrderType.LIMIT,CoreTimeInForce.GTC,0,0,qty,0,qty,false);
     }
     /**
@@ -648,7 +650,7 @@ class MatcherSettlementPlanTest {
     private static CoreInstrument instrument() {
         return INSTRUMENT;
     }
-    private static boolean collect(TradingAccountRuntime runtime, MatcherSettlementEvent event) {
+    private static boolean collect(TradingAccountRuntime runtime, TradeSettlement event) {
         if (!runtime.pollMatcherFinancialSettlement(event)) return false;
         return runtime.collectMatcherSettlement(event, null, null, null);
     }

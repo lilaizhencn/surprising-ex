@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core.change;
 
+import com.surprising.aeron.service.order.*;
+
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -8,8 +10,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class RuntimeChangeBufferTest {
     @Test void reservationPublicationRemainsStableAcrossLiveUpdatesAndReuse() {
-        var reservations = new RuntimeReservationChangeBuffer();
-        var live = new com.surprising.aeron.service.order.state.ReservationRuntime(11, 7, 0,
+        var reservations = new StateChangeBuffer.Reservations();
+        var live = new com.surprising.aeron.service.order.OrderFundsReservation(11, 7, 0,
                 com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 100, 0, 0, 10).laneValue();
         reservations.putLive(11, live);
         for (int id = 12; id < 50; id++) reservations.putLive(id, null);
@@ -36,7 +38,7 @@ class RuntimeChangeBufferTest {
     @Test
     void largeInlineReservationDeletesClearAcrossFrozenAndLiveReuse() {
         // 当前测试独立使用的普通变化缓冲或预留专用缓冲。
-        var buffer = new RuntimeReservationChangeBuffer();
+        var buffer = new StateChangeBuffer.Reservations();
         for (int /* 本轮长短变化的有效条目数量，部分数量超过初始发布槽容量。 */ count : new int[]{0, 1, 8, 9, 256, 1024, 3}) {
             for (/* 本轮加入或核对的连续变化下标。 */ int index = 0; index < count; index++) buffer.putLive(index + 1, null);
             assertThat(buffer.size()).isEqualTo(count);
@@ -54,7 +56,7 @@ class RuntimeChangeBufferTest {
     @Test
     void drainPreservesNullDeletesAndOverwritesAndReleasesReferencesAcrossReuse() throws Exception {
         // 当前测试独立使用的普通变化缓冲或预留专用缓冲。
-        var buffer = new RuntimeChangeBuffer<String>();
+        var buffer = new StateChangeBuffer<String>();
         // 记录消费者收到的键和值，包含显式 null 删除通知。
         var published = new java.util.HashMap<Long, String>();
         for (/* 当前清理和复用的测试轮次。 */ int round = 0; round < 64; round++) {
@@ -69,7 +71,7 @@ class RuntimeChangeBufferTest {
             assertThat(buffer.isEmpty()).isTrue();
             assertThat(buffer.indexOf(0)).isEqualTo(-1);
             // 读取基础值引用数组的反射字段。
-            var field = RuntimeChangeBuffer.class.getDeclaredField("values");
+            var field = StateChangeBuffer.class.getDeclaredField("values");
             field.setAccessible(true);
             assertThat((Object[]) field.get(buffer)).containsOnlyNulls();
         }
@@ -85,7 +87,7 @@ class RuntimeChangeBufferTest {
     @Test
     void matchesInsertionOrderedMapAcrossGrowthOverwriteNullAndReuse() {
         // 正在与插入有序标准 Map 对照的变化缓冲。
-        var actual = new RuntimeChangeBuffer<String>();
+        var actual = new StateChangeBuffer<String>();
         // 保持首次插入顺序的标准 Map 参照。
         var expected = new java.util.LinkedHashMap<Long, String>();
         // 使用固定种子创建的伪随机键生成器，使测试可重复。

@@ -11,7 +11,6 @@ public class MarketMakerConfiguration {
     MarketMakerProperties marketMakerProperties(MarketMakerInfrastructureProperties infrastructure) {
         var properties = new MarketMakerProperties();
         properties.setProductLine(infrastructure.getProductLine());
-        properties.setKafka(infrastructure.getKafka());
         properties.getEngine().setNodeId(infrastructure.getNodeId());
         return properties;
     }

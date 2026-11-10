@@ -62,6 +62,7 @@ public class AuthPersistenceService {
                 rolePermissionRepository, loginLogRepository, mfaRepository, refreshSessionRepository, null);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
     public AuthPersistenceService(GatewayUserRepository userRepository,
                                   GatewayRoleRepository roleRepository,
                                   GatewayPermissionRepository permissionRepository,

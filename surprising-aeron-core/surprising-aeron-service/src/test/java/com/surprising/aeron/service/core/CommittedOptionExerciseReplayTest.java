@@ -64,7 +64,7 @@ class CommittedOptionExerciseReplayTest {
                         "1", underlying, 1, 1, 0, 10)));
                 try(/* 从买方结算后的回放快照恢复的结果核对运行时 */ var probe=TradingCoreRuntime.fromSnapshot(ProductLine.OPTION,replay.snapshot())) {
                     // 买方本次结算在幂等结果表中的已提交响应
-                    var result=probe.resultLedger.get(command.header().commandId());
+                    var result=probe.resultLedger().get(command.header().commandId());
                     assertThat(result.status()).isEqualTo(ResponseStatus.APPLIED);
                     assertThat(CoreSettlementProgressCodec.decode(result.responseData()).complete()).isTrue();
                 }

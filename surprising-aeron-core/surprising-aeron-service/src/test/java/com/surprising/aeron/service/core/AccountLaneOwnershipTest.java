@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
-import com.surprising.aeron.service.account.AccountLaneState;
+import com.surprising.aeron.service.account.AccountPartition;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -44,7 +44,7 @@ class AccountLaneOwnershipTest {
     @Test
     void workerOwnershipRejectsForeignReadsAndReturnsToColdOwnerAfterClose() throws Exception {
         // 本例原账户状态，启动前登记用户，交接期间由明确拥有者访问
-        var lane = new AccountLaneState(0, 16);
+        var lane = new AccountPartition(0, 16);
         lane.registerUser(7);
         // 所属账户线程读取完成的门闩
         var done = new CountDownLatch(1);
@@ -93,7 +93,7 @@ class AccountLaneOwnershipTest {
     @Test
     void handoffPausesAdmissionsUntilColdOwnerReleasesTheLane() throws Exception {
         // 本例原账户状态，启动前登记用户，交接期间由明确拥有者访问
-        var lane = new AccountLaneState(0, 16);
+        var lane = new AccountPartition(0, 16);
         lane.registerUser(7);
         try (/* 本例实际账户工作对象，资源退出时关闭 */ var worker = new SettlementLaneWorker("handoff", lane, 16)) {
             worker.requestHandoff(1);

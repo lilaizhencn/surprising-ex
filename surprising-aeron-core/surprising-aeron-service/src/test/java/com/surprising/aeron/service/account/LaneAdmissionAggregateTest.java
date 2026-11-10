@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -8,7 +10,7 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.Order;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.junit.jupiter.api.Test;
@@ -23,7 +25,7 @@ class LaneAdmissionAggregateTest {
      */
     @Test void orderAndReservationChurnRetainsTablesAndUnrelatedLiveState() throws Exception {
         // 本场景由当前线程持有的独立账户 Lane。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         lane.assertOwner();
         // 全程保留的基准订单，用于检查无关订单周转不改变它。
         var held = CoreStateTestFixtures.order(1, 7, 3, 50);
@@ -65,13 +67,13 @@ class LaneAdmissionAggregateTest {
         for (var /* 当前枚举到的净仓、多仓或空仓持仓腿。 */ position : CorePositionSide.values()) for (var /* 当前枚举到的买入或卖出方向。 */ side : CoreOrderSide.values())
             for (var /* 当前枚举到的全仓或逐仓模式。 */ margin : CoreMarginMode.values()) for (boolean /* 当前测试订单是否只减仓。 */ reduce : new boolean[]{false, true}) {
                 // 本场景由当前线程持有的独立账户 Lane。
-                var lane = new AccountLaneState(0, 256);
+                var lane = new AccountPartition(0, 256);
                 lane.assertOwner();
                 // 当前组合的原始订单，稍后直接写回它来模拟恢复数量。
                 var order = order(side, position, margin, reduce);
                 lane.putOrder(order);
                 // 已经选择合约三的复用准入汇总视图。
-                var indexField = AccountLaneState.class.getDeclaredField("admissionOrderIndex");
+                var indexField = AccountPartition.class.getDeclaredField("admissionOrderIndex");
                 indexField.setAccessible(true);
                 var index = indexField.get(lane);
                 // 用于读取索引内部用户分组表的反射字段。
@@ -110,7 +112,7 @@ class LaneAdmissionAggregateTest {
     @Test
     void quantityUpdatePreservesOtherOrdersInTheSameAggregate() {
         // 本场景由当前线程持有的独立账户 Lane。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         lane.assertOwner();
         // 同分组中准备部分成交并结束的第一笔订单。
         var first = order(CoreOrderSide.BUY, CorePositionSide.NET, CoreMarginMode.CROSS, false);
@@ -134,7 +136,7 @@ class LaneAdmissionAggregateTest {
     @Test
     void changedSideAndMarginMoveBetweenScopes() {
         // 本场景由当前线程持有的独立账户 Lane。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         lane.assertOwner();
         lane.putOrder(order(CoreOrderSide.BUY, CorePositionSide.NET, CoreMarginMode.CROSS, false));
         lane.putOrder(order(CoreOrderSide.SELL, CorePositionSide.NET, CoreMarginMode.ISOLATED, true));
@@ -156,8 +158,8 @@ class LaneAdmissionAggregateTest {
      * @param margin 测试订单保证金模式
      * @param reduce 测试订单是否只减仓
      */
-    private static OrderRuntime order(CoreOrderSide side, CorePositionSide position, CoreMarginMode margin, boolean reduce) {
-        return new OrderRuntime(1, 7, 3, CoreStateTestFixtures.runtimeInstrument(), side, 100, reduce, margin, position,
+    private static Order order(CoreOrderSide side, CorePositionSide position, CoreMarginMode margin, boolean reduce) {
+        return new Order(1, 7, 3, CoreStateTestFixtures.runtimeInstrument(), side, 100, reduce, margin, position,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 0, 0, 100, 0, 100, false);
     }
 }

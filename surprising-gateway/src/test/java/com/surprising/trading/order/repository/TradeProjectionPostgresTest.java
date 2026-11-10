@@ -127,7 +127,7 @@ class TradeProjectionPostgresTest {
     private com.surprising.trading.order.service.OrderService service(ProductLine line) {
         var properties = new com.surprising.trading.order.config.TradingOrderProperties();
         properties.getKafka().setProductLine(line);
-        return new com.surprising.trading.order.service.OrderService(properties,null,null,null,null,null,null,repository,null);
+        return new com.surprising.trading.order.service.OrderService(properties,null,null,null,null,null,repository,null);
     }
     private com.surprising.trading.api.model.TradeFillQueryResponse fills(ProductLine line,long user,String instrument,
             Long order,Long start,Long end,int limit,String cursor) {

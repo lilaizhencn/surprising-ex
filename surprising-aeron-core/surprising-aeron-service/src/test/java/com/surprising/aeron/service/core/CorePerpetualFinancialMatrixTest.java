@@ -25,13 +25,12 @@ import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
-import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.adl.RuntimeAdlExecution;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
+import com.surprising.aeron.service.adl.AdlService;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
+import com.surprising.aeron.service.funding.FundingSettlementService;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor;
-import com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution;
+import com.surprising.aeron.service.liquidation.LiquidationService;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
@@ -212,7 +211,7 @@ class CorePerpetualFinancialMatrixTest {
             assertThat(runtime.topology().accountLaneId(USER_ID))
                     .isNotEqualTo(runtime.topology().accountLaneId(SECOND_MAKER_ID));
             // 直接资金费处理返回的支付事实和进度，不是另一个运行时快照
-            RuntimePerpetualFundingProcessor.FundingResult actual =
+            FundingSettlementService.FundingResult actual =
                     RuntimePerpetualFundingFixture.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
                             identities);
 
@@ -263,7 +262,7 @@ class CorePerpetualFinancialMatrixTest {
         runtime.startAccountLanes();
         try {
             // 已派到账户 Lane 的 ADL 可轮询工作
-            var work = RuntimeAdlExecution.begin(null, command, runtime, identities);
+            var work = AdlService.begin(null, command, runtime, identities);
             // 该异步 ADL 工作必须完成的单调时钟五秒期限
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while (!work.getAsBoolean()) {
@@ -305,7 +304,7 @@ class CorePerpetualFinancialMatrixTest {
         try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
             runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 在原 System Ledger 作用域内准备的资金费续步工作
-            var work = RuntimePerpetualFundingProcessor.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
+            var work = FundingSettlementService.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
                     identities);
             LedgerControlTestSupport.await(runtime, work::poll);
             assertThat(work.poll()).isTrue();
@@ -331,7 +330,7 @@ class CorePerpetualFinancialMatrixTest {
         var identities = new RuntimeIdentityRegistry(topology);
         try (var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
             // 本例先完成选页，再激活线程，才能只阻塞资金记账，不把用户选页也挡在满队列后。
-            var work = RuntimePerpetualFundingProcessor.prepare(null, command,
+            var work = FundingSettlementService.prepare(null, command,
                     List.of(USER_ID, SECOND_MAKER_ID), runtime, identities);
             runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             LedgerControlTestSupport.await(runtime, work::poll);
@@ -339,7 +338,7 @@ class CorePerpetualFinancialMatrixTest {
             assertThat(retained.payments()).isEqualTo(expected.payments());
             var settled = LedgerControlTestSupport.commit(runtime, identities, false);
             assertThat(settled).isEqualTo(expected.state());
-            var empty = RuntimePerpetualFundingProcessor.prepare(work,
+            var empty = FundingSettlementService.prepare(work,
                     new ApplyFundingCommand(702, SYMBOL, 100_000), List.of(), runtime, identities);
             assertThat(empty).isSameAs(work);
             LedgerControlTestSupport.await(runtime, empty::poll);
@@ -378,7 +377,7 @@ class CorePerpetualFinancialMatrixTest {
         try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
             runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 按原账户及账本路径准备的可轮询强平执行工作
-            var execution = RuntimeDerivativeLiquidationProcessor.beginExecution(null, execute, List.of(), 0, runtime, identities);
+            var execution = LiquidationService.beginExecution(null, execute, List.of(), 0, runtime, identities);
             LedgerControlTestSupport.await(runtime, execution);
             assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
             // 给保险外部注入的数量，随后按分配政策确定实际覆盖
@@ -392,13 +391,13 @@ class CorePerpetualFinancialMatrixTest {
             // 按政策金额确认保险覆盖的强平结果命令
             var resolve = new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
             expected = reducer.resolveLiquidation(expected, resolve);
-            LedgerControlTestSupport.await(runtime, RuntimeLiquidationResolution.begin(null, resolve, runtime, identities, List.of(1L)));
+            LedgerControlTestSupport.await(runtime, LiquidationService.beginResolution(null, resolve, runtime, identities, List.of(1L)));
             assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
             // 覆盖剩余亏空的 ADL 命令，目标为第二做市用户空头
             var adl = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
                     -QUANTITY, 150, expected.riskState().markPrices().get(SYMBOL).priceSequence(), 5, linearOrInverse(variant, 700, 40_000));
             expected = reducer.executeAdl(expected, adl);
-            var work = RuntimeAdlExecution.begin(null, adl, runtime, identities);
+            var work = AdlService.begin(null, adl, runtime, identities);
             LedgerControlTestSupport.await(runtime, work);
             long completedRevision = runtime.revision();
             assertThat(work.getAsBoolean()).isTrue();
@@ -433,8 +432,8 @@ class CorePerpetualFinancialMatrixTest {
         try (var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
             runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             var requests = actions.stream().map(action ->
-                    new RuntimeDerivativeLiquidationProcessor.ExecutionRequest(action, List.of(), 0)).toList();
-            var work = RuntimeDerivativeLiquidationProcessor.beginExecutionBatch(
+                    new LiquidationService.ExecutionRequest(action, List.of(), 0)).toList();
+            var work = LiquidationService.beginExecutionBatch(
                     requests, batch.liquidationFeeRatePpm(), runtime, identities);
             LedgerControlTestSupport.await(runtime, work);
             assertThat(work.getAsBoolean()).isTrue();
@@ -1319,7 +1318,7 @@ class CorePerpetualFinancialMatrixTest {
                 0, 0, 0, -1, 0);
         // 拒绝或计算溢出前的业务哈希，失败后必须不变
         long hash = opening.businessStateHash();
-        assertThatThrownBy(() -> com.surprising.aeron.service.product.ProductTradingRulesRegistry
+        assertThatThrownBy(() -> com.surprising.aeron.service.product.ProductTradingRules
                 .forProductLine(variant.type().productLine())
                 .requireInstrument(CoreInstrument.from(otherType.productLine(), wrongLine)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -1359,7 +1358,7 @@ class CorePerpetualFinancialMatrixTest {
                 new ExecuteLiquidationCommand(1, liquidationSequence(marked), 90, 0));
 
         // 当前需要检查抵押隔离或统计资金的主用户状态
-        CoreUserState user = ending.users().get(USER_ID);
+        UserAccountSnapshot user = ending.users().get(USER_ID);
         assertThat(user.positions().get(SYMBOL).marginMode()).isEqualTo(variant.marginMode());
         assertThat(user.balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
         assertThat(user.positions().get("2").marginMode()).isEqualTo(CoreMarginMode.CROSS);
@@ -1401,7 +1400,7 @@ class CorePerpetualFinancialMatrixTest {
                 new ExecuteLiquidationCommand(1, liquidationSequence(marked), 90, 0));
 
         // 当前需要检查抵押隔离或统计资金的主用户状态
-        CoreUserState user = ending.users().get(USER_ID);
+        UserAccountSnapshot user = ending.users().get(USER_ID);
         // 本场景已执行或确认后的强平状态，用于检查亏空、费用和后续阶段
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         assertThat(user.balances().get(variant.settleAsset()).availableUnits()).isEqualTo(50);
@@ -1612,7 +1611,7 @@ class CorePerpetualFinancialMatrixTest {
     private TradingCoreState addPosition(TradingCoreState state, Variant variant, long userId, String instrumentId,
                                          long quantity, long entryPrice, long margin, CoreMarginMode marginMode) {
         // 需要新增手工持仓的原用户状态
-        CoreUserState current = state.users().get(userId);
+        UserAccountSnapshot current = state.users().get(userId);
         // 用户该结算资产的原余额，不存在时临时以零余额作为起点
         AssetBalance currentBalance = current.balances().getOrDefault(variant.settleAsset(),
                 new AssetBalance(variant.settleAsset(), 0, 0));
@@ -1628,11 +1627,11 @@ class CorePerpetualFinancialMatrixTest {
                 CorePositionSide.NET, quantity, entryPrice,
                 Math.multiplyExact(Math.absExact(quantity), entryPrice), 0, margin));
         // 替换对应余额或持仓并增加修订后的用户值
-        CoreUserState nextUser = new CoreUserState(state.productLine(), userId,
+        UserAccountSnapshot nextUser = new UserAccountSnapshot(state.productLine(), userId,
                 Math.incrementExact(current.revision()), balances, current.reservations(), positions,
                 current.positionMode());
         // 复制的完整用户表，只替换本次指定用户
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        Map<Long, UserAccountSnapshot> users = new TreeMap<>(state.users());
         users.put(userId, nextUser);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 state.orders(), state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
@@ -1747,16 +1746,16 @@ class CorePerpetualFinancialMatrixTest {
      */
     private TradingCoreState replacePosition(TradingCoreState state, long userId, CorePositionState position) {
         // 需要替换单个持仓的原用户状态
-        CoreUserState current = state.users().get(userId);
+        UserAccountSnapshot current = state.users().get(userId);
         // 复制的用户持仓表，插入本次手工构造或替换的持仓
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
         positions.put(position.key(), position);
         // 替换对应余额或持仓并增加修订后的用户值
-        CoreUserState nextUser = new CoreUserState(current.productLine(), current.userId(),
+        UserAccountSnapshot nextUser = new UserAccountSnapshot(current.productLine(), current.userId(),
                 Math.incrementExact(current.revision()), current.balances(), current.reservations(), positions,
                 current.positionMode());
         // 复制的完整用户表，只替换本次指定用户
-        Map<Long, CoreUserState> users = new TreeMap<>(state.users());
+        Map<Long, UserAccountSnapshot> users = new TreeMap<>(state.users());
         users.put(userId, nextUser);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
                 state.orders(), state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
@@ -1874,7 +1873,7 @@ class CorePerpetualFinancialMatrixTest {
      */
     private long userValue(Row row, TradingCoreState state, long userId) {
         // 当前需要检查抵押隔离或统计资金的主用户状态
-        CoreUserState user = state.users().get(userId);
+        UserAccountSnapshot user = state.users().get(userId);
         if (user == null) return 0;
         // 当前用户结算资产总现金，economic 行在后面继续加未实现盈亏
         long value = CoreStateTestFixtures.totalUnits(user, row.variant().settleAsset());

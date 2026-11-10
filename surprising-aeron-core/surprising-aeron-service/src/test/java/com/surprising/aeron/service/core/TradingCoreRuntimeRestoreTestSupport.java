@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
-import com.surprising.aeron.service.matcher.MatcherSnapshot;
+import com.surprising.aeron.service.matcher.OrderBookEngine;
+import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.result.CommandResultLedger;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.product.api.ProductLine;
@@ -22,10 +22,10 @@ public final class TradingCoreRuntimeRestoreTestSupport {
     }
 
     /** 为独立原生订单簿夹具捕获真实分片模块，不建立第二套生产快照流程。 */
-    public static MatcherSnapshot matcherSnapshot(DeterministicExchangeCoreAdapter adapter,
+    public static OrderBookSnapshot matcherSnapshot(OrderBookEngine adapter,
             long snapshotId, long sequence, long businessStateHash, TradingCoreState state,
             Iterable<com.surprising.aeron.model.CoreOrderState> activeOrders) {
-        var shards = new java.util.ArrayList<DeterministicExchangeCoreAdapter.MatcherShardSnapshot>();
+        var shards = new java.util.ArrayList<OrderBookEngine.MatcherShardSnapshot>();
         try {
             for (int shardId = 0; shardId < adapter.topology().matchingEngineCount(); shardId++)
                 shards.add(adapter.captureShardSnapshot(shardId, snapshotId, sequence, activeOrders));
@@ -54,8 +54,8 @@ public final class TradingCoreRuntimeRestoreTestSupport {
             throw new IllegalArgumentException("matcher snapshot is required for restored open orders");
         }
         // 为无未结束订单夹具构造的 Matcher 快照
-        MatcherSnapshot matcherSnapshot;
-        try (/* 本方法临时持有并自动关闭的确定性撮合适配器 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+        OrderBookSnapshot matcherSnapshot;
+        try (/* 本方法临时持有并自动关闭的确定性撮合适配器 */ OrderBookEngine adapter = new OrderBookEngine()) {
             matcherSnapshot = matcherSnapshot(adapter, 1, appliedCommandCount,
                     snapshotState.businessStateHash(), snapshotState, List.of());
         }
@@ -78,7 +78,7 @@ public final class TradingCoreRuntimeRestoreTestSupport {
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
             Map<TradingCoreRuntime.SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
-            MatcherSnapshot matcherSnapshot) {
+            OrderBookSnapshot matcherSnapshot) {
         // 尚在组装恢复的候选运行时，成功激活后才返回
         TradingCoreRuntime candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount,
                 commandResults, lastSourceSequences, snapshotState, new TerminalStateRetention(),

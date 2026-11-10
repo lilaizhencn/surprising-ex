@@ -13,15 +13,15 @@ import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.account.UserRuntime;
+import com.surprising.aeron.service.account.AccountBalance;
+import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.query.state.RuntimeRiskQueryService;
-import com.surprising.aeron.service.risk.RiskScanCoordinator;
-import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
+import com.surprising.aeron.service.market.MarkPrice;
+import com.surprising.aeron.service.position.Position;
+import com.surprising.aeron.service.query.CoreQueryService;
+import com.surprising.aeron.service.risk.RiskScanner;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -45,7 +45,7 @@ class RuntimeRiskQueryServiceTest {
         for (CorePositionSide side : CorePositionSide.values()) {
             for (int i = 0; i < ratios.length; i++) {
                 // 全仓比例并不等于单行维持保证金/权益，读取等级不能重新估值这两个金额。
-                var hot = new RiskSnapshotRuntime(7, 1, side, 9, 1_000, 20, 100, ratios[i]);
+                var hot = new RiskMarginCalculator.Snapshot(7, 1, side, 9, 1_000, 20, 100, ratios[i]);
                 var cold = new CoreRiskSnapshot(7, "1", side, 9, 1_000, 20, 100, ratios[i]);
                 assertThat(hot.status()).isEqualTo(expected[i]);
                 assertThat(cold.status()).isEqualTo(expected[i]);
@@ -54,7 +54,7 @@ class RuntimeRiskQueryServiceTest {
             }
         }
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                new RiskSnapshotRuntime(7, 1, CorePositionSide.NET, 9, 1_000, 20, 100, -1))
+                new RiskMarginCalculator.Snapshot(7, 1, CorePositionSide.NET, 9, 1_000, 20, 100, -1))
                 .isInstanceOf(IllegalArgumentException.class);
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                 new CoreRiskSnapshot(7, "1", CorePositionSide.NET, 9, 1_000, 20, 100, -1))
@@ -72,7 +72,7 @@ class RuntimeRiskQueryServiceTest {
         // 用户 7 当前合约净持仓的整数键，用来关联该持仓的风险记录。
         long key = position(product, "1", 10, CoreMarginMode.CROSS, 100, 80);
         // 故意不对应当前价格的旧风险记录，查询应重新算结果，但不能回写覆盖它。
-        var old = new RiskSnapshotRuntime(7, ids.symbolId("1"), CorePositionSide.NET,
+        var old = new RiskMarginCalculator.Snapshot(7, ids.symbolId("1"), CorePositionSide.NET,
                 1, 900, 999, 888, 1_000_000);
         runtime.putRiskSnapshot(key, old);
         // 查询前的运行时修订号，即时只读查询后必须保持相同。
@@ -162,11 +162,11 @@ class RuntimeRiskQueryServiceTest {
         // 本用例使用的线性永续产品线。
         var product = ProductLine.LINEAR_PERPETUAL;
         runtime.setMetadata(product, 1);
-        runtime.putUser(new UserRuntime(product, 7, 1, CorePositionMode.ONE_WAY));
+        runtime.putUser(new UserAccount(product, 7, 1, CorePositionMode.ONE_WAY));
         // 固定 BTC 样本中 USDT 结算资产的运行时整数编号。
         // 本测试合约的运行时整数币对编号，持仓和行情以同一编号关联。
         int asset = ids.assetId("USDT"), symbol = ids.symbolId("604");
-        runtime.putBalance(new BalanceRuntime(7, asset, 9_843_770_736_865L, 152_130_614_718L));
+        runtime.putBalance(new AccountBalance(7, asset, 9_843_770_736_865L, 152_130_614_718L));
         // 本持仓的合约与金额精度配置，决定 tick、数量步数如何换成结算金额。
         var instrument = CoreInstrument.from(product, new com.surprising.aeron.protocol.RegisterInstrumentCommand(
                 "604", "BTC", "USDT", "USDT", 100_000, 10_000_000, 100_000_000,
@@ -177,10 +177,10 @@ class RuntimeRiskQueryServiceTest {
         runtime.registerInstrument(instrument);
         // 用户 7 当前合约净持仓的整数键，用来关联该持仓的风险记录。
         long key = ids.positionKey(7, "604");
-        runtime.putPosition(key, new PositionRuntime(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
+        runtime.putPosition(key, new Position(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
                 instrument, 182, 835866, 152127612, 1_688_800_000L, 152_130_614_718L));
-        runtime.putMarkPrice(new MarkPriceRuntime(symbol, instrument, 860931, 437900, 2000));
-        runtime.putRiskSnapshot(key, new RiskSnapshotRuntime(7, symbol, CorePositionSide.NET, 437798,
+        runtime.putMarkPrice(new MarkPrice(symbol, instrument, 860931, 437900, 2000));
+        runtime.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(7, symbol, CorePositionSide.NET, 437798,
                 10_475_817_151_583L, 479_915_800_000L, 78_463_385_000L, 7489));
         // 当前行情下即时重算的单条风险查询结果，与后台扫描缓存分开检查。
         var risk = userRisk().getFirst();
@@ -202,13 +202,13 @@ class RuntimeRiskQueryServiceTest {
     @ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"64,0,64", "64,3,64", "64,430,3440", "64,1000,4096", "512,3,512"})
     void scanBudgetGrowsAndShrinksWithPendingInstruments(int minimum, int pending, int expected) {
-        assertThat(RiskScanCoordinator.adaptiveBudget(minimum, pending)).isEqualTo(expected);
+        assertThat(RiskScanner.adaptiveBudget(minimum, pending)).isEqualTo(expected);
     }
 
     /** 单用户金额断言直接使用现有账户计算入口，并先固定本次市场输入。 */
     private List<CoreRiskSnapshotView> userRisk() {
-        return RuntimeRiskQueryService.userSnapshots(runtime, ids, 7,
-                RuntimeRiskQueryService.MarketInputs.capture(runtime, ids, runtime.instrumentIdsForQuery()));
+        return CoreQueryService.RiskQueries.userSnapshots(runtime, ids, 7,
+                CoreQueryService.RiskQueries.MarketInputs.capture(runtime, ids, runtime.instrumentIdsForQuery()));
     }
 
     /** 汇总断言走真实查询协议，不能为冷测试保留另一份全 Lane 扫描。 */
@@ -223,8 +223,8 @@ class RuntimeRiskQueryServiceTest {
      */
     private void setup(ProductLine product) {
         runtime.setMetadata(product, 1);
-        runtime.putUser(new UserRuntime(product, 7, 1, CorePositionMode.ONE_WAY));
-        runtime.putBalance(new BalanceRuntime(7, ids.assetId(CoreStateTestFixtures.settleAsset(product)), 9000, 1000));
+        runtime.putUser(new UserAccount(product, 7, 1, CorePositionMode.ONE_WAY));
+        runtime.putBalance(new AccountBalance(7, ids.assetId(CoreStateTestFixtures.settleAsset(product)), 9000, 1000));
     }
 
     /**
@@ -247,9 +247,9 @@ class RuntimeRiskQueryServiceTest {
         runtime.registerInstrument(instrument);
         // 用户 7 当前合约净持仓的整数键，用来关联该持仓的风险记录。
         long key = ids.positionKey(7, name);
-        runtime.putPosition(key, new PositionRuntime(7, symbol, ids.assetId(asset), mode, CorePositionSide.NET,
+        runtime.putPosition(key, new Position(7, symbol, ids.assetId(asset), mode, CorePositionSide.NET,
                 instrument, quantity, 100, Math.abs(quantity) * 100, 0, margin));
-        runtime.putMarkPrice(new MarkPriceRuntime(symbol, instrument, mark, 100, 100, 2, 2000));
+        runtime.putMarkPrice(new MarkPrice(symbol, instrument, mark, 100, 100, 2, 2000));
         return key;
     }
 }

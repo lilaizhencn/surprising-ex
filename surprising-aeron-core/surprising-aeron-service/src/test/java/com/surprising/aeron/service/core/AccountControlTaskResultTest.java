@@ -3,8 +3,8 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.AccountControlTask;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.AccountCommandService;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -28,7 +28,7 @@ class AccountControlTaskResultTest {
                 List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, 10_000_000, 100_000, 50_000))), 0, 0, 0, -1, 0));
         var position = new CorePositionState("1", "USDT", CoreMarginMode.ISOLATED, CorePositionSide.NET,
                 10, 100, 1000, 0, 100);
-        var user = new CoreUserState(product, 7, 1, Map.of("USDT", new AssetBalance("USDT", 900, 100)),
+        var user = new UserAccountSnapshot(product, 7, 1, Map.of("USDT", new AssetBalance("USDT", 900, 100)),
                 Map.of(), Map.of("1", position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         var initial = new TradingCoreState(product, 1, Map.of(7L, user), Map.of(), Map.of("1", instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
@@ -38,7 +38,7 @@ class AccountControlTaskResultTest {
                 new LaneTopology(1, lanes, 42, 32, 64, 128))) {
             assertThat(ids.assetId("USDT")).isGreaterThan(127);
             runtime.startAccountLanes();
-            var task = new AccountControlTask();
+            var task = new AccountCommandService();
             var exceedsAvailable = new TransferFundsCommand(91, product, product,
                     product.accountTypeCode(), product.accountTypeCode(), "USDT", 901, "frozen-test", "", 7, 8);
             assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime,

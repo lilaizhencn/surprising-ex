@@ -1,10 +1,12 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.Order;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.*;
 import exchange.core2.core.common.cmd.*;
@@ -24,7 +26,7 @@ public class MatcherTreasuryReceiptBenchmark {
     @Param({"1", "2"}) public int laneCount;
     private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
-    private OrderRuntime original;
+    private Order original;
     private MatcherResult nativeResult;
     private long sequence;
     private final UUID commandId = new UUID(1, 2);
@@ -43,7 +45,7 @@ public class MatcherTreasuryReceiptBenchmark {
                         0, 0, 0, -1, 0));
         runtime.registerInstrument(instrument);
         int symbol = identities.symbolId("1");
-        original = new OrderRuntime(11, 1, symbol, instrument, CoreOrderSide.BUY, 100,
+        original = new Order(11, 1, symbol, instrument, CoreOrderSide.BUY, 100,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, 0, 0, 1, 0, 1, false);
         runtime.putOrder(original);

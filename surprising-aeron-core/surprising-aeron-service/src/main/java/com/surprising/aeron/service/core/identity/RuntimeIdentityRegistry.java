@@ -1,14 +1,16 @@
 package com.surprising.aeron.service.core.identity;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.account.LaneClientIdentities;
+import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.ClientOrderIdRegistry;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.Order;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,7 +31,7 @@ public final class RuntimeIdentityRegistry {
     private LookupScratch lookupScratch() {
         if (Thread.currentThread() == owner) return ownerLookupScratch;
         // 本线程当前所处的账户命令作用域，没有则使用新建的局部探针
-        AccountLaneState lane = clientRuntime == null ? null : clientRuntime.currentLaneCommandScope();
+        AccountPartition lane = clientRuntime == null ? null : clientRuntime.currentLaneCommandScope();
         return lane == null ? new LookupScratch() : lane.identityLookupScratch();
     }
 
@@ -124,13 +126,13 @@ public final class RuntimeIdentityRegistry {
      * 按已绑定运行时和用户定位账户 Lane；尚未绑定时拒绝。取得引用本身不授予跨线程访问权限。
      * @param userId 该身份所属用户
      */
-    private AccountLaneState clientLane(long userId) {
+    private AccountPartition clientLane(long userId) {
         if (clientRuntime == null) throw new IllegalStateException("client identity requires a runtime");
         return clientRuntime.accountLaneForUserReadOnly(userId);
     }
 
     /** 按唯一运行时的固定路由借用客户身份表，读取和写入均遵守 Lane 所有权。 */
-    private LaneClientIdentities clientTable(long userId) {
+    private ClientOrderIdRegistry clientTable(long userId) {
         return clientLane(userId).clientIdentities();
     }
 
@@ -139,7 +141,7 @@ public final class RuntimeIdentityRegistry {
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
      * @param userId 该身份所属用户
      */
-    private LaneClientIdentities clientTable(AccountLaneState lane, long userId) {
+    private ClientOrderIdRegistry clientTable(AccountPartition lane, long userId) {
         lane.assertOwner();
         if (lane.laneId() != clientTopology.accountLaneId(userId)
                 || clientRuntime == null || clientRuntime.accountLane(lane.laneId()) != lane)
@@ -223,7 +225,7 @@ public final class RuntimeIdentityRegistry {
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
      * @param key 待查询、登记或释放的确定性身份长整数键
      */
-    private PositionEntry positionEntry(AccountLaneState lane, long key) {
+    private PositionEntry positionEntry(AccountPartition lane, long key) {
         return positionEntry(lane.identityLookupScratch(), key);
     }
 
@@ -462,9 +464,9 @@ public final class RuntimeIdentityRegistry {
      * @param userId 该身份所属用户
      * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
      */
-    public long prepareClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId) {
+    public long prepareClientKeyInLane(AccountPartition lane, long userId, String clientOrderId) {
         // 当前用户所属 Lane 的客户端身份表
-        LaneClientIdentities table = clientTable(lane, userId);
+        ClientOrderIdRegistry table = clientTable(lane, userId);
         // 当前用户身份的确定性长整数键
         long key = clientKeyOrZero(userId, clientOrderId);
         if (key == 0) return 0;
@@ -491,9 +493,9 @@ public final class RuntimeIdentityRegistry {
      * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
      * @param preparedKey 本次客户端身份准备结果，负号表示新建，绝对值为实际键
      */
-    public void rollbackClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId, long preparedKey) {
+    public void rollbackClientKeyInLane(AccountPartition lane, long userId, String clientOrderId, long preparedKey) {
         // 当前用户所属 Lane 的客户端身份表
-        LaneClientIdentities table = clientTable(lane, userId);
+        ClientOrderIdRegistry table = clientTable(lane, userId);
         if (preparedKey != 0) table.rollback(clientKeyValue(preparedKey), userId, clientOrderId);
     }
 
@@ -512,7 +514,7 @@ public final class RuntimeIdentityRegistry {
      * @param instrument 提供永久标的文本的合约配置
      * @param side 净仓、多头或空头持仓方向
      */
-    public long findPositionKeyValueInLane(AccountLaneState lane, long userId,
+    public long findPositionKeyValueInLane(AccountPartition lane, long userId,
                                     CoreInstrument instrument, CorePositionSide side) {
         lane.assertOwner();
         if (lane.laneId() != clientTopology.accountLaneId(userId)
@@ -536,7 +538,7 @@ public final class RuntimeIdentityRegistry {
         long key = clientKeyOrZero(userId, clientOrderId);
         if (key == 0) return 0;
         // 当前用户所属 Lane 的客户端身份表
-        LaneClientIdentities table = clientTable(userId);
+        ClientOrderIdRegistry table = clientTable(userId);
         return table.find(key, userId, clientOrderId);
     }
 
@@ -546,9 +548,9 @@ public final class RuntimeIdentityRegistry {
      * @param userId 该身份所属用户
      * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
      */
-    public long findClientKeyValueInLane(AccountLaneState lane, long userId, String clientOrderId) {
+    public long findClientKeyValueInLane(AccountPartition lane, long userId, String clientOrderId) {
         // 当前用户所属 Lane 的客户端身份表
-        LaneClientIdentities table = clientTable(lane, userId);
+        ClientOrderIdRegistry table = clientTable(lane, userId);
         // 当前用户身份的确定性长整数键
         long key = clientKeyOrZero(userId, clientOrderId);
         return key == 0 ? 0 : table.find(key, userId, clientOrderId);
@@ -562,7 +564,7 @@ public final class RuntimeIdentityRegistry {
     public String clientOrderId(long userId, long clientKey) {
         if (clientKey == 0) return "";
         // 当前用户所属 Lane 的客户端身份表
-        LaneClientIdentities table = clientTable(userId);
+        ClientOrderIdRegistry table = clientTable(userId);
         return table.name(clientKey, userId);
     }
 
@@ -572,7 +574,7 @@ public final class RuntimeIdentityRegistry {
      * @param userId 该身份所属用户
      * @param clientKey 用户范围的实际客户端身份键，零表示未提供客户端单号
      */
-    public void releaseClientKeyInLane(AccountLaneState lane, long userId, long clientKey) {
+    public void releaseClientKeyInLane(AccountPartition lane, long userId, long clientKey) {
         clientTable(lane, userId).release(clientKey, userId);
     }
 
@@ -678,7 +680,7 @@ public final class RuntimeIdentityRegistry {
      * @param instrumentId 永久数字标的身份；整数重载直接给数值，文本重载使用规范数字文本
      * @param side 净仓、多头或空头持仓方向
      */
-    public long retainPositionInLane(AccountLaneState lane, long key, long userId, String instrumentId,
+    public long retainPositionInLane(AccountPartition lane, long key, long userId, String instrumentId,
                               CorePositionSide side) {
         lane.assertOwner();
         if (clientTopology.accountLaneId(userId) != lane.laneId()
@@ -848,7 +850,7 @@ public final class RuntimeIdentityRegistry {
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
      * @param order 所属 Lane 中的订单，已保存持仓身份键、标的编号和方向
      */
-    public long preparedPositionKey(AccountLaneState lane, OrderRuntime order) {
+    public long preparedPositionKey(AccountPartition lane, Order order) {
         lane.assertOwner();
         // 从当前订单或身份项读出的用户
         long userId = order.userId();
@@ -921,7 +923,7 @@ public final class RuntimeIdentityRegistry {
         int count = 0;
         if (clientRuntime == null) return 0;
         for (int laneIndex = 0; laneIndex < clientRuntime.accountLaneCount(); laneIndex++) {
-            AccountLaneState lane = clientRuntime.accountLane(laneIndex);
+            AccountPartition lane = clientRuntime.accountLane(laneIndex);
             count = Math.addExact(count, lane.clientIdentities().publishedCount());
         }
         return count;

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -8,7 +10,7 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.Order;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
@@ -100,9 +102,9 @@ class LaneAdmissionReuseTest {
     /**
      * 创建由当前线程持有且已登记用户七和八的测试 Lane。
      */
-    private static AccountLaneState lane() {
+    private static AccountPartition lane() {
         // 已绑定当前线程、登记两个用户的测试 Lane。
-        var lane = new AccountLaneState(0, 256);
+        var lane = new AccountPartition(0, 256);
         lane.assertOwner(); lane.registerUser(7); lane.registerUser(8);
         return lane;
     }
@@ -118,9 +120,9 @@ class LaneAdmissionReuseTest {
      * @param reduce 测试订单是否只减仓
      * @param quantity 测试订单初始数量步数
      */
-    private static OrderRuntime order(long id, long user, int symbol, CoreOrderSide side,
+    private static Order order(long id, long user, int symbol, CoreOrderSide side,
             CorePositionSide position, CoreMarginMode margin, boolean reduce, long quantity) {
-        return new OrderRuntime(id, user, symbol, CoreStateTestFixtures.runtimeInstrument(), side, 100,
+        return new Order(id, user, symbol, CoreStateTestFixtures.runtimeInstrument(), side, 100,
                 reduce, margin, position, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 0, 0,
                 quantity, 0, quantity, false);
     }
@@ -137,7 +139,7 @@ class LaneAdmissionReuseTest {
      * @param reduce 预期只减仓剩余数量合计
      * @param count 预期持仓腿及保证金模式订单条数
      */
-    private static void summary(AccountLaneState lane, long user, int symbol, CorePositionSide position,
+    private static void summary(AccountPartition lane, long user, int symbol, CorePositionSide position,
             CoreOrderSide side, CoreMarginMode margin, long pending, long reduce, int count) {
         // 本次 inspect 的复用结果，下一次调用前立即完成三个断言。
         var result = lane.admissionSummary(symbol, user, position, side, margin);

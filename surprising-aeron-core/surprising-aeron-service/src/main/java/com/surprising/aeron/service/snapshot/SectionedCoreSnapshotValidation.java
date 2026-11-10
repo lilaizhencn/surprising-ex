@@ -4,7 +4,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.MatcherSnapshot;
+import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
@@ -78,7 +78,7 @@ final class SectionedCoreSnapshotValidation {
     static void validatePairing(
             HeaderManifest manifest,
             Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
-            MatcherSnapshot matcherSnapshot,
+            OrderBookSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies,
             Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers) {

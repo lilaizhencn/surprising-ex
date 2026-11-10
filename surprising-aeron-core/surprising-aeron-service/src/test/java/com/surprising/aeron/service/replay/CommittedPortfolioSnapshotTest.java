@@ -7,7 +7,7 @@ import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -120,7 +120,7 @@ class CommittedPortfolioSnapshotTest {
         var positions = type == ContractType.SPOT ? Map.<String, CorePositionState>of()
                 : Map.of("604", new CorePositionState("604", settleAsset, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 2, 100, 200, 0, 0));
         // 用户七的权益结果，要求完整且资产 Map 不可修改。
-        var user = new CoreUserState(type.productLine(), 7, 1, Map.of(settleAsset, new AssetBalance(settleAsset, available, locked)), Map.of(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
+        var user = new UserAccountSnapshot(type.productLine(), 7, 1, Map.of(settleAsset, new AssetBalance(settleAsset, available, locked)), Map.of(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 包含标记价、指数和远期价均为一百三十的合成风险状态。
         var risk = new CoreRiskState(Map.of("604", new CoreMarkPriceState("604", 130, 130, 130, 1, markTime)), Map.of(), Map.of(), Map.of(), 1, CoreRiskState.defaultScanControl(), 0);
         return new TradingCoreState(type.productLine(), 1, Map.of(7L, user), Map.of(), Map.of("604", instrument), risk, CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());

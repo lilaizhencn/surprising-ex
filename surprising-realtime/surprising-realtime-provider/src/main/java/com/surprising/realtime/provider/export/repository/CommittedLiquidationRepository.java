@@ -1,7 +1,7 @@
 package com.surprising.realtime.provider.export.repository;
 
-import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
+import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -86,13 +86,13 @@ public class CommittedLiquidationRepository {
         if (!latest.isEmpty()) throw new IllegalStateException("incomplete committed liquidations");
     }
 
-    private static boolean sameIdentity(LiquidationRuntime a, LiquidationRuntime b) {
+    private static boolean sameIdentity(RiskScanner.LiquidationOrder a, RiskScanner.LiquidationOrder b) {
         return a.userId() == b.userId() && a.instrument().instrumentIdValue() == b.instrument().instrumentIdValue()
                 && a.instrument().settleAsset().equals(b.instrument().settleAsset())
                 && a.marginMode() == b.marginMode() && a.positionSide() == b.positionSide();
     }
 
-    private static boolean sameState(LiquidationRuntime a, LiquidationRuntime b) {
+    private static boolean sameState(RiskScanner.LiquidationOrder a, RiskScanner.LiquidationOrder b) {
         return a.signedQuantitySteps() == b.signedQuantitySteps()
                 && a.closeQuantitySteps() == b.closeQuantitySteps()
                 && a.executionPriceTicks() == b.executionPriceTicks() && a.liquidationFeeRatePpm() == b.liquidationFeeRatePpm()

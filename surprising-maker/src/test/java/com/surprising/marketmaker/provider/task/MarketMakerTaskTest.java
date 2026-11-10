@@ -114,12 +114,9 @@ class MarketMakerTaskTest {
         var task = new MarketMakerTask(service, properties, wakeups);
         try {
             task.start(); assertThat(first.await(3, TimeUnit.SECONDS)).isTrue();
-            String payload = mapper.writeValueAsString(new com.surprising.trading.api.model.PublicTradeEvent(
-                    "trade", 1, "604", com.surprising.trading.api.model.OrderSide.BUY, 100, 1, java.time.Instant.now()));
-            String topic = com.surprising.product.api.utils.ProductTopicNames.of(ProductLine.LINEAR_PERPETUAL).matchTradesTopic();
-            wakeups.onTrade(new org.apache.kafka.clients.consumer.ConsumerRecord<>(topic, 0, 1, "653", payload));
+            wakeups.onTrade("653");
             Thread.sleep(100); assertThat(calls.get()).isEqualTo(1);
-            wakeups.onTrade(new org.apache.kafka.clients.consumer.ConsumerRecord<>(topic, 0, 2, "604", payload));
+            wakeups.onTrade("604");
             assertThat(second.await(1, TimeUnit.SECONDS)).isTrue();
         } finally { task.stop(); }
     }

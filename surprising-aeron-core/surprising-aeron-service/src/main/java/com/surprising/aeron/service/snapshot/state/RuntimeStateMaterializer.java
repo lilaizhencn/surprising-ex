@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.snapshot.state;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreMarkPriceState;
@@ -8,10 +10,10 @@ import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.CoreRiskSnapshot;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.risk.*;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
@@ -39,7 +41,7 @@ public final class RuntimeStateMaterializer {
         var runtimeBalances = runtime.balancesForSnapshot();
 
         // 本次导出临时按用户归组的已提交资金预留，避免构造每个用户时重扫全表。
-        Map<Long, Map<Long, OrderReservation>> reservationsByUser = new HashMap<>();
+        Map<Long, Map<Long, OrderFundsReservation.Snapshot>> reservationsByUser = new HashMap<>();
 
         runtime.reservationsForSnapshot().forEachKeyValue((/* 当前预留、订单或客户别名所对应的订单编号。 */ orderId, /* 当前运行时预留值，未完成预约随后从导出中跳过。 */ reservation) -> {
 
@@ -48,7 +50,7 @@ public final class RuntimeStateMaterializer {
                 throw new IllegalStateException("reservation owner is not registered: " + reservation.userId());
             }
             reservationsByUser.computeIfAbsent(reservation.userId(), /* 首次为某用户创建分组时传入的用户编号，当前回调只创建空 Map。 */ ignored -> new HashMap<>())
-                    .put(orderId, new OrderReservation(orderId, identities.instrumentId(reservation.symbolId()),
+                    .put(orderId, new OrderFundsReservation.Snapshot(orderId, identities.instrumentId(reservation.symbolId()),
                             reservation.kind(), identities.asset(reservation.assetId()),
                             reservation.totalReservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
                             reservation.orderQuantitySteps()));
@@ -71,7 +73,7 @@ public final class RuntimeStateMaterializer {
         });
 
         // 本次导出的用户值，按用户编号排序。
-        Map<Long, CoreUserState> users = new TreeMap<>();
+        Map<Long, UserAccountSnapshot> users = new TreeMap<>();
         runtimeUsers.forEachKeyValue((/* 当前被导出用户的编号。 */ userId, /* 该用户原运行时修订号、产品线及账户模式。 */ user) -> {
             // 该用户的运行时余额表，可能不存在或为空。
             var userBalances = runtimeBalances.get(userId);
@@ -91,14 +93,14 @@ public final class RuntimeStateMaterializer {
                 });
             }
             // 预留全表预分组中该用户的条目，缺失时使用空表。
-            Map<Long, OrderReservation> reservationValues = reservationsByUser.get(userId);
+            Map<Long, OrderFundsReservation.Snapshot> reservationValues = reservationsByUser.get(userId);
             // 写入该用户导出值的已提交资金预留表，仍可包含活动订单尚未释放的额度。
-            Map<Long, OrderReservation> reservations = reservationValues == null ? Map.of() : reservationValues;
+            Map<Long, OrderFundsReservation.Snapshot> reservations = reservationValues == null ? Map.of() : reservationValues;
             // 持仓全表预分组中该用户的条目，缺失时使用空表。
             Map<String, CorePositionState> positionValues = positionsByUser.get(userId);
             // 写入该用户导出值的持仓表。
             Map<String, CorePositionState> positions = positionValues == null ? Map.of() : positionValues;
-            users.put(userId, new CoreUserState(user.productLine(), userId,
+            users.put(userId, new UserAccountSnapshot(user.productLine(), userId,
                     Math.subtractExact(user.revision(), runtime.pendingReservations().pendingReservationCount(userId)), balances,
                     reservations, positions, user.positionMode()));
         });

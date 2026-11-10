@@ -72,13 +72,13 @@ class StableOrderIdentityTest {
                     return new CoreCommandOutcome.Terminal(commandResponse(command, "stable-client"));
                 });
 
-        AeronOrderCommandService first = service(aeron, properties);
+        OrderService first = service(aeron, properties);
         first.place(request());
         long firstTimestamp = System.currentTimeMillis();
         while (System.currentTimeMillis() == firstTimestamp) {
             Thread.onSpinWait();
         }
-        AeronOrderCommandService reconstructed = service(aeron, properties);
+        OrderService reconstructed = service(aeron, properties);
         reconstructed.place(request());
 
         ArgumentCaptor<UUID> commandIds = ArgumentCaptor.forClass(UUID.class);
@@ -90,9 +90,10 @@ class StableOrderIdentityTest {
                 .isEqualTo(TradingCommandCodec.decodePlaceOrder(payloads.getAllValues().get(1)).orderId());
     }
 
-    private static AeronOrderCommandService service(OrderAeronGateway aeron, TradingOrderProperties properties) {
-        return new AeronOrderCommandService(aeron, properties,
-                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class));
+    private static OrderService service(OrderAeronGateway aeron, TradingOrderProperties properties) {
+        return new OrderService(properties, null, aeron, null,
+                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class),
+                null, null, null);
     }
 
     private static PlaceOrderRequest request() {

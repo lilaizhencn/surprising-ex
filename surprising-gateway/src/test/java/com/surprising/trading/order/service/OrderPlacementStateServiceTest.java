@@ -19,7 +19,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.surprising.trading.order.config.TradingOrderProperties;
+
 class OrderPlacementStateServiceTest {
+
+    private static OrderService service(OrderAeronGateway aeron) {
+        return new OrderService(new TradingOrderProperties(), null, aeron, null, null, null, null, null);
+    }
 
     @Test
     void closeSelectsSymbolMarginAndSideFromTheSameHedgeSnapshot() {
@@ -31,7 +37,7 @@ class OrderPlacementStateServiceTest {
                 position("1", CoreMarginMode.ISOLATED, CorePositionSide.LONG, 7),
                 position("1", CoreMarginMode.ISOLATED, CorePositionSide.SHORT, 0),
                 position("1", CoreMarginMode.ISOLATED, CorePositionSide.SHORT, -5))));
-        var service = new OrderPlacementStateService(aeron);
+        var service = service(aeron);
 
         var result = service.requireClosePosition(ProductLine.LINEAR_PERPETUAL, 1001, "1",
                 MarginMode.ISOLATED, PositionSide.SHORT);
@@ -47,7 +53,7 @@ class OrderPlacementStateServiceTest {
         when(aeron.userState(1001L)).thenReturn(new CoreUserStateView(
                 ProductLine.LINEAR_PERPETUAL, 1001, 7, CorePositionMode.HEDGE,
                 List.of(), List.of(), List.of()));
-        assertThatThrownBy(() -> new OrderPlacementStateService(aeron).requireClosePosition(
+        assertThatThrownBy(() -> service(aeron).requireClosePosition(
                 ProductLine.LINEAR_PERPETUAL, 1001, "1", null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("positionSide LONG or SHORT is required in HEDGE position mode");
@@ -58,7 +64,7 @@ class OrderPlacementStateServiceTest {
     @Test
     void closeRejectsFlatPositionAndSpotWithoutSubmittingAnything() {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-        var service = new OrderPlacementStateService(aeron);
+        var service = service(aeron);
         assertThatThrownBy(() -> service.requireClosePosition(ProductLine.SPOT, 1001, "1", null, null))
                 .hasMessage("open position not found");
         verifyNoInteractions(aeron);
@@ -79,7 +85,7 @@ class OrderPlacementStateServiceTest {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
         when(aeron.userState(1001L)).thenReturn(new CoreUserStateView(
                 ProductLine.LINEAR_PERPETUAL, 1001L, 7L, List.of(), List.of(), List.of()));
-        OrderPlacementStateService service = new OrderPlacementStateService(aeron);
+        OrderService service = service(aeron);
 
         assertThatThrownBy(() -> service.requireClosePosition(ProductLine.LINEAR_DELIVERY, 1001L,
                 "1", null, null)).hasMessageContaining("product line mismatch");
@@ -88,7 +94,7 @@ class OrderPlacementStateServiceTest {
     @Test
     void missingAeronUserStateFailsClosed() {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-        OrderPlacementStateService service = new OrderPlacementStateService(aeron);
+        OrderService service = service(aeron);
 
         assertThatThrownBy(() -> service.requireClosePosition(ProductLine.LINEAR_PERPETUAL, 1001L,
                 "1", null, null)).hasMessageContaining("Aeron user state not found");

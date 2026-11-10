@@ -1,7 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.order.ClusterCommandWindow;
+import com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -240,7 +242,7 @@ class CoreSelfTradePrefixTest {
      */
     private CoreResponse submit(TradingCoreRuntime core, CoreMessage message) {
         // 仅供这次原消息解码与独立准入准备的短期命令窗口
-        var window = new ClusterCommandWindow();
+        var window = new OrderCommandQueue.IngressWindow();
         // 本条输入是否满足既有窗口内独立撮合准入条件
         boolean independent = core.prepareClusterPipelineScope(message, window);
 

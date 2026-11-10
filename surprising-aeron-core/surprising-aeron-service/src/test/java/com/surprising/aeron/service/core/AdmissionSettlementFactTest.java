@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
@@ -13,12 +15,12 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
-import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
+import com.surprising.aeron.service.market.MarkPrice;
+import com.surprising.aeron.service.order.OrderAdmissionService;
+import com.surprising.aeron.service.order.OrderCommand.PlaceAdmissionEvent;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
@@ -51,7 +53,7 @@ class AdmissionSettlementFactTest {
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
         // 用户七初始一万 USDT、无持仓和订单的冷状态
-        var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
+        var user = new UserAccountSnapshot(ProductLine.LINEAR_PERPETUAL, 7, 1,
                 Map.of("USDT", new AssetBalance("USDT", 10_000, 0)), Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 原资产、标的及持仓身份表
         var ids = new RuntimeIdentityRegistry();
@@ -62,7 +64,7 @@ class AdmissionSettlementFactTest {
             // USDT 的内部资产编号
             // 永久标的一的内部稠密编号
             int symbol = ids.symbolId("1"), asset = ids.assetId("USDT");
-            runtime.putMarkPrice(new MarkPriceRuntime(symbol, instrument, 100, 1, 1_000));
+            runtime.putMarkPrice(new MarkPrice(symbol, instrument, 100, 1, 1_000));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
             // 用于把标的设为资金费处理中状态的原进度值
@@ -79,7 +81,7 @@ class AdmissionSettlementFactTest {
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "fact");
                 // 从池借出的准入事件，账户和 Matcher 借用结束后归还
                 var event = runtime.acquirePlaceAdmission();
-                RuntimeOrderAdmission.prepare(event, runtime, ids, 7, intent, 1_001);
+                OrderAdmissionService.prepare(event, runtime, ids, 7, intent, 1_001);
                 // 用户七所属账户 Lane 下标
                 int laneId = runtime.accountLaneId(7);
                 // 通知测试线程阻塞工作已经进入账户 Lane 的门闩
@@ -89,7 +91,7 @@ class AdmissionSettlementFactTest {
                 try {
                     runtime.dispatchPlaceAdmission(2, 7, event, new UUID(1, 2), captured, asset, ids, 1_001, 2);
                     // 通过反射读取准入事件所保留结算状态的字段
-                    var field = PlaceAdmissionEvent.class.getDeclaredField("settlementStatus");
+                    var field = OrderCommand.PlaceAdmissionEvent.class.getDeclaredField("settlementStatus");
                     field.setAccessible(true);
                     assertThat(field.get(event)).isSameAs(captured);
                     assertThat(event.complete()).isFalse();

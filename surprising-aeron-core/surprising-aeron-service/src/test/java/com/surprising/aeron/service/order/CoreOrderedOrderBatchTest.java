@@ -36,9 +36,8 @@ import com.surprising.aeron.service.core.PipelinedExecutionExtension;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline;
-import com.surprising.aeron.service.matcher.pipeline.MatcherPipelineGroup;
+import com.surprising.aeron.service.market.MarkPrice;
+import com.surprising.aeron.service.matcher.OrderBookRouter;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.OrderAction;
@@ -254,7 +253,7 @@ class CoreOrderedOrderBatchTest {
             boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
             try {
                 if (acquired) runtime.acquireOwnerLaneAccess();
-                runtime.putBalance(new com.surprising.aeron.service.account.BalanceRuntime(
+                runtime.putBalance(new com.surprising.aeron.service.account.AccountBalance(
                         1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
                 // 这里故意破坏测试余额，随后清变更跟踪。
                 // 下一命令应在真实账户算术检查中失败，不能把这次注入当成业务余额调整。
@@ -654,12 +653,12 @@ class CoreOrderedOrderBatchTest {
                         TradingCommandCodec.encodePlaceOrder(place(18_001 + index, "chunk-" + index, 1_000))));
             }
             // 当前 Core 使用的 Matcher 分片管线组
-            MatcherPipelineGroup group = field(state, "matcherPipeline");
+            OrderBookRouter group = field(state, "matcherPipeline");
             // 反射读取管线组内部 shards 数组的字段
-            var shardsField = MatcherPipelineGroup.class.getDeclaredField("shards");
+            var shardsField = OrderBookRouter.class.getDeclaredField("shards");
             shardsField.setAccessible(true);
             // 实际 Matcher 分片工作队列数组
-            var shards = (MatcherCommandPipeline[]) shardsField.get(group);
+            var shards = (OrderBookRouter.ShardPipeline[]) shardsField.get(group);
             // 撤单批次前分片零的提交位置，用差值检查合并片段数
             long[] cursors = field(shards[0], "cursors");
             java.lang.invoke.VarHandle cursorHandle = field(shards[0], "CURSORS");
@@ -1174,7 +1173,7 @@ class CoreOrderedOrderBatchTest {
             // 故障批次第一项已经成功撮合的事实
             var acceptedFirst = awaitMatching(state, fatalSequence);
             // 当前命令原槽持有的批次上下文，等待首项游标实际前进
-            OrderBatchPending activeBatch = state.batches().batch(fatalSequence);
+            OrderBatchProcessor.PendingBatch activeBatch = state.batches().batch(fatalSequence);
             // 首项账户和提交推进的有界等待截止点
             long firstDeadline = System.nanoTime() + 5_000_000_000L;
             while (activeBatch.nextIndex == 0) {
@@ -1188,12 +1187,12 @@ class CoreOrderedOrderBatchTest {
             // 过早标记故障可能挡住该项预留，使后面的断言失去场景前提。
             assertThat(awaitMatching(state, fatalSequence).accepted()).isTrue();
             // 故障批次仍占用的原命令槽，用于检查没有残留可再次消费的完成引用
-            CommandSlot claimedContext = state.pendingMatching().required(fatalSequence);
+            OrderCommand claimedContext = state.pendingMatching().required(fatalSequence);
             // 故障批次首项推进后复制的分片水位，后续故障不能错误覆盖
             long[] matcherAfterFirst = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
             // 测试构造的 EXCHANGE_CORE_FAILURE 结果，用于持续故障断言
-            var fatal = new com.surprising.aeron.service.matcher.CoreMatchingResult(
+            var fatal = new com.surprising.aeron.service.matcher.OrderMatchingResult.Control(
                     false, "EXCHANGE_CORE_FAILURE");
             // 本轮等待捕获的致命分歧异常，故障后仍须返回同一实例
             Throwable divergence = null;
@@ -1763,7 +1762,7 @@ class CoreOrderedOrderBatchTest {
                 }
                 // 当前场景要推进的原批量消息
                 var batch = state.batches().acquireOrderBatchPending(
-                        com.surprising.aeron.service.order.command.OrderBatchKind.AMEND,
+                        com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND,
                         1, 2_000, 3);
                 batch.sequence = 1_000;
                 // 当前待测的批量改单消息或其单项输入
@@ -1790,7 +1789,7 @@ class CoreOrderedOrderBatchTest {
 
                 // 本场景预期被拒绝的输入、Core 响应或批次，具体角色见所在方法
                 var rejected = state.batches().acquireOrderBatchPending(
-                        com.surprising.aeron.service.order.command.OrderBatchKind.AMEND,
+                        com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND,
                         1, 2_001, 4);
                 rejected.sequence = 1_001;
                 rejected.addItem(13_203, 13_201, 13_203, new AmendOrderCommand(
@@ -1822,7 +1821,7 @@ class CoreOrderedOrderBatchTest {
      * @param event 本场景已经派发的替换准入事件，等待完成但不在辅助方法内回收
      */
     private static void awaitBatchAmendAdmission(TradingCoreRuntime state,
-            com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent event) {
+            com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent event) {
         // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
         while (!event.complete()) {
@@ -1900,12 +1899,12 @@ class CoreOrderedOrderBatchTest {
                 // 入口到达时账户线程可能正在修改或扩容订单表。
                 // 测试让任何直接查询都失败，要求路由使用 Owner 已有活动索引。
                 ordersField.set(lanes[index], /* 所有 get 都抛断言的临时空订单表，当前入口只验证路由不执行账户业务，finally 会恢复各 Lane 原表。 */ new org.agrona.collections.Long2ObjectHashMap<
-                        com.surprising.aeron.service.order.state.OrderRuntime>() {
+                        com.surprising.aeron.service.order.Order>() {
                     /**
                      * 任何订单表读取都抛断言，证明当前入口准备路径使用 Owner 活动路由而未调用此表。
                      * @param key 故意禁止的订单表查询键；测试替身不读取它而直接抛断言
                      */
-                    @Override public com.surprising.aeron.service.order.state.OrderRuntime get(long key) {
+                    @Override public com.surprising.aeron.service.order.Order get(long key) {
                         throw new AssertionError("Owner read a Lane order table");
                     }
                 });
@@ -1915,35 +1914,35 @@ class CoreOrderedOrderBatchTest {
                 var single = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_101)), 1001);
                 // 当前普通撤单消息的类型化解码输入
-                var decoded = com.surprising.aeron.service.order.command.DecodedMatchingCommand.decode(single);
+                var decoded = com.surprising.aeron.service.order.OrderCommand.Decoded.decode(single);
                 state.admissions().validatePendingCancel(single, decoded);
-                assertThat(state.admissions().matchingSymbol(CommandSlot.Operation.CANCEL, decoded))
+                assertThat(state.admissions().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.CANCEL, decoded))
                         .isEqualTo("1");
                 // 只用于查原单路由的普通改单消息
                 var amendSingle = command(CoreMessageType.AMEND_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(
                                 13_101, 13_103, "route-amend", 900L, 1L, CoreTimeInForce.GTC, false)), 1001);
-                assertThat(state.admissions().matchingSymbol(CommandSlot.Operation.AMEND,
-                        com.surprising.aeron.service.order.command.DecodedMatchingCommand.decode(amendSingle)))
+                assertThat(state.admissions().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.AMEND,
+                        com.surprising.aeron.service.order.OrderCommand.Decoded.decode(amendSingle)))
                         .isEqualTo("1");
                 // 只用于查原单路由的普通替换消息
                 var replaceSingle = command(CoreMessageType.REPLACE_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeReplaceOrder(new com.surprising.aeron.protocol.ReplaceOrderCommand(
                                 13_101, place(13_103, "route-replace", 900))), 1001);
-                assertThat(state.admissions().matchingSymbol(CommandSlot.Operation.REPLACE,
-                        com.surprising.aeron.service.order.command.DecodedMatchingCommand.decode(replaceSingle)))
+                assertThat(state.admissions().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.REPLACE,
+                        com.surprising.aeron.service.order.OrderCommand.Decoded.decode(replaceSingle)))
                         .isEqualTo("1");
                 // 请求用户尝试撤对方订单的普通消息
                 var foreignSingle = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_102)), 1001);
                 assertThatThrownBy(() -> state.admissions().validatePendingCancel(foreignSingle,
-                        com.surprising.aeron.service.order.command.DecodedMatchingCommand.decode(foreignSingle)))
+                        com.surprising.aeron.service.order.OrderCommand.Decoded.decode(foreignSingle)))
                         .isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
                         .hasMessageContaining("another user");
                 for (/* 重复借用和归还批次的轮数 */ int round = 0; round < 4; round++) {
                     // 只含自有订单的临时撤单批次
                     var own = state.batches().acquireOrderBatchPending(
-                            com.surprising.aeron.service.order.command.OrderBatchKind.CANCEL,
+                            com.surprising.aeron.service.order.OrderBatchProcessor.Kind.CANCEL,
                             1, 2_000, 5);
                     own.addItem(13_101, 0, 0, new CancelOrderCommand(13_101));
                     state.batches().validateOrderBatchIdentity(own, 1001);
@@ -1952,7 +1951,7 @@ class CoreOrderedOrderBatchTest {
 
                     // 混入其他用户订单的临时撤单批次
                     var foreign = state.batches().acquireOrderBatchPending(
-                            com.surprising.aeron.service.order.command.OrderBatchKind.CANCEL,
+                            com.surprising.aeron.service.order.OrderBatchProcessor.Kind.CANCEL,
                             2, 2_000, 5);
                     foreign.addItem(13_101, 0, 0, new CancelOrderCommand(13_101));
                     foreign.addItem(13_102, 0, 0, new CancelOrderCommand(13_102));
@@ -1963,7 +1962,7 @@ class CoreOrderedOrderBatchTest {
 
                     // 当前待测的批量改单消息或其单项输入
                     var amend = state.batches().acquireOrderBatchPending(
-                            com.surprising.aeron.service.order.command.OrderBatchKind.AMEND,
+                            com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND,
                             1, 2_000, 5);
                     amend.addItem(13_103, 13_102, 13_103, new Object());
                     assertThatThrownBy(() -> state.batches().validateOrderBatchIdentity(amend, 1001))
@@ -1973,7 +1972,7 @@ class CoreOrderedOrderBatchTest {
 
                     // 只含缺失订单的临时撤单批次
                     var missing = state.batches().acquireOrderBatchPending(
-                            com.surprising.aeron.service.order.command.OrderBatchKind.CANCEL,
+                            com.surprising.aeron.service.order.OrderBatchProcessor.Kind.CANCEL,
                             1, 2_000, 5);
                     missing.addItem(999_999, 0, 0, new CancelOrderCommand(999_999));
                     state.batches().validateOrderBatchIdentity(missing, 1001);
@@ -2090,7 +2089,7 @@ class CoreOrderedOrderBatchTest {
         // 当前顺序批次第一项已经取得的 Matcher 事实
         var firstResult = awaitMatching(state, sequence);
         // 当前命令原槽持有的批次上下文，等待首项游标实际前进
-        OrderBatchPending activeBatch = state.batches().batch(sequence);
+        OrderBatchProcessor.PendingBatch activeBatch = state.batches().batch(sequence);
         // 首项账户和提交推进的有界等待截止点
         long firstDeadline = System.nanoTime() + 5_000_000_000L;
         while (activeBatch.nextIndex == 0) {
@@ -2142,7 +2141,7 @@ class CoreOrderedOrderBatchTest {
             long sequence = state.matchingSequence(batch.header().commandId());
             awaitMatching(state, sequence);
 
-            assertThatThrownBy(() -> runtime.putMarkPrice(new MarkPriceRuntime(
+            assertThatThrownBy(() -> runtime.putMarkPrice(new MarkPrice(
                     symbolId, runtime.instrument("1"), 50_000, 2, 2)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("order batch cannot mutate mark-price state");
@@ -2302,7 +2301,7 @@ class CoreOrderedOrderBatchTest {
             // 当前顺序批次第一项已经取得的 Matcher 事实
             var firstResult = awaitMatching(state, sequence);
             // 当前命令原槽持有的批次上下文，等待首项游标实际前进
-            OrderBatchPending activeBatch = state.batches().batch(sequence);
+            OrderBatchProcessor.PendingBatch activeBatch = state.batches().batch(sequence);
             // 首项账户和提交推进的有界等待截止点
             long firstDeadline = System.nanoTime() + 5_000_000_000L;
             while (activeBatch.nextIndex == 0) {
@@ -2315,7 +2314,7 @@ class CoreOrderedOrderBatchTest {
             // 首项完成后复制的分片序号，供故障边界作不倒退比较
             long[] matcherSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             // 测试构造的致命原生完成结果
-            var failedResult = new com.surprising.aeron.service.matcher.CoreMatchingResult(false, "EXCHANGE_CORE_FAILURE");
+            var failedResult = new com.surprising.aeron.service.matcher.OrderMatchingResult.Control(false, "EXCHANGE_CORE_FAILURE");
             // 本轮等待捕获的致命分歧异常，故障后仍须返回同一实例
             Throwable divergence = null;
             // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
@@ -2483,7 +2482,7 @@ class CoreOrderedOrderBatchTest {
      */
     private static CoreResponse completeEventually(
             TradingCoreRuntime state, long sequence,
-            com.surprising.aeron.service.matcher.MatchingResult matching,
+            com.surprising.aeron.service.matcher.OrderMatchingResult matching,
             long clusterTimestamp, long clusterPosition) {
         // 本轮已完成响应、序号列表或最后取得的终态，具体角色见所在方法
         CoreResponse completed = null;
@@ -2513,15 +2512,15 @@ class CoreOrderedOrderBatchTest {
      * @param state 当前场景要推进或读取的测试 Core 运行时
      * @param sequence 指定命令完整 Core 序号
      */
-    private static com.surprising.aeron.service.matcher.MatchingResult awaitMatching(
+    private static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatching(
             TradingCoreRuntime state, long sequence) {
         // 当前取得的同一 Matcher 事实，可能尚未完成账户结算
-        com.surprising.aeron.service.matcher.MatchingResult matching = null;
+        com.surprising.aeron.service.matcher.OrderMatchingResult matching = null;
         // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
             // 当前全局队首命令槽，未激活批次由等待辅助入口推进
-            CommandSlot head = state.pendingMatching().get(state.pendingMatching().firstSequence());
+            OrderCommand head = state.pendingMatching().get(state.pendingMatching().firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches().activateOrderBatch(head.orderBatch, head, true);
             state.matchingProgress.drainMatchingCompletions();

@@ -694,7 +694,7 @@ public class ClusteredBatchTradingBenchmark {
                     throw new AssertionError("funds preflight did not reach Account Lane work");
                 Thread.onSpinWait();
             }
-            var controlWork = DirectCommandSlot.class.getDeclaredField("controlWork");
+            var controlWork = OrderCommand.Direct.class.getDeclaredField("controlWork");
             controlWork.setAccessible(true);
             var business = (java.util.function.BooleanSupplier) controlWork.get(owner.directCommand);
             controlWork.set(owner.directCommand, (java.util.function.BooleanSupplier) () -> {

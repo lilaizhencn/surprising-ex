@@ -22,7 +22,7 @@ class SpotMarketCommandTest {
         properties.getKafka().setProductLine(ProductLine.SPOT);
         when(books.orderBookSnapshot("1", 1)).thenReturn(new OrderBookSnapshotResponse("1", 10, 1,
                 List.of(new OrderBookLevel(100_000, 10, 1)), List.of(new OrderBookLevel(101_000, 10, 1)), Instant.now()));
-        var service = new AeronOrderCommandService(gateway, properties, books);
+        var service = new OrderService(properties, null, gateway, null, books, null, null, null);
         service.preflight(new PlaceOrderRequest(1, "spot-market", "1", side, OrderType.MARKET,
                 TimeInForce.IOC, 0, 2, MarginMode.CROSS, PositionSide.NET, false, false));
         var command = ArgumentCaptor.forClass(PlaceOrderCommand.class);
@@ -39,7 +39,7 @@ class SpotMarketCommandTest {
         var books = mock(MatchingMarketDataService.class);
         var properties = new TradingOrderProperties(); properties.getKafka().setProductLine(ProductLine.SPOT);
         when(books.orderBookSnapshot("1", 1)).thenReturn(new OrderBookSnapshotResponse("1", 1, 1, List.of(), List.of(), Instant.now()));
-        var service = new AeronOrderCommandService(gateway, properties, books);
+        var service = new OrderService(properties, null, gateway, null, books, null, null, null);
         assertThatThrownBy(() -> service.preflight(new PlaceOrderRequest(1, "spot-empty", "1", side,
                 OrderType.MARKET, TimeInForce.FOK, 0, 1, MarginMode.CROSS, PositionSide.NET, false, false)))
                 .hasMessageContaining("SPOT_MARKET_LIQUIDITY_UNAVAILABLE");

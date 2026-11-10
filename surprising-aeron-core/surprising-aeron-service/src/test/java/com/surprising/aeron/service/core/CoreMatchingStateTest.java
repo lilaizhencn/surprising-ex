@@ -803,7 +803,7 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(2);
             assertThat(state.tradingState().users().get(22L).reservations()).doesNotContainKeys(203L, 301L).containsKey(204L);
             assertThat(total(state, "USDT")).isEqualTo(4_000);
-            assertThat(state.fatalFailure).isNull();
+            assertThat(state.fatalFailure()).isNull();
         }
     }
 
@@ -841,7 +841,7 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(2);
             assertThat(state.tradingState().users().get(22L).reservations()).doesNotContainKeys(203L, 204L);
             assertThat(total(state, "USDT")).isEqualTo(4_000);
-            assertThat(state.fatalFailure).isNull();
+            assertThat(state.fatalFailure()).isNull();
         }
     }
 
@@ -1468,7 +1468,7 @@ class CoreMatchingStateTest {
      */
     private static CoreResponse completeUntilTerminalOrFailure(
             TradingCoreRuntime state, long sequence,
-            com.surprising.aeron.service.matcher.MatchingResult result,
+            com.surprising.aeron.service.matcher.OrderMatchingResult result,
             long clusterTimestamp, long clusterPosition) {
         // 本命令最终完成响应，尚未完成时可为空。
         CoreResponse completed = null;

@@ -15,7 +15,7 @@ class ClusterCommandWindowRoutingTest {
     @Test
     void differentUsersSharingALaneCanFillTheOwnerWindow() {
         // 六十四条容量的 Owner 窗口。
-        var window = new ClusterCommandWindow(64);
+        var window = new OrderCommandQueue.IngressWindow(64);
 
         window.resetCandidate(101);
         window.route(0, 1L);
@@ -34,7 +34,7 @@ class ClusterCommandWindowRoutingTest {
      */
     @Test void decodedSlotsStayLeasedUntilTheirWindowEntriesRetire() {
         // 六十四条容量的 Owner 窗口。
-        var window = new ClusterCommandWindow(64);
+        var window = new OrderCommandQueue.IngressWindow(64);
         // 首条请求。
         var first = request(1, 101);
         // 第二条请求。

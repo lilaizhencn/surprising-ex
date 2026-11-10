@@ -1,11 +1,13 @@
 package com.surprising.aeron.service.snapshot;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.MatcherSnapshot;
-import com.surprising.aeron.service.matcher.MatchingResult;
-import com.surprising.aeron.service.order.CommandSlot;
+import com.surprising.aeron.service.matcher.OrderBookSnapshot;
+import com.surprising.aeron.service.matcher.OrderMatchingResult;
+import com.surprising.aeron.service.order.OrderCommand;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicReference;
@@ -28,7 +30,7 @@ public final class CoreSnapshotLifecycle {
     /** 正在执行的 Matcher 捕获完成信号；外部取消等待视图不结束捕获，完成回调按身份清除。 */
     @Accessors(fluent = true, chain = false)
     @Getter
-    final AtomicReference<CompletionStage<MatcherSnapshot>> inFlightMatcherSnapshot =
+    final AtomicReference<CompletionStage<OrderBookSnapshot>> inFlightMatcherSnapshot =
             new AtomicReference<>();
 
     /**  当前 Owner 正在推进的快照屏障，返回结果或释放后清空。 返回当前屏障引用，未开始或已释放时为空，供 Owner 内部协作。 */
@@ -46,7 +48,7 @@ public final class CoreSnapshotLifecycle {
     long lastSnapshotId;
 
     /** 在各 Matcher 提交栅栏捕获原生模块，全部完成后汇总；屏障释放不取消捕获。 */
-    public CompletionStage<MatcherSnapshot> captureMatcherSnapshot(
+    public CompletionStage<OrderBookSnapshot> captureMatcherSnapshot(
             long snapshotId, long coreSequence, long businessStateHash,
             TradingCoreState state, Iterable<CoreOrderState> activeOrders) {
         return owner.matcherPipeline().readEachAsync(shardId ->
@@ -137,9 +139,9 @@ public final class CoreSnapshotLifecycle {
                 // 待撮合队列中当前最早的 Core 命令序号，必须先推进该项。
                 long sequence = owner.pendingMatching().firstSequence();
                 // 当前最早序号对应的命令槽，保存结算事件或普通结果。
-                CommandSlot pending = owner.pendingMatching().get(sequence);
+                OrderCommand pending = owner.pendingMatching().get(sequence);
                 // 当前命令已发布的撮合事实，缺失或结算尚未结束时本次轮询返回空。
-                MatchingResult result =
+                OrderMatchingResult result =
                         pending != null && pending.settlementEvent() != null
                                 ? pending.matchingResult()
                                 : pending.takeMatchingCompletion();
@@ -176,7 +178,7 @@ public final class CoreSnapshotLifecycle {
                 if (fence.matcherSnapshot == null) {
                     fence.coreSequence = owner.appliedCommandCount();
                     // 只登记生产者的完成信号，防止等待方取消自己的视图时提前放行交易。
-                    CompletionStage<MatcherSnapshot> matcherSnapshot = captureMatcherSnapshot(
+                    CompletionStage<OrderBookSnapshot> matcherSnapshot = captureMatcherSnapshot(
                             fence.snapshotId, fence.coreSequence, fence.businessStateHash,
                             fence.snapshotState, fence.snapshotState.orders().values().stream().filter(/* 从首次物化订单表筛选出的候选订单，只保留 OPEN 状态交给原生对账。 */ order -> order.status() == com.surprising.aeron.model.CoreOrderStatus.OPEN).toList());
                     if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
@@ -189,7 +191,7 @@ public final class CoreSnapshotLifecycle {
                 }
                 if (!fence.matcherSnapshot.isDone()) return null;
                 // 原生捕获已经完成的快照值，取出后仍需核对 Core 水位和待处理队列没有变化。
-                MatcherSnapshot matcherSnapshot = fence.matcherSnapshot.getNow(null);
+                OrderBookSnapshot matcherSnapshot = fence.matcherSnapshot.getNow(null);
                 if (matcherSnapshot == null || owner.appliedCommandCount() != fence.coreSequence || !owner.pendingMatching().isEmpty()) {
                     throw new IllegalStateException("snapshot fence state changed during capture");
                 }
@@ -237,7 +239,7 @@ public final class CoreSnapshotLifecycle {
         java.util.Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies;
         java.util.Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers;
         /** 本屏障的 Matcher 捕获 Future，可能在屏障释放后仍继续执行。 */
-        CompletableFuture<MatcherSnapshot> matcherSnapshot;
+        CompletableFuture<OrderBookSnapshot> matcherSnapshot;
         /**
          * 保存本次编号与单调时钟截止点，水位初始负一表示尚未捕获；输入有效性由外层 beginSnapshot 检查。
          * @param snapshotId 本次快照编号，具体合法范围由当前入口检查

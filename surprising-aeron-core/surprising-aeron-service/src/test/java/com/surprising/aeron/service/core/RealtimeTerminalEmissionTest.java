@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.realtime.state.RealtimeStateCapture;
+import com.surprising.aeron.service.realtime.TradingRealtimeBoundary;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
@@ -80,7 +80,7 @@ class RealtimeTerminalEmissionTest {
      * @param label 当前业务轨迹标签，决定预期订单及成交数
      */
     private static void place(TradingCoreRuntime state,ProductLine line,long user,long id,CoreOrderSide side,
-                              RealtimeStateCapture capture,RealtimeOutbox outbox,String label) {
+                              TradingRealtimeBoundary.StateCapture capture,RealtimeOutbox outbox,String label) {
         send(state,line,CoreMessageType.PLACE_ORDER,user,TradingCommandCodec.encodePlaceOrder(
                 new PlaceOrderCommand(id,"1",side,100,2,false,CoreMarginMode.CROSS,
                         CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"audit-"+id)),capture,outbox,label);
@@ -97,7 +97,7 @@ class RealtimeTerminalEmissionTest {
      * @param label 当前业务轨迹标签，决定预期订单及成交数
      */
     private static void send(TradingCoreRuntime state,ProductLine line,CoreMessageType type,long user,byte[] payload,
-                             RealtimeStateCapture capture,RealtimeOutbox outbox,String label) {
+                             TradingRealtimeBoundary.StateCapture capture,RealtimeOutbox outbox,String label) {
         // 本条消息来源序号，同时作为模拟日志位置及 UUID 组成部分
         long seq=++sequence;
         // 当前原业务消息

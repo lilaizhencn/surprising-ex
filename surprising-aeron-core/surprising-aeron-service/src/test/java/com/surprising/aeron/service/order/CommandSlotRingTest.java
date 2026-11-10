@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.protocol.CoreResultCode;
-import com.surprising.aeron.service.matcher.CoreMatchingResult;
+import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.result.CommandResultBuilder;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import java.util.Arrays;
@@ -20,11 +20,11 @@ class CommandSlotRingTest {
     @Test
     void matcherRouteMustBeConsumedBeforeTheSequenceSlotCanBeReused() {
         // 当前固定容量命令槽池。
-        var ring = new CommandSlotRing(2);
+        var ring = new OrderCommandQueue.Pool(2);
         // 当前已占用的命令槽。
         var context = ring.claim(1);
         context.claimMatcherSubmission(0);
-        context.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1), 1, 1);
+        context.result(new OrderMatchingResult.Control(true, "ACCEPTED").withCoreSequenceInPlace(1), 1, 1);
         context.completeLanes(1);
         assertThatThrownBy(() -> ring.release(1)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> context.releaseMatcherSubmission(1)).isInstanceOf(IllegalStateException.class);
@@ -36,7 +36,7 @@ class CommandSlotRingTest {
     /** 不同序号分别保存变化和发布标记，恢复一个槽不修改另一个槽。 */
     @Test
     void suspendedSequencesKeepTheirOwnChangesAndPublicationFlags() {
-        var ring = new CommandSlotRing(4);
+        var ring = new OrderCommandQueue.Pool(4);
         var first = ring.claim(1);
         var second = ring.claim(2);
         var builder = new CommandResultBuilder(null);
@@ -68,11 +68,11 @@ class CommandSlotRingTest {
     @Test
     void synchronousControlLanesCannotEraseMatcherParticipantsOrWeakenAckValidation() {
         // 当前固定容量命令槽池。
-        var ring=new CommandSlotRing(4);
+        var ring=new OrderCommandQueue.Pool(4);
         // 当前已占用的命令槽。
         var context=ring.claim(1);
         assertThatThrownBy(()->context.includeControlLanes(2,15)).isInstanceOf(IllegalStateException.class);
-        context.result(new CoreMatchingResult(true,"ACCEPTED").withCoreSequenceInPlace(1),1,15);
+        context.result(new OrderMatchingResult.Control(true,"ACCEPTED").withCoreSequenceInPlace(1),1,15);
         context.includeControlLanes(2,15);
         assertThat(context.expectedLaneMask()).isEqualTo(3);
         assertThatThrownBy(()->context.includeControlLanes(16,15)).isInstanceOf(IllegalStateException.class);
@@ -86,12 +86,12 @@ class CommandSlotRingTest {
     }
 
     /**
-     * 反射检查 CommandSlot 的直接声明字段里没有类型恰好为 CompletableFuture 的字段；不递归检查子对象或所有分配行为。
+     * 反射检查 OrderCommand 的直接声明字段里没有类型恰好为 CompletableFuture 的字段；不递归检查子对象或所有分配行为。
      */
     @Test
     void commandContextDoesNotRetainAPerCommandMatchingFuture() {
-        assertThat(Arrays.stream(CommandSlot.class.getDeclaredFields())
-                .anyMatch(/* 反射枚举到的 CommandSlot 直接声明字段。 */ field -> field.getType() == java.util.concurrent.CompletableFuture.class)).isFalse();
+        assertThat(Arrays.stream(OrderCommand.class.getDeclaredFields())
+                .anyMatch(/* 反射枚举到的 OrderCommand 直接声明字段。 */ field -> field.getType() == java.util.concurrent.CompletableFuture.class)).isFalse();
     }
 
     /**
@@ -100,11 +100,11 @@ class CommandSlotRingTest {
     @Test
     void aggregatesExactlyOneAckPerExpectedLaneAndReleasesTheResultReference() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(4);
+        OrderCommandQueue.Pool ring = new OrderCommandQueue.Pool(4);
         // 当前已占用的命令槽。
-        CommandSlot context = ring.claim(1);
+        OrderCommand context = ring.claim(1);
         // 人工撮合事实，绑定同一 Core 序号后用于 Lane 确认。
-        CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1);
+        OrderMatchingResult.Control result = new OrderMatchingResult.Control(true, "ACCEPTED").withCoreSequenceInPlace(1);
         context.result(result, 0b101, 0b1111);
 
         context.completeLanes(0b001);
@@ -125,13 +125,13 @@ class CommandSlotRingTest {
     @Test
     void storesSynchronousMatchingResultAndKeepsTheFirstCompletion() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(4);
+        OrderCommandQueue.Pool ring = new OrderCommandQueue.Pool(4);
         // 当前已占用的命令槽。
-        CommandSlot context = ring.claim(3);
+        OrderCommand context = ring.claim(3);
         // 首个槽或首个同步完成结果，具体见当前声明。
-        CoreMatchingResult first = new CoreMatchingResult(true, "SUCCESS").withCoreSequenceInPlace(3);
+        OrderMatchingResult.Control first = new OrderMatchingResult.Control(true, "SUCCESS").withCoreSequenceInPlace(3);
         // 同 Core 序号的迟到普通辅助结果，不能覆盖已经保存的第一项。
-        CoreMatchingResult duplicate = new CoreMatchingResult(false, "LATE").withCoreSequenceInPlace(3);
+        OrderMatchingResult.Control duplicate = new OrderMatchingResult.Control(false, "LATE").withCoreSequenceInPlace(3);
 
         context.publishMatchingCompletion(first);
         context.publishMatchingCompletion(duplicate);
@@ -148,9 +148,9 @@ class CommandSlotRingTest {
     @Test
     void failsClosedForDuplicateUnexpectedOrOutOfRangeAck() {
         // 当前已占用的命令槽。
-        CommandSlot context = new CommandSlotRing(4).claim(1);
+        OrderCommand context = new OrderCommandQueue.Pool(4).claim(1);
         // 人工撮合事实，绑定同一 Core 序号后用于 Lane 确认。
-        CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1);
+        OrderMatchingResult.Control result = new OrderMatchingResult.Control(true, "ACCEPTED").withCoreSequenceInPlace(1);
         context.result(result, 0b11, 0b1111);
         context.completeLanes(0b01);
 
@@ -168,9 +168,9 @@ class CommandSlotRingTest {
     @Test
     void storesMatchingRejectionInTheSequenceSlot() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(4);
+        OrderCommandQueue.Pool ring = new OrderCommandQueue.Pool(4);
         // 当前已占用的命令槽。
-        CommandSlot context = ring.claim(1);
+        OrderCommand context = ring.claim(1);
 
         context.rejectMatching(CoreResultCode.MATCHING_REJECTED);
 
@@ -187,9 +187,9 @@ class CommandSlotRingTest {
     @Test
     void ownsSuspendedCommitStateBySequence() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(4);
+        OrderCommandQueue.Pool ring = new OrderCommandQueue.Pool(4);
         // 当前已占用的命令槽。
-        CommandSlot context = ring.claim(2);
+        OrderCommand context = ring.claim(2);
         // 当前结果构建器。
         CommandResultBuilder builder = new CommandResultBuilder(null);
         builder.changedUserIds().add(7L);
@@ -212,9 +212,9 @@ class CommandSlotRingTest {
     @Test
     void restoresSuspendedPrimitiveChangeBuffersByOwnershipTransfer() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(2);
+        OrderCommandQueue.Pool ring = new OrderCommandQueue.Pool(2);
         // 当前已占用的命令槽。
-        CommandSlot context = ring.claim(1);
+        OrderCommand context = ring.claim(1);
         // 提交输入被挂起的原构建器。
         CommandResultBuilder suspended = new CommandResultBuilder(null);
         suspended.changedUserIds().add(7L);

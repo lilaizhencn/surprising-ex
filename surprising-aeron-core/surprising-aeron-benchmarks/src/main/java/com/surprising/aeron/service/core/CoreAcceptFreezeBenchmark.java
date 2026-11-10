@@ -76,6 +76,14 @@ public final class CoreAcceptFreezeBenchmark {
                         : source == CommandSource.KAFKA_INPUT_BRIDGE ? 89 : 7,
                 sourceSequence, source == CommandSource.OPERATIONS ? 0 : USER_ID, 1_000, correlationId), payload);
         CoreResponse response = state.apply(message);
+        long deadline = System.nanoTime() + 30_000_000_000L;
+        while (state.directCommand.active()) {
+            state.assertHealthy();
+            response = state.directCommand.poll();
+            if (System.nanoTime() >= deadline)
+                throw new IllegalStateException("direct command timed out: " + type);
+            if (response == null) Thread.onSpinWait();
+        }
         if (response.status() != ResponseStatus.APPLIED && response.status() != ResponseStatus.OK) {
             throw new IllegalStateException("command rejected type=" + type + " status=" + response.status());
         }

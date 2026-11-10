@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -7,7 +9,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.service.order.Order;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
@@ -62,8 +64,8 @@ class FrozenMatcherInputTest {
     /**
      * 构造用户七、订单十一、数量十的可变权威测试订单，使用共享测试合约。
      */
-    private static OrderRuntime authority() {
-        return new OrderRuntime(11, 7, 0, CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.BUY, 100,
+    private static Order authority() {
+        return new Order(11, 7, 0, CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.BUY, 100,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 0, 0, 10, 0, 10, false);
     }

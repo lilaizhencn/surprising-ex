@@ -39,7 +39,7 @@ class ExportBatchTest {
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.LINEAR_PERPETUAL, orders, sink);
         batch.flush(0);
         clearInvocations(orders, sink);
-        var change = mock(com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange.class);
+        var change = mock(com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange.class);
         batch.add(List.of(), null, 0, 1, List.of(), null, List.of(change));
         var attempts = new java.util.concurrent.atomic.AtomicInteger();
         doAnswer(call -> {
@@ -62,7 +62,7 @@ class ExportBatchTest {
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.OPTION, orders, sink,
                 CommittedTradeExporter.ExportMode.LIQUIDATION_REPAIR);
-        var change = mock(com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange.class);
+        var change = mock(com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange.class);
         doAnswer(call -> {
             assertThat(call.<List<?>>getArgument(1)).isEqualTo(List.of(change));
             return null;

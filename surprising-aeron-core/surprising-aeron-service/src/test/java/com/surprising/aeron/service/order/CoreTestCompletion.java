@@ -158,7 +158,7 @@ public final class CoreTestCompletion {
         // 当前辅助阶段的 nanoTime 截止点，不覆盖内部所有嵌套等待。
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
         // 只为本次入口准备路由及解码的临时命令窗口。
-        var window = new ClusterCommandWindow();
+        var window = new OrderCommandQueue.IngressWindow();
         // 入口是否可独立推进，无需为准备阶段读取 Lane 状态。
         boolean independent = owner.prepareClusterPipelineScope(message, window);
         while (!independent && owner.requiresOwnerLaneAccessForPreparation(message)
@@ -229,9 +229,9 @@ public final class CoreTestCompletion {
                 response = owner.commits.completeRejectedMatching(sequence);
             } else {
                 // 当前等待的命令槽，可能已经拥有批次或结算事件。
-                CommandSlot pending = owner.pendingMatching().get(sequence);
+                OrderCommand pending = owner.pendingMatching().get(sequence);
                 // 选取的批次、普通或直达撮合事实，缺失时尝试等待。
-                com.surprising.aeron.service.matcher.MatchingResult matching =
+                com.surprising.aeron.service.matcher.OrderMatchingResult matching =
                         pending != null && pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
                                 || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
                                 ? pending.orderBatch.lastMatchingResult
@@ -272,9 +272,9 @@ public final class CoreTestCompletion {
      * @param state 需要等待撮合事实的测试运行时
      * @param sequence 需要等待事实的完整 Core 序号
      */
-    public static com.surprising.aeron.service.matcher.MatchingResult awaitMatchingResult(
+    public static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatchingResult(
             TradingCoreRuntime state, long sequence) {
-        return awaitMatchingResult(state, sequence, TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
+        return awaitMatchingResult(state, sequence, TradingCoreRuntime.Limits.MATCHING_AWAIT_TIMEOUT_NANOS);
     }
 
     /**
@@ -283,14 +283,14 @@ public final class CoreTestCompletion {
      * @param sequence 需要等待事实的完整 Core 序号
      * @param timeoutNanos 本次等待撮合事实的纳秒期限，非正直接返回空
      */
-    public static com.surprising.aeron.service.matcher.MatchingResult awaitMatchingResult(
+    public static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatchingResult(
             TradingCoreRuntime state, long sequence, long timeoutNanos) {
         if (state.fatalFailure() != null) return null;
         if (timeoutNanos <= 0) return null;
         // 当前辅助阶段的 nanoTime 截止点，不覆盖内部所有嵌套等待。
         long deadline = System.nanoTime() + timeoutNanos;
         // 当前等待的命令槽，可能已经拥有批次或结算事件。
-        CommandSlot pending = state.pendingMatching().get(sequence);
+        OrderCommand pending = state.pendingMatching().get(sequence);
         while (pending != null && placeAdmissionOutstanding(pending)
                 && !state.matchingFlow.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
             state.matchingProgress.progressPlaceBatchAdmissions();
@@ -301,7 +301,7 @@ public final class CoreTestCompletion {
         int idle = 0;
         while (state.pendingMatching().contains(sequence) && System.nanoTime() < deadline) {
             // 当前最早待命令，尚未激活的批次先通过现有业务入口激活。
-            CommandSlot head = state.pendingMatching().get(state.pendingMatching().firstSequence());
+            OrderCommand head = state.pendingMatching().get(state.pendingMatching().firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches().activateOrderBatch(head.orderBatch, head, true);
             state.matchingProgress.drainMatchingCompletions();
@@ -324,10 +324,10 @@ public final class CoreTestCompletion {
         return null;
     }
     /** 读取现有槽内事实，供测试/基准等待使用；不执行结算或提交。 */
-    public static com.surprising.aeron.service.matcher.MatchingResult takeMatchingResult(
+    public static com.surprising.aeron.service.matcher.OrderMatchingResult takeMatchingResult(
             TradingCoreRuntime owner, long sequence) {
         if (owner.fatalFailure() != null) return null;
-        CommandSlot pending = owner.pendingMatching().get(sequence);
+        OrderCommand pending = owner.pendingMatching().get(sequence);
         if (pending == null) return null;
         if (pending.matchingResult() != null) return pending.matchingResult();
         var direct = pending.settlementEvent();
@@ -339,7 +339,7 @@ public final class CoreTestCompletion {
         return pending.takeMatchingCompletion();
     }
 
-    private static boolean placeAdmissionOutstanding(CommandSlot pending) {
+    private static boolean placeAdmissionOutstanding(OrderCommand pending) {
         var batch = pending.orderBatch;
         return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
     }

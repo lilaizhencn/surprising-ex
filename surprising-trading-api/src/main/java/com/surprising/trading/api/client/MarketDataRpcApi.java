@@ -8,7 +8,7 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-@FeignClient(name = "surprising-gateway", contextId = "marketDataRpcApi")
+@FeignClient(name = "surprising-gateway", url = "${surprising.clients.market-data.base-url:${surprising.clients.gateway.url:http://127.0.0.1:9094}}", contextId = "marketDataRpcApi")
 public interface MarketDataRpcApi {
 
     @GetMapping("/api/v1/trading/market/orderbook")

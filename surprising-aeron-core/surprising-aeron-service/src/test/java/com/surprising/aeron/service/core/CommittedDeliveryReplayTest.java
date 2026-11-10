@@ -151,7 +151,7 @@ class CommittedDeliveryReplayTest {
     private CoreSettlementProgressView assertApplied(CommittedTradeReplay replay, ProductLine line) {
         try (/* 从回放当前快照恢复的短期只读结果核对运行时 */ var probe = TradingCoreRuntime.fromSnapshot(line, replay.snapshot())) {
             // 按当前来源 UUID 找到的原已提交结算终态
-            var result = probe.resultLedger.get(new UUID(117, sequence));
+            var result = probe.resultLedger().get(new UUID(117, sequence));
             assertThat(result).as("committed settlement result").isNotNull();
             assertThat(result.status()).as("settlement code=" + result.resultCode()).isEqualTo(ResponseStatus.APPLIED);
             return CoreSettlementProgressCodec.decode(result.responseData());

@@ -30,7 +30,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.service.matcher.pipeline.MatcherPipelineGroup;
+import com.surprising.aeron.service.matcher.OrderBookRouter;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.order.PipelineTestAccess;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
@@ -132,7 +132,7 @@ class TradingCoreOwnerTest {
             assertThat(state.orders().get(9000L).remainingQuantitySteps()).isEqualTo(4);
             assertThat(state.orders().get(9001L)).isNull();
             assertThat(state.orders().get(9002L)).isNull();
-            assertThat(core.terminalTradeCount).isEqualTo(2);
+            assertThat(core.terminalTradeCount()).isEqualTo(2);
             // 已提交用户 USDT 总额，和原财库费用一起核对守恒
             long funds = state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> CoreStateTestFixtures.totalUnits(user, "USDT")).sum();
             assertThat(funds + state.treasuryState().feeBalances().getOrDefault("USDT", 0L)).isEqualTo(20_000);
@@ -233,7 +233,7 @@ class TradingCoreOwnerTest {
             long funds = state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> CoreStateTestFixtures.totalUnits(user, "USDT")).sum();
             assertThat(fees).isEqualTo(4L * itemsPerCommand);
             assertThat(funds + fees).isEqualTo(40_000);
-            assertThat(core.terminalTradeCount).isEqualTo(2L * itemsPerCommand);
+            assertThat(core.terminalTradeCount()).isEqualTo(2L * itemsPerCommand);
             for (int /* 当前主动买入用户一或三 */ taker : new int[]{1, 3}) {
                 assertThat(state.users().get((long) (taker)).reservations()).isEmpty();
                 for (/* 当前原批次子项的下标 */ int item = 0; item < itemsPerCommand; item++) assertThat(state.orders().get((long) (9300 + taker * 10 + item))).isNull();
@@ -496,11 +496,11 @@ class TradingCoreOwnerTest {
             assertThat(funds + fees).isEqualTo(20_000);
             if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
                 assertThat(fees).isZero();
-                assertThat(core.terminalTradeCount).isZero();
+                assertThat(core.terminalTradeCount()).isZero();
                 assertThat(state.orders().get(9900L).remainingQuantitySteps()).isEqualTo(20);
             } else {
                 assertThat(fees).isEqualTo(40);
-                assertThat(core.terminalTradeCount).isEqualTo(20);
+                assertThat(core.terminalTradeCount()).isEqualTo(20);
                 assertThat(state.orders().get(9900L)).isNull();
                 if (line == ProductLine.SPOT) {
                     assertThat(CoreStateTestFixtures.totalUnits(state.users().get(1L), "BTC")).isEqualTo(20);
@@ -554,7 +554,7 @@ class TradingCoreOwnerTest {
             var business = PipelineTestAccess.controlWork(owner.directCommand);
             com.surprising.aeron.service.order.PipelineTestAccess.replaceControlWork(owner.directCommand, () -> {
                 if (!business.getAsBoolean()) return false;
-                PipelineTestAccess.overflowQueuedMatching(owner.admissions, owner.pendingMatching().capacity() + 1);
+                PipelineTestAccess.overflowQueuedMatching(owner.admissions(), owner.pendingMatching().capacity() + 1);
                 return true;
             });
             // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
@@ -571,7 +571,7 @@ class TradingCoreOwnerTest {
                         assertThat(balance.lockedUnits()).isZero();
                     });
             assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
-            assertThat(owner.admissions.queuedMatchingCount()).isZero();
+            assertThat(owner.admissions().queuedMatchingCount()).isZero();
             // 重复原请求取得的已记录拒绝终态
             var duplicate = CoreTestCompletion.applyAsynchronously(owner, request);
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
@@ -873,7 +873,7 @@ class TradingCoreOwnerTest {
             var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
             field.setAccessible(true);
             // 本用例原 Matcher 分组，用提交围栏读取工作构造阻塞
-            var pipeline = (MatcherPipelineGroup) field.get(service.state());
+            var pipeline = (OrderBookRouter) field.get(service.state());
             // 被门闩挡住的原 Matcher 读取 Future
             var blocked = pipeline.readAtSubmissionFence(0, () -> {
                 entered.countDown();
@@ -1180,7 +1180,7 @@ class TradingCoreOwnerTest {
                     .hasCauseInstanceOf(IllegalStateException.class);
             // 本场景故意保留未完成预留，不能为状态查询取得完成围栏。
             assertThat(service.state().appliedCommandCount()).isEqualTo(appliedBefore);
-            assertThat(service.state().resultLedger.get(attempted.header().commandId())).isNull();
+            assertThat(service.state().resultLedger().get(attempted.header().commandId())).isNull();
         } finally {
             service.onTerminate(null);
         }
@@ -1500,7 +1500,7 @@ class TradingCoreOwnerTest {
             // 本用例后续可用原来源序号，发送消息时递增
             long sequence = preparePendingPlace(state, 901);
             // 为原撮合构造的明确 exchange-core 失败结果
-            var matcherFailure = new com.surprising.aeron.service.matcher.CoreMatchingResult(
+            var matcherFailure = new com.surprising.aeron.service.matcher.OrderMatchingResult.Control(
                     false, "EXCHANGE_CORE_FAILURE");
             // 原提交边界检测出的致命撮合分歧，之后快照继续抛同一故障
             Throwable fatal = catchThrowable(() -> state.commits.completeMatching(sequence, matcherFailure, 2_000, 3));
@@ -1612,7 +1612,7 @@ class TradingCoreOwnerTest {
             // 已完成但尚未提交的原 Matcher 结果
             var matchingResult = awaitMatching(service.state(), pendingSequence);
             assertThat(matchingResult).isNotNull();
-            if (matchingResult instanceof com.surprising.aeron.service.matcher.CoreMatchingResult /* 类型匹配成功的原生 CoreMatchingResult，放回既有完成入口 */ core) {
+            if (matchingResult instanceof com.surprising.aeron.service.matcher.OrderMatchingResult.Control /* 类型匹配成功的原生 OrderMatchingResult.Control，放回既有完成入口 */ core) {
                 service.state().matchingFlow.publishMatchingCompletion(pendingSequence, core);
             }
 
@@ -1849,10 +1849,10 @@ class TradingCoreOwnerTest {
      * @param state 当前原交易运行时
      * @param sequence 本条原来源顺序号，亦参与 UUID 或关联号
      */
-    private static com.surprising.aeron.service.matcher.MatchingResult awaitMatching(
+    private static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatching(
             TradingCoreRuntime state, long sequence) {
         // 本轮原业务、Matcher 控制或撮合结果，未就绪可为空
-        com.surprising.aeron.service.matcher.MatchingResult result = null;
+        com.surprising.aeron.service.matcher.OrderMatchingResult result = null;
         // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (result == null && System.nanoTime() < deadline) {

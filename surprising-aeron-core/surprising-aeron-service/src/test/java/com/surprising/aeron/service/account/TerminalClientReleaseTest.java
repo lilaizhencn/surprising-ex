@@ -31,15 +31,15 @@ class TerminalClientReleaseTest {
             identities.prepareClientKeyInLane(lane, 7, "shared");
             // 客户号 other 的正数身份键，只由订单十二额外持有。
             long second = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(lane, 7, "other"));
-            lane.clientKeysByOrderId.add(11, first);
-            lane.clientKeysByOrderId.add(12, first);
-            lane.clientKeysByOrderId.add(12, second);
-            lane.clientKeysByOrderId.add(12, 0);
+            lane.clientKeysByOrderId().add(11, first);
+            lane.clientKeysByOrderId().add(12, first);
+            lane.clientKeysByOrderId().add(12, second);
+            lane.clientKeysByOrderId().add(12, 0);
             // 用户客户键到订单编号的原语表，共享客户键已指向后来的订单十二。
             var clientOrders = new org.agrona.collections.Long2LongHashMap(0);
             clientOrders.put(first, 12);
             clientOrders.put(second, 12);
-            lane.clientOrderIndex.put(7, clientOrders);
+            lane.clientIdentities.clientOrderIndex.put(7, clientOrders);
             assertThatThrownBy(() -> lane.releaseOrderClientIdentities(foreign, 11, 7))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(identities.clientIdentityCount()).isEqualTo(2);
@@ -54,7 +54,7 @@ class TerminalClientReleaseTest {
             assertThat(clientOrders.isEmpty()).isTrue();
             // 旧别名全部释放后新建客户号 next 的正数身份键。
             long next = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(lane, 7, "next"));
-            lane.clientKeysByOrderId.add(13, next);
+            lane.clientKeysByOrderId().add(13, next);
             assertThat(identities.clientOrderId(7, next)).isEqualTo("next");
             lane.releaseOrderClientIdentities(identities, 13, 7);
             lane.removeClientOrdersForOrder(7, 13);

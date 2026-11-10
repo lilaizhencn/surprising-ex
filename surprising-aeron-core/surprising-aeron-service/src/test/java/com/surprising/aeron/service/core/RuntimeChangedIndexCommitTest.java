@@ -14,10 +14,10 @@ import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
-import com.surprising.aeron.service.position.PositionRuntime;
+import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.risk.*;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
-import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
+import com.surprising.aeron.service.risk.RiskScanner;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ class RuntimeChangedIndexCommitTest {
             // 四项可断言索引及共同事实应用入口组成的测试记录
             var indexes = indexes(initial, identities);
             for (long /* 当前循环赋给同一持仓的带符号数量，零不等于删除对象 */ quantity : new long[]{2, -2, 0, 3, 0}) {
-                runtime.putPosition(key, new PositionRuntime(7, symbol, asset, CoreMarginMode.CROSS,
+                runtime.putPosition(key, new Position(7, symbol, asset, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), quantity,
                         quantity == 0 ? 0 : 100, Math.abs(quantity) * 100, 0, Math.abs(quantity) * 10));
                 runtime.bindFactIndexes(indexes.coordinator, identities);
@@ -85,7 +85,7 @@ class RuntimeChangedIndexCommitTest {
         int assetId = identities.assetId("USDT");
         // 本用例持仓和风险快照共用的确定性身份键
         long positionKey = identities.positionKey(7, "1:NET");
-        runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId,
+        runtime.putPosition(positionKey, new Position(7, symbolId, assetId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 2, 100, 200, 0, 40));
         runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 2));
@@ -102,7 +102,7 @@ class RuntimeChangedIndexCommitTest {
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(2);
 
         runtime.clearChangedKeys();
-        runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId,
+        runtime.putPosition(positionKey, new Position(7, symbolId, assetId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 3, 100, 300, 0, 60));
         runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 5));
@@ -148,7 +148,7 @@ class RuntimeChangedIndexCommitTest {
         long userId = 7;
         // 本用例持仓和风险快照共用的确定性身份键
         long positionKey = identities.positionKey(userId, "1:NET");
-        runtime.putPosition(positionKey, new PositionRuntime(userId, symbolId, assetId,
+        runtime.putPosition(positionKey, new Position(userId, symbolId, assetId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 2, 100, 200, 0, 40));
         runtime.clearChangedKeys();
@@ -157,7 +157,7 @@ class RuntimeChangedIndexCommitTest {
         // 四项可断言索引及共同事实应用入口组成的测试记录
         IndexSet indexes = indexes(initial, identities);
         // 当前写入并随后删除的 NORMAL 风险快照
-        RiskSnapshotRuntime risk = new RiskSnapshotRuntime(userId, symbolId, CorePositionSide.NET,
+        RiskMarginCalculator.Snapshot risk = new RiskMarginCalculator.Snapshot(userId, symbolId, CorePositionSide.NET,
                 9, 1_000, 20, 100, 100_000);
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
             runtime.putRiskSnapshot(positionKey, risk);
@@ -205,7 +205,7 @@ class RuntimeChangedIndexCommitTest {
         // 本用例账户用户七
         long userId = 7;
         // 用户七待执行的 PLANNED 强平任务
-        LiquidationRuntime planned = new LiquidationRuntime(1, userId, symbolId,
+        RiskScanner.LiquidationOrder planned = new RiskScanner.LiquidationOrder(1, userId, symbolId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2,
                 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0);
         runtime.startAccountLanes();
@@ -226,7 +226,7 @@ class RuntimeChangedIndexCommitTest {
 
         runtime.clearChangedKeys();
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
-            runtime.replaceLiquidation(new LiquidationRuntime(1, userId, symbolId,
+            runtime.replaceLiquidation(new RiskScanner.LiquidationOrder(1, userId, symbolId,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2,
                     0, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
             return null;

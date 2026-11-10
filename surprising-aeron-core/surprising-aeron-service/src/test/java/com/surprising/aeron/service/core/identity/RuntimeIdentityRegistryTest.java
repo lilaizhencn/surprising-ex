@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core.identity;
 
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.account.AccountLaneState;
+import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,7 +41,7 @@ class RuntimeIdentityRegistryTest {
         // 决定用户账户 Lane 的固定拓扑
         var topology = CoreConfiguration.standaloneLaneTopology();
         // 按测试用户路由构造或从冷运行时取得的所属账户 Lane
-        var lane = new AccountLaneState(topology.accountLaneId(user), 16);
+        var lane = new AccountPartition(topology.accountLaneId(user), 16);
         // 独立算出的预期哈希，或 Owner 已准备的预期持仓键
         long expected = registry.positionKey(user, "1:LONG");
         try (/* 模拟独立 Lane 操作或普通冷读的单线程执行器，用例结束关闭 */ var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
@@ -68,7 +68,7 @@ class RuntimeIdentityRegistryTest {
         long user = 17;
         long identity = RuntimeIdentityRegistry.positionIdentityKey(user, "1", CorePositionSide.LONG);
         // 按测试用户路由构造或从冷运行时取得的所属账户 Lane
-        var lane = new AccountLaneState(CoreConfiguration.standaloneLaneTopology().accountLaneId(user), 16);
+        var lane = new AccountPartition(CoreConfiguration.standaloneLaneTopology().accountLaneId(user), 16);
         try (/* 模拟独立 Lane 操作或普通冷读的单线程执行器，用例结束关闭 */ var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
             // 本用例反复保留、发布消费和退休的确定性持仓键
             long key = executor.submit(() -> registry.retainPositionInLane(lane, identity, user, "1", CorePositionSide.LONG)).get();
@@ -179,7 +179,7 @@ class RuntimeIdentityRegistryTest {
             identities.rollbackClientKeyInLane(lane, userId, "客户😀", first);
             assertThat(identities.clientIdentityCount()).isZero();
             // 与用户所属 Lane 不同的独立 Lane，准备应拒绝
-            var wrongLane = new AccountLaneState(lane.laneId() + 1, 16);
+            var wrongLane = new AccountPartition(lane.laneId() + 1, 16);
             org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                     identities.prepareClientKeyInLane(wrongLane, userId, "wrong"))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("crossed account Lane");

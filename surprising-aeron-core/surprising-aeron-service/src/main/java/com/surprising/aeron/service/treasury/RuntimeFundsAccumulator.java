@@ -1,16 +1,16 @@
 package com.surprising.aeron.service.treasury;
 
-import com.surprising.aeron.service.settlement.FundsPosting;
+import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.Arrays;
 
 /**
  * 单命令或单项结算独占的原语资金变化缓冲。按资产、所有者类别、所有者编号和子账合并有符号金额，同键抵消为零就移除；用于资金守恒核对和回执交接，不保存第二份账户余额。跨线程消费必须先通过完成标记交接所有权，清空只重置有效长度并保留容量。
  */
 public final class RuntimeFundsAccumulator {
-    /** 按枚举 ordinal 解码当前缓冲字节列的类别表，只是本地存储编码，不使用 FundsPosting 固定 wireCode。 */
-    private static final FundsPosting.OwnerKind[] OWNER_KINDS = FundsPosting.OwnerKind.values();
+    /** 按枚举 ordinal 解码当前缓冲字节列的类别表，只是本地存储编码，不使用 TradeSettlement.Posting 固定 wireCode。 */
+    private static final TradeSettlement.Posting.OwnerKind[] OWNER_KINDS = TradeSettlement.Posting.OwnerKind.values();
     /** 按枚举 ordinal 解码当前缓冲子账字节列的取值表。 */
-    private static final FundsPosting.Subledger[] SUBLEDGERS = FundsPosting.Subledger.values();
+    private static final TradeSettlement.Posting.Subledger[] SUBLEDGERS = TradeSettlement.Posting.Subledger.values();
     /** 各有效资金项的资产稠密编号列。 */
     private int[] assetIds;
     /** 各有效资金项所有者类别的本地 ordinal 字节列。 */
@@ -53,8 +53,8 @@ public final class RuntimeFundsAccumulator {
      * @param subledger 本条资金变化归入的子账
      * @param deltaUnits 有符号资金变化量，零值直接忽略
      */
-    public void add(int assetId, FundsPosting.OwnerKind ownerKind, long ownerId,
-             FundsPosting.Subledger subledger, long deltaUnits) {
+    public void add(int assetId, TradeSettlement.Posting.OwnerKind ownerKind, long ownerId,
+             TradeSettlement.Posting.Subledger subledger, long deltaUnits) {
         if (deltaUnits == 0) return;
         if (assetId < 0 || ownerKind == null || subledger == null) {
             throw new IllegalArgumentException("invalid runtime funds posting");

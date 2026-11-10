@@ -13,7 +13,7 @@ class CaptureBufferReuseTest {
     @Test
     void clientOrderSlotsOverwritePresenceAcrossShorterReuse() {
         // 当前测试独立创建的客户映射或余额捕获缓冲。
-        var captures = new LaneClientOrderCaptures();
+        var captures = new AccountTransactionRollback.ClientOrderCaptures();
         for (/* 首次扩容缓冲时逐项新增的正数客户键和订单编号。 */ int i = 1; i <= 20; i++) captures.add(7, i, (long) i);
         captures.clear();
         captures.clear();
@@ -32,13 +32,13 @@ class CaptureBufferReuseTest {
     @Test
     void balancesSkipEmptyClearButInvalidateOldIndexAndAfterState() {
         // 当前测试独立创建的客户映射或余额捕获缓冲。
-        var captures = new LaneBalancePatches();
+        var captures = new AccountTransactionRollback.BalancePatches();
         // 空缓冲清理前的索引代次，空清理应保持它。
         int generation = captures.indexGeneration;
         captures.clear();
         assertThat(captures.indexGeneration).isEqualTo(generation);
-        captures.add(7, 3, new BalanceRuntime(7, 3, 10, 0), 0);
-        captures.after(7, 3, new BalanceRuntime(7, 3, 5, 5), 0);
+        captures.add(7, 3, new AccountBalance(7, 3, 10, 0), 0);
+        captures.after(7, 3, new AccountBalance(7, 3, 5, 5), 0);
         captures.clear();
         assertThat(captures.contains(7, 3)).isFalse();
         captures.add(8, 4, null, 0);
@@ -54,12 +54,12 @@ class CaptureBufferReuseTest {
     }
     @Test
     void balanceMergesKeepEarliestPresenceAndPendingAmountsAndLatestAfterState() {
-        var first = new LaneBalancePatches();
-        first.add(7, 3, new BalanceRuntime(7, 3, 10, 8), 4);
-        first.after(7, 3, new BalanceRuntime(7, 3, 6, 12), 7);
+        var first = new AccountTransactionRollback.BalancePatches();
+        first.add(7, 3, new AccountBalance(7, 3, 10, 8), 4);
+        first.after(7, 3, new AccountBalance(7, 3, 6, 12), 7);
         first.add(8, 3, null, 0);
-        first.after(8, 3, new BalanceRuntime(8, 3, 5, 0), 0);
-        var merged = new LaneBalancePatches();
+        first.after(8, 3, new AccountBalance(8, 3, 5, 0), 0);
+        var merged = new AccountTransactionRollback.BalancePatches();
         merged.mergeBefore(first);
         assertThat(merged.size()).isEqualTo(2);
         assertThat(merged.availableBefore(0)).isEqualTo(10);
@@ -68,13 +68,13 @@ class CaptureBufferReuseTest {
         assertThat(merged.presentBefore(1)).isFalse();
         assertThat(merged.capturedAfter(0)).isFalse();
 
-        var second = new LaneBalancePatches();
-        second.add(7, 3, new BalanceRuntime(7, 3, 6, 12), 7);
-        second.after(7, 3, new BalanceRuntime(7, 3, 4, 14), 9);
-        second.add(8, 3, new BalanceRuntime(8, 3, 5, 0), 0);
+        var second = new AccountTransactionRollback.BalancePatches();
+        second.add(7, 3, new AccountBalance(7, 3, 6, 12), 7);
+        second.after(7, 3, new AccountBalance(7, 3, 4, 14), 9);
+        second.add(8, 3, new AccountBalance(8, 3, 5, 0), 0);
         second.after(8, 3, null, 0);
-        second.add(9, 3, new BalanceRuntime(9, 3, 0, 0), 0);
-        second.after(9, 3, new BalanceRuntime(9, 3, 2, 0), 0);
+        second.add(9, 3, new AccountBalance(9, 3, 0, 0), 0);
+        second.after(9, 3, new AccountBalance(9, 3, 2, 0), 0);
         merged.mergeBefore(second);
         merged.mergeSequential(second);
         assertThat(merged.size()).isEqualTo(3);
@@ -91,9 +91,9 @@ class CaptureBufferReuseTest {
 
     @Test
     void balanceCaptureRejectsPendingAmountsOutsideLockedFunds() {
-        var captures = new LaneBalancePatches();
+        var captures = new AccountTransactionRollback.BalancePatches();
         assertThatIllegalArgumentException().isThrownBy(() ->
-                captures.add(7, 3, new BalanceRuntime(7, 3, 10, 8), 9));
+                captures.add(7, 3, new AccountBalance(7, 3, 10, 8), 9));
         assertThat(captures.size()).isZero();
     }
 

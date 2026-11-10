@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core.change;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.position.RuntimePositionIndexValue;
+import com.surprising.aeron.service.position.Position;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
@@ -29,10 +29,10 @@ class CommittedIndexVisitTest {
             assertThat(indexes.openInterest().totals()).isEmpty();
             state.clearChangedKeys();
 
-            var firstOrders = new RuntimeOrderChangeBuffer();
-            var lastOrders = new RuntimeOrderChangeBuffer();
-            var firstPositions = new RuntimePositionChangeBuffer();
-            var lastPositions = new RuntimePositionChangeBuffer();
+            var firstOrders = new StateChangeBuffer.Orders();
+            var lastOrders = new StateChangeBuffer.Orders();
+            var firstPositions = new StateChangeBuffer.Positions();
+            var lastPositions = new StateChangeBuffer.Positions();
             firstOrders.put(30, null); lastOrders.put(33, null);
             firstPositions.putIndexed(40, null, true, null);
             lastPositions.putIndexed(43, null, true, null);
@@ -59,8 +59,8 @@ class CommittedIndexVisitTest {
     }
     private static void seedPosition(com.surprising.aeron.service.core.index.RuntimeFactIndexes indexes,
             com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities, long key) {
-        var changes = new RuntimePositionChangeBuffer();
-        changes.putIndexed(key, null, true, new RuntimePositionIndexValue(7, "1", "USDT", CorePositionSide.NET, 5));
+        var changes = new StateChangeBuffer.Positions();
+        changes.putIndexed(key, null, true, new Position.IndexValue(7, "1", "USDT", CorePositionSide.NET, 5));
         indexes.applyPositions(changes, identities, null);
     }
 }

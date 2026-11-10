@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.query;
 
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
+
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreOrderState;
@@ -7,8 +9,8 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.OwnerAccountReadGuard;
 import com.surprising.aeron.service.core.PipelinedExecutionExtension;
@@ -17,8 +19,8 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.query.state.RuntimeStateQueryService;
+import com.surprising.aeron.service.position.Position;
+import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -54,9 +56,9 @@ class CoreAccountLaneQueryTest {
             var identities = new RuntimeIdentityRegistry();
             try (/* 由当前已提交交易状态投影的冷运行时，在合法 Lane 参数下构造预期视图和哈希。 */ var expected = RuntimeStateProjector.project(core.tradingState(), identities)) {
                 // 冷运行时中用户 1 的完整查询结果，提供详情编码和状态哈希的参照。
-                var user = RuntimeStateQueryService.userState(expected, expected.accountLaneForUser(1), identities, 1, false);
+                var user = CoreQueryService.StateQueries.userState(expected, expected.accountLaneForUser(1), identities, 1, false);
                 // 冷运行时中用户 7 的订单 200 查询结果，详情、哈希和客户端查询均应与它一致。
-                var order = RuntimeStateQueryService.orderState(expected,
+                var order = CoreQueryService.StateQueries.orderState(expected,
                         expected.accountLaneForUser(7), identities, 200, false);
                 // 查询开始前账户所有权交接计数，查询完成后必须不变。
                 long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
@@ -64,12 +66,12 @@ class CoreAccountLaneQueryTest {
                     assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 1, new byte[0]).data())
                             .isEqualTo(CoreStateQueryCodec.encodeUserState(user.view()));
                     assertThat(CoreStateQueryCodec.decodeStateHash(query(core, CoreMessageType.USER_STATE_HASH_QUERY,
-                            1, new byte[0]).data())).isEqualTo(RuntimeStateQueryService.userState(expected, expected.accountLaneForUser(1), identities, 1, true).stateHash());
+                            1, new byte[0]).data())).isEqualTo(CoreQueryService.StateQueries.userState(expected, expected.accountLaneForUser(1), identities, 1, true).stateHash());
                     assertThat(query(core, CoreMessageType.ORDER_STATE_QUERY, 0,
                             TradingCommandCodec.encodeOrderStateQuery(200)).data())
                             .isEqualTo(CoreStateQueryCodec.encodeOrderState(order.view()));
                     assertThat(CoreStateQueryCodec.decodeStateHash(query(core, CoreMessageType.ORDER_STATE_HASH_QUERY,
-                            0, TradingCommandCodec.encodeOrderStateQuery(200)).data())).isEqualTo(RuntimeStateQueryService.orderState(expected, expected.accountLaneForUser(7), identities, 200, true).stateHash());
+                            0, TradingCommandCodec.encodeOrderStateQuery(200)).data())).isEqualTo(CoreQueryService.StateQueries.orderState(expected, expected.accountLaneForUser(7), identities, 200, true).stateHash());
                     assertThat(query(core, CoreMessageType.CLIENT_ORDER_STATE_QUERY, 7,
                             CoreStateQueryCodec.encodeClientOrderStateQuery("account-q-200")).data())
                             .isEqualTo(CoreStateQueryCodec.encodeOrderState(order.view()));
@@ -128,7 +130,7 @@ class CoreAccountLaneQueryTest {
         var order = new CoreOrderState(991, LINE, 7, "1", CoreOrderSide.SELL, 100, 1, 0,
                 true, CoreOrderStatus.CANCELED, 2);
         // 包含已撤订单、对应用户和币对的最小业务状态。
-        var state = new TradingCoreState(LINE, 0, Map.of(7L, new CoreUserState(LINE, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+        var state = new TradingCoreState(LINE, 0, Map.of(7L, new UserAccountSnapshot(LINE, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
                 Map.of(991L, order), Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = initial(state)) {
             core.activate();
@@ -174,12 +176,12 @@ class CoreAccountLaneQueryTest {
     void oversizedUserQueryRejectsOnlyItsResult() throws Exception {
         // 用户 1 的超限资产余额集合，每个资产一单位，用来超过完整用户查询实体上限。
         var balances = new LinkedHashMap<String, AssetBalance>();
-        for (/* 构造不同资产名称的下标，循环包含上限位置以确保比允许数量多一项。 */ int index = 0; index <= RuntimeStateQueryService.MAX_USER_QUERY_ENTITIES; index++)
+        for (/* 构造不同资产名称的下标，循环包含上限位置以确保比允许数量多一项。 */ int index = 0; index <= CoreQueryService.StateQueries.MAX_USER_QUERY_ENTITIES; index++)
             balances.put("ASSET" + index, new AssetBalance("ASSET" + index, 1, 0));
         // 拥有超限余额条数的用户 1，完整详情应被拒绝。
-        var user = new CoreUserState(LINE, 1, 0, balances, Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
+        var user = new UserAccountSnapshot(LINE, 1, 0, balances, Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 同时包含超限用户 1 和空用户 7 的状态，用后者确认失败只影响单次查询。
-        var state = new TradingCoreState(LINE, 0, Map.of(1L, user, 7L, new CoreUserState(LINE, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+        var state = new TradingCoreState(LINE, 0, Map.of(1L, user, 7L, new UserAccountSnapshot(LINE, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = initial(state)) {
             core.activate();
@@ -247,24 +249,24 @@ class CoreAccountLaneQueryTest {
             var lanesField = TradingAccountRuntime.class.getDeclaredField("accountLanes");
             lanesField.setAccessible(true);
             // 用户 1 的真实账户 Lane，反射安装守卫后仍由原线程消费任务。
-            var lane = ((AccountLaneState[]) lanesField.get(core.runtimeState()))[laneId];
+            var lane = ((AccountPartition[]) lanesField.get(core.runtimeState()))[laneId];
             // 账户 Lane 的权威持仓表字段，用于暂时替换成带 get 计数的测试 Map。
-            var positionsField = AccountLaneState.class.getDeclaredField("positions");
+            var positionsField = AccountPartition.class.getDeclaredField("positions");
             positionsField.setAccessible(true);
             // 替换前的原持仓表，finally 中恢复，防止测试监测对象逃出用例。
             @SuppressWarnings("unchecked")
-            var original = (org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<PositionRuntime>) positionsField.get(lane);
+            var original = (org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<Position>) positionsField.get(lane);
             // 仅在目标 Lane 的只读作用域测试期间打开的原子开关，区分普通控制处理与查询读取。
             var reading = new AtomicBoolean();
             // 只读作用域期间持仓 Map.get 的次数，空查询应保持为零。
             var proofReads = new AtomicInteger();
             // 以原持仓内容初始化的测试 Map，只覆写 get 计数，不改变持仓查询返回值。
-            var guarded = /* 只在本测试使用的持仓 Map 守卫，读取行为不变，仅在只读监测期间累计 get 次数。 */ new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<PositionRuntime>(original) {
+            var guarded = /* 只在本测试使用的持仓 Map 守卫，读取行为不变，仅在只读监测期间累计 get 次数。 */ new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<Position>(original) {
                 /**
                  * 读取持仓键时仅在只读监测开关打开期间计数，再委托原 Map 返回值，用来发现只读范围中的隐式持仓读取。
                  * @param positionKey 本次 Map.get 要读取的持仓身份键，交给父类查询后原样返回
                  */
-                @Override public PositionRuntime get(long positionKey) {
+                @Override public Position get(long positionKey) {
                     if (reading.get()) proofReads.incrementAndGet();
                     return super.get(positionKey);
                 }
@@ -274,7 +276,7 @@ class CoreAccountLaneQueryTest {
                 assertThatThrownBy(() -> core.runtimeState().readAccountLane(lane, /* Owner 直接申请 Lane 只读范围的回调参数，所有权检查应在执行回调前拒绝。 */ ignored -> Boolean.TRUE))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("owning Lane thread");
                 core.runtimeState().dispatchControlLanes(mask, /* 控制任务传入的 Lane 参数，实际通过运行时入口写入再移除风险快照，留下待收集变化。 */ ignored -> {
-                    core.runtimeState().putRiskSnapshot(key, new com.surprising.aeron.service.risk.RiskSnapshotRuntime(
+                    core.runtimeState().putRiskSnapshot(key, new com.surprising.aeron.service.risk.RiskMarginCalculator.Snapshot(
                             1, symbolId, CorePositionSide.NET, 1, 100, 0, 1, 1));
                     com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(core.runtimeState(), key);
                     return null;

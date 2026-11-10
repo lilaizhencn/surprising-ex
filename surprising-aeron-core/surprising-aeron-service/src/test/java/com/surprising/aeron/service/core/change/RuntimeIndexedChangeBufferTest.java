@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.*;
  */
 class RuntimeIndexedChangeBufferTest {
     @Test void freezesLiveAndAlreadyFrozenOrdersWithoutLosingDeletesOrReusingLiveValues() {
-        var orders = new RuntimeOrderChangeBuffer();
+        var orders = new StateChangeBuffer.Orders();
         var live = CoreStateTestFixtures.order(11, 7, 0, 10).laneValue();
         live.applyCommitMetadataInPlace(10, 20);
         orders.putLive(11, live);
@@ -39,11 +39,11 @@ class RuntimeIndexedChangeBufferTest {
      */
     @Test void orderHandoffsDoNotAllocateUnusedPreparedColumns() throws Exception {
         // 模拟 Lane 输出的普通索引变化缓冲，未使用预计算列。
-        var lane = new RuntimeIndexedChangeBuffer<String, Void>();
+        var lane = new StateChangeBuffer.Indexed<String, Void>();
         // 接管模拟 Lane 输出的 Owner 变化视图。
-        var owner = new OwnerIndexedChanges<String, Void>(new RuntimeIndexedChangeBuffer<>());
+        var owner = new StateChangeBuffer.OwnerIndexed<String, Void>(new StateChangeBuffer.Indexed<>());
         // 读取第二列数组的反射字段，用于检查未使用预计算列时长度仍为零。
-        var prepared = RuntimeIndexedChangeBuffer.class.getDeclaredField("prepared");
+        var prepared = StateChangeBuffer.Indexed.class.getDeclaredField("prepared");
         prepared.setAccessible(true);
         for (/* 当前源缓冲交接和 Owner 清理的轮次。 */ int round = 0; round < 3; round++) {
             for (/* 本次填充或核对的连续业务键下标。 */ int i = 0; i < 100; i++) lane.put(i, "value");
@@ -60,9 +60,9 @@ class RuntimeIndexedChangeBufferTest {
      */
     @Test void coalescesStateAndPreparedIndexWithoutLosingDeletionOrFallback() {
         // 准备交给另一缓冲的业务变化源。
-        var source = new RuntimeIndexedChangeBuffer<String, String>();
+        var source = new StateChangeBuffer.Indexed<String, String>();
         // 接收业务变化和预计算事实的独立目标缓冲。
-        var target = new RuntimeIndexedChangeBuffer<String, String>();
+        var target = new StateChangeBuffer.Indexed<String, String>();
         source.put(1, "open"); source.putPrepared(1, "active");
         source.put(2, "closed"); source.putPrepared(2, null);
         source.put(3, "control");
@@ -85,9 +85,9 @@ class RuntimeIndexedChangeBufferTest {
      */
     @Test void directDrainKeepsFrozenOrderValuesAfterReleasingTheirSourceCells() {
         // 准备交给另一缓冲的业务变化源。
-        var source = new RuntimeOrderChangeBuffer();
+        var source = new StateChangeBuffer.Orders();
         // 接收业务变化和预计算事实的独立目标缓冲。
-        var target = new RuntimeOrderChangeBuffer();
+        var target = new StateChangeBuffer.Orders();
         source.put(11, CoreStateTestFixtures.order(11, 7, 0, 10));
         // 源订单缓冲命令槽的借用引用，源清理后其业务引用应被清空。
         var borrowed = source.get(11);
@@ -106,11 +106,11 @@ class RuntimeIndexedChangeBufferTest {
      */
     @Test void reuseAndGrowthDoNotRetainPreparedValues() throws Exception {
         // 检验扩容及跨轮次清理的索引变化缓冲。
-        var buffer = new RuntimeIndexedChangeBuffer<String, String>();
+        var buffer = new StateChangeBuffer.Indexed<String, String>();
         for (/* 本次填充或核对的连续业务键下标。 */ int i = 0; i < 100; i++) { buffer.put(i, "value"); buffer.putPrepared(i, i % 3 == 0 ? null : "index"); }
         buffer.clear();
         // 反射读取预计算列，以断言清空后无保留引用。
-        var field = RuntimeIndexedChangeBuffer.class.getDeclaredField("prepared"); field.setAccessible(true);
+        var field = StateChangeBuffer.Indexed.class.getDeclaredField("prepared"); field.setAccessible(true);
         assertThat((Object[]) field.get(buffer)).containsOnlyNulls();
         for (/* 本次填充或核对的连续业务键下标。 */ int i = 0; i < 100; i++) buffer.put(1000 + i, "next");
         for (int slot = 0; slot < buffer.size(); slot++) {

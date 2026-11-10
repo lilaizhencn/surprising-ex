@@ -21,8 +21,7 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.TradeProjectionRepository;
 import com.surprising.trading.order.service.TradingMetricsService;
-import com.surprising.trading.order.service.AeronOrderCommandService;
-import com.surprising.trading.order.service.OrderPlacementStateService;
+import com.surprising.trading.order.service.OrderAeronGateway;
 import com.surprising.trading.order.service.OrderService;
 import com.surprising.trading.order.service.OrderValidator;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
@@ -70,7 +69,7 @@ class ConstructorInjectionContextTest {
             for (Class<?> type : List.of(AuthService.class, GatewayApiKeyService.class, AdminAuditRepository.class, AdminApprovalRepository.class,
                     ProductTransferCoordinator.class, ProductTransferSecurityService.class, RestTemplate.class,
                     com.surprising.instrument.provider.service.InstrumentService.class,
-                    OrderValidator.class, OrderPlacementStateService.class, AeronOrderCommandService.class,
+                    OrderValidator.class, OrderAeronGateway.class,
                     AeronOrderProjectionRepository.class, MatchingMarketDataService.class, TradingMetricsService.class,
                     TradeProjectionRepository.class, ValkeyUserQueries.class, TriggerOrderAeronGateway.class,
                     TriggerOrderProjectionRepository.class)) {
@@ -89,7 +88,7 @@ class ConstructorInjectionContextTest {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> context.getBean(TriggerOrderService.class).get(1001L, 99L))
                     .isInstanceOf(IllegalStateException.class);
             verify(projection).get(product, 1001L, 99L);
-            verifyNoInteractions(context.getBean(TriggerOrderAeronGateway.class), context.getBean(AeronOrderCommandService.class));
+            verifyNoInteractions(context.getBean(TriggerOrderAeronGateway.class), context.getBean(OrderAeronGateway.class));
 
             var request = new MockHttpServletRequest("GET", "/api/v1/gateway/trading-market/depth");
             request.addHeader("X-Product-Line", product.name());

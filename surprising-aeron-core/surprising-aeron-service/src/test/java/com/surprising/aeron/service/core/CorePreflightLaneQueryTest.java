@@ -1,13 +1,14 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.market.MarkPriceRuntime;
+import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
-import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
+import com.surprising.aeron.service.order.OrderAdmissionService;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -49,9 +50,9 @@ class CorePreflightLaneQueryTest {
                     // 尚未执行的预检下单意图，原单编号固定而买卖方向逐次变化。
                     var command = place(900, side, 95, 3, false, "preflight-900");
                     // 在冷运行时通过订单规则解析的确定输入，供预留公式作为参照。
-                    var resolved = RuntimeOrderAdmission.resolve(cold, identities, 1, command, TIME);
+                    var resolved = OrderAdmissionService.resolve(cold, identities, 1, command, TIME);
                     // 冷运行时按产品规则算出的应预留金额，不在查询时真的冻结。
-                    long reserved = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
+                    long reserved = OrderAdmissionService.requiredReservation(cold, identities, 1, resolved,
                             0);
                     try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                         // 当前产品和方向的最终预检响应，应与冷规则资产及金额编码完全一致。
@@ -121,9 +122,9 @@ class CorePreflightLaneQueryTest {
                 // 已有十步持仓和八步平仓占用后，仍可容纳的两步只减仓意图。
                 var valid = place(305, CoreOrderSide.SELL, 110, 2, true, "close-valid");
                 // 在冷运行时通过订单规则解析的确定输入，供预留公式作为参照。
-                var resolved = RuntimeOrderAdmission.resolve(cold, identities, 1, valid, TIME);
+                var resolved = OrderAdmissionService.resolve(cold, identities, 1, valid, TIME);
                 // 冷运行时结合实际 OI 和挂单汇总算出的两步只减仓预留金额。
-                long expected = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
+                long expected = OrderAdmissionService.requiredReservation(cold, identities, 1, resolved,
                         new OpenInterestIndex(before).openInterestSteps("1"));
                 try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                     assertThat(query(core, 1, place(304, CoreOrderSide.SELL, 110, 3, true, "close-oversized")).resultCode())
@@ -154,9 +155,9 @@ class CorePreflightLaneQueryTest {
             byte[] expected;
             try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = RuntimeStateProjector.project(core.tradingState(), ids)) {
                 // 更新前冷配置解析的订单输入，用来计算旧预检编码。
-                var order = RuntimeOrderAdmission.resolve(cold, ids, 1, intent, TIME);
+                var order = OrderAdmissionService.resolve(cold, ids, 1, intent, TIME);
                 expected = CoreOrderPreflightCodec.encode(new CoreOrderPreflightView(order.reservationAsset(),
-                        RuntimeOrderAdmission.requiredReservation(cold, ids, 1, order, 0)));
+                        OrderAdmissionService.requiredReservation(cold, ids, 1, order, 0)));
             }
             // 确认阻塞任务已在用户所属 Lane 执行的门闩，避免尚未阻塞就发送查询。
             var entered = new CountDownLatch(1);
@@ -181,7 +182,7 @@ class CorePreflightLaneQueryTest {
                 // 测试直接更新的在线规范币对，与早先捕获的查询配置区分。
                 var instrument = core.runtimeState.instrument("1");
                 instrument.updateConfiguration(CoreInstrument.from(core.productLine, instrument(core.productLine, 200_000)));
-                core.runtimeState.putMarkPrice(new MarkPriceRuntime(core.identities.findSymbolId("1"), instrument, 120, 2, TIME));
+                core.runtimeState.putMarkPrice(new MarkPrice(core.identities.findSymbolId("1"), instrument, 120, 2, TIME));
                 release.countDown();
                 assertThat(await(core, request, id).data()).isEqualTo(expected);
                 assertThat(query(core, 1, intent).data()).isNotEqualTo(expected);

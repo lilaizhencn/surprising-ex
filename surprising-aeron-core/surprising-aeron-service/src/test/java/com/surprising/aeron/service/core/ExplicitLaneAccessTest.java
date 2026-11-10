@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.account.BalanceRuntime;
+import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
@@ -39,7 +39,7 @@ class ExplicitLaneAccessTest {
             // 最终确定的另一 Lane 用户，供异步断言捕获
             final long foreignUser = otherLaneUser;
             assertThatThrownBy(() -> runtime.requireLaneAccess(lane, foreignUser)).isInstanceOf(IllegalStateException.class);
-            runtime.putBalance(new BalanceRuntime(7, 0, 100, 0));
+            runtime.putBalance(new AccountBalance(7, 0, 100, 0));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
             assertThatThrownBy(() -> runtime.accountLaneForUser(7)).isInstanceOf(IllegalStateException.class);

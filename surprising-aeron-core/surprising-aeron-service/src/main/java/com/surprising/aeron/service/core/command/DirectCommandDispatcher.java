@@ -4,16 +4,16 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMaintenanceCodec;
 import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
-import com.surprising.aeron.service.risk.RiskScanCoordinator;
-import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
-import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
+import com.surprising.aeron.service.risk.RiskScanner;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
+import com.surprising.aeron.service.funding.FundingSettlementService;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
-import com.surprising.aeron.service.adl.RuntimeAdlExecution;
+import com.surprising.aeron.service.adl.AdlService;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands;
 import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
-import com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution;
+import com.surprising.aeron.service.liquidation.LiquidationService;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 
 /**
@@ -117,7 +117,7 @@ public final class DirectCommandDispatcher
         // 本币对全局用户游标之后的持仓用户来源，具体页由账本阶段选择。
         Iterable<Long> indexedUserIds = owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId());
         // 命令槽持有的一页资金费工作，Owner 后续轮询收齐账户和账本回执。
-        var work = RuntimePerpetualFundingProcessor.prepare(owner.directCommand.reusableFundingWork(), command,
+        var work = FundingSettlementService.prepare(owner.directCommand.reusableFundingWork(), command,
                 indexedUserIds, owner.runtimeState(), owner.identities());
         owner.directCommand.deferFundingControl(work);
     }
@@ -133,7 +133,7 @@ public final class DirectCommandDispatcher
         int pendingBefore = owner.pendingRiskScanCount();
         // 本轮扫描开始的单调时钟时间，仅用于耗时观测
         long startedAt = System.nanoTime();
-        RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(command, owner.runtimeState(), owner.identities());
+        RiskMarginCalculator.applyMarkPriceRuntime(command, owner.runtimeState(), owner.identities());
         owner.initializeTriggerScan(command);
         owner.requestCommitPublication();
         owner.logRiskScan("mark-price", command.instrumentId(), owner.runtimeState().riskScanControl().scanBatchSize(),
@@ -164,7 +164,7 @@ public final class DirectCommandDispatcher
         // 本轮开始前未完成扫描数量，用于预算调整和诊断日志
         int pendingBefore = owner.pendingRiskScanCount();
         // 结合请求上限和当前积压计算的本轮总预算
-        int maxWork = RiskScanCoordinator.adaptiveBudget(command.maxUsers(), pendingBefore);
+        int maxWork = RiskScanner.adaptiveBudget(command.maxUsers(), pendingBefore);
         // 本轮扫描开始的单调时钟时间，仅用于耗时观测
         long startedAt = System.nanoTime();
         // 本轮续扫前的业务修订，交给控制槽比较，用于判断是否请求发布
@@ -173,7 +173,7 @@ public final class DirectCommandDispatcher
         // 分给风险估值的预算，触发尚未完成时折半以保留触发推进机会
         int riskBudget = activeScan.triggerComplete() ? maxWork : maxWork / 2;
         // 复用的异步风险协调任务；风险已完或分配预算为零时为空，由原控制槽继续处理剩余步骤
-        RiskScanCoordinator risk = null;
+        RiskScanner risk = null;
         if (!activeScan.riskComplete() && riskBudget > 0) {
             risk = owner.directCommand.reusableRiskScanCoordinator(
                     riskBudget);
@@ -228,14 +228,14 @@ public final class DirectCommandDispatcher
     private void executeExecuteAdl(CoreMessage message) {
         var command = TradingCommandCodec.decodeExecuteAdl(message.payloadUnsafe());
         owner.resultBuilder.setSingleChangedUser(command.targetUserId());
-        var work = RuntimeAdlExecution.begin(owner.directCommand.reusableAdlWork(),
+        var work = AdlService.begin(owner.directCommand.reusableAdlWork(),
                 command, owner.runtimeState(), owner.identities());
         owner.directCommand.deferAdlControl(work);
     }
 
     private void executeResolveLiquidation(CoreMessage message) {
         var command = TradingCommandCodec.decodeResolveLiquidation(message.payloadUnsafe());
-        var work = RuntimeLiquidationResolution.begin(owner.directCommand.reusableLiquidationResolutionWork(), command,
+        var work = LiquidationService.beginResolution(owner.directCommand.reusableLiquidationResolutionWork(), command,
                 owner.runtimeState(), owner.identities(), owner.activeLiquidationIds());
         owner.directCommand.deferLiquidationResolutionControl(work);
     }
@@ -287,4 +287,17 @@ public final class DirectCommandDispatcher
         owner.requestCommitPublication();
         return true;
     }
+
+
+/** 说明一项账户 Lane 任务属于哪种工作，便于派发、统计和检查任务的执行边界。 */
+public enum OperationType {
+    /** 普通账户命令，例如余额调整、账户设置或其他由命令发起的账户变更。 */
+    COMMAND,
+    /** 应用撮合或生命周期处理产生的资金、订单和持仓结算变化。 */
+    SETTLEMENT,
+    /** 在账户所属 Lane 内读取数据，不以查询名义绕过线程所有权。 */
+    QUERY,
+    /** 风险估值和风险状态处理，仍在账户自己的 Lane 中执行。 */
+    RISK
+}
 }

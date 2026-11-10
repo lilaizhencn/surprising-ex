@@ -41,8 +41,6 @@ import com.surprising.marketmaker.provider.repository.MarketMakerRunEventReposit
 import com.surprising.marketmaker.provider.store.MarketMakerStrategyOverrideStore;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
-import com.surprising.price.consumer.LatestMarkPriceCache;
-import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -1027,11 +1025,8 @@ class MarketMakerServiceTest {
                     });
         }
 
-        private LatestMarkPriceCache markPriceCache() {
-            MarkPriceConsumerProperties consumerProperties = new MarkPriceConsumerProperties();
-            consumerProperties.setProductLine(productLine);
-            consumerProperties.setMaxAge(Duration.ofSeconds(3));
-            LatestMarkPriceCache cache = new LatestMarkPriceCache(consumerProperties);
+        private MarketMakerMarkPriceCache markPriceCache() {
+            MarketMakerMarkPriceCache cache = new MarketMakerMarkPriceCache();
             Instant now = Instant.now();
             BigDecimal price = BigDecimal.valueOf(50_000L);
             cache.update(new MarkPriceEvent(productLine, instrumentId, 1L,

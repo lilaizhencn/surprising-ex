@@ -1,7 +1,9 @@
 package com.surprising.aeron.service.treasury;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.model.AssetBalance;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.snapshot.state.StateMapSupport;
 import java.util.Map;
 import java.util.TreeMap;
@@ -96,7 +98,7 @@ public record CoreTreasuryState(
         Map<String, Long> result = new TreeMap<>();
         source.forEach((/* 当前完整进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 当前完成编号 Map 变化项或回调中的结算编号。 */ settlementId) -> {
             // 已经通过业务校验的规范币对名称。
-            String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
+            String normalizedSymbol = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
             if (settlementId == null || settlementId <= 0 || result.put(normalizedSymbol, settlementId) != null) {
                 throw new IllegalArgumentException("invalid settlement marker");
             }
@@ -114,7 +116,7 @@ public record CoreTreasuryState(
         Map<String, FundingProgress> result = new TreeMap<>();
         source.forEach((/* 当前完整进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 当前完整进度表中的非空记录。 */ progress) -> {
             // 已经通过业务校验的规范币对名称。
-            String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
+            String normalizedSymbol = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
             validateProgress(normalizedSymbol, progress);
             if (result.put(normalizedSymbol, progress) != null) {
                 throw new IllegalArgumentException("duplicate funding progress");
@@ -133,7 +135,7 @@ public record CoreTreasuryState(
         Map<String, LifecycleProgress> result = new TreeMap<>();
         source.forEach((/* 当前完整进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 当前完整进度表中的非空记录。 */ progress) -> {
             // 已经通过业务校验的规范币对名称。
-            String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
+            String normalizedSymbol = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
             validateLifecycleProgress(normalizedSymbol, progress);
             if (result.put(normalizedSymbol, progress) != null) {
                 throw new IllegalArgumentException("duplicate lifecycle progress");
@@ -148,7 +150,7 @@ public record CoreTreasuryState(
      * @param progress 待设置或校验的对应进度值，with 入口可传空表示删除
      */
     private static void validateProgress(String instrumentId, FundingProgress progress) {
-        if (!OrderReservation.requireInstrumentId(instrumentId).equals(instrumentId) || progress == null) {
+        if (!OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId).equals(instrumentId) || progress == null) {
             throw new IllegalArgumentException("invalid funding progress");
         }
     }
@@ -159,7 +161,7 @@ public record CoreTreasuryState(
      * @param progress 待设置或校验的对应进度值，with 入口可传空表示删除
      */
     private static void validateLifecycleProgress(String instrumentId, LifecycleProgress progress) {
-        if (!OrderReservation.requireInstrumentId(instrumentId).equals(instrumentId) || progress == null) {
+        if (!OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId).equals(instrumentId) || progress == null) {
             throw new IllegalArgumentException("invalid lifecycle progress");
         }
     }

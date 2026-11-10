@@ -21,7 +21,7 @@ import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
@@ -30,7 +30,7 @@ import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.aeron.service.treasury.InsuranceAllocationPolicy;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
+import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.instrument.api.model.ContractType;
@@ -119,7 +119,7 @@ class CoreLifecycleStateTest {
         TradingCoreState base = stateWithUser(ProductLine.LINEAR_PERPETUAL,
                 ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 0);
         // 显式覆盖前取得的用户原状态和修订号。
-        CoreUserState current = base.users().get(1L);
+        UserAccountSnapshot current = base.users().get(1L);
         // 测试构造的同币对 LONG 和 SHORT 两腿持仓表。
         Map<String, CorePositionState> hedgedPositions = new TreeMap<>();
         hedgedPositions.put("1:LONG", new CorePositionState("1", "USDT",
@@ -129,11 +129,11 @@ class CoreLifecycleStateTest {
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.SHORT, -10, 100, 1_000, 0, 0));
         // 设为双向持仓模式并保留原余额和预留的测试用户。
-        CoreUserState hedgedUser = new CoreUserState(base.productLine(), 1, current.revision() + 1,
+        UserAccountSnapshot hedgedUser = new UserAccountSnapshot(base.productLine(), 1, current.revision() + 1,
                 current.balances(), current.reservations(), hedgedPositions,
                 com.surprising.aeron.protocol.CorePositionMode.HEDGE);
         // 复制旧用户表后替换当前用户的测试集合。
-        Map<Long, CoreUserState> users = new TreeMap<>(base.users());
+        Map<Long, UserAccountSnapshot> users = new TreeMap<>(base.users());
         users.put(1L, hedgedUser);
         // 已经装入同用户多空两腿并应用标记价的前置状态。
         TradingCoreState hedged = new TradingCoreState(base.productLine(), base.revision() + 1, users,
@@ -683,7 +683,7 @@ class CoreLifecycleStateTest {
             java.util.Collections.reverse(reverseIds);
             int assetId = identities.assetId("USDT");
             // 空槽和有效前缀之后的重复回执均不应参与分配。
-            LiquidationRuntime[] receipts = new LiquidationRuntime[reverseIds.size() + 2];
+            RiskScanner.LiquidationOrder[] receipts = new RiskScanner.LiquidationOrder[reverseIds.size() + 2];
             for (int index = 0; index < reverseIds.size(); index++) receipts[index + 1] = runtime.liquidation(reverseIds.get(index));
             receipts[receipts.length - 1] = runtime.liquidation(firstUser.liquidationId());
             int count = receipts.length - 1;
@@ -916,7 +916,7 @@ class CoreLifecycleStateTest {
         TradingCoreState funded = reducer.adjustBalance(state, userId,
                 new BalanceAdjustmentCommand("USDT", wallet));
         // 显式覆盖前取得的用户原状态和修订号。
-        CoreUserState current = funded.users().get(userId);
+        UserAccountSnapshot current = funded.users().get(userId);
         // 复制原用户余额后，显式覆盖 USDT 可用和冻结额的测试表。
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put("USDT", new AssetBalance("USDT", wallet - margin, margin));
@@ -925,10 +925,10 @@ class CoreLifecycleStateTest {
         positions.put("1", new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, quantity,
                 entryPrice, Math.multiplyExact(Math.absExact(quantity), entryPrice), 0, margin));
         // 用指定钱包和持仓数据新构造的用户业务值。
-        CoreUserState user = new CoreUserState(funded.productLine(), userId, current.revision() + 1,
+        UserAccountSnapshot user = new UserAccountSnapshot(funded.productLine(), userId, current.revision() + 1,
                 balances, current.reservations(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 复制旧用户表后替换当前用户的测试集合。
-        Map<Long, CoreUserState> users = new TreeMap<>(funded.users());
+        Map<Long, UserAccountSnapshot> users = new TreeMap<>(funded.users());
         users.put(userId, user);
         return new TradingCoreState(funded.productLine(), funded.revision() + 1, users, funded.orders(),
                 funded.instruments(), funded.riskState(), funded.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
@@ -967,7 +967,7 @@ class CoreLifecycleStateTest {
     private static long totalEconomicEquity(TradingCoreState state, String asset) {
         // 匹配当前结算资产的全部非零持仓未实现盈亏累计值。
         long unrealized = 0;
-        for (CoreUserState /* 当前断言或合计余额、持仓的用户业务值。 */ user : state.users().values()) {
+        for (UserAccountSnapshot /* 当前断言或合计余额、持仓的用户业务值。 */ user : state.users().values()) {
             for (CorePositionState /* 当前参与未实现盈亏合计的持仓业务值。 */ position : user.positions().values()) {
                 // 当前场景原注册的币对配置。
                 CoreInstrument instrument = state.instruments().get(position.instrumentId());

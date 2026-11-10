@@ -1,12 +1,16 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.query.CoreQueryService;
+
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.order.state.OrderReservation;
-import com.surprising.aeron.service.position.RuntimePositionIndexValue;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
+import com.surprising.aeron.service.position.Position;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeSet;
@@ -77,7 +81,7 @@ public final class PositionUserIndex {
             long count = userId == 0 ? counts.sum() : counts.get(userId);
             total = Math.addExact(total, count);
             if (total > maximumPositions)
-                throw new com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException();
+                throw new com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException();
             if (count == 0) continue;
             if (userId == 0) counts.forEachKey(users::add);
         }
@@ -98,7 +102,7 @@ public final class PositionUserIndex {
     public long higherUserId(String instrumentId, long cursorUserId) {
         assertBusinessOwner();
         // 该合约已有的各 Lane 有序用户列表，首次出现合约时才创建整组列表。
-        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
+        LongArrayList[] lanes = usersBySymbol.get(OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId));
         if (lanes == null) return 0;
         // 当前查到的严格大于游标的最小用户编号，0 表示尚无后继。
         long higher = 0;
@@ -122,7 +126,7 @@ public final class PositionUserIndex {
             throw new IllegalArgumentException("invalid Account Lane id");
         }
         // 该合约已有的各 Lane 有序用户列表，首次出现合约时才创建整组列表。
-        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
+        LongArrayList[] lanes = usersBySymbol.get(OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId));
         return lanes == null ? 0 : higherUserId(lanes[accountLaneId], cursorUserId);
     }
 
@@ -144,7 +148,7 @@ public final class PositionUserIndex {
      * @param previous 变更前的持仓索引字段，null 表示之前没有该记录
      * @param current 变更后的持仓索引字段，null 表示该记录已删除
      */
-    void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
+    void apply(Position.IndexValue previous, Position.IndexValue current) {
         applyRoutes(previous == null ? 0 : previous.userId(), previous == null ? null : previous.instrumentId(),
                 current == null ? 0 : current.userId(), current == null ? null : current.instrumentId());
     }
@@ -170,7 +174,7 @@ public final class PositionUserIndex {
      */
     public Iterable<Long> usersAfter(String instrumentId, long afterUserId) {
         // 经过合约编号校验的遍历目标，迭代器后续使用同一编号查后继。
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
+        String normalized = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         return () -> /* 本次惰性用户迭代器，只保存一个下一用户游标，依托实时有序索引逐项推进，不复制全部用户集合。 */ new java.util.Iterator<>() {
             /** 该惰性迭代器下一次要返回的用户编号，0 表示已经没有后续用户。 */
             private long next = higherUserId(normalized, afterUserId);
@@ -199,7 +203,7 @@ public final class PositionUserIndex {
         assertBusinessOwner();
         usersBySymbol.clear();
         positionCountsBySymbol.clear();
-        for (CoreUserState /* 当前输出到查询数组或恢复遍历到的用户，编号用于路由与计数。 */ user : state.users().values()) {
+        for (UserAccountSnapshot /* 当前输出到查询数组或恢复遍历到的用户，编号用于路由与计数。 */ user : state.users().values()) {
             // 恢复时从当前用户记录取得的用户编号，用来累计各合约持仓引用数。
             long userId = user.userId();
             for (CorePositionState /* 恢复业务状态中的一条持仓记录，包含空仓也要为它维护路由引用数。 */ position : user.positions().values()) {

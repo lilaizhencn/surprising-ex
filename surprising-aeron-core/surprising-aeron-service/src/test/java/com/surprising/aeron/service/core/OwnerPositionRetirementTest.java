@@ -3,11 +3,11 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.account.CoreUserState;
+import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
+import com.surprising.aeron.service.position.Position;
+import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
@@ -83,7 +83,7 @@ class OwnerPositionRetirementTest {
         /** 本夹具持仓的规范身份键。 */
         final long key;
         /** 夹具初始及重新开仓时使用的持仓值。 */
-        final PositionRuntime position;
+        final Position position;
 
         /**
          * 建立线性永续币对、账户 Lane、一个持仓身份及配对风险记录，清理初始化变化后启动账户工作线程。
@@ -99,17 +99,17 @@ class OwnerPositionRetirementTest {
                             java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                     0, 0, 0, -1, 0));
             // 包含测试合约的初始业务状态
-            var initial = new TradingCoreState(line, 0, Map.of(7L, new CoreUserState(line, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(),
+            var initial = new TradingCoreState(line, 0, Map.of(7L, new UserAccountSnapshot(line, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(),
                     Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
             runtime = RuntimeStateProjector.project(initial, identities);
             // 合约注册后的稠密符号编号
             // 结算资产对应的稠密资产编号
             int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
             key = identities.positionKey(7, instrument, CorePositionSide.NET);
-            position = new PositionRuntime(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
+            position = new Position(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
                     instrument, 2, 100, 200, 0, 0);
             runtime.putPosition(key, position);
-            runtime.putRiskSnapshot(key, new RiskSnapshotRuntime(7, symbol, CorePositionSide.NET,
+            runtime.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(7, symbol, CorePositionSide.NET,
                     9, 1_000, 20, 100, 100_000));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();

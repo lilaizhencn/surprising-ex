@@ -4,7 +4,6 @@ import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -22,7 +21,7 @@ class PendingMatchingRingTest {
     @Test
     void ledgerDispatchAdvancesWithoutRetiringResponsesAndSurvivesSlotReuse() {
         // 当前测试创建的 Owner 待撮合环。
-        var ring = new PendingMatchingRing(4, 1);
+        var ring = new OrderCommandQueue(4, 1);
         // 最早的已占用命令槽。
         var first = acquire(ring, 1, UUID.randomUUID(), 1001);
         // 第二个命令槽。
@@ -59,7 +58,7 @@ class PendingMatchingRingTest {
     @Test
     void removingUnfundedOrRejectedHeadKeepsTheLedgerCursorInOriginalOrder() {
         // 当前测试创建的 Owner 待撮合环。
-        var ring = new PendingMatchingRing(4, 1);
+        var ring = new OrderCommandQueue(4, 1);
         // 最早的已占用命令槽。
         var first = acquire(ring, 1, UUID.randomUUID(), 1001);
         // 第二个命令槽。
@@ -83,17 +82,17 @@ class PendingMatchingRingTest {
     @Test
     void keepsTheLowWatermarkWhileAllowingIndependentPartitionCompletion() {
         // 当前测试创建的 Owner 待撮合环。
-        PendingMatchingRing ring = new PendingMatchingRing(3, 1);
+        OrderCommandQueue ring = new OrderCommandQueue(3, 1);
         // 最早的已占用命令槽。
-        CommandSlot first = acquire(ring, 7, UUID.randomUUID(), 1001);
+        OrderCommand first = acquire(ring, 7, UUID.randomUUID(), 1001);
         // 首槽原对象的另一个引用，用于验证同序号重登记不另加项。
-        CommandSlot replacement = first;
+        OrderCommand replacement = first;
         // 第二个命令槽。
-        CommandSlot second = acquire(ring, 8, UUID.randomUUID(), 1003);
+        OrderCommand second = acquire(ring, 8, UUID.randomUUID(), 1003);
         // 第三个命令槽。
-        CommandSlot third = acquire(ring, 9, UUID.randomUUID(), 1004);
+        OrderCommand third = acquire(ring, 9, UUID.randomUUID(), 1004);
         // 填满四槽窗口的第四项。
-        CommandSlot fourth = acquire(ring, 10, UUID.randomUUID(), 1005);
+        OrderCommand fourth = acquire(ring, 10, UUID.randomUUID(), 1005);
 
         ring.put(first);
         assertThat(ring.get(7)).isSameAs(first);
@@ -134,13 +133,13 @@ class PendingMatchingRingTest {
     @Test
     void advancesEachMatcherSubmissionShardWithoutScanningThePendingRing() {
         // 当前测试创建的 Owner 待撮合环。
-        PendingMatchingRing ring = new PendingMatchingRing(4, 2);
+        OrderCommandQueue ring = new OrderCommandQueue(4, 2);
         // 零分片最早提交项。
-        CommandSlot shardZeroFirst = acquire(ring, 1, UUID.randomUUID(), 1001);
+        OrderCommand shardZeroFirst = acquire(ring, 1, UUID.randomUUID(), 1001);
         // 一分片唯一提交项。
-        CommandSlot shardOne = acquire(ring, 2, UUID.randomUUID(), 1002);
+        OrderCommand shardOne = acquire(ring, 2, UUID.randomUUID(), 1002);
         // 零分片后续提交项。
-        CommandSlot shardZeroSecond = acquire(ring, 3, UUID.randomUUID(), 1003);
+        OrderCommand shardZeroSecond = acquire(ring, 3, UUID.randomUUID(), 1003);
         ring.put(shardZeroFirst);
         ring.put(shardOne);
         ring.put(shardZeroSecond);
@@ -164,11 +163,11 @@ class PendingMatchingRingTest {
     @Test
     void exposesOnlyTheDeterministicSubmissionHead() {
         // 当前测试创建的 Owner 待撮合环。
-        PendingMatchingRing ring = new PendingMatchingRing(2, 1);
+        OrderCommandQueue ring = new OrderCommandQueue(2, 1);
         // 最早的已占用命令槽。
-        CommandSlot first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        OrderCommand first = acquire(ring, 1, UUID.randomUUID(), 1001);
         // 第二个命令槽。
-        CommandSlot second = acquire(ring, 2, UUID.randomUUID(), 1002);
+        OrderCommand second = acquire(ring, 2, UUID.randomUUID(), 1002);
         ring.put(first);
         ring.put(second);
 
@@ -185,14 +184,14 @@ class PendingMatchingRingTest {
     @Test
     void reusesTheSequenceContextPendingCarrierAfterTheSlotIsReleased() {
         // 当前测试创建的 Owner 待撮合环。
-        PendingMatchingRing ring = new PendingMatchingRing(4, 1);
+        OrderCommandQueue ring = new OrderCommandQueue(4, 1);
         // 最早的已占用命令槽。
-        CommandSlot first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        OrderCommand first = acquire(ring, 1, UUID.randomUUID(), 1001);
         ring.put(first);
         ring.remove(1);
 
         // 物理槽复用后承载新 Core 序号的同一对象。
-        CommandSlot reused = acquire(ring, 5, UUID.randomUUID(), 1002);
+        OrderCommand reused = acquire(ring, 5, UUID.randomUUID(), 1002);
 
         assertThat(reused).isSameAs(first);
         assertThat(reused.sequence()).isEqualTo(5);
@@ -207,12 +206,12 @@ class PendingMatchingRingTest {
      * @param commandId 本条人工载体命令 UUID
      * @param userId 用于用户计数索引的请求用户号
      */
-    private static CommandSlot acquire(PendingMatchingRing ring, long sequence, UUID commandId, long userId) {
+    private static OrderCommand acquire(OrderCommandQueue ring, long sequence, UUID commandId, long userId) {
         // 只为容器测试提供头部身份的人工消息。
         CoreMessage command = command(commandId, userId);
-        return ring.acquire(sequence, CommandSlot.Operation.PLACE, command,
+        return ring.acquire(sequence, OrderCommand.Operation.PLACE, command,
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
-                DecodedMatchingCommand.decode(command), null);
+                OrderCommand.Decoded.decode(command), null);
     }
 
     /**

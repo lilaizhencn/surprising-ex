@@ -1,8 +1,10 @@
 package com.surprising.aeron.model;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.order.state.OrderReservation;
+import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 
 /**
  * 用户在一个合约及持仓腿上的不可变持仓记录。数量带多空符号，金额用资产最小单位；记录用于状态查看和恢复，不在这里执行成交结算。
@@ -31,7 +33,7 @@ public record CorePositionState(
      * 规范合约和资产代码，检查保证金非负；空仓不能残留入场价、入场价格量或持仓保证金，有仓则必须有正的入场信息。
      */
     public CorePositionState {
-        instrumentId = OrderReservation.requireInstrumentId(instrumentId);
+        instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
         marginAsset = AssetBalance.normalizeAsset(marginAsset);
         if (marginMode == null || positionSide == null || positionMarginUnits < 0) {
             throw new IllegalArgumentException("position margin must not be negative");

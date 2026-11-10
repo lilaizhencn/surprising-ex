@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.service.account.AccountLaneState;
+import com.surprising.aeron.service.account.AccountPartition;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -25,7 +25,7 @@ class RuntimeExecutionScopeTest {
             try {
                 runtime.dispatchControlLanes(1, /* 当前控制 Lane 或试图进入的另一 Lane，本回调不读取业务正文 */ ignored -> {
                     // 工作线程进入时保存的实际账户作用域，Owner 操作后应仍为同一实例
-                    AccountLaneState owned = runtime.currentLaneCommandScope();
+                    AccountPartition owned = runtime.currentLaneCommandScope();
                     entered.countDown();
                     try {
                         if (!ownerFinished.await(5, TimeUnit.SECONDS)) throw new AssertionError("Owner scope did not finish");

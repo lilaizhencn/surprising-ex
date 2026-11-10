@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.trigger.command;
 
+import com.surprising.aeron.service.order.*;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -8,7 +10,7 @@ import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
-import com.surprising.aeron.service.risk.RiskScanRuntime;
+import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import java.util.UUID;
 import lombok.AccessLevel;
@@ -82,7 +84,7 @@ public final class TriggerOrderCommands {
         // 本标的解析得到的内部整数身份，find 入口没找到时可为空
         Integer symbolId = owner.identities().findSymbolId(command.instrumentId());
         // 该标的已有风险与触发扫描进度，存在且价格序列对应时才继续
-        RiskScanRuntime scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
+        RiskScanner.State scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
         if (scan == null || scan.priceSequence() != command.priceSequence()) return;
         // 本价格序列开始时固定的最大待触发 ID，后续新建更大 ID 不纳入这次页范围
         long upperId = owner.triggerOrderIndex().maxPendingId(command.instrumentId());
@@ -101,7 +103,7 @@ public final class TriggerOrderCommands {
         // 本标的解析得到的内部整数身份，find 入口没找到时可为空
         Integer symbolId = owner.identities().findSymbolId(instrumentId);
         // 该标的已有风险与触发扫描进度，存在且价格序列对应时才继续
-        RiskScanRuntime scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
+        RiskScanner.State scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
         if (scan == null || scan.triggerComplete()) return COMPLETE;
         return reusableTriggerScan.prepare(instrumentId, scan,
                 Math.min(maxWork, owner.defaultTriggerScanBatchSize()));
@@ -125,7 +127,7 @@ public final class TriggerOrderCommands {
         /** 本扫描合成或原执行请求传入的命令 UUID，供子单身份和撮合上下文使用。 */
         private UUID commandId;
         /** 本页固定并随 OCO 续步调整的风险与触发扫描进度值。 */
-        private RiskScanRuntime scan;
+        private RiskScanner.State scan;
         /** 当前页预算，同时约束候选页大小和 OCO 段工作；逐候选本身不递减，兄弟段完成时扣量。 */
         private int remaining;
         /** 当前价格来源已取出的候选页，处理完后保存续步并结束本次扫描工作。 */
@@ -148,7 +150,7 @@ public final class TriggerOrderCommands {
          * @param scan 当前需要保存或接续的风险及触发扫描进度
          * @param remaining 本次扫描页及 OCO 撤销可用的预算
          */
-        PendingTriggerScan prepare(String instrumentId, RiskScanRuntime scan, int remaining) {
+        PendingTriggerScan prepare(String instrumentId, RiskScanner.State scan, int remaining) {
             this.instrumentId = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
             this.scan = scan;
             this.remaining = remaining;
@@ -522,7 +524,7 @@ public final class TriggerOrderCommands {
      * 把触发扫描游标与 OCO 进度接回原风险状态转换，然后请求命令提交发布。
      * @param scan 当前需要保存或接续的风险及触发扫描进度
      */
-    void replaceRiskScan(RiskScanRuntime scan) {
+    void replaceRiskScan(RiskScanner.State scan) {
         owner.runtimeState().replaceRiskScan(scan);
         owner.requestCommitPublication();
     }
@@ -660,7 +662,7 @@ public final class TriggerOrderCommands {
             long userId, com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
         if (!owner.productLine().isDerivative()) return 0;
         return owner.identities().positionKey(userId,
-                com.surprising.aeron.service.order.state.OrderReservation.requireInstrumentId(trigger.instrumentId()),
+                com.surprising.aeron.service.order.OrderFundsReservation.Snapshot.requireInstrumentId(trigger.instrumentId()),
                 trigger.positionSide());
     }
 
@@ -889,7 +891,7 @@ public final class TriggerOrderCommands {
          */
         private int baseAssetId, quoteAssetId, settleAssetId;
         /** Owner 固定的订单决策上下文，账户 Lane 据此解析子单，交接完成后清引用。 */
-        private com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context decision;
+        private com.surprising.aeron.service.order.OrderAdmissionService.Context decision;
         /** 唯一账本提供的市场未平仓量，只有标的额度需要它时才查询。 */
         private long openInterest;
         /** 子单账户工作是否已派发，防止 Owner 轮询时重复派同一任务。 */
@@ -915,7 +917,7 @@ public final class TriggerOrderCommands {
             trigger = null;
             this.triggerId = triggerId; this.triggerSequence = triggerSequence;
             this.price = price; this.triggeredAt = triggeredAt; this.commandId = commandId;
-            decision = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.context(
+            decision = com.surprising.aeron.service.order.OrderAdmissionService.context(
                     owner.runtimeState(), owner.identities(), route.instrumentId(), owner.currentClusterTimestamp());
             baseAssetId = owner.identities().assetId(decision.instrument().baseAsset());
             quoteAssetId = owner.identities().assetId(decision.instrument().quoteAsset());
@@ -940,10 +942,10 @@ public final class TriggerOrderCommands {
         @Override public Object apply(int ignoredLaneId) {
             trigger = executableTrigger(owner.runtimeState().triggerOrder(triggerId), triggerSequence, price, decision.symbolId());
             if (trigger == null) return null;
-            com.surprising.aeron.service.order.admission.ResolvedPlaceOrder order = null;
+            com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder order = null;
             String failureReason = "";
             try {
-                order = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolve(
+                order = com.surprising.aeron.service.order.OrderAdmissionService.resolve(
                         decision, trigger.userId(), childOrder(trigger, price, trigger.instrument(), childOrderId));
             } catch (/* 子单决策或冻结中遇到的业务拒绝，记成触发失败而非技术故障 */ CoreStateRejectedException rejected) { failureReason = rejected.code(); }
             int assetId = order == null ? 0 : order.reservationAsset().equals(decision.instrument().baseAsset()) ? baseAssetId
@@ -1000,7 +1002,7 @@ public final class TriggerOrderCommands {
             owner.requestCommitPublication();
             if (result != null) {
                 // 账户返回的子单订单回执，先收集冻结预留再排入撮合
-                var receipt = (com.surprising.aeron.service.order.state.OrderRuntime) result;
+                var receipt = (com.surprising.aeron.service.order.Order) result;
                 owner.runtimeState().pendingReservations().collectControlReservation(receipt, childSequence);
                 owner.resultBuilder.markUserChanged(trigger.userId());
                 owner.resultBuilder.markOrderChanged(receipt.orderId());
