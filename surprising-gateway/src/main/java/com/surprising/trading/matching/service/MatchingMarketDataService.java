@@ -22,7 +22,7 @@ public class MatchingMarketDataService {
 
     @org.springframework.beans.factory.annotation.Autowired
     public MatchingMarketDataService(StringRedisTemplate redis, TradingOrderProperties properties) {
-        this(new ValkeyMarketData(redis), properties.getKafka().getProductLine());
+        this(new ValkeyMarketData(redis), properties.getProductLine());
     }
 
     public MatchingMarketDataService(ValkeyMarketData marketData, ProductLine product) {

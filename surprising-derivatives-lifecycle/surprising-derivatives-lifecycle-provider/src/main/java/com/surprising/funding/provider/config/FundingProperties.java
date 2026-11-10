@@ -25,6 +25,14 @@ public class FundingProperties {
     @Valid
     private volatile Coordination coordination = new Coordination();
 
+    public ProductLine getProductLine() {
+        return kafka.getProductLine();
+    }
+
+    public void setProductLine(ProductLine productLine) {
+        kafka.setProductLine(productLine);
+    }
+
     @Getter
     public static class Kafka {
         @Setter

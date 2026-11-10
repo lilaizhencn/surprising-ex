@@ -38,10 +38,10 @@ import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.matcher.OrderBookRouter;
 import com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow;
 import com.surprising.aeron.service.order.OrderCommand;
-import com.surprising.aeron.service.order.OrderMatchingCoordinator;
+import com.surprising.aeron.service.order.OrderMatchingFlow;
 import com.surprising.aeron.service.order.OrderCommand.Direct;
 import com.surprising.aeron.service.order.OrderAdmissionService;
-import com.surprising.aeron.service.order.OrderMatchingCoordinator.Progress;
+import com.surprising.aeron.service.order.OrderMatchingFlow.Progress;
 import com.surprising.aeron.service.order.OrderBatchProcessor;
 import com.surprising.aeron.service.order.OrderBatchProcessor.PendingBatch;
 import com.surprising.aeron.service.order.OrderCommandQueue;
@@ -81,7 +81,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 交易步骤 1：Owner 上的业务执行入口。接收复制命令后，依次处理查询边界、幂等与来源检查、业务准入、撮合派发和有序完成。
- * 撮合准入交给 OrderAdmissionService，撮合推进交给 OrderMatchingCoordinator，
+ * 撮合准入交给 OrderAdmissionService，撮合推进交给 OrderMatchingFlow，
  * 结果完成交给 OrderCommitService；其他命令交给对应业务 Commands。
  * <p>账户 Lane、Matcher 和账本各自拥有权威状态。本类保存当前命令的变化范围、路由索引、收据及恢复水位，
  * 借出引用不会自动授予跨线程账户读写权限。构造保持被动，activate 才建立活动执行边界。</p>
@@ -104,8 +104,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final TradingAccountRuntime runtimeState;
     private final OrderBookRouter matcherPipeline;
     public final OrderCommitService commits = new OrderCommitService(this);
-    public final OrderMatchingCoordinator matchingFlow = new OrderMatchingCoordinator(this);
-    public final OrderMatchingCoordinator.Progress matchingProgress = new OrderMatchingCoordinator.Progress(this);
+    public final OrderMatchingFlow matchingFlow = new OrderMatchingFlow(this);
+    public final OrderMatchingFlow.Progress matchingProgress = new OrderMatchingFlow.Progress(this);
     public final CommandResultBuilder resultBuilder;
     @Accessors(fluent = true, chain = false)
     @Getter

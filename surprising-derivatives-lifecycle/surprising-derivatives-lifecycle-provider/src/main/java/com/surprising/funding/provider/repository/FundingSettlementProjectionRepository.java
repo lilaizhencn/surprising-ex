@@ -32,6 +32,6 @@ public class FundingSettlementProjectionRepository {
                     Instant.ofEpochMilli(rs.getLong("settlement_id")), rs.getLong("funding_rate_ppm"),
                     rs.getLong("total_long_payment_units"), rs.getLong("total_short_payment_units"),
                     rs.getInt("position_count"), rs.getString("command_status"), occurredAt, occurredAt);
-        }, properties.getKafka().getProductLine().name(), instrumentId).stream().findFirst();
+        }, properties.getProductLine().name(), instrumentId).stream().findFirst();
     }
 }

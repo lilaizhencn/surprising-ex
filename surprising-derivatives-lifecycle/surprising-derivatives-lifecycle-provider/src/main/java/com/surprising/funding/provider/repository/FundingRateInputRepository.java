@@ -41,7 +41,7 @@ public class FundingRateInputRepository {
         if (markPrices.isEmpty()) {
             return List.of();
         }
-        ProductLine productLine = properties.getKafka().getProductLine();
+        ProductLine productLine = properties.getProductLine();
         if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("资金费率合约 JVM 快照尚未就绪");
         }
@@ -49,7 +49,7 @@ public class FundingRateInputRepository {
     }
 
     private List<FundingRateInput> fromSnapshot(List<MarkPriceEvent> markPrices) {
-        ProductLine productLine = properties.getKafka().getProductLine();
+        ProductLine productLine = properties.getProductLine();
         if (!productLine.isFundingProduct()) {
             return List.of();
         }

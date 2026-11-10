@@ -99,7 +99,7 @@ public class IndexPriceService {
         latestIndexPriceCache.update(event);
         markPriceService.acceptIndexPrice(event);
         kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), instrumentId, PricePublishedEvent.index(event));
-        realtime.ifAvailable(publisher -> publisher.publish(properties.getKafka().getProductLine(),
+        realtime.ifAvailable(publisher -> publisher.publish(properties.getProductLine(),
                 com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event));
 
     }

@@ -30,7 +30,7 @@ public class FundingPaymentRepository {
         var sortSpec = new AdminCursorPage.SortSpec("createdAt", "occurred_at_epoch_ms", "payment_id", query.descending());
         var decodedCursor = query.cursor();
         List<Object> args = new ArrayList<>();
-        args.add(properties.getKafka().getProductLine().name());
+        args.add(properties.getProductLine().name());
         args.add(userId);
         args.add(instrumentId);
         args.add(instrumentId);

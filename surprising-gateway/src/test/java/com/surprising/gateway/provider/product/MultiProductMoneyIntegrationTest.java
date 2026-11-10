@@ -35,7 +35,7 @@ class MultiProductMoneyIntegrationTest {
                 assertThat(core.balance()).isEqualTo(100_000L*(line.ordinal()+1));
             }
             long initial = total(cores);
-            var transfers = new ProductTransferCoordinator(new ProductAccountAccess(products));
+            var transfers = new com.surprising.gateway.provider.service.ProductTransferService(new ProductAccountAccess(products));
             for (var line : ProductLine.values()) {
                 if (line == ProductLine.SPOT) continue;
                 var command = transfer(ProductLine.SPOT,line,"allocation-"+line);

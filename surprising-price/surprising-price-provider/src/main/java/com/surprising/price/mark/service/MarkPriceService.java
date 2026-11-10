@@ -96,7 +96,7 @@ public class MarkPriceService {
 
     public void acceptFundingRate(PerpFundingRateEvent event) {
         fundingRates.put(event.instrumentId(), event);
-        realtime.ifAvailable(publisher -> publisher.publish(properties.getKafka().getProductLine(),
+        realtime.ifAvailable(publisher -> publisher.publish(properties.getProductLine(),
                 com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.instrumentId(),event.instrumentId(),event.sequence(),event.eventTime(),event));
     }
 
@@ -171,7 +171,7 @@ public class MarkPriceService {
                 fundingRates.get(instrumentId), basisAverage,
                 properties.getCalculation().getBasisWindow().toSeconds(), now);
         kafkaTemplate.send(properties.priceEventsTopic(), instrumentId, PricePublishedEvent.mark(publication));
-        realtime.ifAvailable(publisher -> publisher.publish(properties.getKafka().getProductLine(),
+        realtime.ifAvailable(publisher -> publisher.publish(properties.getProductLine(),
                 com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK, instrumentId, instrumentId,
                 event.sequence(), event.eventTime(), event));
 

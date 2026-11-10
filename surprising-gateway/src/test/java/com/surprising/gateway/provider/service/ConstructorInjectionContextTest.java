@@ -67,7 +67,7 @@ class ConstructorInjectionContextTest {
             context.registerBean(GatewayProductServices.class, () -> products);
             context.registerBean(ObjectMapper.class, () -> new ObjectMapper());
             for (Class<?> type : List.of(AuthService.class, GatewayApiKeyService.class, AdminAuditRepository.class, AdminApprovalRepository.class,
-                    ProductTransferCoordinator.class, ProductTransferSecurityService.class, RestTemplate.class,
+                    ProductTransferService.class, ProductTransferSecurityService.class, RestTemplate.class,
                     com.surprising.instrument.provider.service.InstrumentService.class,
                     OrderValidator.class, OrderAeronGateway.class,
                     AeronOrderProjectionRepository.class, MatchingMarketDataService.class, TradingMetricsService.class,

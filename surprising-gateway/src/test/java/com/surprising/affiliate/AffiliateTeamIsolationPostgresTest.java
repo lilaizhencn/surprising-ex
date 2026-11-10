@@ -332,7 +332,7 @@ class AffiliateTeamIsolationPostgresTest {
         f.repository,
         f.ledger,
         org.mockito.Mockito.mock(
-          com.surprising.gateway.provider.service.ProductTransferCoordinator.class
+          com.surprising.gateway.provider.service.ProductTransferService.class
         ),
         f.manager,
         f.context.getBean(AffiliateProperties.class)

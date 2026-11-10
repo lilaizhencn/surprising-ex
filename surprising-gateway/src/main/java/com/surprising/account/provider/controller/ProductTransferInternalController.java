@@ -45,7 +45,7 @@ public final class ProductTransferInternalController {
 
     @PostMapping(AccountApiPaths.TRANSFER_PENDING_PATH)
     public PendingProductTransfersResponse pending(@Valid @RequestBody PendingProductTransfersRequest request) {
-        if (request.productLine() != properties.getKafka().getProductLine()) {
+        if (request.productLine() != properties.getProductLine()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "pending transfer product line mismatch");
         }
         return new PendingProductTransfersResponse(commands.pendingTransfers(request.limit()));

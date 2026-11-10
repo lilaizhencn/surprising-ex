@@ -3,7 +3,7 @@ package com.surprising.funding.provider.service;
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
-import com.surprising.aeron.client.AeronLifecycleCoordinator;
+import com.surprising.aeron.client.AeronLifecycleRetry;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -51,7 +51,7 @@ public class FundingService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final FundingAeronGateway aeron;
     private final String nodeId;
-    private final AeronLifecycleCoordinator lifecycleCoordinator = new AeronLifecycleCoordinator();
+    private final AeronLifecycleRetry lifecycleRetry = new AeronLifecycleRetry();
     public FundingService(FundingProperties properties,
                           FundingLeaseRepository leaseRepository,
                           FundingSequenceRepository sequenceRepository,
@@ -100,7 +100,7 @@ public class FundingService {
     }
 
     public synchronized SettlementCycle settleDueRates() {
-        return lifecycleCoordinator.execute(this::settleDueRatesInternal);
+        return lifecycleRetry.execute(this::settleDueRatesInternal);
     }
 
     private SettlementCycle settleDueRatesInternal() {
@@ -137,7 +137,7 @@ public class FundingService {
                 }
                 CoreFundingSettlement settlement = reserveCore(rate);
                 rate = settlement.rate();
-                String commandPrefix = properties.getKafka().getProductLine() + ":funding:"
+                String commandPrefix = properties.getProductLine() + ":funding:"
                         + rate.instrumentId() + ':' + settlement.settlementId();
                 long cursor = 0;
                 if (persisted != null && !persisted.complete()) {

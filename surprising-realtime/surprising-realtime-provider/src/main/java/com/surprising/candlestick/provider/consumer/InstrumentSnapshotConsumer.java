@@ -39,7 +39,7 @@ public class InstrumentSnapshotConsumer {
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         try {
             InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
-                    properties.getKafka().getProductLine(), "K 线服务");
+                    properties.getProductLine(), "K 线服务");
             symbolRegistryService.refresh();
         } catch (Exception ex) {
             throw new IllegalStateException("K 线合约快照更新失败", ex);

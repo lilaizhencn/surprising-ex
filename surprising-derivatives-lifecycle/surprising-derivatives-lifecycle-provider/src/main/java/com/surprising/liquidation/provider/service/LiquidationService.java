@@ -1,7 +1,7 @@
 package com.surprising.liquidation.provider.service;
 
 import com.surprising.aeron.protocol.CoreLiquidationActionView;
-import com.surprising.aeron.client.AeronLifecycleCoordinator;
+import com.surprising.aeron.client.AeronLifecycleRetry;
 import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderResponse;
 import com.surprising.liquidation.api.model.LiquidationOrderStatus;
@@ -21,7 +21,7 @@ public class LiquidationService {
     private final LiquidationProperties properties;
     private final LiquidationAeronGateway aeron;
     private final CoreLiquidationProjectionRepository projections;
-    private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
+    private final AeronLifecycleRetry lifecycleRetry = AeronLifecycleRetry.shared();
     private long nextRiskScanAtNanos;
     public LiquidationService(LiquidationProperties properties, LiquidationAeronGateway aeron,
                               CoreLiquidationProjectionRepository projections) {
@@ -31,7 +31,7 @@ public class LiquidationService {
     }
 
     public synchronized WorkCycle processWork() {
-        return lifecycleCoordinator.execute(this::processWorkInternal);
+        return lifecycleRetry.execute(this::processWorkInternal);
     }
 
     private WorkCycle processWorkInternal() {

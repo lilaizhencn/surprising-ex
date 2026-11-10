@@ -34,7 +34,7 @@ public class AccountAeronGateway implements AutoCloseable {
     public AccountAeronGateway(AccountProperties properties,
             @Qualifier("productCommandMediaDriver")
             MediaDriver driver) {
-        ProductLine productLine = properties.getKafka().getProductLine();
+        ProductLine productLine = properties.getProductLine();
         AccountProperties.Aeron aeron = properties.getAeron();
         this.clients = new AeronClientPool("account", productLine, aeron.getHostnames(),
                 aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),

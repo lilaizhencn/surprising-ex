@@ -543,7 +543,7 @@ class GatewayProxyControllerTest {
         var approval = dependencies.length > 2 ? (CapturedApproval) dependencies[2] : null;
         var mapper = dependencies.length > 3 ? (tools.jackson.databind.ObjectMapper) dependencies[3]
                 : new tools.jackson.databind.ObjectMapper();
-        var transfers = dependencies.length > 4 ? (ProductTransferCoordinator) dependencies[4] : null;
+        var transfers = dependencies.length > 4 ? (ProductTransferService) dependencies[4] : null;
         var security = dependencies.length > 5 ? (ProductTransferSecurityService) dependencies[5] : null;
         var local = mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
         when(local.productLine()).thenReturn(ProductLine.LINEAR_PERPETUAL);

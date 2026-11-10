@@ -40,7 +40,7 @@ public class InstrumentSnapshotConsumer {
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         try {
             InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
-                    properties.getKafka().getProductLine(), "指数价格服务");
+                    properties.getProductLine(), "指数价格服务");
             configService.refresh();
         } catch (Exception ex) {
             throw new IllegalStateException("指数价格合约快照更新失败", ex);

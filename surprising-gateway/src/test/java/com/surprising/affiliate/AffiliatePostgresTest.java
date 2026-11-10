@@ -9,7 +9,7 @@ import com.surprising.affiliate.repository.*;
 import com.surprising.affiliate.service.*;
 import com.surprising.gateway.provider.model.*;
 import com.surprising.gateway.provider.model.ProductAccountAdjustment;
-import com.surprising.gateway.provider.service.ProductTransferCoordinator;
+import com.surprising.gateway.provider.service.ProductTransferService;
 import java.nio.file.*;
 import java.time.Instant;
 import java.util.*;
@@ -462,7 +462,7 @@ class AffiliatePostgresTest {
     var settlement = new AffiliateSettlementService(
       repository,
       ledger,
-      mock(ProductTransferCoordinator.class),
+      mock(ProductTransferService.class),
       manager,
       context.getBean(AffiliateProperties.class)
     );
@@ -551,7 +551,7 @@ class AffiliatePostgresTest {
     var settlement = new AffiliateSettlementService(
       repository,
       ledger,
-      mock(ProductTransferCoordinator.class),
+      mock(ProductTransferService.class),
       manager,
       context.getBean(AffiliateProperties.class)
     );
@@ -591,7 +591,7 @@ class AffiliatePostgresTest {
     new TransactionTemplate(manager).executeWithoutResult(tx ->
       repository.budget("LINEAR_PERPETUAL", 9, 10, "测试预算")
     );
-    var transfers = mock(ProductTransferCoordinator.class);
+    var transfers = mock(ProductTransferService.class);
     when(transfers.executeCommittedTransfer(any())).thenAnswer(invocation -> {
       var command = (ProductTransferCommand) invocation.getArgument(0);
       return ProductTransferResult.from(
@@ -660,7 +660,7 @@ class AffiliatePostgresTest {
     var settlement = new AffiliateSettlementService(
       repository,
       ledger,
-      mock(ProductTransferCoordinator.class),
+      mock(ProductTransferService.class),
       manager,
       context.getBean(AffiliateProperties.class)
     );
@@ -719,7 +719,7 @@ class AffiliatePostgresTest {
       var settlement = new AffiliateSettlementService(
         repository,
         ledger,
-        new ProductTransferCoordinator(accounts, null),
+        new ProductTransferService(accounts, null),
         manager,
         context.getBean(AffiliateProperties.class)
       );

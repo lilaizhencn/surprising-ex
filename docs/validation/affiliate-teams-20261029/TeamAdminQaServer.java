@@ -4,7 +4,7 @@ import com.surprising.affiliate.config.AffiliateProperties;
 import com.surprising.affiliate.service.*;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
-import com.surprising.gateway.provider.service.ProductTransferCoordinator;
+import com.surprising.gateway.provider.service.ProductTransferService;
 import java.nio.file.*;
 import java.time.Instant;
 import java.util.List;
@@ -29,7 +29,7 @@ public class TeamAdminQaServer {
    var auth=mock(AuthService.class);
    when(auth.requireAdminPermission(anyString(),anyString())).thenReturn(new JwtPrincipal(9,"team-qa","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(3600)));
    var query=new AffiliateQueryService(f.repository,f.ledger,f.service);
-   var money=new AffiliateSettlementService(f.repository,f.ledger,mock(ProductTransferCoordinator.class),f.manager,properties);
+   var money=new AffiliateSettlementService(f.repository,f.ledger,mock(ProductTransferService.class),f.manager,properties);
    Path base=Files.createTempDirectory(Path.of("/tmp/surprising-affiliate-teams-20261029"),"tomcat-");
    tomcat.setBaseDir(base.toString());tomcat.setHostname("127.0.0.1");tomcat.setPort(19096);
    var host=tomcat.addContext("",base.toString());

@@ -26,7 +26,7 @@ public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotIni
 
     @Override
     protected Set<ProductLine> productLines() {
-        return Set.of(properties.getKafka().getProductLine());
+        return Set.of(properties.getProductLine());
     }
 
     @Override

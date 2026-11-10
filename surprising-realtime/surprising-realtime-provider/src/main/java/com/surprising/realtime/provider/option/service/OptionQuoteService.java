@@ -31,7 +31,7 @@ public final class OptionQuoteService {
     @Autowired
     public OptionQuoteService(InstrumentSnapshotCache instruments, CandlestickProperties properties) {
         this(instruments, Clock.systemUTC());
-        if (properties.getKafka().getProductLine() != ProductLine.OPTION)
+        if (properties.getProductLine() != ProductLine.OPTION)
             throw new IllegalArgumentException("option market view requires OPTION product");
     }
 

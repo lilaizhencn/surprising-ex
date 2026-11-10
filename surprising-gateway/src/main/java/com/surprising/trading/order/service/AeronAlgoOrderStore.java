@@ -78,7 +78,7 @@ public class AeronAlgoOrderStore {
         return aeron.algoOrders(userId, instrumentId, dueAt, limit);
     }
     public AlgoOrderRecord record(CoreAlgoOrderView value) {
-        var productLine = properties.getKafka().getProductLine();
+        var productLine = properties.getProductLine();
 
         return new AlgoOrderRecord(value.algoOrderId(), productLine, value.userId(), empty(value.clientAlgoOrderId()),
                 value.instrumentId(), AlgoOrderType.values()[value.algoTypeCode()], OrderSide.valueOf(value.side().name()),

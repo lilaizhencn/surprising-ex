@@ -34,7 +34,7 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
         this.properties = properties;
         this.periods = properties.getPeriods().stream().map(CandlePeriod::fromCode)
                 .filter(period -> period != CandlePeriod.M1).distinct().toList();
-        this.productKey = properties.getKafka().getProductLine().topicSegment();
+        this.productKey = properties.getProductLine().topicSegment();
         this.hotCache = hotCache;
         this.minutes = java.util.Objects.requireNonNull(minutes);
     }

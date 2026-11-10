@@ -23,14 +23,14 @@ public class FundingSettlementRateRepository {
                 INSERT INTO funding_settlement_rates(product_line,instrument_id,settlement_id,sequence,
                   funding_time,funding_interval_hours,funding_rate_ppm,premium_rate_ppm,interest_rate_ppm,event_time)
                 VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING
-                """, properties.getKafka().getProductLine().name(), rate.instrumentId(), settlementId, rate.sequence(),
+                """, properties.getProductLine().name(), rate.instrumentId(), settlementId, rate.sequence(),
                 java.sql.Timestamp.from(rate.fundingTime()), rate.fundingIntervalHours(), rate.fundingRatePpm(),
                 rate.premiumRatePpm(), rate.interestRatePpm(), java.sql.Timestamp.from(rate.eventTime()));
         var frozen = jdbcTemplate.queryForObject("""
                 SELECT *, 'PREDICTED' AS status FROM funding_settlement_rates
                  WHERE product_line=? AND instrument_id=? AND settlement_id=?
                 """, (rs, row) -> toRate(rs),
-                properties.getKafka().getProductLine().name(), rate.instrumentId(), settlementId);
+                properties.getProductLine().name(), rate.instrumentId(), settlementId);
         return java.util.Objects.requireNonNull(frozen);
     }
 

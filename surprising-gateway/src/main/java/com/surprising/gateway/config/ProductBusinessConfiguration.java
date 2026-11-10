@@ -29,7 +29,7 @@ public class ProductBusinessConfiguration {
     public MediaDriver productCommandMediaDriver(AccountProperties properties) {
         String directory = Path.of(System.getProperty("java.io.tmpdir"),
                 "surprising-gateway-command-" + ProcessHandle.current().pid() + "-"
-                        + properties.getKafka().getProductLine() + "-" + UUID.randomUUID()).toString();
+                        + properties.getProductLine() + "-" + UUID.randomUUID()).toString();
         return SurprisingAeronClient.newMediaDriver(directory);
     }
 
@@ -45,7 +45,7 @@ public class ProductBusinessConfiguration {
             AccountProperties properties) {
         var scheduler = new org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler();
         scheduler.setPoolSize(2);
-        scheduler.setThreadNamePrefix("gateway-" + properties.getKafka().getProductLine() + "-scheduled-");
+        scheduler.setThreadNamePrefix("gateway-" + properties.getProductLine() + "-scheduled-");
         scheduler.setRemoveOnCancelPolicy(true);
         scheduler.setAwaitTerminationSeconds(5);
         return scheduler;

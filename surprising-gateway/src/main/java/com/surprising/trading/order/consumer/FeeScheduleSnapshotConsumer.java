@@ -47,7 +47,7 @@ public class FeeScheduleSnapshotConsumer {
         }
         try {
             FeeScheduleEvent event = objectMapper.readValue(record.value(), FeeScheduleEvent.class);
-            if (event.productLine() != properties.getKafka().getProductLine()) {
+            if (event.productLine() != properties.getProductLine()) {
                 throw new IllegalArgumentException("费率事件产品线不匹配: " + event.productLine());
             }
             FeeScheduleSnapshotCache.ApplyResult result = cache.apply(event);

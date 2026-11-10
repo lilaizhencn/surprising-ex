@@ -28,7 +28,7 @@ public class MaintenanceAeronGateway implements AutoCloseable {
     public CoreResponse command(CoreMessageType type,java.util.UUID id,long userId,byte[] payload) { return views.command(type,id,userId,payload); }
     public com.surprising.aeron.client.CoreCommandOutcome commandOutcome(CoreMessageType type,java.util.UUID id,long userId,byte[] payload) { return clients.commandOutcome(type,id,userId,payload); }
     private static AeronClientPool clients(TradingOrderProperties properties, MediaDriver driver) {
-        var config=properties.getAeron(); var line=properties.getKafka().getProductLine();
+        var config=properties.getAeron(); var line=properties.getProductLine();
         return new AeronClientPool("maintenance",line,config.getHostnames(),config.getEgressHostname(),
                 config.getResponseTimeout(),1,"maintenance-"+line.name()+"-node-"+config.getNodeId(),driver);
     }

@@ -23,7 +23,7 @@ public class OrderBusinessSettingsService {
     public OrderBusinessSettingsService(OrderBusinessSettingsRepository settings, TradingOrderProperties properties) {
         this.settings = settings;
         this.properties = properties;
-        this.line = properties.getKafka().getProductLine();
+        this.line = properties.getProductLine();
     }
 
     @PostConstruct

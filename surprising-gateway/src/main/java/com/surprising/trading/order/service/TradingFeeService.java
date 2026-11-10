@@ -169,15 +169,15 @@ public class TradingFeeService {
         if (properties == null || properties.getKafka() == null) {
             throw new IllegalStateException("交易费率服务未配置产品线");
         }
-        ProductLineConfiguration.requireSame(properties.getKafka().getProductLine(), requested, "trading fee");
+        ProductLineConfiguration.requireSame(properties.getProductLine(), requested, "trading fee");
     }
 
     private ProductLine currentProductLine() {
         if (properties == null || properties.getKafka() == null
-                || properties.getKafka().getProductLine() == null) {
+                || properties.getProductLine() == null) {
             throw new IllegalStateException("交易费率服务未配置产品线");
         }
-        return properties.getKafka().getProductLine();
+        return properties.getProductLine();
     }
 
 }

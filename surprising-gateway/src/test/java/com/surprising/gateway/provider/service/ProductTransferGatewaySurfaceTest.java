@@ -47,7 +47,7 @@ class ProductTransferGatewaySurfaceTest {
         when(products.enabled()).thenReturn(java.util.List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
         when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
         GatewayProxyController proxy = new GatewayProxyController(properties(), new RestTemplate(), userAuthService(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class),
-                null, new ObjectMapper(), new ProductTransferCoordinator(accountClient), null,
+                null, new ObjectMapper(), new ProductTransferService(accountClient), null,
                 products, local, new com.surprising.gateway.provider.product.GatewayProductSelection(products, new ObjectMapper()));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest(
                 "POST", "/api/v1/gateway/account/transfers");
@@ -69,7 +69,7 @@ class ProductTransferGatewaySurfaceTest {
     @org.junit.jupiter.params.provider.EnumSource(com.surprising.gateway.provider.exception.ProductTransferSecurityException.Reason.class)
     void nativeSecurityFailuresKeepTheirHttpStatusAndNeverStartFundsMovement(
             com.surprising.gateway.provider.exception.ProductTransferSecurityException.Reason reason) throws Exception {
-        var coordinator=mock(ProductTransferCoordinator.class);
+        var coordinator=mock(ProductTransferService.class);
         var security=mock(ProductTransferSecurityService.class);
         org.mockito.Mockito.doThrow(new com.surprising.gateway.provider.exception.ProductTransferSecurityException(reason,"security failure"))
                 .when(security).requireIfNeeded(org.mockito.ArgumentMatchers.eq(42L),org.mockito.ArgumentMatchers.any(),
@@ -92,7 +92,7 @@ class ProductTransferGatewaySurfaceTest {
 
 
     @Test void authenticationPrecedesBodyBindingAndCannotReachSecurityOrFunds() {
-        var coordinator=mock(ProductTransferCoordinator.class);
+        var coordinator=mock(ProductTransferService.class);
         var security=mock(ProductTransferSecurityService.class);
         var auth=userAuthService();
         var controller=controller(coordinator,security,auth);
@@ -104,7 +104,7 @@ class ProductTransferGatewaySurfaceTest {
     }
 
     @Test void exactAmountAndAuthenticatedIdentityAreBoundInTheOriginalSecurityOrder() {
-        var coordinator=mock(ProductTransferCoordinator.class);
+        var coordinator=mock(ProductTransferService.class);
         var security=mock(ProductTransferSecurityService.class);
         var auth=userAuthService();
         when(coordinator.transfer(org.mockito.ArgumentMatchers.any())).thenAnswer(call->ProductTransferResult.from(99,
@@ -138,7 +138,7 @@ class ProductTransferGatewaySurfaceTest {
                 {"sourceAccountType":"FUNDING","targetAccountType":"USDT_PERPETUAL","asset":"USDT","amountUnits":100,"referenceId":"original"}
                 """);
         payload.set(field,json.readTree(value));
-        var coordinator=mock(ProductTransferCoordinator.class);
+        var coordinator=mock(ProductTransferService.class);
         var controller=controller(coordinator,mock(ProductTransferSecurityService.class),userAuthService());
         org.assertj.core.api.Assertions.assertThatThrownBy(()->controller.proxy("account",HttpMethod.POST,transferRequest(),json.writeValueAsBytes(payload)))
                 .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,
@@ -166,7 +166,7 @@ class ProductTransferGatewaySurfaceTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings={"null","broken","[]"})
     void malformedBodyNeverReachesSecurityOrFunds(String body) {
-        var coordinator=mock(ProductTransferCoordinator.class);
+        var coordinator=mock(ProductTransferService.class);
         var security=mock(ProductTransferSecurityService.class);
         var controller=controller(coordinator,security,userAuthService());
         org.assertj.core.api.Assertions.assertThatThrownBy(()->controller.proxy("account",HttpMethod.POST,transferRequest(),body.getBytes(StandardCharsets.UTF_8)))
@@ -181,7 +181,7 @@ class ProductTransferGatewaySurfaceTest {
         return request;
     }
 
-    private GatewayProxyController controller(ProductTransferCoordinator coordinator,ProductTransferSecurityService security,AuthService auth) {
+    private GatewayProxyController controller(ProductTransferService coordinator,ProductTransferSecurityService security,AuthService auth) {
         var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         var local=mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
         var json=new ObjectMapper();

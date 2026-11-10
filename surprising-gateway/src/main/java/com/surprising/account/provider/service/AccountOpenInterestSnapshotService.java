@@ -22,7 +22,7 @@ public class AccountOpenInterestSnapshotService {
     }
 
     public OpenInterestSnapshotResponse snapshot(ProductLine productLine) {
-        ProductLineConfiguration.requireSame(properties.getKafka().getProductLine(), productLine, "account open interest");
+        ProductLineConfiguration.requireSame(properties.getProductLine(), productLine, "account open interest");
         var state = aeron.openInterest();
         Instant now = Instant.now();
         long revision = Math.max(1L, state.revision());

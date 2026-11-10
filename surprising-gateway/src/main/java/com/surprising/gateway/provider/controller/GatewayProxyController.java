@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.model.ProductTransferCommand;
 import com.surprising.gateway.provider.model.ProductTransferWireRequest;
 
 
-import com.surprising.gateway.provider.service.ProductTransferCoordinator;
+import com.surprising.gateway.provider.service.ProductTransferService;
 import com.surprising.gateway.provider.service.ProductTransferSecurityService;
 import com.surprising.gateway.provider.model.ProductTransferResult;
 import com.surprising.gateway.provider.model.ProductTransferStatus;
@@ -70,7 +70,7 @@ public class GatewayProxyController {
     private final com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding apiKeyRequests;
     private final AdminApprovalService adminOperations;
     private final ObjectMapper objectMapper;
-    private final ProductTransferCoordinator productTransferCoordinator;
+    private final ProductTransferService productTransferCoordinator;
     private final ProductTransferSecurityService productTransferSecurityService;
 
     @Autowired
@@ -80,7 +80,7 @@ public class GatewayProxyController {
                                com.surprising.gateway.provider.auth.service.GatewayApiKeyService apiKeys,
                                AdminApprovalService adminOperations,
                                ObjectMapper objectMapper,
-                               ProductTransferCoordinator productTransferCoordinator,
+                               ProductTransferService productTransferCoordinator,
                                ProductTransferSecurityService productTransferSecurityService,
                                com.surprising.gateway.provider.product.GatewayProductServices products,
                                com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi,

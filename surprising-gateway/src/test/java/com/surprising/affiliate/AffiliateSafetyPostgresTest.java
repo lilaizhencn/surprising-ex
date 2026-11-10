@@ -6,7 +6,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.affiliate.config.AffiliateProperties;
 import com.surprising.affiliate.model.AffiliateModels.*;
 import com.surprising.affiliate.service.*;
-import com.surprising.gateway.provider.service.ProductTransferCoordinator;
+import com.surprising.gateway.provider.service.ProductTransferService;
 import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -45,7 +45,7 @@ class AffiliateSafetyPostgresTest {
     return f.jdbc.queryForObject("SELECT count(*) FROM " + table, Long.class);
   }
 
-  AffiliateSettlementService settlement(ProductTransferCoordinator transfers) {
+  AffiliateSettlementService settlement(ProductTransferService transfers) {
     return new AffiliateSettlementService(
       f.repository,
       f.ledger,
@@ -273,7 +273,7 @@ class AffiliateSafetyPostgresTest {
   @Test
   void expiredClaimCannotOverwriteNewClaimOrTerminalMoneyResult() {
     ordinaryMatureFee();
-    settlement(mock(ProductTransferCoordinator.class)).prepare(true, 10);
+    settlement(mock(ProductTransferService.class)).prepare(true, 10);
     UUID first = UUID.randomUUID(),
       second = UUID.randomUUID();
     var old = f.ledger.claimPayout(first, 120).orElseThrow();
@@ -308,7 +308,7 @@ class AffiliateSafetyPostgresTest {
   @Test
   void committedAmountsAndAssignmentsCannotBeMutatedAfterClaim() {
     ordinaryMatureFee();
-    settlement(mock(ProductTransferCoordinator.class)).prepare(true, 10);
+    settlement(mock(ProductTransferService.class)).prepare(true, 10);
     assertThatThrownBy(() ->
       f.jdbc.update("DELETE FROM affiliate_commissions")
     ).isInstanceOf(DataAccessException.class);
@@ -356,7 +356,7 @@ class AffiliateSafetyPostgresTest {
       "INSERT INTO affiliate_payouts(payout_id,beneficiary_id,budget_user_id,product_line,asset,amount_units) VALUES(?,1,9,'LINEAR_PERPETUAL','USDT',2000)",
       id
     );
-    var transfers = mock(ProductTransferCoordinator.class);
+    var transfers = mock(ProductTransferService.class);
     settlement(transfers).send();
     verifyNoInteractions(transfers);
     assertThat(
@@ -405,7 +405,7 @@ class AffiliateSafetyPostgresTest {
       "UPDATE affiliate_settlement_groups SET available_at=clock_timestamp()-interval '1 second'"
     );
     properties().setPayoutRows(2);
-    var worker = settlement(mock(ProductTransferCoordinator.class));
+    var worker = settlement(mock(ProductTransferService.class));
     worker.prepare(false, 0);
     assertThat(
       f.jdbc.queryForObject(
@@ -436,7 +436,7 @@ class AffiliateSafetyPostgresTest {
     var now = f.repository.now().minusSeconds(172800);
     f.accrual.accrue(new Fee(2, "LINEAR_PERPETUAL", 2, 43, "USDT", 10000, now));
     properties().setPayoutRows(1);
-    var transfers = mock(ProductTransferCoordinator.class);
+    var transfers = mock(ProductTransferService.class);
     when(transfers.executeCommittedTransfer(any())).thenAnswer(invocation -> {
       assertThat(
         f.jdbc.queryForObject(
@@ -512,7 +512,7 @@ class AffiliateSafetyPostgresTest {
     ordinaryMatureFee();
     var fee = f.matureFee(2, 2, 10000);
     f.accrual.accrue(new Fee(2, "SPOT", 2, 43, "BTC", 10000, fee.occurredAt()));
-    var worker = settlement(mock(ProductTransferCoordinator.class));
+    var worker = settlement(mock(ProductTransferService.class));
     worker.prepare(true, 10);
     assertThat(count("affiliate_payouts")).isEqualTo(1);
     assertThat(
@@ -548,7 +548,7 @@ class AffiliateSafetyPostgresTest {
       )
     );
     f.service.budget("LINEAR_PERPETUAL", 9, 10, "边界预算");
-    var worker = settlement(mock(ProductTransferCoordinator.class));
+    var worker = settlement(mock(ProductTransferService.class));
     worker.prepare(true, 10);
     worker.prepare(true, 10);
     assertThat(count("affiliate_payouts")).isEqualTo(2);
@@ -587,7 +587,7 @@ class AffiliateSafetyPostgresTest {
       accounts.loseDebitResponse = false;
       accounts.adjust(9, 1000);
       accounts.adjust(1, 0);
-      var worker = settlement(new ProductTransferCoordinator(accounts, null));
+      var worker = settlement(new ProductTransferService(accounts, null));
       worker.prepare(true, 10);
       worker.send();
       assertThat(accounts.balances.get(9L)).isEqualTo(1000);

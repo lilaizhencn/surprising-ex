@@ -73,7 +73,7 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
             return;
         }
         long now = System.currentTimeMillis();
-        var product = properties.getKafka().getProductLine();
+        var product = properties.getProductLine();
         directory.heartbeat(node, endpoint, Duration.ofSeconds(15));
         // 当前产品线的公共行情；没有账户订阅，也不依赖浏览器是否打开。
         directory.register(new RealtimeRoute(product, 0, "TRADE", "*"), node, now + 15000);
@@ -82,7 +82,7 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
     }
 
     void receive(RealtimeFrame frame) {
-        if (frame.productLine() != properties.getKafka().getProductLine() || frame.userId() != 0
+        if (frame.productLine() != properties.getProductLine() || frame.userId() != 0
                 || (frame.kind() != RealtimeFrame.Kind.BOOK && frame.kind() != RealtimeFrame.Kind.TRADE)) return;
         MarkPriceEncoding encoding = encodings.currentEncoding(frame.instrumentId());
         Instant time = Instant.ofEpochMilli(frame.timestamp());

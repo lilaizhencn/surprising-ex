@@ -21,6 +21,14 @@ public class AccountProperties {
         this.aeron = aeron == null ? new Aeron() : aeron;
     }
 
+    public ProductLine getProductLine() {
+        return kafka.getProductLine();
+    }
+
+    public void setProductLine(ProductLine productLine) {
+        kafka.setProductLine(productLine);
+    }
+
     @Getter
     public static class Kafka {
         @Setter

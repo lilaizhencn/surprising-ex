@@ -77,8 +77,8 @@ public final class AffiliateTeamWorkload {
       context.registerBean(DataSourceTransactionManager.class, () ->
         new DataSourceTransactionManager(pool)
       );
-      context.registerBean(ProductTransferCoordinator.class, () ->
-        new ProductTransferCoordinator(funds, null)
+      context.registerBean(ProductTransferService.class, () ->
+        new ProductTransferService(funds, null)
       );
       context.register(
         AffiliatePostgresTest.Transactions.class,

@@ -29,7 +29,7 @@ public class InstrumentSnapshotInitializer {
 
     @PostConstruct
     public void initialize() {
-        ProductLine productLine = properties.getKafka().getProductLine();
+        ProductLine productLine = properties.getProductLine();
         var snapshot = instrumentService.snapshot(productLine);
         if (snapshot == null || snapshot.productLine() != productLine) {
             throw new IllegalStateException("合约快照产品线不匹配: " + productLine);

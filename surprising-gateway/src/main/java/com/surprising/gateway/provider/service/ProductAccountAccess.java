@@ -33,7 +33,7 @@ public final class ProductAccountAccess implements ProductAccountClient {
     private ProductAccountAdjustment operation(String accountType, ProductTransferOperationRequest request, String phase) {
         products.requireEnabled(request.sourceProductLine());
         products.requireEnabled(request.targetProductLine());
-        ProductLine product = ProductTransferCoordinator.productLine(AccountType.valueOf(accountType));
+        ProductLine product = ProductTransferService.productLine(AccountType.valueOf(accountType));
         // 配置错误在提交前暴露；Core 超时则必须维持 UNKNOWN，不能退款或换一个命令标识。
         var commands = products.service(product, AccountCommandGateway.class);
         try {

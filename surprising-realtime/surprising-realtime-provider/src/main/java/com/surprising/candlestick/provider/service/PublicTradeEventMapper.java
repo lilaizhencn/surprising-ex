@@ -34,7 +34,7 @@ public class PublicTradeEventMapper {
         this(snapshotCache,
                 properties == null || properties.getKafka() == null
                         ? com.surprising.product.api.ProductLine.LINEAR_PERPETUAL
-                        : properties.getKafka().getProductLine());
+                        : properties.getProductLine());
     }
 
     private PublicTradeEventMapper(InstrumentSnapshotCache snapshotCache,

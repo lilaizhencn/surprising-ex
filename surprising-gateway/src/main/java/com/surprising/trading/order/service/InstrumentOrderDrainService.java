@@ -42,7 +42,7 @@ public class InstrumentOrderDrainService {
 
     public void drain(InstrumentEvent event) {
         if (event.status() != InstrumentStatus.SETTLING
-                || event.productLine() != properties.getKafka().getProductLine()) {
+                || event.productLine() != properties.getProductLine()) {
             return;
         }
         algoOrderService.cancelLifecycleOrders(Integer.toString(event.instrumentId()), BATCH_SIZE);
@@ -62,7 +62,7 @@ public class InstrumentOrderDrainService {
                     InstrumentLifecycleDrainEvent.CURRENT_SCHEMA_VERSION,
                     Integer.toString(event.instrumentId()),
                     event.changeId(),
-                    properties.getKafka().getProductLine(),
+                    properties.getProductLine(),
                     InstrumentLifecycleDrainComponent.ORDER,
                     Instant.now());
             String payload = objectMapper.writeValueAsString(ready);

@@ -37,7 +37,7 @@ public class TradingOrderKafkaConfiguration {
         config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
         config.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, ORDER_STATE_SNAPSHOT_MAX_BYTES);
         DefaultKafkaProducerFactory<String, String> factory = new DefaultKafkaProducerFactory<>(config);
-        factory.setTransactionIdPrefix("order-" + productLineName(properties.getKafka().getProductLine())
+        factory.setTransactionIdPrefix("order-" + productLineName(properties.getProductLine())
                 + "-" + properties.getKafka().getClientId() + "-");
         return factory;
     }

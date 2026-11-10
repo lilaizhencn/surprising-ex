@@ -28,7 +28,7 @@ public class FeeScheduleSnapshotInitializer {
 
     @PostConstruct
     public void initialize() {
-        ProductLine productLine = properties.getKafka().getProductLine();
+        ProductLine productLine = properties.getProductLine();
         var schedules = repository.loadSnapshotSchedules(productLine);
         schedules.forEach(coreImporter::importPolicy);
         cache.replace(productLine, schedules);

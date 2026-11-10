@@ -23,6 +23,14 @@ public class CandlestickProperties {
     private Query query = new Query();
     private Rocksdb rocksdb = new Rocksdb();
 
+    public ProductLine getProductLine() {
+        return kafka.getProductLine();
+    }
+
+    public void setProductLine(ProductLine productLine) {
+        kafka.setProductLine(productLine);
+    }
+
     @Getter
     public static class Kafka {
         @Setter

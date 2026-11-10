@@ -1,7 +1,7 @@
 package com.surprising.insurance.provider.service;
 
 import com.surprising.account.api.model.LiquidationFeeSettledEvent;
-import com.surprising.aeron.client.AeronLifecycleCoordinator;
+import com.surprising.aeron.client.AeronLifecycleRetry;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
@@ -33,7 +33,7 @@ import java.util.UUID;
     private final InsuranceFundLedgerRepository ledgerRepository;
     private final InsuranceCoverageRepository coverageRepository;
     private final InsuranceAeronGateway aeron;
-    private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
+    private final AeronLifecycleRetry lifecycleRetry = AeronLifecycleRetry.shared();
     public InsuranceService(InsuranceProperties properties,
                             InsuranceFundLedgerRepository ledgerRepository,
                             InsuranceCoverageRepository coverageRepository,
@@ -45,7 +45,7 @@ import java.util.UUID;
     }
 
     public synchronized CoverageCycle coverDeficits() {
-        return lifecycleCoordinator.execute(this::coverDeficitsInternal);
+        return lifecycleRetry.execute(this::coverDeficitsInternal);
     }
 
     private CoverageCycle coverDeficitsInternal() {
@@ -69,7 +69,7 @@ import java.util.UUID;
     }
 
     private void requireOwnedWork(CoreLiquidationWorkView work) {
-        if (work.productLine() != properties.getKafka().getProductLine()) {
+        if (work.productLine() != properties.getProductLine()) {
             throw new IllegalStateException("Core insurance work ProductLine mismatch");
         }
         if (!work.actions().isEmpty() || work.resolutions().stream()
@@ -88,7 +88,7 @@ import java.util.UUID;
         long currentBalance = aeron.balance(asset);
         long nextBalance = Math.addExact(currentBalance, request.amountUnits());
         if (nextBalance < 0) throw new IllegalArgumentException("insufficient insurance fund balance");
-        UUID commandId = stableId("INSURANCE_FUND:" + properties.getKafka().getProductLine() + ':' + referenceId);
+        UUID commandId = stableId("INSURANCE_FUND:" + properties.getProductLine() + ':' + referenceId);
         aeron.command(CoreMessageType.ADJUST_INSURANCE_FUND, commandId,
                 TradingCommandCodec.encodeAdjustInsuranceFund(
                         new AdjustInsuranceFundCommand(asset, request.amountUnits())));
@@ -104,7 +104,7 @@ import java.util.UUID;
         requireProviderAccountType(accountType);
         String referenceId = event.tradeId() + ":" + event.orderId();
         String asset = normalizeAsset(event.asset());
-        UUID commandId = stableId("LIQUIDATION_FEE:" + properties.getKafka().getProductLine() + ':' + referenceId);
+        UUID commandId = stableId("LIQUIDATION_FEE:" + properties.getProductLine() + ':' + referenceId);
         aeron.command(CoreMessageType.ADJUST_INSURANCE_FUND, commandId,
                 TradingCommandCodec.encodeAdjustInsuranceFund(
                         new AdjustInsuranceFundCommand(asset, event.amountUnits())));
@@ -137,7 +137,7 @@ import java.util.UUID;
         if (coverUnits <= 0) {
             return false;
         }
-        UUID commandId = stableId("INSURANCE_COVER:" + properties.getKafka().getProductLine() + ':'
+        UUID commandId = stableId("INSURANCE_COVER:" + properties.getProductLine() + ':'
                 + deficit.liquidationId() + ':' + deficit.deficitUnits());
         aeron.command(CoreMessageType.RESOLVE_LIQUIDATION, commandId,
                 TradingCommandCodec.encodeResolveLiquidation(new ResolveLiquidationCommand(

@@ -30,6 +30,14 @@ public class MarkPriceProperties {
         this.aeron = aeron == null ? new Aeron() : aeron;
     }
 
+    public ProductLine getProductLine() {
+        return kafka.getProductLine();
+    }
+
+    public void setProductLine(ProductLine productLine) {
+        kafka.setProductLine(productLine);
+    }
+
     @Getter
     public static class Aeron {
         private List<String> hostnames = List.of("localhost", "localhost", "localhost");

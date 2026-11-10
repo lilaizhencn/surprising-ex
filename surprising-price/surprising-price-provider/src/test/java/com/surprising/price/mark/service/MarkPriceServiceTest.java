@@ -145,7 +145,7 @@ class MarkPriceServiceTest {
         assertThat(event.markPrice()).isEqualByComparingTo("100.000000000000000000");
         verify(cache).update(any(MarkPriceEvent.class));
         verify(corePublisher).publish(event);
-        verify(realtime).publish(eq(properties.getKafka().getProductLine()), eq(com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK),
+        verify(realtime).publish(eq(properties.getProductLine()), eq(com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK),
                 eq("1"), eq("1"), eq(event.sequence()), eq(event.eventTime()), eq(event));
     }
 

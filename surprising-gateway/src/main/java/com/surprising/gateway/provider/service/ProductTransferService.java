@@ -24,21 +24,21 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
-public final class ProductTransferCoordinator {
+public final class ProductTransferService {
 
-    private static final Logger log = LoggerFactory.getLogger(ProductTransferCoordinator.class);
+    private static final Logger log = LoggerFactory.getLogger(ProductTransferService.class);
     // Only the scan order lives here; pending money remains owned by each source Core.
     private final AtomicInteger nextReconciliationLine = new AtomicInteger();
 
     private final ProductAccountClient accountClient;
     private final com.surprising.gateway.provider.auth.repository.GatewayUserRepository users;
 
-    public ProductTransferCoordinator(ProductAccountClient accountClient) {
+    public ProductTransferService(ProductAccountClient accountClient) {
         this(accountClient, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public ProductTransferCoordinator(ProductAccountClient accountClient,
+    public ProductTransferService(ProductAccountClient accountClient,
             com.surprising.gateway.provider.auth.repository.GatewayUserRepository users) {
         this.accountClient = accountClient;
         this.users = users;

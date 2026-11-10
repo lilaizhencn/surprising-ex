@@ -29,7 +29,7 @@ public class InstrumentCoreSyncService {
 
     public InstrumentCoreSyncService(@Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache cache,
             MaintenanceAeronGateway gateway, TradingOrderProperties properties) {
-        this.cache=cache; this.gateway=gateway; this.line=properties.getKafka().getProductLine(); this.properties=properties;
+        this.cache=cache; this.gateway=gateway; this.line=properties.getProductLine(); this.properties=properties;
     }
 
     public synchronized void reconcile() {

@@ -36,6 +36,14 @@ public class IndexPriceProperties {
     private Audit audit = new Audit();
     private List<String> requiredInstrumentIds = List.of();
 
+    public ProductLine getProductLine() {
+        return kafka.getProductLine();
+    }
+
+    public void setProductLine(ProductLine productLine) {
+        kafka.setProductLine(productLine);
+    }
+
     public void setRequiredInstrumentIds(List<String> requiredInstrumentIds) {
         this.requiredInstrumentIds = requiredInstrumentIds == null ? List.of() : requiredInstrumentIds.stream()
                 .filter(value -> value != null && !value.isBlank())

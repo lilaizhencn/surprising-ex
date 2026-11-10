@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.telegram.bot.handler;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.gateway.provider.model.ProductTransferCommand;
 import com.surprising.gateway.provider.model.ProductTransferResult;
-import com.surprising.gateway.provider.service.ProductTransferCoordinator;
+import com.surprising.gateway.provider.service.ProductTransferService;
 import com.surprising.gateway.provider.telegram.bot.client.TelegramBotClient;
 import com.surprising.gateway.provider.telegram.bot.model.TelegramSessionState;
 import com.surprising.gateway.provider.telegram.bot.model.TelegramUser;
@@ -25,12 +25,12 @@ public class TelegramTransferHandler {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramTransferHandler.class);
 
-    private final ProductTransferCoordinator transferCoordinator;
+    private final ProductTransferService transferCoordinator;
     private final TelegramAuthHandler authHandler;
     private final TelegramSessionService sessionService;
     private final TelegramBotClient botClient;
 
-    public TelegramTransferHandler(ProductTransferCoordinator transferCoordinator,
+    public TelegramTransferHandler(ProductTransferService transferCoordinator,
                                    TelegramAuthHandler authHandler,
                                    TelegramSessionService sessionService,
                                    TelegramBotClient botClient) {

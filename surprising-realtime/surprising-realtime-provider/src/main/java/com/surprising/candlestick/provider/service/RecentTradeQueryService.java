@@ -57,7 +57,7 @@ public class RecentTradeQueryService {
     static Properties consumerConfig(CandlestickProperties properties) {
         Properties config = new Properties();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        config.put(ConsumerConfig.CLIENT_ID_CONFIG, "recent-trades-query-" + properties.getKafka().getProductLine());
+        config.put(ConsumerConfig.CLIENT_ID_CONFIG, "recent-trades-query-" + properties.getProductLine());
         config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);

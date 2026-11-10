@@ -16,12 +16,12 @@ import java.util.EnumMap;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-class ProductTransferCoordinatorTest {
+class ProductTransferServiceTest {
 
     @Test
     void transferUsesStableRuntimeIdentityAndThreeForwardPhases() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
+        ProductTransferService coordinator = new ProductTransferService(accountClient);
         ProductTransferCommand command = command("transfer-001", "FUNDING", "USDT_PERPETUAL", 1_250_000L);
 
         ProductTransferResult first = coordinator.transfer(command);
@@ -40,7 +40,7 @@ class ProductTransferCoordinatorTest {
     void rejectedTargetRemainsSourceDebitedForForwardRecovery() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
         accountClient.rejectNextTransferIn();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
+        ProductTransferService coordinator = new ProductTransferService(accountClient);
 
         ProductTransferResult result = coordinator.transfer(
                 command("transfer-002", "FUNDING", "USDT_PERPETUAL", 10L));
@@ -53,7 +53,7 @@ class ProductTransferCoordinatorTest {
     @Test
     void reconciliationReadsPendingRuntimeAndOnlyRunsRemainingPhases() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
+        ProductTransferService coordinator = new ProductTransferService(accountClient);
         accountClient.rejectNextTransferIn();
         ProductTransferResult started = coordinator.transfer(
                 command("transfer-003", "FUNDING", "USDT_PERPETUAL", 10L));
@@ -71,7 +71,7 @@ class ProductTransferCoordinatorTest {
     @Test
     void sameUnderlyingFundingAndSpotAreRejectedBeforeProviderCall() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
+        ProductTransferService coordinator = new ProductTransferService(accountClient);
 
         assertThatThrownBy(() -> coordinator.transfer(
                 command("transfer-005", "FUNDING", "SPOT", 10L)))
@@ -83,7 +83,7 @@ class ProductTransferCoordinatorTest {
     @Test
     void sameDerivativeAccountIsRejectedBeforeProviderCall() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
+        ProductTransferService coordinator = new ProductTransferService(accountClient);
 
         assertThatThrownBy(() -> coordinator.transfer(
                 command("transfer-006", "USDT_PERPETUAL", "USDT_PERPETUAL", 10L)))
@@ -95,7 +95,7 @@ class ProductTransferCoordinatorTest {
     @Test
     void distinctIdempotencyKeysProduceDistinctRuntimeTransferIds() {
         RecordingProductAccountClient accountClient = new RecordingProductAccountClient();
-        ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
+        ProductTransferService coordinator = new ProductTransferService(accountClient);
 
         ProductTransferResult first = coordinator.transfer(new ProductTransferCommand(
                 42L, "transfer-007", com.surprising.account.api.model.AccountType.FUNDING, com.surprising.account.api.model.AccountType.USDT_PERPETUAL,
@@ -115,14 +115,14 @@ class ProductTransferCoordinatorTest {
                 ProductLine.SPOT, com.surprising.account.api.model.AccountType.USDT_PERPETUAL,
                 com.surprising.account.api.model.AccountType.SPOT, "USDT", 10, "r", "");
         client.addPending(operation);
-        assertThat(new ProductTransferCoordinator(client).reconcile(12)).isEqualTo(1);
+        assertThat(new ProductTransferService(client).reconcile(12)).isEqualTo(1);
         assertThat(client.calls()).extracting(TransferCall::phase).containsExactly("IN", "COMPLETE");
     }
 
     @Test
     void smallBatchRotatesSourcesDespitePermanentlyPendingTransfers() {
         var client = new RecordingProductAccountClient();
-        var coordinator = new ProductTransferCoordinator(client);
+        var coordinator = new ProductTransferService(client);
         for (ProductLine line : ProductLine.values()) {
             ProductLine target = line == ProductLine.SPOT ? ProductLine.LINEAR_PERPETUAL : ProductLine.SPOT;
             client.addPending(new ProductTransferOperationRequest(line.ordinal() + 1, 42, line, target,
@@ -142,7 +142,7 @@ class ProductTransferCoordinatorTest {
     @Test
     void failedCreditDoesNotAbortOtherTransfersInTheSameBatch() {
         var client = new RecordingProductAccountClient();
-        var coordinator = new ProductTransferCoordinator(client);
+        var coordinator = new ProductTransferService(client);
         for (int i = 1; i <= 2; i++) client.addPending(new ProductTransferOperationRequest(i, 42,
                 ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
                 com.surprising.account.api.model.AccountType.SPOT,
@@ -158,11 +158,11 @@ class ProductTransferCoordinatorTest {
         var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.repository.GatewayUserRepository.class);
         org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
                 new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
-                        42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
+                42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
         org.mockito.Mockito.when(users.find(43)).thenReturn(java.util.Optional.of(
                 new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
-                        43, "recipient", "recipient@example.test", "NORMAL", java.time.Instant.now())));
-        var coordinator = new ProductTransferCoordinator(client, users);
+                43, "recipient", "recipient@example.test", "NORMAL", java.time.Instant.now())));
+        var coordinator = new ProductTransferService(client, users);
         var command = new ProductTransferCommand(42, "to-user", com.surprising.account.api.model.AccountType.SPOT, com.surprising.account.api.model.AccountType.SPOT, "USDT", 10,
                 "to-user", "", 43);
         assertThat(coordinator.transfer(command).status()).isEqualTo(ProductTransferStatus.COMPLETED);
@@ -178,8 +178,8 @@ class ProductTransferCoordinatorTest {
         var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.repository.GatewayUserRepository.class);
         org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
                 new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
-                        42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
-        var coordinator = new ProductTransferCoordinator(client, users);
+                42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
+        var coordinator = new ProductTransferService(client, users);
         assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "invalid-user", com.surprising.account.api.model.AccountType.SPOT, com.surprising.account.api.model.AccountType.SPOT,
                 "USDT", 10, "r", "", 43))).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("recipient");
@@ -192,8 +192,8 @@ class ProductTransferCoordinatorTest {
         var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.repository.GatewayUserRepository.class);
         org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
                 new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
-                        42, "sender", "sender@example.test", "WITHDRAW_DISABLED", java.time.Instant.now())));
-        var coordinator = new ProductTransferCoordinator(client, users);
+                42, "sender", "sender@example.test", "WITHDRAW_DISABLED", java.time.Instant.now())));
+        var coordinator = new ProductTransferService(client, users);
         assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "blocked-user", com.surprising.account.api.model.AccountType.SPOT, com.surprising.account.api.model.AccountType.SPOT,
                 "USDT", 10, "r", "", 43))).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("transfers are disabled");

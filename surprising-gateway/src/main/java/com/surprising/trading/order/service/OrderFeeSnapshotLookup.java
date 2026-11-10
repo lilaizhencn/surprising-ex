@@ -32,7 +32,7 @@ public class OrderFeeSnapshotLookup {
                                              long instrumentChangeId,
                                              Instant now) {
         ProductLine productLine = requestedProductLine == null
-                ? properties.getKafka().getProductLine() : requestedProductLine;
+                ? properties.getProductLine() : requestedProductLine;
         var instrument = instrumentSnapshotCache.current(productLine, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), instrumentChangeId);
         if (instrument.isEmpty()) {
             return Optional.empty();

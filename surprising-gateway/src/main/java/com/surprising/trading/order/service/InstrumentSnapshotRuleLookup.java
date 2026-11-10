@@ -25,7 +25,7 @@ public class InstrumentSnapshotRuleLookup implements InstrumentRuleLookup {
 
     @Override
     public Optional<InstrumentRule> currentRule(String instrumentId) {
-        var productLine = properties.getKafka().getProductLine();
+        var productLine = properties.getProductLine();
         if (!snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("下单合约 JVM 快照尚未就绪");
         }

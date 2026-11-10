@@ -23,7 +23,7 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
-public final class OrderMatchingCoordinator {
+public final class OrderMatchingFlow {
 
     /** 组织本条交接链的所属交易运行时，不复制各线程业务事实。 */
     private final TradingCoreRuntime owner;
@@ -32,7 +32,7 @@ public final class OrderMatchingCoordinator {
      * 保存非空所属运行时引用，不创建第二份交易状态。
      * @param owner 所属交易 Owner 运行时
      */
-    public OrderMatchingCoordinator(TradingCoreRuntime owner) {
+    public OrderMatchingFlow(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 

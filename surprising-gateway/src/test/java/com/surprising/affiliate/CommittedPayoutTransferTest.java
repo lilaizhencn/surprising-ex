@@ -17,7 +17,7 @@ class CommittedPayoutTransferTest {
     when(accounts.transferOut(anyString(), any())).thenReturn(applied);
     when(accounts.transferIn(anyString(), any())).thenReturn(applied);
     when(accounts.completeTransfer(anyString(), any())).thenReturn(applied);
-    var coordinator = new ProductTransferCoordinator(accounts, null);
+    var coordinator = new ProductTransferService(accounts, null);
     var command = new ProductTransferCommand(
       9,
       "affiliate:payout-1",

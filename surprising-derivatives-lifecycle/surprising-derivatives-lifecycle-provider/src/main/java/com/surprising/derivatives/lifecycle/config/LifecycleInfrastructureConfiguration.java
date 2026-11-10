@@ -25,7 +25,7 @@ public class LifecycleInfrastructureConfiguration {
         var properties = new InsuranceProperties();
         properties.getKafka().setProductLine(risk.getProductLine());
         Binder.get(environment).bind("surprising.insurance.kafka", Bindable.ofInstance(properties.getKafka()));
-        if (properties.getKafka().getProductLine() != risk.getProductLine())
+        if (properties.getProductLine() != risk.getProductLine())
             throw new IllegalStateException("insurance and lifecycle must use the same product line");
         return properties;
     }

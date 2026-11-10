@@ -29,7 +29,7 @@ public class TradeExportService implements SmartLifecycle, HealthIndicator {
     @org.springframework.beans.factory.annotation.Autowired
     public TradeExportService(TradeExportProperties config, CandlestickProperties candles,
             CommittedOrderProjectionService orders) {
-        this(config, new CommittedTradeExporter(config, candles.getKafka().getProductLine(),
+        this(config, new CommittedTradeExporter(config, candles.getProductLine(),
                 candles.getKafka().getBootstrapServers(), orders));
     }
 

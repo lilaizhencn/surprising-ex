@@ -29,7 +29,7 @@ public class SymbolRegistryService extends AbstractInstrumentSnapshotInitializer
 
     @Override
     protected Set<ProductLine> productLines() {
-        return Set.of(properties.getKafka().getProductLine());
+        return Set.of(properties.getProductLine());
     }
 
     @Override
@@ -44,7 +44,7 @@ public class SymbolRegistryService extends AbstractInstrumentSnapshotInitializer
 
     /** 从当前合约 JVM 快照重建 K 线交易对注册表。 */
     public void refresh() {
-        var productLine = properties.getKafka().getProductLine();
+        var productLine = properties.getProductLine();
         if (!snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("K 线合约 JVM 快照尚未就绪: " + productLine);
         }

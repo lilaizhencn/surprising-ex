@@ -34,7 +34,7 @@ public class MarkPriceCalculator {
                                     BigDecimal basisAverage,
                                     MarkPriceEncoding encoding,
                                     Instant now) {
-        if (properties.getKafka().getProductLine() == com.surprising.product.api.ProductLine.OPTION)
+        if (properties.getProductLine() == com.surprising.product.api.ProductLine.OPTION)
             return calculateOption(instrumentId, sequence, index, encoding, now);
         int scale = properties.getCalculation().getScale();
         BigDecimal indexPrice = index.indexPrice();
@@ -74,7 +74,7 @@ public class MarkPriceCalculator {
                 .longValueExact();
         long markPriceTicks = Math.floorDiv(
                 Math.addExact(markPriceUnits, encoding.priceTickUnits() / 2), encoding.priceTickUnits());
-        return new MarkPriceEvent(properties.getKafka().getProductLine(), instrumentId, encoding.instrumentChangeId(),
+        return new MarkPriceEvent(properties.getProductLine(), instrumentId, encoding.instrumentChangeId(),
                 markPriceUnits, markPriceTicks, markPrice, indexPrice, null, price1, price2, lastTradePrice,
                 book == null ? null : book.bestBidPrice(), book == null ? null : book.bestAskPrice(), fundingRate, nextFundingTime, timeUntilFundingSeconds,
                 basisAverage, properties.getCalculation().getBasisWindow().toSeconds(), clampLow, clampHigh,
@@ -92,7 +92,7 @@ public class MarkPriceCalculator {
                 .setScale(0, RoundingMode.HALF_UP).longValueExact();
         long ticks = Math.floorDiv(Math.addExact(units, encoding.priceTickUnits() / 2), encoding.priceTickUnits());
         if (ticks <= 0) throw new IllegalArgumentException("option premium is below its price tick");
-        return new MarkPriceEvent(properties.getKafka().getProductLine(), instrumentId, encoding.instrumentChangeId(),
+        return new MarkPriceEvent(properties.getProductLine(), instrumentId, encoding.instrumentChangeId(),
                 units, ticks, premium, index.indexPrice(), reference.sameExpiryForwardPrice(), premium, null, null,
                 null, null, BigDecimal.ZERO, null, 0, BigDecimal.ZERO, 0, premium, premium,
                 sequence, index.status(), now, now);

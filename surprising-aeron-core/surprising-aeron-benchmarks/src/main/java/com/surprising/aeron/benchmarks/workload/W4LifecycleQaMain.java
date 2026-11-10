@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import lombok.extern.slf4j.Slf4j;
 
-import com.surprising.aeron.client.AeronLifecycleCoordinator;
+import com.surprising.aeron.client.AeronLifecycleRetry;
 import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
@@ -87,7 +87,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
 
     private final ProductLine productLine;
     private final SurprisingAeronClient client;
-    private final AeronLifecycleCoordinator lifecycleCoordinator = new AeronLifecycleCoordinator();
+    private final AeronLifecycleRetry lifecycleRetry = new AeronLifecycleRetry();
     private final long seed;
     private final long sourceId;
     private final long makerUserId;
@@ -720,7 +720,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
             byte[] payload = TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
                     action.liquidationId(), action.triggerPriceSequence(), action.markPriceTicks(), 100_000,
                     action.cursorOrderId(), 1_024));
-            lifecycleCoordinator.execute(() -> {
+            lifecycleRetry.execute(() -> {
                 try {
                     command(CoreMessageType.EXECUTE_LIQUIDATION, action.userId(), payload);
                 } catch (IllegalStateException exception) {

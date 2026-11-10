@@ -4,7 +4,7 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.affiliate.config.AffiliateProperties;
 import com.surprising.affiliate.repository.*;
 import com.surprising.gateway.provider.model.ProductTransferCommand;
-import com.surprising.gateway.provider.service.ProductTransferCoordinator;
+import com.surprising.gateway.provider.service.ProductTransferService;
 import com.surprising.product.api.ProductLine;
 import java.util.HashSet;
 import java.util.UUID;
@@ -19,14 +19,14 @@ public class AffiliateSettlementService {
 
   private final AffiliateRepository repository;
   private final AffiliateLedgerRepository ledger;
-  private final ProductTransferCoordinator transfers;
+  private final ProductTransferService transfers;
   private final TransactionTemplate transaction;
   private final AffiliateProperties properties;
 
   public AffiliateSettlementService(
     AffiliateRepository repository,
     AffiliateLedgerRepository ledger,
-    ProductTransferCoordinator transfers,
+    ProductTransferService transfers,
     PlatformTransactionManager manager,
     AffiliateProperties properties
   ) {

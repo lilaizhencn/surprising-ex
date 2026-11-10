@@ -43,7 +43,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
 
     @Autowired
     public MarkPriceCorePublisher(MarkPriceProperties properties) {
-        this(new AeronClientPool("price-mark", properties.getKafka().getProductLine(),
+        this(new AeronClientPool("price-mark", properties.getProductLine(),
                 properties.getAeron().getHostnames(), properties.getAeron().getEgressHostname(),
                 properties.getAeron().getResponseTimeout(), properties.getAeron().getClientConnections(),
                 "price-mark-core"));

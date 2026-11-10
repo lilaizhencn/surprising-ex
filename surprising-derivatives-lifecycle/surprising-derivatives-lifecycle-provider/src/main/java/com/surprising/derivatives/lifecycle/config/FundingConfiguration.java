@@ -24,7 +24,7 @@ public class FundingConfiguration {
         org.springframework.boot.context.properties.bind.Binder.get(environment).bind("surprising.funding.kafka",
                 org.springframework.boot.context.properties.bind.Bindable.ofInstance(funding.getKafka()));
         funding.getCoordination().setNodeId(environment.getProperty("FUNDING_NODE_ID"));
-        if (funding.getKafka().getProductLine() != risk.getProductLine()) {
+        if (funding.getProductLine() != risk.getProductLine()) {
             throw new IllegalStateException("funding and lifecycle must use the same product line");
         }
         return funding;

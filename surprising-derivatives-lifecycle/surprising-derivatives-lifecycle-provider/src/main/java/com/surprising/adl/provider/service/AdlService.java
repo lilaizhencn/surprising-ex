@@ -11,7 +11,7 @@ import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.model.CoreAdlLiquidationProjection;
 import com.surprising.adl.provider.repository.AdlEventRepository;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
-import com.surprising.aeron.client.AeronLifecycleCoordinator;
+import com.surprising.aeron.client.AeronLifecycleRetry;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
@@ -30,7 +30,7 @@ public class AdlService {
     private final AdlProperties properties;
     private final AdlAeronGateway aeron;
     private final AdlEventRepository events;
-    private final AeronLifecycleCoordinator lifecycleCoordinator = AeronLifecycleCoordinator.shared();
+    private final AeronLifecycleRetry lifecycleRetry = AeronLifecycleRetry.shared();
     public AdlService(AdlProperties properties, AdlAeronGateway aeron, AdlEventRepository events) {
         this.properties = properties;
         this.aeron = aeron;
@@ -38,7 +38,7 @@ public class AdlService {
     }
 
     public synchronized AdlCycle processResidualDeficits() {
-        return lifecycleCoordinator.execute(this::processResidualDeficitsInternal);
+        return lifecycleRetry.execute(this::processResidualDeficitsInternal);
     }
 
     private AdlCycle processResidualDeficitsInternal() {
@@ -56,7 +56,7 @@ public class AdlService {
     }
 
     private void requireOwnedWork(CoreLiquidationWorkView work) {
-        if (work.productLine() != properties.getKafka().getProductLine()) {
+        if (work.productLine() != properties.getProductLine()) {
             throw new IllegalStateException("Core ADL work ProductLine mismatch");
         }
         if (!work.actions().isEmpty() || work.resolutions().stream()
@@ -83,7 +83,7 @@ public class AdlService {
                     Math.absExact(candidate.signedQuantitySteps()));
             long covered = Math.min(remaining, realized);
             if (closeSteps <= 0 || covered <= 0) continue;
-            UUID commandId = UUID.nameUUIDFromBytes((properties.getKafka().getProductLine() + ":ADL:"
+            UUID commandId = UUID.nameUUIDFromBytes((properties.getProductLine() + ":ADL:"
                     + liquidation.liquidationId() + ':' + candidate.userId() + ':' + candidate.instrumentId() + ':'
                     + candidate.markPriceSequence() + ':' + closeSteps).getBytes(StandardCharsets.UTF_8));
             aeron.execute(commandId, TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(

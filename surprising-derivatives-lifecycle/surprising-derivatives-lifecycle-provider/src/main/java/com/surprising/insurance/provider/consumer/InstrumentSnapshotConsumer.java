@@ -34,7 +34,7 @@ public class InstrumentSnapshotConsumer {
             containerFactory = "insuranceInstrumentSnapshotKafkaListenerContainerFactory")
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
         InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
-                properties.getKafka().getProductLine(), "衍生品服务");
+                properties.getProductLine(), "衍生品服务");
     }
 
     public String topic() {

@@ -35,7 +35,7 @@ public class IndexPriceCalculator {
                 .sorted()
                 .toList());
 
-        boolean option = properties.getKafka().getProductLine() == com.surprising.product.api.ProductLine.OPTION;
+        boolean option = properties.getProductLine() == com.surprising.product.api.ProductLine.OPTION;
         BigDecimal premiumMedian = option ? median(freshnessChecked.stream().filter(SourceQuote::healthy)
                 .filter(q -> q.optionReference() != null).map(q -> q.optionReference().premiumPrice()).toList()) : null;
         BigDecimal forwardMedian = option ? median(freshnessChecked.stream().filter(SourceQuote::healthy)
@@ -83,7 +83,7 @@ public class IndexPriceCalculator {
 
     private com.surprising.price.api.model.OptionPriceReference optionReference(
             List<SourceQuote> quotes, List<IndexComponentSnapshot> components) {
-        if (properties.getKafka().getProductLine() != com.surprising.product.api.ProductLine.OPTION) return null;
+        if (properties.getProductLine() != com.surprising.product.api.ProductLine.OPTION) return null;
         BigDecimal premium = BigDecimal.ZERO, forward = BigDecimal.ZERO;
         Instant expiry = null;
         for (int i = 0; i < components.size(); i++) {

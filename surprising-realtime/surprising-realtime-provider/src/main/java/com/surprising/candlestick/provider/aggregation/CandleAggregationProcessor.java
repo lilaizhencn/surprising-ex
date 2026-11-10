@@ -56,7 +56,7 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
         this.symbolRegistryService = symbolRegistryService;
         this.tradeEventMapper = tradeEventMapper;
         this.hotCache = hotCache;
-        this.productKey = properties.getKafka().getProductLine().topicSegment();
+        this.productKey = properties.getProductLine().topicSegment();
     }
 
     @Override

@@ -26,7 +26,7 @@ class ProductBusinessConfigurationTest {
             ConfigurationPropertySources.attach(parent.getEnvironment());
             parent.register(RootProperties.class);parent.refresh();
             assertThat(parent.getBean(com.surprising.websocket.provider.config.WebSocketProperties.class)
-                    .getKafka().getProductLine()).isNull();
+                    .getProductLine()).isNull();
             for(var line:ProductLine.values()) try(var child=new AnnotationConfigApplicationContext()) {
                 child.setParent(parent);child.getEnvironment().merge(parent.getEnvironment());
                 child.getEnvironment().getPropertySources().addFirst(new MapPropertySource("product",Map.of(
@@ -37,9 +37,9 @@ class ProductBusinessConfigurationTest {
                 child.registerBean("surprising.websocket-com.surprising.websocket.provider.config.WebSocketProperties", com.surprising.websocket.provider.config.WebSocketProperties.class,
                         () -> new com.surprising.gateway.config.ProductBusinessConfiguration().webSocketProperties(child.getEnvironment()));
                 child.register(Properties.class,OrderInfrastructureConfiguration.class);child.refresh();
-                assertThat(child.getBean(com.surprising.websocket.provider.config.WebSocketProperties.class).getKafka().getProductLine()).isEqualTo(line);
-                assertThat(child.getBean(AccountProperties.class).getKafka().getProductLine()).isEqualTo(line);
-                assertThat(child.getBean(TradingOrderProperties.class).getKafka().getProductLine()).isEqualTo(line);
+                assertThat(child.getBean(com.surprising.websocket.provider.config.WebSocketProperties.class).getProductLine()).isEqualTo(line);
+                assertThat(child.getBean(AccountProperties.class).getProductLine()).isEqualTo(line);
+                assertThat(child.getBean(TradingOrderProperties.class).getProductLine()).isEqualTo(line);
             }
         }
     }

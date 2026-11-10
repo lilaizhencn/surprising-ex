@@ -21,6 +21,14 @@ public class WebSocketProperties {
     private Security security = new Security();
     private Fanout fanout = new Fanout();
 
+    public ProductLine getProductLine() {
+        return kafka.getProductLine();
+    }
+
+    public void setProductLine(ProductLine productLine) {
+        kafka.setProductLine(productLine);
+    }
+
     public static class Kafka {
         @Getter
         @Setter

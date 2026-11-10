@@ -30,7 +30,7 @@ public class MaintenanceService {
             MaintenanceActionRepository actionRepository,
             MaintenanceAeronGateway core, ObjectMapper json,
             org.springframework.transaction.PlatformTransactionManager transactionManager) {
-        this.line = properties.getKafka().getProductLine(); this.repository = repository; this.core = core;
+        this.line = properties.getProductLine(); this.repository = repository; this.core = core;
         this.actionRepository = actionRepository;
         this.json = json;
         this.transactions = new TransactionTemplate(transactionManager);

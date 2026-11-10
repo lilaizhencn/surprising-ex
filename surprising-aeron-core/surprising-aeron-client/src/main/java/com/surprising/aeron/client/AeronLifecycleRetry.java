@@ -2,22 +2,25 @@ package com.surprising.aeron.client;
 
 import java.util.function.Supplier;
 
-public final class AeronLifecycleCoordinator {
+/**
+ * 当 Aeron 集群处于 LIFECYCLE_IN_PROGRESS 转换期时的业务重试执行器。
+ */
+public final class AeronLifecycleRetry {
 
-    private static final AeronLifecycleCoordinator SHARED = new AeronLifecycleCoordinator();
+    private static final AeronLifecycleRetry SHARED = new AeronLifecycleRetry();
 
     private final int maxAttempts;
     private final long baseDelayMillis;
 
-    public AeronLifecycleCoordinator() {
+    public AeronLifecycleRetry() {
         this(20, 25L);
     }
 
-    public static AeronLifecycleCoordinator shared() {
+    public static AeronLifecycleRetry shared() {
         return SHARED;
     }
 
-    public AeronLifecycleCoordinator(int maxAttempts, long baseDelayMillis) {
+    public AeronLifecycleRetry(int maxAttempts, long baseDelayMillis) {
         if (maxAttempts < 1 || baseDelayMillis < 1) {
             throw new IllegalArgumentException("invalid lifecycle retry bounds");
         }

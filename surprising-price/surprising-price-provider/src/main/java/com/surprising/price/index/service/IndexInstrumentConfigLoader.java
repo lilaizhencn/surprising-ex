@@ -27,7 +27,7 @@ public class IndexInstrumentConfigLoader {
     }
 
     public List<IndexPriceProperties.SymbolConfig> load() {
-        var productLine = properties.getKafka().getProductLine();
+        var productLine = properties.getProductLine();
         if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("指数价格合约 JVM 快照尚未就绪");
         }

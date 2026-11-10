@@ -13,7 +13,7 @@ public class OrderInfrastructureConfiguration {
         binder.bind("surprising.trading.order.kafka",Bindable.ofInstance(p.getKafka()));
         binder.bind("surprising.trading.order.aeron",Bindable.ofInstance(p.getAeron()));
         binder.bind("surprising.trading.order.event-publish",Bindable.ofInstance(p.getEventPublish()));
-        if(p.getKafka().getProductLine()==null)throw new IllegalArgumentException("order product line required");
+        if(p.getProductLine()==null)throw new IllegalArgumentException("order product line required");
         return p;
     }
 }

@@ -54,7 +54,7 @@ public class AccountCommandGateway {
     public BalanceResponse adjustBalance(BalanceAdjustmentRequest request, String adminUserId, String adminUsername) {
         UUID commandId = commandId("balance-adjust", request.userId(), request.referenceId());
         String asset = adjustmentAsset(request.asset());
-        adjustments.prepare(properties.getKafka().getProductLine(), commandId, "BASIC",
+        adjustments.prepare(properties.getProductLine(), commandId, "BASIC",
                 adminId(adminUserId), adminUsername, request.userId(), asset, request.amountUnits(),
                 request.referenceId().trim(), request.reason());
         aeron.command(CoreMessageType.ADJUST_BALANCE, commandId, request.userId(),
@@ -68,7 +68,7 @@ public class AccountCommandGateway {
         requireProductAccount(request.accountType(), "产品余额调整");
         UUID commandId = commandId("product-balance-adjust", request.userId(), request.referenceId());
         String asset = adjustmentAsset(request.asset());
-        adjustments.prepare(properties.getKafka().getProductLine(), commandId, "PRODUCT",
+        adjustments.prepare(properties.getProductLine(), commandId, "PRODUCT",
                 adminId(adminUserId), adminUsername, request.userId(), asset, request.amountUnits(),
                 request.referenceId().trim(), request.reason());
         aeron.command(CoreMessageType.ADJUST_BALANCE, commandId, request.userId(),
@@ -191,20 +191,20 @@ public class AccountCommandGateway {
 
     private UUID commandId(String operation, long userId, String referenceId) {
         if (referenceId == null || referenceId.isBlank()) throw new IllegalArgumentException("referenceId is required");
-        String identity = properties.getKafka().getProductLine() + ":" + userId + ":" + operation + ":"
+        String identity = properties.getProductLine() + ":" + userId + ":" + operation + ":"
                 + referenceId.trim();
         return UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
     }
 
     private void requireProductAccount(AccountType accountType, String operation) {
-        ProductLine current = properties.getKafka().getProductLine();
+        ProductLine current = properties.getProductLine();
         if (accountType == null || accountType.productLine().orElse(null) != current) {
             throw new IllegalStateException(operation + "的账户类型与当前产品线不匹配: " + current);
         }
     }
 
     private void requireProductLine(ProductLine productLine, String operation) {
-        ProductLine current = properties.getKafka().getProductLine();
+        ProductLine current = properties.getProductLine();
         if (productLine != current) {
             throw new IllegalStateException(operation + "的产品线与当前 Core 不匹配: " + current);
         }

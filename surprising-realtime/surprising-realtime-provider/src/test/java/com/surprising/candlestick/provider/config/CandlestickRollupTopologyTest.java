@@ -230,7 +230,7 @@ class CandlestickRollupTopologyTest {
             verify(router, times(4)).offer(frames.capture());
             assertThat(frames.getAllValues()).allSatisfy(frame -> {
                 assertThat(frame.kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE);
-                assertThat(frame.productLine()).isEqualTo(properties.getKafka().getProductLine());
+                assertThat(frame.productLine()).isEqualTo(properties.getProductLine());
             });
             assertThat(frames.getAllValues()).extracting(com.surprising.aeron.protocol.RealtimeFrame::entityId)
                     .containsExactlyInAnyOrder("1m", "1m", "5m", "5m");

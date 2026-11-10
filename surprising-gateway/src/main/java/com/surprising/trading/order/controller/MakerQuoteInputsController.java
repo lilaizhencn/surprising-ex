@@ -32,7 +32,7 @@ public class MakerQuoteInputsController {
     public MakerQuoteInputs.Response query(@RequestBody MakerQuoteInputs.Request request) {
         try {
             ProductLine product = request.productLine();
-            ProductLineConfiguration.requireSame(properties.getKafka().getProductLine(), product, "maker quote inputs");
+            ProductLineConfiguration.requireSame(properties.getProductLine(), product, "maker quote inputs");
             var instrument = instruments.current(product, Integer.parseInt(request.instrumentId()), request.instrumentChangeId())
                     .orElseThrow(() -> new IllegalStateException("maker instrument version unavailable"));
             if (product == ProductLine.SPOT && (instrument.baseAsset() == null || instrument.baseAsset().isBlank()

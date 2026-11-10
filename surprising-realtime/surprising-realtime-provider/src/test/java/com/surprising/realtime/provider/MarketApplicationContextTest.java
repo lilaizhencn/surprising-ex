@@ -62,7 +62,7 @@ class MarketApplicationContextTest {
                     .doesNotHaveBean(com.surprising.aeron.bootstrap.AeronCoreLifecycle.class)
                     .doesNotHaveBean(RealtimeRouter.class);
                 assertThat(ctx.getBean(com.surprising.candlestick.provider.config.CandlestickProperties.class)
-                    .getKafka().getProductLine()).isEqualTo(line);
+                    .getProductLine()).isEqualTo(line);
             });
     }
 

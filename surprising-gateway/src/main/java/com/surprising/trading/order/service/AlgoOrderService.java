@@ -397,7 +397,7 @@ public class AlgoOrderService {
     }
 
     private ProductLine currentProductLine() {
-        return properties.getKafka().getProductLine();
+        return properties.getProductLine();
     }
 
     private void requireLocalProductLine(ProductLine productLine) {

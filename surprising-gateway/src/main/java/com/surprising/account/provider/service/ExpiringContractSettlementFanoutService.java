@@ -51,7 +51,7 @@ public class ExpiringContractSettlementFanoutService {
     private void submit(String instrumentId, long settlementPriceTicks,
                         Instant settlementTime) {
         long settlementId = settlementTime.toEpochMilli();
-        String identity = properties.getKafka().getProductLine() + ":lifecycle:" + instrumentId.toUpperCase()
+        String identity = properties.getProductLine() + ":lifecycle:" + instrumentId.toUpperCase()
                 + ':' + settlementId + ':' + UUID.randomUUID();
         long cursor = 0;
         CoreSettlementProgressView persisted = decodeProgressOrQuery(instrumentId, settlementId, null);

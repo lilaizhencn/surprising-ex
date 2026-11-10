@@ -103,7 +103,7 @@ class GatewayLimitHttpTest {
                 mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class));
         keys = new GatewayApiKeyService(keyRows, auth, totp, mock(SensitiveActionVerificationService.class), gateway, clients);
         var proxy = new GatewayProxyController(gateway, new RestTemplate(), auth, keys, null, json,
-                mock(com.surprising.gateway.provider.service.ProductTransferCoordinator.class), null,
+                mock(com.surprising.gateway.provider.service.ProductTransferService.class), null,
                 products, business, new GatewayProductSelection(products, json));
         var compatibility = new BinanceApiController(gateway, proxy, keys, null, auth, null, null, null, json);
         return MockMvcBuilders.standaloneSetup(proxy, compatibility, new AsyncReads(auth, pending))

@@ -29,8 +29,8 @@ public class PriceBusinessSettingsService {
     public PriceBusinessSettingsService(PriceBusinessSettingsRepository settings, ObjectMapper json,
             IndexPriceProperties index, MarkPriceProperties mark, ApplicationEventPublisher events) {
         this.settings = settings; this.json = json; this.index = index; this.mark = mark; this.events = events;
-        this.line = index.getKafka().getProductLine();
-        if (line == null || line != mark.getKafka().getProductLine()) throw new IllegalArgumentException("index and mark settings product line mismatch");
+        this.line = index.getProductLine();
+        if (line == null || line != mark.getProductLine()) throw new IllegalArgumentException("index and mark settings product line mismatch");
     }
 
     @PostConstruct

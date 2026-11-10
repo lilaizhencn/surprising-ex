@@ -5,7 +5,7 @@
  *   <li>步骤 1–2：state.risk 生成计划；EXECUTE_LIQUIDATION 命令经交易编排进入执行。</li>
  *   <li>步骤 3：{@link com.surprising.aeron.service.liquidation.LiquidationService.ExecutionCheck}
  *       校验状态、标记价、游标和所属 Lane 的持仓。</li>
- *   <li>步骤 4：OrderMatchingCoordinator 交给 Matcher 分页撤单；未完成时只提交进度。</li>
+ *   <li>步骤 4：OrderMatchingFlow 交给 Matcher 分页撤单；未完成时只提交进度。</li>
  *   <li>步骤 5–6：同类的 ExecutionWork 或 BatchFinancialWork 交接账户与账本，
  *       所属 Lane 更新持仓和资金，Ledger 记账，Owner 收齐完成回执后有序提交。</li>
  *   <li>步骤 7：后续 RESOLVE_LIQUIDATION 命令进入

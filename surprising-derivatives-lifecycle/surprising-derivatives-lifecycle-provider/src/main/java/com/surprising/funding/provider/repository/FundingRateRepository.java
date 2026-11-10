@@ -30,7 +30,7 @@ public class FundingRateRepository {
         var sortSpec = new AdminCursorPage.SortSpec("eventTime", "event_time", "sequence", query.descending());
         var decoded = query.cursor();
         var args = new ArrayList<Object>();
-        args.add(properties.getKafka().getProductLine().name());
+        args.add(properties.getProductLine().name());
         args.add(instrumentId);
         AdminCursorPage.addCursorArgs(args, decoded);
         args.add(safeLimit + 1);

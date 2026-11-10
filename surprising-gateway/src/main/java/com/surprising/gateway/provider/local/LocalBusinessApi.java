@@ -48,14 +48,14 @@ public final class LocalBusinessApi {
     @jakarta.annotation.PostConstruct
     public void validateConfiguration() {
         if (accountProperties == null) return; // 公共币种/合约目录没有产品账户容器。
-        if (productLine() == null || productLine() != tradingProperties.getKafka().getProductLine()) {
+        if (productLine() == null || productLine() != tradingProperties.getProductLine()) {
             throw new IllegalStateException("account and trading must use the same product line: account="
-                    + productLine() + ", trading=" + tradingProperties.getKafka().getProductLine());
+                    + productLine() + ", trading=" + tradingProperties.getProductLine());
         }
     }
 
     public com.surprising.product.api.ProductLine productLine() {
-        return accountProperties.getKafka().getProductLine();
+        return accountProperties.getProductLine();
     }
 
     public static LocalBusinessApi shared(com.surprising.instrument.provider.controller.InstrumentRequestHandler instruments,
