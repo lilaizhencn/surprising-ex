@@ -26,8 +26,8 @@
    - 合并了原 `OrderService`、`AeronOrderCommandService`、`OrderPlacementStateService`。接收 [OrderCommandController.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/main/java/com/surprising/trading/order/controller/OrderCommandController.java) 请求，完成产品规则归一化、订单落库、Aeron 协议编码发送，以及成交/拒绝回执落库。
 2. **订单准入与冻结计算**：[OrderAdmissionService.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderAdmissionService.java)
    - 合并了原 `MatchingCommandAdmission` 与 `RuntimeOrderAdmission`。按 [ProductTradingRules.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/ProductTradingRules.java) 校验币对状态、杠杆、风险限额、只减仓容量（[`Position.CloseCapacity`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/position/Position.java)），计算应冻结保证金/现货资产额度，并向所属账户分区 [AccountPartition.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/AccountPartition.java) 派发资金预留。
-3. **撮合协调与订单簿引擎**：[OrderMatchingCoordinator.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderMatchingCoordinator.java) → [OrderBookEngine.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/OrderBookEngine.java)
-   - `OrderMatchingCoordinator` 将通过准入的 [OrderCommand.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommand.java) 提交给对应币对分片的 `OrderBookEngine` 撮合订单簿，生成不可变撮合结果 [OrderMatchingResult.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/OrderMatchingResult.java) 或直达结算事件 [TradeSettlement.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/TradeSettlement.java)。
+3. **撮合执行流编排与订单簿引擎**：[OrderMatchingFlow.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderMatchingFlow.java) → [OrderBookEngine.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/OrderBookEngine.java)
+   - `OrderMatchingFlow` 将通过准入的 [OrderCommand.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommand.java) 提交给对应币对分片的 `OrderBookEngine` 撮合订单簿，生成不可变撮合结果 [OrderMatchingResult.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/OrderMatchingResult.java) 或直达结算事件 [TradeSettlement.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/TradeSettlement.java)。
 4. **成交清算与账户分区入账**：[SpotTradeSettlementService.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/SpotTradeSettlementService.java) / [DerivativeTradeSettlementService.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/DerivativeTradeSettlementService.java) → [AccountPartition.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/AccountPartition.java)
    - 按成交明细计算买卖双方手续费、保证金释放与已实现盈亏，更新 [AccountBalance.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/AccountBalance.java)、[Position.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/position/Position.java)、[Order.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/Order.java) 与 [OrderFundsReservation.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderFundsReservation.java)。
 5. **有序提交与回执发布**：[OrderCommitService.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommitService.java)
@@ -81,3 +81,25 @@
   - 核心运行时单测套件 116 项 100% 通过（0 失败，0 错误）；
   - 全工程 23 个 Maven 反应堆模块全量编译通过（35s 编译完成）；
   - 代码已全部 push 到远程 master 分支。
+
+
+---
+
+## 5. 第五轮：架构异味彻底清理与代码精简重构（Coordinator 清理与配置解耦）
+
+### 5.1 消除三大 Coordinator 异味类
+- **`AeronLifecycleCoordinator` → [`AeronLifecycleRetry`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-client/src/main/java/com/surprising/aeron/client/AeronLifecycleRetry.java)**：实质为带重试/指数退避的生命周期 Aeron 执行器，改名为 `AeronLifecycleRetry` 准确反映无状态重试工具语义。所有调用方（ADL、Funding、Insurance、Liquidation 等）同步完成重构。
+- **`ProductTransferCoordinator` → [`ProductTransferService`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/main/java/com/surprising/gateway/provider/service/ProductTransferService.java)**：实质为网关层跨产品线划转业务服务，改名为标准业务服务 `ProductTransferService`，同步更新了单测及网关/联盟营销等十余处调用方。
+- **`OrderMatchingCoordinator` → [`OrderMatchingFlow`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderMatchingFlow.java)**：实质为订单撮合执行流编排（Match / Cancel / Amend Flow），改名为 `OrderMatchingFlow`，消除了空泛的协调器命名。
+
+### 5.2 配置顶层属性下放与 `getKafka().getProductLine()` 彻底清理
+- 各服务模块的 `Properties` 配置类（`FundingProperties`、`AccountProperties`、`IndexPriceProperties`、`MarkPriceProperties`、`CandlestickProperties`、`WebSocketProperties`）均在类顶层暴露 `productLine` 字段。
+- 全量清理各业务模块中历史残留的 `.getKafka().getProductLine()` 调用链（共清理 65 处），彻底解开对底层 Kafka 属性树的误导依赖。
+
+### 5.3 质量与测试全量验证
+- **全工程多模块编译**：23 个反应堆模块 100% 编译通过（`BUILD SUCCESS`）。
+- **生命周期服务测试**：`AdlServiceTest`, `FundingServiceTest`, `InsuranceServiceTest`, `LiquidationServiceTest`（23 项全过）。
+- **价格服务测试**：`MarkPriceServiceTest`, `IndexPriceServiceTest`（17 项全过）。
+- **网关服务测试**：`ProductTransferServiceTest`, `ProductTransferGatewaySurfaceTest`, `OrderServiceTest`（163 项全过）。
+- **交易核心状态机与撮合测试**：`TradingAccountRuntimeTest`（55 项）、`TradingCoreOwnerTest`（43 项）、`CoreMatchingStateTest`（51 项）、`PendingMatchingRingTest`（6 项）共 155 项全过。
+- **Git 提交**：提交哈希 `a2ee2ddf8`，已成功推送到远程分支 `origin/master`。
