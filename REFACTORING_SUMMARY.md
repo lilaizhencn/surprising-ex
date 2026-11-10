@@ -54,3 +54,30 @@
 - **核心运行时巨型类字段瘦身**：
   - [TradingAccountRuntime.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java)：顶层编译字段从 **74 个** 瘦身至 **18 个**（未提交变更与分区协调池收拢入内部 `UncommittedChanges` 与 `PartitionCoordinator`）。
   - [TradingCoreRuntime.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java)：顶层编译字段从 **73 个** 瘦身至 **18 个**（子服务组件与执行水位状态收拢入内部 `CoreComponents` 与 `ExecutionState`）。
+
+
+---
+
+## 4. 第四轮：全景架构深度收敛（按顺序全部清理干净）
+
+### 阶段 A：网关层清爽化与去 Coordinator 化
+- **孤岛死代码清理**：彻底删除无任何调用方装配的孤岛类 `SelfTradePreventionCoordinator.java` 及其测试文件。
+- **业务化命名去虚名**：将 `BracketOrderCoordinator.java` 重命名并重构为意图直白的 `BracketOrderDispatcher.java`（去除虚构的 Coordinator 概念），测试与调用方同步对齐。
+- **配置属性去污染**：在 `TradingOrderProperties` 暴露顶层的 `getProductLine()`，消除了长期以来在 `OrderAeronGateway` 和 `OrderService` 中出现 `properties.getKafka().getProductLine()` 的怪异误导写法。
+- **网关核心测试**：`BracketOrderDispatcherTest`、`OrderServiceTest`、`MakerQuoteInputsControllerTest` 等共 140 项单测全部通过。
+
+### 阶段 B：衍生品生命周期配置与网关清理
+- **属性统一化**：在 `InsuranceProperties` 与 `AdlProperties` 中增加顶层 `getProductLine()` 与 `setProductLine()`，消除了生命周期模块读取 `kafka.productLine` 历史残余包袱。
+- **网关清晰化**：`DerivativesAeronClient`、`InsuranceAeronGateway`、`AdlAeronGateway` 统一通过顶层配置直读产品线类型。
+- **生命周期测试**：`LiquidationAeronGatewayTest`、`InsuranceAeronGatewayTest`、`FundingAeronGatewayTest` 等 10 项测试 100% 成功。
+
+### 阶段 C：交易核心主状态机与总账解耦
+- **持仓索引抽离**：抽取 `PositionIndexOps.java`，把持仓二分查找插入、撤销及标的非零暴露维护从 `TradingAccountRuntime` 剥离。
+- **客户订单双向索引抽离**：抽取 `ClientOrderIndexOps.java`，将客户号与订单实体号的正反向索引维护解耦。
+- **强平状态索引抽离**：抽取 `LiquidationIndexOps.java`，将未完成活动强平单的标的与方向索引解耦。
+- **条件单业务规则解耦**：抽取 `TriggerOrderOperations.java`，将条件单生命周期转换（Pending/Triggering/Triggered/Expired/Retry）、OCO 止盈止损双腿准入校验以及移动止损激活维护完整解耦，`TradingAccountRuntime` 仅做委托调用。
+- **瘦身收益**：`TradingAccountRuntime.java` 减少约 400 行低级细节代码，真正聚焦于账户多 Lane 调度与核心总账边界。
+- **验证成果**：
+  - 核心运行时单测套件 116 项 100% 通过（0 失败，0 错误）；
+  - 全工程 23 个 Maven 反应堆模块全量编译通过（35s 编译完成）；
+  - 代码已全部 push 到远程 master 分支。
