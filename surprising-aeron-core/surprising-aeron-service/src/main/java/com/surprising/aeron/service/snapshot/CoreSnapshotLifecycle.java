@@ -3,7 +3,7 @@ package com.surprising.aeron.service.snapshot;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreOrderState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;

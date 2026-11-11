@@ -4,7 +4,7 @@ import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.AmendOrderBatchCommand;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;

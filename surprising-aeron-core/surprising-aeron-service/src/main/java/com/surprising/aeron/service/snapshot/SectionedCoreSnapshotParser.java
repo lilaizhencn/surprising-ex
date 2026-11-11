@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.snapshot;
 
 import com.surprising.aeron.model.CoreFeePolicyState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreResultCode;

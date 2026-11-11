@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.replay;
 
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.aeron.support.math.OptionContractMath;
 import com.surprising.product.api.ProductLine;

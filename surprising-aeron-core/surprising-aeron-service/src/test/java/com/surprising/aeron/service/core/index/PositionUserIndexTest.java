@@ -6,7 +6,7 @@ import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.CoreRiskState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.UserAccountSnapshot;

@@ -11,7 +11,7 @@ import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;

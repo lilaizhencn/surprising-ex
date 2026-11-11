@@ -5,7 +5,7 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.core.LedgerControlTestSupport;

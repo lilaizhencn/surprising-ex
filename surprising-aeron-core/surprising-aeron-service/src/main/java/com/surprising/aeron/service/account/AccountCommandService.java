@@ -5,6 +5,7 @@ import com.surprising.aeron.service.order.*;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreLeverageKey;
+import com.surprising.aeron.model.InstrumentId;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
@@ -480,7 +481,7 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
         runtime.assertOwner();
         if (command.amountUnits() == 0)
             throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID", "only isolated position margin can be adjusted");
-        String instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(command.instrumentId());
+        String instrumentId = InstrumentId.requireValid(command.instrumentId());
         CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
         return identities.positionKey(userId, instrument, command.positionSide());

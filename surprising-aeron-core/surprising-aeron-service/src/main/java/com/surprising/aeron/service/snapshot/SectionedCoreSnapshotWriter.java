@@ -38,7 +38,7 @@ public final class SectionedCoreSnapshotWriter {
             long coreSequence,
             long clusterTimestamp,
             long clusterPosition,
-            com.surprising.aeron.model.TradingCoreState snapshotState,
+            com.surprising.aeron.service.snapshot.state.TradingCoreState snapshotState,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies,
             Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers,
             long businessStateHash) {

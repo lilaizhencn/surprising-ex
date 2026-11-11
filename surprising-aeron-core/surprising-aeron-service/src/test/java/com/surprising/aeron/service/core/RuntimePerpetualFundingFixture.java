@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;

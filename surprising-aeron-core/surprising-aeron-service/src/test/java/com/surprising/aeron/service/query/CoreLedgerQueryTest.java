@@ -3,7 +3,7 @@ package com.surprising.aeron.service.query;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreMarkPriceState;
 import com.surprising.aeron.model.CoreRiskState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.*;

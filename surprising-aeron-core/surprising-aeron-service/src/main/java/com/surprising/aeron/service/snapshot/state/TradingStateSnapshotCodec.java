@@ -17,7 +17,7 @@ import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.CoreRiskState.RiskScan;
 import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.model.RiskLaneProgress;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.*;

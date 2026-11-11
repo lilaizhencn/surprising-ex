@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.matcher.OrderBookEngine;
 import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.result.CommandResultLedger;

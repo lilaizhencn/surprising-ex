@@ -4,7 +4,7 @@ import com.surprising.aeron.service.risk.RiskMarginCalculator;
 
 import static com.surprising.aeron.service.risk.RiskMarginCalculator.applyMarkPriceRuntime;
 
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.PositionUserIndex;

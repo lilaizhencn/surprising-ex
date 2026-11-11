@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.CoreTestCompletion;

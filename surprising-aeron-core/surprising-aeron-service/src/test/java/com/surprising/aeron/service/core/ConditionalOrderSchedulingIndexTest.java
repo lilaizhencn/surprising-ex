@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreAlgoOrderState;
 import com.surprising.aeron.model.CoreCancelAllAfterState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;

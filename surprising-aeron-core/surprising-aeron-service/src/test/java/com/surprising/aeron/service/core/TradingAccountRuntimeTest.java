@@ -6,7 +6,7 @@ import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.AccountLaneTestAccess;

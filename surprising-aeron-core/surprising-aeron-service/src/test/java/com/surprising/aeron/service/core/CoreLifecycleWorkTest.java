@@ -5,7 +5,7 @@ import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreMarkPriceState;
 import com.surprising.aeron.model.CoreRiskState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;

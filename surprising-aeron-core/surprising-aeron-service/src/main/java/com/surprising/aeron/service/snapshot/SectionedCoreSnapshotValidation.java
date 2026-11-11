@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.snapshot;
 
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.core.TradingCoreRuntime;

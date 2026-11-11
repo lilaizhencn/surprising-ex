@@ -23,7 +23,7 @@ import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.CoreTriggerOrderState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
 import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;

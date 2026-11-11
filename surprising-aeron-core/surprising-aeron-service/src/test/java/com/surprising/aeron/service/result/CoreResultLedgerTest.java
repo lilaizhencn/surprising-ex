@@ -214,7 +214,7 @@ class CoreResultLedgerTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> TradingCoreRuntimeRestoreTestSupport.restore(
                         ProductLine.SPOT, 70, results, Map.of(),
-                        com.surprising.aeron.model.TradingCoreState.empty(ProductLine.SPOT)))
+                        com.surprising.aeron.service.snapshot.state.TradingCoreState.empty(ProductLine.SPOT)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("result ledger");
     }

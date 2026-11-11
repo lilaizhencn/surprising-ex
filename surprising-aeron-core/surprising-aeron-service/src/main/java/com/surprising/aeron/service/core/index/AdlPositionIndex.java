@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core.index;
 import com.surprising.aeron.service.query.CoreQueryService;
 
 import com.surprising.aeron.model.AssetBalance;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.position.Position;
 import java.util.Collections;

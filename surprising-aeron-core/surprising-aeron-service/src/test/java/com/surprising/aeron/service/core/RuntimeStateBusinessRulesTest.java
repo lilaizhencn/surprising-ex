@@ -12,7 +12,7 @@ import com.surprising.aeron.model.CoreCancelAllAfterState;
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CorePositionState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;

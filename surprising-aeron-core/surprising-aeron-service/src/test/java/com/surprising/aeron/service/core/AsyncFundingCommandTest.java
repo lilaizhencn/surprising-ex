@@ -190,7 +190,7 @@ class AsyncFundingCommandTest {
                         restored.runtimeState.markPrices.clear();
                         var cold = state.tradingState();
                         var risk = cold.riskState();
-                        var noMark = new com.surprising.aeron.model.TradingCoreState(line, cold.revision(),
+                        var noMark = new com.surprising.aeron.service.snapshot.state.TradingCoreState(line, cold.revision(),
                                 cold.users(), cold.orders(), cold.instruments(), new com.surprising.aeron.model.CoreRiskState(
                                         java.util.Map.of(), risk.snapshots(), risk.liquidations(), risk.scans(),
                                         risk.nextLiquidationId(), risk.scanControl(), risk.marketRevision()),

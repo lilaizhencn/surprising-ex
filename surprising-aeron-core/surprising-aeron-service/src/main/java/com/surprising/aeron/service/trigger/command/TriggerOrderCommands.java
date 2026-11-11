@@ -3,6 +3,7 @@ package com.surprising.aeron.service.trigger.command;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
+import com.surprising.aeron.model.InstrumentId;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
@@ -662,7 +663,7 @@ public final class TriggerOrderCommands {
             long userId, com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
         if (!owner.productLine().isDerivative()) return 0;
         return owner.identities().positionKey(userId,
-                com.surprising.aeron.service.order.OrderFundsReservation.Snapshot.requireInstrumentId(trigger.instrumentId()),
+                InstrumentId.requireValid(trigger.instrumentId()),
                 trigger.positionSide());
     }
 

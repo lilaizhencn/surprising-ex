@@ -22,7 +22,7 @@ import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.model.CoreOrderState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;

@@ -7,7 +7,8 @@ import com.surprising.aeron.service.order.*;
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CorePositionState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.model.InstrumentId;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.position.Position;
@@ -102,7 +103,7 @@ public final class PositionUserIndex {
     public long higherUserId(String instrumentId, long cursorUserId) {
         assertBusinessOwner();
         // 该合约已有的各 Lane 有序用户列表，首次出现合约时才创建整组列表。
-        LongArrayList[] lanes = usersBySymbol.get(OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId));
+        LongArrayList[] lanes = usersBySymbol.get(InstrumentId.requireValid(instrumentId));
         if (lanes == null) return 0;
         // 当前查到的严格大于游标的最小用户编号，0 表示尚无后继。
         long higher = 0;
@@ -126,7 +127,7 @@ public final class PositionUserIndex {
             throw new IllegalArgumentException("invalid Account Lane id");
         }
         // 该合约已有的各 Lane 有序用户列表，首次出现合约时才创建整组列表。
-        LongArrayList[] lanes = usersBySymbol.get(OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId));
+        LongArrayList[] lanes = usersBySymbol.get(InstrumentId.requireValid(instrumentId));
         return lanes == null ? 0 : higherUserId(lanes[accountLaneId], cursorUserId);
     }
 
@@ -174,7 +175,7 @@ public final class PositionUserIndex {
      */
     public Iterable<Long> usersAfter(String instrumentId, long afterUserId) {
         // 经过合约编号校验的遍历目标，迭代器后续使用同一编号查后继。
-        String normalized = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
+        String normalized = InstrumentId.requireValid(instrumentId);
         return () -> /* 本次惰性用户迭代器，只保存一个下一用户游标，依托实时有序索引逐项推进，不复制全部用户集合。 */ new java.util.Iterator<>() {
             /** 该惰性迭代器下一次要返回的用户编号，0 表示已经没有后续用户。 */
             private long next = higherUserId(normalized, afterUserId);

@@ -1,13 +1,10 @@
 package com.surprising.aeron.model;
 
-import com.surprising.aeron.service.order.*;
-
 import com.surprising.aeron.protocol.CoreAlgoOrderCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import java.util.List;
 
 /**
@@ -110,7 +107,7 @@ public record CoreAlgoOrderState(
         if (algoTypeCode == CoreAlgoOrderCommand.TWAP_TYPE_CODE) timeInForce = CoreTimeInForce.IOC;
         if (algoTypeCode == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) intervalSeconds = 0;
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
-        instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
+        instrumentId = InstrumentId.requireValid(instrumentId);
         rejectReason = rejectReason == null ? "" : rejectReason;
         childOrderIds = List.copyOf(childOrderIds);
         if (algoOrderId <= 0 || userId <= 0 || algoTypeCode < 0 || side == null || quantitySteps <= 0

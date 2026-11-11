@@ -740,7 +740,7 @@ class RuntimeCommitRecoveryTest {
      * 按本永续夹具口径精确汇总全部用户 USDT 可用加冻结，再加费用、保险、强平费及资金费/舍入残差并减保险亏空；不自动计入未实现盈亏或清算损益表。
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
-    private static long economicUsdt(com.surprising.aeron.model.TradingCoreState state) {
+    private static long economicUsdt(com.surprising.aeron.service.snapshot.state.TradingCoreState state) {
         // 按本夹具资金口径累计的 USDT 单位总额
         long total = 0;
         for (var /* 当前资金守恒或全部释放断言中的冷用户 */ user : state.users().values()) {

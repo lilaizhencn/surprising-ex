@@ -7,6 +7,7 @@ import com.surprising.aeron.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.model.CoreCancelAllAfterState;
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.model.CoreOrderStatus;
+import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
@@ -1636,7 +1637,7 @@ public static final class RiskQueries {
                     position.positionSide(), asset, position.signedQuantitySteps(), position.entryPriceTicks(),
                     value.mark().markPriceTicks(), value.notional(), position.positionMarginUnits(),
                     value.mark().priceSequence(), wallet, equity, value.pnl(), value.maintenance(), ratio,
-                    RiskMarginCalculator.status(ratio).name()));
+                    CoreRiskStatus.of(ratio).name()));
         }
         result.sort(Comparator.comparingLong(CoreRiskSnapshotView::userId)
                 .thenComparing(CoreRiskSnapshotView::instrumentId)

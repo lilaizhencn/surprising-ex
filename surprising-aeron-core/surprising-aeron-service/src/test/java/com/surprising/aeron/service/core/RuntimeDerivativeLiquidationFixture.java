@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreOrderState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;

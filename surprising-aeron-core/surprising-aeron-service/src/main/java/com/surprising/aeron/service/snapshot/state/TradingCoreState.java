@@ -1,12 +1,11 @@
-package com.surprising.aeron.model;
+package com.surprising.aeron.service.snapshot.state;
 
-import com.surprising.aeron.service.order.*;
-
+import com.surprising.aeron.model.*;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.snapshot.state.CoreStateHash;
-import com.surprising.aeron.service.snapshot.state.StateMapSupport;
+import com.surprising.aeron.support.collection.StateMapSupport;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -400,7 +399,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, balance.availableUnits());
             hash = CoreStateHash.mix(hash, balance.lockedUnits());
         }
-        for (OrderFundsReservation.Snapshot /* 当前用户的订单预留，剩余为零时不参与业务哈希 */ reservation : user.reservations().values()) {
+        for (Snapshot /* 当前用户的订单预留，剩余为零时不参与业务哈希 */ reservation : user.reservations().values()) {
             if (reservation.remainingUnits() == 0) continue;
             hash = CoreStateHash.mix(hash, reservation.orderId());
             hash = CoreStateHash.mix(hash, reservation.instrumentId());

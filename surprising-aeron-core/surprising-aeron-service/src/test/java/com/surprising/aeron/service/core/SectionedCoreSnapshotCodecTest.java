@@ -10,7 +10,7 @@ import static com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSup
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
@@ -79,7 +79,7 @@ class SectionedCoreSnapshotCodecTest {
         // 准备配对并待编码的原始运行时。
         TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1,
                 Map.of(commandId, stored), Map.of(),
-                com.surprising.aeron.model.TradingCoreState.empty(ProductLine.SPOT));
+                com.surprising.aeron.service.snapshot.state.TradingCoreState.empty(ProductLine.SPOT));
 
         // 从快照恢复的候选运行时，具体关闭范围见当前测试。
         TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot());

@@ -1,7 +1,7 @@
 package com.surprising.aeron.model;
 
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
-import com.surprising.aeron.service.snapshot.state.StateMapSupport;
+import com.surprising.aeron.support.collection.StateMapSupport;
 import java.util.List;
 import java.util.Map;
 

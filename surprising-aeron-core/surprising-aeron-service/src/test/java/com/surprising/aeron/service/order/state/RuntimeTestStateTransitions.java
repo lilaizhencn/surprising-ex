@@ -11,7 +11,7 @@ import com.surprising.aeron.service.core.RuntimeLifecycleSettlementFixture;
 import com.surprising.aeron.service.core.RuntimePerpetualFundingFixture;
 
 import com.surprising.aeron.model.CoreOrderState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;

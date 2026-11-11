@@ -1,10 +1,6 @@
 package com.surprising.aeron.model;
 
-import com.surprising.aeron.service.order.*;
-
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
-import com.surprising.aeron.service.risk.RiskMarginCalculator;
 
 /**
  * 某次价格下对用户某个持仓腿的风险估值结果，保存当时权益、盈亏、维持保证金及风险比例，等级按固定阈值读取；全仓记录中的权益可以是多仓共享的账户权益。
@@ -30,7 +26,7 @@ public record CoreRiskSnapshot(
      * 规范合约编号，并校验用户、价格序号、持仓腿、维持保证金和风险占比等必填范围。
      */
     public CoreRiskSnapshot {
-        instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
+        instrumentId = InstrumentId.requireValid(instrumentId);
         if (userId <= 0 || positionSide == null || priceSequence <= 0 || maintenanceMarginUnits < 0
                 || marginRatioPpm < 0) {
             throw new IllegalArgumentException("invalid risk snapshot");
@@ -39,7 +35,7 @@ public record CoreRiskSnapshot(
 
     /** 按已固定的风险比例读取等级，不重新估值账户或行情。 */
     public CoreRiskStatus status() {
-        return RiskMarginCalculator.status(marginRatioPpm);
+        return CoreRiskStatus.of(marginRatioPpm);
     }
 
     /**

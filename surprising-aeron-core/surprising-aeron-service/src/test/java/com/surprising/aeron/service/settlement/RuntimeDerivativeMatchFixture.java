@@ -3,7 +3,7 @@ package com.surprising.aeron.service.settlement;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;

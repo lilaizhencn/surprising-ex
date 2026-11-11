@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.snapshot.state;
+package com.surprising.aeron.support.collection;
 
 import java.util.HashMap;
 import java.util.Map;

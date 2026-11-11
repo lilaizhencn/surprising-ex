@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.model.AssetBalance;
+import com.surprising.aeron.model.InstrumentId;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
@@ -312,7 +313,7 @@ public static final class Snapshot {
             throw new IllegalArgumentException("invalid order reservation");
         }
         this.orderId = orderId;
-        this.instrumentId = requireInstrumentId(instrumentId);
+        this.instrumentId = InstrumentId.requireValid(instrumentId);
         this.kind = kind;
         this.asset = AssetBalance.normalizeAsset(asset);
         this.reservedUnits = reservedUnits;
@@ -367,15 +368,6 @@ public static final class Snapshot {
      */
     public long remainingUnits() {
         return Math.subtractExact(reservedUnits, Math.addExact(releasedUnits, consumedUnits));
-    }
-
-    /**
-     * 校验永久正整数币对编号文本后原样返回，不重新生成或改写字符串。
-     * @param value 需要校验的永久币对编号文本
-     */
-    public static String requireInstrumentId(String value) {
-        com.surprising.product.api.utils.InstrumentIds.parse(value);
-        return value;
     }
 }
 

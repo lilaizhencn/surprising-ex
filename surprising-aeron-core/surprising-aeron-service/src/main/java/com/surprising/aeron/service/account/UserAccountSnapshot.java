@@ -6,7 +6,7 @@ import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
-import com.surprising.aeron.service.snapshot.state.StateMapSupport;
+import com.surprising.aeron.support.collection.StateMapSupport;
 import com.surprising.product.api.ProductLine;
 import java.util.HashMap;
 import java.util.Map;

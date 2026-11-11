@@ -3,7 +3,8 @@ package com.surprising.aeron.service.core.index;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.model.InstrumentId;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
@@ -170,7 +171,7 @@ public final class LiquidationIndex {
          * 要求标的文本符合规范数字身份，其他字段按既有调用约定提供。
          */
         private LiquidationKey {
-            instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
+            instrumentId = InstrumentId.requireValid(instrumentId);
         }
 
         /**

@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;

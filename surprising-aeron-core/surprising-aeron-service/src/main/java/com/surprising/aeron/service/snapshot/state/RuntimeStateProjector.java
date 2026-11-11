@@ -6,8 +6,9 @@ import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreOrderState;
-import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.model.TradingCoreState.ClientOrderKey;
+import com.surprising.aeron.model.InstrumentId;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState.ClientOrderKey;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
@@ -245,7 +246,7 @@ public final class RuntimeStateProjector {
      */
     private static String positionKey(String instrumentId, com.surprising.aeron.protocol.CorePositionSide side) {
         // 经过币对名规范化后的持仓键主体。
-        String normalized = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
+        String normalized = InstrumentId.requireValid(instrumentId);
         return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
     }
 
@@ -256,7 +257,7 @@ public final class RuntimeStateProjector {
      */
     private static CoreInstrument requireInstrument(TradingCoreState source, String instrumentId) {
         // 从旧状态中找到的注册币对配置。
-        CoreInstrument instrument = source.instruments().get(OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId));
+        CoreInstrument instrument = source.instruments().get(InstrumentId.requireValid(instrumentId));
         if (instrument == null) throw new IllegalStateException("instrument is not registered: " + instrumentId);
         return instrument;
     }

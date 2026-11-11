@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.snapshot.state;
 
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import java.util.Map;

@@ -11,7 +11,7 @@ import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;

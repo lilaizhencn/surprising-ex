@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core.index;
 
 import com.surprising.aeron.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.model.CoreCancelAllAfterState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.ArrayList;
 import java.util.List;

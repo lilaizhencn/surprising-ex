@@ -1,10 +1,7 @@
 package com.surprising.aeron.model;
 
-import com.surprising.aeron.service.order.*;
-
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 
 /**
  * 一笔强平从风险计划、撤单处理到执行及补亏的不可变记录。保存原持仓方向、计划平仓量、费用和剩余亏空；状态方法只生成新记录，不直接操作账户。
@@ -43,7 +40,7 @@ public record CoreLiquidationState(
      * 检查强平数量、费用和亏空等范围，要求完成状态没有亏空；未执行的计划与取消状态不能带执行费用，撤单游标只允许在 ORDERED 保存。
      */
     public CoreLiquidationState {
-        instrumentId = OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
+        instrumentId = InstrumentId.requireValid(instrumentId);
         if (liquidationId <= 0 || userId <= 0 || marginMode == null || positionSide == null
                 || triggerPriceSequence <= 0 || signedQuantitySteps == 0 || closeQuantitySteps <= 0
                 || closeQuantitySteps > Math.absExact(signedQuantitySteps) || deficitUnits < 0

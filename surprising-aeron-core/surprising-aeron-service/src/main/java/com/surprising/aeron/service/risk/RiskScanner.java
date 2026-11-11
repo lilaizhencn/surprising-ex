@@ -519,7 +519,7 @@ public final class RiskScanner {
                                               long ratio, RiskScanner.LiquidationBatch creations,
                                               RuntimeIdentityRegistry identities) {
         // 根据风险占比选出的正常、预警或强平结论。
-        CoreRiskStatus status = RiskMarginCalculator.status(ratio);
+        CoreRiskStatus status = CoreRiskStatus.of(ratio);
         // 当前持仓的币对整数编号，定位已有强平及行情缓存时使用。
         int symbolId = position.symbolId();
         // 该用户、币对和持仓腿对应的风险记录整数键。

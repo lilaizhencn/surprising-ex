@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core.index;
 
 import com.surprising.aeron.model.CoreAlgoOrderState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.product.api.utils.InstrumentIds;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;

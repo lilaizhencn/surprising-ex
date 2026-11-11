@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.model.CoreMarkPriceState;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.RiskLaneProgress;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreOrderSide;

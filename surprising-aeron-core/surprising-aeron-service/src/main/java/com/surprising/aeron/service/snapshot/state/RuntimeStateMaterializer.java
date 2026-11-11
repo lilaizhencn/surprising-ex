@@ -9,7 +9,7 @@ import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.CoreRiskSnapshot;
 import com.surprising.aeron.model.CoreRiskState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;

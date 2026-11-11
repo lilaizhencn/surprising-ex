@@ -3,10 +3,11 @@ package com.surprising.aeron.service.core.index;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreOrderState;
+import com.surprising.aeron.model.InstrumentId;
 import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
@@ -139,7 +140,7 @@ public final class ActiveOrderIndex {
             throw new IllegalArgumentException("invalid active-order page");
         }
         // 本次页查询验证后的标的文本，不筛选标的时为空
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId);
+        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : InstrumentId.requireValid(instrumentId);
         // 选中扫描的较小成员桶；分页无筛选时为空并遍历全订单表
         LongHashSet source;
         // 无用户和标的条件时使用的全订单键迭代器

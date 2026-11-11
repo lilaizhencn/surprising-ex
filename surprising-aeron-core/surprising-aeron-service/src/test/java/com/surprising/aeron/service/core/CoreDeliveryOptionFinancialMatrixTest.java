@@ -17,7 +17,7 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.CoreRiskSnapshot;
 import com.surprising.aeron.model.CoreRiskStatus;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;

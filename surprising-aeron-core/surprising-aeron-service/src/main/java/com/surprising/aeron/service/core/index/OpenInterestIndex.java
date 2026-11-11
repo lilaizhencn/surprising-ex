@@ -3,7 +3,8 @@ package com.surprising.aeron.service.core.index;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CorePositionState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.model.InstrumentId;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.position.Position;
 import java.util.Collections;
@@ -65,7 +66,7 @@ public final class OpenInterestIndex {
     public long openInterestSteps(String instrumentId) {
         assertBusinessOwner();
         // 当前合约的索引自有累计桶，只读取其多空数字，不交给查询调用方修改。
-        MutableTotals value = totals.get(OrderFundsReservation.Snapshot.requireInstrumentId(instrumentId));
+        MutableTotals value = totals.get(InstrumentId.requireValid(instrumentId));
         return value == null ? 0 : Math.max(value.longQuantity, value.shortQuantity);
     }
 
