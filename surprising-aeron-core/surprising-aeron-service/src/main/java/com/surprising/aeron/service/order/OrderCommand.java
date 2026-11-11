@@ -44,7 +44,7 @@ import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.result.CommandResultBuilder;
-import com.surprising.aeron.service.result.ResponseArena;
+import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import com.surprising.aeron.service.settlement.ContractExpirySettlementService;
@@ -205,7 +205,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /**
      * 非批量命令按操作选择最多两个需要收集结果的订单号，再绑定 Lane 响应目标；批量沿用自己的 OrderBatchProcessor.PendingBatch 目标，不创建第二份结果容器。
      */
-    void prepareLaneResultTarget(ResponseArena responseArena) {
+    void prepareLaneResultTarget(ResponseSlotPool responseSlotPool) {
         if (orderBatch != null) return;
         // 替换操作需要捕获的第二个订单号，否则零。
         long first = 0, second = 0;
@@ -225,7 +225,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
             }
             default -> { }
         }
-        settlementState.laneResultTarget.bind(first, second, responseArena);
+        settlementState.laneResultTarget.bind(first, second, responseSlotPool);
     }
 
     /**
@@ -256,7 +256,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
      */
     public int lanePreparedResponseLength() { return settlementState.laneResultTarget.preparedResponseLength(); }
     /**
-     * 把响应租约从本槽目标移交出去，只清本目标租约引用，不归还 Arena 或复制字节。
+     * 把响应租约从本槽目标移交出去，只清本目标租约引用，不归还 槽池 或复制字节。
      */
     public void transferLaneResponseOwnership() { settlementState.laneResultTarget.transferResponseOwnership(); }
 
@@ -1113,19 +1113,19 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         private boolean prepared;
         /** 目标当前仍持有的响应数组引用。 */
         private byte[] response;
-        /** 响应有效字节数，不等于 Arena 数组总容量。 */
+        /** 响应有效字节数，不等于 槽池 数组总容量。 */
         private int responseLength;
-        /** 绑定的响应缓冲 Arena，清目标后保留引用供下次使用。 */
-        private ResponseArena responseArena;
-        /** 仍由目标持有的可空 Arena 租约，移交后清空。 */
-        private ResponseArena.Slot responseSlot;
+        /** 绑定的响应缓冲 槽池，清目标后保留引用供下次使用。 */
+        private ResponseSlotPool responseSlotPool;
+        /** 仍由目标持有的可空 槽池 租约，移交后清空。 */
+        private ResponseSlotPool.Slot responseSlot;
 
         /**
-         * 先清上次结果，再保存 Arena；只有 first 为正才启用目标，second 为正且不同才增加第二项。
+         * 先清上次结果，再保存 槽池；只有 first 为正才启用目标，second 为正且不同才增加第二项。
          */
-        void bind(long first, long second, ResponseArena responseArena) {
+        void bind(long first, long second, ResponseSlotPool responseSlotPool) {
             clear();
-            this.responseArena = responseArena;
+            this.responseSlotPool = responseSlotPool;
             if (first <= 0) return;
             ids[0] = first;
             count = 1;
@@ -1187,10 +1187,10 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
          */
         @Override public boolean includeTerminalAfterImage() { return true; }
         /**
-         * 归还旧租约后按非空订单副本数选择空响应、单单或多单协议，向 Arena 租用字节并编码，保存有效长度；编码运行异常或 Error 时归还本次已取得的租约再抛出。
+         * 归还旧租约后按非空订单副本数选择空响应、单单或多单协议，向 槽池 租用字节并编码，保存有效长度；编码运行异常或 Error 时归还本次已取得的租约再抛出。
          */
         @Override public void prepareResponse() {
-            if (responseSlot != null) responseArena.release(responseSlot);
+            if (responseSlot != null) responseSlotPool.release(responseSlot);
             responseSlot = null;
             prepared = false;
             response = null;
@@ -1215,7 +1215,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
                 int length = single
                         ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodedSingleOrderLength(first)
                         : com.surprising.aeron.protocol.CoreCommandResultCodec.encodedLength(orderList, java.util.List.of());
-                responseSlot = responseArena.acquireSlot(length);
+                responseSlot = responseSlotPool.acquireSlot(length);
                 int encodedLength = single
                         ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(first, responseSlot.writer())
                         : com.surprising.aeron.protocol.CoreCommandResultCodec.encodeInto(
@@ -1224,7 +1224,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
                 response = responseSlot.storage();
                 prepared = true;
             } catch (RuntimeException | Error failure) {
-                if (responseSlot != null) responseArena.release(responseSlot);
+                if (responseSlot != null) responseSlotPool.release(responseSlot);
                 responseSlot = null;
                 throw failure;
             }
@@ -1246,7 +1246,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         @Override public int preparedResponseLength() { return responseLength; }
 
         /**
-         * 只断开当前响应槽和数组/长度引用，不归还 Arena，prepared 标记保持原值直到 clear 或下一次准备。
+         * 只断开当前响应槽和数组/长度引用，不归还 槽池，prepared 标记保持原值直到 clear 或下一次准备。
          */
         void transferResponseOwnership() {
             responseSlot = null;
@@ -1255,11 +1255,11 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         }
 
         /**
-         * 归还仍由目标持有的响应租约，清有效订单和身份、捕获位与响应标记；保留 Arena 引用及已分配副本对象以便再次使用。
+         * 归还仍由目标持有的响应租约，清有效订单和身份、捕获位与响应标记；保留 槽池 引用及已分配副本对象以便再次使用。
          */
         void clear() {
-            if (responseSlot != null && responseArena != null) {
-                responseArena.release(responseSlot);
+            if (responseSlot != null && responseSlotPool != null) {
+                responseSlotPool.release(responseSlot);
                 responseSlot = null;
             }
             for (int i = 0; i < count; i++) {

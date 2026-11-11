@@ -14,7 +14,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.result.CommandResultBuilder;
-import com.surprising.aeron.service.result.ResponseArena;
+import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -35,7 +35,7 @@ class CommandSlotTest {
         CoreMessage command = command(1000);
         var pending = new OrderCommand().initialize(1000, OrderCommand.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(), OrderCommand.Decoded.decode(command), null);
-        pending.prepareLaneResultTarget(new ResponseArena(1, 16));
+        pending.prepareLaneResultTarget(new ResponseSlotPool(1, 16));
         // 普通命令槽提供的 Lane 结果写入接口。
         var target = pending.laneResultTarget();
         target.resultOrder(0, null, null);
@@ -130,7 +130,7 @@ class CommandSlotTest {
         var pending = new OrderCommand().initialize(1000, OrderCommand.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(), OrderCommand.Decoded.decode(command), null);
         // 人工绑定到槽上的批次上下文。
-        var batch = new OrderBatchProcessor.PendingBatch(1, new ResponseArena(1, 4096));
+        var batch = new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool(1, 4096));
         pending.orderBatch = batch;
         pending.initialize(2000, OrderCommand.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(),
@@ -155,7 +155,7 @@ class CommandSlotTest {
                     pending[i] = owner.admissions().newPendingMatching(first + i,
                             OrderCommand.Operation.PLACE, command(first + i));
                     owner.pendingMatching().put(pending[i]);
-                    batches[i] = new OrderBatchProcessor.PendingBatch(1, owner.responseArena());
+                    batches[i] = new OrderBatchProcessor.PendingBatch(1, owner.responseSlotPool());
                     batches[i].sequence = first + i;
                     owner.batches().registerBatch(pending[i], batches[i]);
                     assertThat(owner.batches().batch(first + i)).isSameAs(pending[i].orderBatch).isSameAs(batches[i]);

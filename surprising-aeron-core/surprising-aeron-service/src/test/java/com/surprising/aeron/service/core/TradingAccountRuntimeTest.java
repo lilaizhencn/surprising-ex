@@ -18,7 +18,7 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.OrderFundsReservation.PendingTracker;
 import com.surprising.aeron.service.order.OrderBatchProcessor.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.order.OrderBatchProcessor.PendingBatch;
-import com.surprising.aeron.service.result.ResponseArena;
+import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
@@ -91,7 +91,7 @@ class TradingAccountRuntimeTest {
                     new OrderCommand.ResolvedPlaceOrder[1], new long[1],
                     new Order[]{CoreStateTestFixtures.order(11, 7, 5, 2)},
                     1, lane, 0, state, changes, new RuntimeIdentityRegistry(),
-                    new OrderBatchProcessor.PendingBatch(1, new ResponseArena()), 0, 0);
+                    new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool()), 0, 0);
             // 通过反射仅用于本测试标记该原批次已完成的字段
             var complete = OrderBatchProcessor.PlaceBatchAdmissionEvent.class.getDeclaredField("completed");
             complete.setAccessible(true);

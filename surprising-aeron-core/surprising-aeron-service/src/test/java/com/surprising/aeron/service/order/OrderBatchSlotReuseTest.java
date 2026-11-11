@@ -4,8 +4,8 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
-import com.surprising.aeron.service.result.ResponseArena;
-import com.surprising.aeron.service.result.ResponseArenaTestAccess;
+import com.surprising.aeron.service.result.ResponseSlotPool;
+import com.surprising.aeron.service.result.ResponseSlotPoolTestAccess;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,9 +18,9 @@ class OrderBatchSlotReuseTest {
      */
     @Test void admissionReceiptBelongsToItsItemAndSurvivesOtherBatchesAndReuse() {
         // 第一批上下文或其首项对象，具体类型见声明
-        var first = new OrderBatchProcessor.PendingBatch(1, new ResponseArena(1, 4096));
+        var first = new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool(1, 4096));
         // 第二批独立上下文
-        var second = new OrderBatchProcessor.PendingBatch(1, new ResponseArena(1, 4096));
+        var second = new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool(1, 4096));
         first.addItem(11, 0, 0, new Object());
         second.addItem(12, 0, 0, new Object());
         // 用于捕获的活跃订单，不能被副本复用改写
@@ -75,9 +75,9 @@ class OrderBatchSlotReuseTest {
      */
     @Test void failedBatchReencodingDropsOldPayloadAndReturnsItsLease() {
         // 测试显式创建的有限响应分配器
-        var arena = new ResponseArena(1, 4096);
+        var 槽池 = new ResponseSlotPool(1, 4096);
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchProcessor.PendingBatch(1, arena);
+        var batch = new OrderBatchProcessor.PendingBatch(1, 槽池);
         batch.addItem(1, 0, 0, new Object());
         // 当前设置状态或准备结果的批内项
         var item = batch.items.getFirst();
@@ -96,17 +96,17 @@ class OrderBatchSlotReuseTest {
         assertThat(batch.hasPreparedResponseSlot()).isFalse();
         batch.clear();
         // 清理后重新借到的订单副本或响应槽，具体类型见声明
-        var reused = arena.acquireSlot(16);
+        var reused = 槽池.acquireSlot(16);
         assertThat(reused.storage()).isSameAs(original);
-        arena.release(reused);
+        槽池.release(reused);
     }
 
     /**
-     * 显式传空响应分配器必须失败，并说明缺少 response arena。
+     * 显式传空响应分配器必须失败，并说明缺少 response slot pool。
      */
-    @Test void batchRequiresAnExplicitResponseArena() {
+    @Test void batchRequiresAnExplicitResponseSlotPool() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> new OrderBatchProcessor.PendingBatch(1, null))
-                .isInstanceOf(NullPointerException.class).hasMessageContaining("response arena");
+                .isInstanceOf(NullPointerException.class).hasMessageContaining("response slot pool");
     }
 
     /**
@@ -114,9 +114,9 @@ class OrderBatchSlotReuseTest {
      */
     @Test void laneResponseRequiresEveryItemAndIsDetachedFromReusableSlots() {
         // 测试显式创建的有限响应分配器
-        var arena = new ResponseArena(1, 4096);
+        var 槽池 = new ResponseSlotPool(1, 4096);
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchProcessor.PendingBatch(2, arena);
+        var batch = new OrderBatchProcessor.PendingBatch(2, 槽池);
         batch.addItem(1, 0, 0, new Object());
         batch.addItem(2, 0, 0, new Object());
         for (var /* 当前设置状态或准备结果的批内项 */ item : batch.items) {
@@ -138,20 +138,20 @@ class OrderBatchSlotReuseTest {
         batch.clear();
         assertThat(batch.preparedResponse).isNull();
         // 旧响应仍有租约时新借到的独立槽
-        var next = arena.acquireSlot(encodedLength);
-        assertThat(ResponseArenaTestAccess.arenaBacked(next)).isFalse();
+        var next = 槽池.acquireSlot(encodedLength);
+        assertThat(ResponseSlotPoolTestAccess.槽池Backed(next)).isFalse();
         assertThat(next.storage()).isNotSameAs(encoded);
         java.util.Arrays.fill(next.storage(), (byte) 7);
         // 从旧响应再次解码的结果，证明没有被新槽写入覆盖
         var decoded = com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeResult(encoded, encodedLength);
         assertThat(decoded.items()).hasSize(2);
         assertThat(decoded.items().getFirst().orderId()).isEqualTo(1);
-        arena.release(next);
-        arena.release(encoded);
+        槽池.release(next);
+        槽池.release(encoded);
         // 清理后重新借到的订单副本或响应槽，具体类型见声明
-        var reused = arena.acquireSlot(encodedLength);
+        var reused = 槽池.acquireSlot(encodedLength);
         assertThat(reused.storage()).isSameAs(encoded);
-        arena.release(reused);
+        槽池.release(reused);
     }
 
     /**
@@ -159,7 +159,7 @@ class OrderBatchSlotReuseTest {
      */
     @Test void reuseClearsPriorInputsAndLaneResultsAcrossDifferentBatchSizes() {
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchProcessor.PendingBatch(20, new ResponseArena(1, 4096));
+        var batch = new OrderBatchProcessor.PendingBatch(20, new ResponseSlotPool(1, 4096));
         // 批内多个项共用的输入标识对象
         var command = new Object();
         batch.addItem(1, 0, 0, command);

@@ -215,7 +215,7 @@ public final class OrderMatchingFlow {
                 || !batchContinuation && owner.matchingProgress.submissionDeferred(pending.sequence())) return;
         if (!collectReplacementAdmissionIfReady(pending) || hasPendingMatchingRejection(pending.sequence())) return;
         if (!collectLiquidationChecksIfReady(pending) || pending.hasMatchingRejection()) return;
-        pending.prepareLaneResultTarget(owner.responseArena());
+        pending.prepareLaneResultTarget(owner.responseSlotPool());
         if (pending.orderBatch != null) {
             owner.batches().submitOrderBatchMatching(pending);
             // 批次仍可能派发后续 Matcher 片段时，保留当前分片提交边界。

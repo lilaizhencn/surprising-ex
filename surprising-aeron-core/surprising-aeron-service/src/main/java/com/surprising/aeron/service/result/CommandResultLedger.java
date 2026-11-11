@@ -44,7 +44,7 @@ public final class CommandResultLedger {
     /** 表槽到保留队列绝对位置的反向索引，搬移表槽时同步更新。 */
     private final int[] retentionPositions = new int[TABLE_CAPACITY];
     /** 可空响应池，存在时分别维护账本和发送方引用。 */
-    private final ResponseArena responseArena;
+    private final ResponseSlotPool responseSlotPool;
     /** 保留循环队列的绝对头游标。 */
     private int retentionHead;
     /** 保留循环队列的下一追加绝对位置。 */
@@ -67,10 +67,10 @@ public final class CommandResultLedger {
     /**
      * 预建结果记录和空闲槽，检查输入非空及条数后按迭代顺序恢复记录，再统计协议字节和下一保留序号；完整恢复元数据验证由 validateResultLedger 单独承担。
      * @param results 按保留顺序提供的已有结果集合，验证入口检查其元数据
-     * @param responseArena 可空共享响应池，存在时参与字节引用管理
+     * @param responseSlotPool 可空共享响应池，存在时参与字节引用管理
      */
-    public CommandResultLedger(LinkedHashMap<UUID, StoredResult> results, ResponseArena responseArena) {
-        this.responseArena = responseArena;
+    public CommandResultLedger(LinkedHashMap<UUID, StoredResult> results, ResponseSlotPool responseSlotPool) {
+        this.responseSlotPool = responseSlotPool;
         for (/* 当前预建池槽号或有效响应字节的遍历位置 */ int index = 0; index < TABLE_CAPACITY; index++) {
             recordRing[index] = new StoredResult(index);
             freeRecordSlots[index] = index;
@@ -122,7 +122,7 @@ public final class CommandResultLedger {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                     CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, EMPTY_RESPONSE_DATA);
         }
-        if (responseArena != null) responseArena.retain(duplicate.responseDataUnsafe());
+        if (responseSlotPool != null) responseSlotPool.retain(duplicate.responseDataUnsafe());
         return CoreResponse.owned(ResponseStatus.DUPLICATE,
                 duplicate.status(), duplicate.resultCode(), duplicate.appliedCommandCount(),
                 duplicate.responseDataUnsafe(),
@@ -287,13 +287,13 @@ public final class CommandResultLedger {
         if (freeRecordCount == 0) throw new IllegalStateException("result commit ring is full");
         // 方法返回后，Owner 命令或输出队列仍持有终态响应。
         // 账本另持一份池引用，避免淘汰结果时覆盖尚未完成发送的响应字节。
-        if (responseArena != null) {
+        if (responseSlotPool != null) {
             if (previous != null && previousResponse == responseData) {
                 // 相同命令继续使用同一底层数组时，沿用已有账本引用，另加本次发送引用。
                 // 首次响应已经排出、随后再次查询保留结果时，也需要独立的发送借用期。
-                responseArena.retain(responseData);
+                responseSlotPool.retain(responseData);
             } else {
-                responseArena.retainLedger(responseData);
+                responseSlotPool.retainLedger(responseData);
             }
         }
         // 本次替换使用另一预建记录，避免当场改写当前边界仍借看的旧记录。
@@ -310,8 +310,8 @@ public final class CommandResultLedger {
             commandIdLeast[slot] = commandIdLsb;
             enqueueRetentionSlot(slot);
             size++;
-        } else if (responseArena != null && previousResponse != responseData) {
-            responseArena.releaseLedger(previousResponse);
+        } else if (responseSlotPool != null && previousResponse != responseData) {
+            responseSlotPool.releaseLedger(previousResponse);
         }
         if (previous != null) freeRecordSlots[freeRecordCount++] = previous.ringSlot;
         results[slot] = retained;
@@ -384,8 +384,8 @@ public final class CommandResultLedger {
     private void remove(int slot) {
         // 本次即将从表移除并归还池的记录
         StoredResult removed = results[slot];
-        if (responseArena != null && removed != null) {
-            responseArena.releaseLedger(removed.responseDataUnsafe());
+        if (responseSlotPool != null && removed != null) {
+            responseSlotPool.releaseLedger(removed.responseDataUnsafe());
         }
         // 当前表槽对应的保留队列绝对位置
         int position = retentionPositions[slot];

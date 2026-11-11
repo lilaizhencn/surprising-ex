@@ -55,7 +55,7 @@ import com.surprising.aeron.service.result.CommandResultBuilder;
 import com.surprising.aeron.service.result.CommandResultLedger;
 import com.surprising.aeron.service.result.CommandResultLedger.StoredResult;
 import com.surprising.aeron.service.result.FundsCommandIndex;
-import com.surprising.aeron.service.result.ResponseArena;
+import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.aeron.service.result.SourceSequenceIndex;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.risk.RiskScanner;
@@ -137,7 +137,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         final OrderAdmissionService admissions;
         final TriggerOrderCommands triggers;
         final DirectCommandDispatcher directCommands;
-        final ResponseArena responseArena;
+        final ResponseSlotPool responseSlotPool;
         final CrossShardCancellationCoordinator crossShardCancellations;
         final com.surprising.aeron.service.core.index.RuntimeFactIndexes factIndexes;
         final CommandResultLedger resultLedger;
@@ -159,9 +159,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
             this.admissions = new OrderAdmissionService(owner);
             this.triggers = new TriggerOrderCommands(owner);
             this.directCommands = new DirectCommandDispatcher(owner, this.triggers);
-            this.responseArena = new ResponseArena(configuration);
+            this.responseSlotPool = new ResponseSlotPool(configuration);
             this.crossShardCancellations = new CrossShardCancellationCoordinator(owner);
-            this.resultLedger = new CommandResultLedger(commandResults, this.responseArena);
+            this.resultLedger = new CommandResultLedger(commandResults, this.responseSlotPool);
             this.lastSourceSequences = new SourceSequenceIndex(lastSourceSequences);
             this.terminalRetention = terminalRetention;
             this.factIndexes = factIndexes;
@@ -208,7 +208,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public CommandFingerprint.Calculator fingerprints() { return components.fingerprints; }
     public OrderAdmissionService admissions() { return components.admissions; }
     public TriggerOrderCommands triggers() { return components.triggers; }
-    public ResponseArena responseArena() { return components == null ? null : components.responseArena; }
+    public ResponseSlotPool responseSlotPool() { return components == null ? null : components.responseSlotPool; }
     public CrossShardCancellationCoordinator crossShardCancellations() { return components.crossShardCancellations; }
     public CoreRuntimeConfiguration configuration() { return components.configuration; }
     public com.surprising.aeron.service.core.index.RuntimeFactIndexes factIndexes() { return components.factIndexes; }
@@ -537,7 +537,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                             CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, state.appliedCommandCount,
                             EMPTY_RESPONSE_DATA);
                 }
-                components.responseArena.retain(result.responseDataUnsafe());
+                components.responseSlotPool.retain(result.responseDataUnsafe());
                 return CoreResponse.owned(com.surprising.aeron.protocol.ResponseStatus.OK, result.status(), result.resultCode(),
                         result.appliedCommandCount(),
                         result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
@@ -1242,7 +1242,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param response 要交接或归还的响应，包含其缓冲租约
      */
     void releaseResponse(CoreResponse response) {
-        if (response != null) components.responseArena.release(response.dataUnsafe());
+        if (response != null) components.responseSlotPool.release(response.dataUnsafe());
     }
 
     /**

@@ -9,7 +9,7 @@ import lombok.experimental.Accessors;
 /**
  * 响应字节的固定槽池：小响应可借预分配数组，超大响应或槽全被保留时使用独立精确长度数组。Lane 编码器、Owner 与出口通过原子计数共同持有槽；账本引用和发送引用分开计数，两类都归零才可再借。
  */
-public final class ResponseArena {
+public final class ResponseSlotPool {
     /** 默认槽数下限五百一十二，兼顾命令窗口与账本同时持有响应。 */
     static final int DEFAULT_SLOT_COUNT = 512;
     /** 默认固定槽字节容量六十四 KiB。 */
@@ -59,7 +59,7 @@ public final class ResponseArena {
         @Getter
         byte[] storage;
         /** 底层数组是否属于本池固定槽，决定是否参与引用归还。 */
-        final boolean arenaBacked;
+        final boolean 槽池Backed;
         /** 池内固定槽号，独立数组和空描述符为负一。 */
         final int slotIndex;
         /** 与当前数组配对的复用 ByteBuffer，仅当前编码持有者修改其位置。 */
@@ -68,12 +68,12 @@ public final class ResponseArena {
         /**
          * 保存该描述符的底层数组、本池归属及槽号，不在这里增加任何引用计数。
          * @param storage 要描述、定位或借还引用的底层数组
-         * @param arenaBacked 该描述符是否对应本池固定数组
+         * @param 槽池Backed 该描述符是否对应本池固定数组
          * @param slotIndex 本池槽号，独立数组传负一
          */
-        private Slot(byte[] storage, boolean arenaBacked, int slotIndex) {
+        private Slot(byte[] storage, boolean 槽池Backed, int slotIndex) {
             this.storage = storage;
-            this.arenaBacked = arenaBacked;
+            this.槽池Backed = 槽池Backed;
             this.slotIndex = slotIndex;
         }
 
@@ -90,14 +90,14 @@ public final class ResponseArena {
     /**
      * 按 Owner 命令窗口配置计算固定槽数，使用默认每槽六十四 KiB 容量建池。
      */
-    public ResponseArena() {
+    public ResponseSlotPool() {
         this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone());
     }
 
     /**
      * 读取 JVM 命令窗口配置，按至少六十四的窗口预算另留二百五十六槽，再取至少五百一十二的二次幂容量；本入口不替命令窗口执行完整配置范围验证。
      */
-    public ResponseArena(com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+    public ResponseSlotPool(com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
         this(defaultSlotCount(configuration.ownerCommandWindow()), DEFAULT_SLOT_BYTES);
     }
 
@@ -115,8 +115,8 @@ public final class ResponseArena {
      * @param slotCount 要预分配的正槽数
      * @param slotBytes 每个固定槽的正字节容量
      */
-    public ResponseArena(int slotCount, int slotBytes) {
-        if (slotCount <= 0 || slotBytes <= 0) throw new IllegalArgumentException("invalid response arena");
+    public ResponseSlotPool(int slotCount, int slotBytes) {
+        if (slotCount <= 0 || slotBytes <= 0) throw new IllegalArgumentException("invalid response slot pool");
         this.slotCount = slotCount;
         this.slotBytes = slotBytes;
         this.isPowerOfTwo = (slotCount & (slotCount - 1)) == 0;
@@ -225,7 +225,7 @@ public final class ResponseArena {
      * @param slot 需归还发送引用的可空描述符
      */
     public void release(Slot slot) {
-        if (slot == null || !slot.arenaBacked || slot.slotIndex < 0) return;
+        if (slot == null || !slot.槽池Backed || slot.slotIndex < 0) return;
         releaseSlot(slot.slotIndex);
     }
 
@@ -252,7 +252,7 @@ public final class ResponseArena {
             // 状态高三十二位的发送引用数
             long transport = state >>> TRANSPORT_SHIFT;
             if (state == 0L || transport <= 0) {
-                throw new IllegalStateException("response arena transport slot released more than once");
+                throw new IllegalStateException("response slot pool transport slot released more than once");
             }
             // 扣除一份对应引用后准备 CAS 写入的状态
             long next = state - TRANSPORT_UNIT;
@@ -283,7 +283,7 @@ public final class ResponseArena {
             // 本轮 CAS 前读到的复合引用计数状态
             long state = slotStates.get(index);
             if (state == 0L) {
-                throw new IllegalStateException("response arena slot is not leased");
+                throw new IllegalStateException("response slot pool slot is not leased");
             }
             if (slotStates.compareAndSet(index, state, state + TRANSPORT_UNIT)) {
                 return;
@@ -312,7 +312,7 @@ public final class ResponseArena {
             // 本轮 CAS 前读到的复合引用计数状态
             long state = slotStates.get(index);
             if (state == 0L) {
-                throw new IllegalStateException("response arena slot is not leased");
+                throw new IllegalStateException("response slot pool slot is not leased");
             }
             if (slotStates.compareAndSet(index, state, state + 1L)) {
                 return;
@@ -343,7 +343,7 @@ public final class ResponseArena {
             // 状态低三十二位的账本引用数
             int ledger = (int) (state & LEDGER_MASK);
             if (state == 0L || ledger <= 0) {
-                throw new IllegalStateException("response arena ledger slot released more than once");
+                throw new IllegalStateException("response slot pool ledger slot released more than once");
             }
             // 扣除一份对应引用后准备 CAS 写入的状态
             long next = state - 1L;

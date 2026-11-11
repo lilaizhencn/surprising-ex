@@ -39,7 +39,7 @@ public final class CommandResultBuilder {
     /** 所属交易运行时，负责命令作用域和状态读取边界。 */
     final TradingCoreRuntime owner;
     /** 当前响应编码共用的固定槽池。 */
-    private final ResponseArena responseArena;
+    private final ResponseSlotPool responseSlotPool;
     /** 当前工作区仍持有的响应底层数组，移交后清为空。 */
     private byte[] responseStorage = EMPTY_RESULT;
     /** 当前工作区响应有效切片起始偏移。 */
@@ -53,8 +53,8 @@ public final class CommandResultBuilder {
      */
     public CommandResultBuilder(TradingCoreRuntime owner) {
         this.owner = owner;
-        this.responseArena = owner == null ? new ResponseArena(1, ResponseArena.DEFAULT_SLOT_BYTES)
-                : owner.responseArena();
+        this.responseSlotPool = owner == null ? new ResponseSlotPool(1, ResponseSlotPool.DEFAULT_SLOT_BYTES)
+                : owner.responseSlotPool();
     }
 
     /** 当前单订单编码直接借用的可空运行订单。 */
@@ -505,7 +505,7 @@ public final class CommandResultBuilder {
         discardResponseStorage();
         responseOffset = 0;
         responseLength = length;
-        responseStorage = responseArena.acquire(length);
+        responseStorage = responseSlotPool.acquire(length);
         return responseStorage;
     }
 
@@ -513,7 +513,7 @@ public final class CommandResultBuilder {
      * 归还当前尚未移交响应的一份发送引用，再把工作区恢复为空；独立数组不参加池计数。
      */
     private void discardResponseStorage() {
-        if (responseStorage != EMPTY_RESULT) responseArena.release(responseStorage);
+        if (responseStorage != EMPTY_RESULT) responseSlotPool.release(responseStorage);
         responseStorage = EMPTY_RESULT;
         responseOffset = 0;
         responseLength = 0;

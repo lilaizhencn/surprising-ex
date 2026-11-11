@@ -4,8 +4,8 @@ import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.result.ResponseArena;
-import com.surprising.aeron.service.result.ResponseArenaTestAccess;
+import com.surprising.aeron.service.result.ResponseSlotPool;
+import com.surprising.aeron.service.result.ResponseSlotPoolTestAccess;
 import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
@@ -23,8 +23,8 @@ class LaneReplacementResponseTest {
         // 当前可复用的单笔或改单 Lane 结果目标
         var target = new OrderCommand.LaneResultTarget();
         // 当前测试响应槽分配器
-        var arena = new ResponseArena(1, 4096);
-        target.bind(11, 0, arena);
+        var 槽池 = new ResponseSlotPool(1, 4096);
+        target.bind(11, 0, 槽池);
         target.resultOrder(0, order(11, false), null);
         assertThatThrownBy(target::prepareResponse).isInstanceOf(IllegalArgumentException.class);
         assertThat(target.prepared()).isFalse();
@@ -43,10 +43,10 @@ class LaneReplacementResponseTest {
         assertThat(target.preparedResponseLength()).isZero();
         target.clear();
         // 清理后从分配器借回的槽，用于核对原缓冲已释放
-        var reused = arena.acquireSlot(16);
-        assertThat(ResponseArenaTestAccess.arenaBacked(reused)).isTrue();
+        var reused = 槽池.acquireSlot(16);
+        assertThat(ResponseSlotPoolTestAccess.槽池Backed(reused)).isTrue();
         assertThat(reused.storage()).isSameAs(encoded);
-        arena.release(reused);
+        槽池.release(reused);
     }
 
     /**
@@ -65,8 +65,8 @@ class LaneReplacementResponseTest {
             // 当前可复用的单笔或改单 Lane 结果目标
             var target = new OrderCommand.LaneResultTarget();
             // 当前测试响应槽分配器
-            var arena = new ResponseArena(1, 4096);
-            target.bind(11, 12, arena);
+            var 槽池 = new ResponseSlotPool(1, 4096);
+            target.bind(11, 12, 槽池);
             com.surprising.aeron.service.order.OrderCommand.ResultTarget.capture(target,
                     new com.surprising.aeron.service.core.change.AccountPartitionCommit.Delta(), identities, lane);
             assertThat(target.resultPrepared(0)).isTrue();
@@ -77,7 +77,7 @@ class LaneReplacementResponseTest {
             assertThat(view.orders()).extracting(CoreOrderStateView::orderId).containsExactly(11L);
             target.clear();
 
-            target.bind(11, 0, arena);
+            target.bind(11, 0, 槽池);
             assertThat(target.resultPrepared(0)).isFalse();
             target.resultOrder(0, order(11, true), "1");
             com.surprising.aeron.service.order.OrderCommand.ResultTarget.capture(target,
@@ -116,13 +116,13 @@ class LaneReplacementResponseTest {
         // 当前可复用的单笔或改单 Lane 结果目标
         var target = new OrderCommand.LaneResultTarget();
         // 当前测试响应槽分配器
-        var arena = new ResponseArena(8, 4096);
+        var 槽池 = new ResponseSlotPool(8, 4096);
         // 单独复制并保留的首代双订单响应
         byte[] first = null;
         for (/* 当前复用代数，共检查六十四代 */ int generation = 0; generation < 64; generation++) {
             // 本代第一张订单编号，第二张为它加一
             long id = generation * 2L + 1;
-            target.bind(id, id + 1, arena);
+            target.bind(id, id + 1, 槽池);
             target.resultOrder(0, order(id, true), "1");
             target.resultOrder(1, order(id + 1, false), "1");
             target.prepareResponse();
@@ -135,7 +135,7 @@ class LaneReplacementResponseTest {
             if (first == null) first = response;
             target.clear();
 
-            target.bind(id, 0, arena);
+            target.bind(id, 0, 槽池);
             target.resultOrder(0, order(id, false), "1");
             target.prepareResponse();
             view = CoreCommandResultCodec.decode(Arrays.copyOf(target.preparedResponse(), target.preparedResponseLength()));

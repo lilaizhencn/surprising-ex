@@ -27,7 +27,7 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.matcher.OrderCancelResult;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.result.OrderRuntimeSource;
-import com.surprising.aeron.service.result.ResponseArena;
+import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import com.surprising.product.api.ProductLine;
@@ -1225,7 +1225,7 @@ public final class OrderBatchProcessor {
             selected = candidate;
             break;
         }
-        if (selected == null) selected = new OrderBatchProcessor.PendingBatch(itemCount, owner.responseArena());
+        if (selected == null) selected = new OrderBatchProcessor.PendingBatch(itemCount, owner.responseSlotPool());
         return selected.initialize(kind, clusterTimestamp, clusterPosition);
     }
 
@@ -1506,9 +1506,9 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     @Getter(onMethod_ = {@Override})
     int preparedResponseLength;
     /** 创建本批时指定的响应槽分配器。 */
-    private final ResponseArena responseArena;
+    private final ResponseSlotPool responseSlotPool;
     /** 本批尚未移交或归还的可空响应槽租约。 */
-    private ResponseArena.Slot preparedResponseSlot;
+    private ResponseSlotPool.Slot preparedResponseSlot;
     /**
      * previousBatch：仅由 Owner 访问的前一批排序链接，入池前由外层摘除。
      * nextBatch：仅由 Owner 访问的后一批排序链接，Matcher 和账户不读取。
@@ -1522,7 +1522,7 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
         // 部分拒单、顺序改单可能没有本次 Lane 结果，仍需提交点补齐其查询语义。
         for (BatchItem item : items) if (!item.laneResultPrepared || item.status == null) return;
         if (preparedResponseSlot != null) {
-            responseArena.release(preparedResponseSlot);
+            responseSlotPool.release(preparedResponseSlot);
             preparedResponseSlot = null;
         }
         preparedResponse = null;
@@ -1530,14 +1530,14 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
         try {
             // 编码全部结果需要的字节数
             int length = TradingOrderBatchCodec.encodedResultSourceLength(this);
-            preparedResponseSlot = responseArena.acquireSlot(length);
+            preparedResponseSlot = responseSlotPool.acquireSlot(length);
             // 实际写入响应槽的有效字节数
             int encodedLength = TradingOrderBatchCodec.encodeResultSourceInto(
                     this, preparedResponseSlot.storage(), 0);
             preparedResponse = preparedResponseSlot.storage();
             preparedResponseLength = encodedLength;
         } catch (/* 重编码过程中抛出的运行异常或错误，释放本批新租约后继续抛出 */ RuntimeException | Error failure) {
-            if (preparedResponseSlot != null) responseArena.release(preparedResponseSlot);
+            if (preparedResponseSlot != null) responseSlotPool.release(preparedResponseSlot);
             preparedResponseSlot = null;
             throw failure;
         } finally {
@@ -1863,10 +1863,10 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
      * 容量至少取一，要求显式响应分配器，分配本批各列和项槽；后续按有效项数复用，不自动扩展这些数组。
      * @param requestedCapacity 请求的项容量，至少分配一项
      */
-    public PendingBatch(int requestedCapacity, ResponseArena responseArena) {
+    public PendingBatch(int requestedCapacity, ResponseSlotPool responseSlotPool) {
         // 至少为一的本批预分配项容量
         int capacity = Math.max(1, requestedCapacity);
-        this.responseArena = java.util.Objects.requireNonNull(responseArena, "response arena");
+        this.responseSlotPool = java.util.Objects.requireNonNull(responseSlotPool, "response slot pool");
         items = new ArrayList<>(capacity);
         itemSlots = new BatchItem[capacity];
         changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
@@ -1935,7 +1935,7 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
         nextIndex = 0;
         tradeCount = 0;
         responseOrder.clear();
-        if (preparedResponseSlot != null) responseArena.release(preparedResponseSlot);
+        if (preparedResponseSlot != null) responseSlotPool.release(preparedResponseSlot);
         preparedResponseSlot = null;
         preparedResponse = null;
         preparedResponseLength = 0;
