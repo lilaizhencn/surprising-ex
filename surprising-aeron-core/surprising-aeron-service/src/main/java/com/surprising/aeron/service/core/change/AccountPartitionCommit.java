@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.core.change;
 
-import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -25,7 +25,7 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 /**
  * 一个 Core 序号对受影响账户 Lane 的异步提交扇出。各 Lane 完成触发关闭、订单元数据、用户水位及结果捕获后发布自己的完成位，Owner 收齐全部 required 位才发布和回收。requiredLaneMask 是必须回执的分区，committedLaneMask 决定其中哪些分区还要推进用户水位。
  */
-public final class AccountPartitionCommit implements SettlementLaneWorker.Command {
+public final class AccountPartitionCommit implements AccountLaneCommand {
     /** 完成标记之间间隔十六个 long，避免各 Lane 紧邻写同一小片存储。 */
     private static final int CACHE_LINE_LONGS = 16;
     /** 完成数组元素的 VarHandle，Lane release 写入、Owner acquire 读取。 */

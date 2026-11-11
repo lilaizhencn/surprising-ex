@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.order;
 
-import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreOrderStatus;
@@ -30,6 +29,7 @@ import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.service.account.AccountCommandService;
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.adl.AdlService;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
@@ -2325,7 +2325,7 @@ public static class ResolvedPlaceOrder {
 }
 
 
-public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
+public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements AccountLaneCommand {
     /** 币对 OI 数量步数，账户准入用它检查比例限额。 */
     private long openInterestSteps;
 
@@ -2615,7 +2615,7 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
 }
 
 
-public static final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
+public static final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implements AccountLaneCommand {
     /** 币对 OI 数量步数，账户准入用它检查比例限额。 */
     private long openInterestSteps;
 

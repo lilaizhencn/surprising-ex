@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
@@ -653,7 +654,7 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
         }
 
         @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
-        private final class LaneControlTask implements com.surprising.aeron.bootstrap.account.SettlementLaneWorker.Command {
+        private final class LaneControlTask implements AccountLaneCommand {
             private final int laneId;
             private IntFunction<Object> operation;
             private Object result;

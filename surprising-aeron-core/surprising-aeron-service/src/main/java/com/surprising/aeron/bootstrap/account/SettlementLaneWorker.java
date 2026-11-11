@@ -3,6 +3,7 @@ package com.surprising.aeron.bootstrap.account;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.config.TradingCpuAffinity;
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.concurrent.RejectedExecutionException;
@@ -26,27 +27,12 @@ public final class SettlementLaneWorker implements AutoCloseable {
     /** Owner 归还临时账户所有权后发布的恢复轮次。 */
     private volatile long resumedHandoff;
 
-    /**
-     * 可投递到账户线程的任务契约；任务先声明输入就绪，再在账户实际拥有者线程执行。
-     */
-    public interface Command {
-        /**
-         * 在本工作线程拥有账户时执行一条已就绪任务，完成交接由任务自身负责。
-         * @param lane 任务执行的唯一所属账户 Lane
-         */
-        void execute(AccountPartition lane);
-        /**
-         * 判断普通或准入任务需要的账本输入是否已到齐，默认就绪；已经入队不等于可以执行。
-         */
-        default boolean accountReady() { return true; }
-    }
-
     /** 账户线程保存故障后调用的发布器，通知运行时并唤醒 Owner。 */
     private final java.util.function.Consumer<Throwable> failurePublisher;
     /** 单 Owner 到本账户线程的普通控制任务引用邮箱。 */
-    private final Command[] commands;
+    private final AccountLaneCommand[] commands;
     /** 独立的单 Owner 准入邮箱，避免被普通队首尚未就绪的撮合输入挡住。 */
-    private final Command[] admissionCommands;
+    private final AccountLaneCommand[] admissionCommands;
     /** 每个 Matcher 分片独占生产的结算环，由本账户线程合并消费。 */
     private final MatcherSettlementRing[] matcherSettlementRings;
     /** 普通邮箱二次幂容量减一，用于原始游标映射到数组下标。 */
@@ -136,8 +122,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
         // 向上取整后的二次幂物理邮箱容量，各来源邮箱分别使用
         int capacity = 1;
         while (capacity < requestedCapacity) capacity = Math.multiplyExact(capacity, 2);
-        commands = new Command[capacity];
-        admissionCommands = new Command[capacity];
+        commands = new AccountLaneCommand[capacity];
+        admissionCommands = new AccountLaneCommand[capacity];
         matcherSettlementRings = new MatcherSettlementRing[matcherShardCount];
         for (/* 正在创建结算环的 Matcher 分片下标 */ int shard = 0; shard < matcherShardCount; shard++)
             matcherSettlementRings[shard] = new MatcherSettlementRing(capacity);
@@ -152,7 +138,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     /** 复用的普通控制任务，只释放账户所有权并发布交接完成轮次，不修改资金。 */
-    private final Command handoffCommand = /* 交接命令实际所属账户，只释放所有权并发布完成轮次 */ lane -> {
+    private final AccountLaneCommand handoffCommand = /* 交接命令实际所属账户，只释放所有权并发布完成轮次 */ lane -> {
         lane.releaseOwnerForHandoff();
         completedHandoff = requestedHandoff;
     };
@@ -182,7 +168,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * 单 Owner 向普通邮箱发布任务，检查故障、关闭、物理容量及总采样深度；先放引用再发布游标并按需唤醒，返回一开始计数的入队序号，不表示任务完成。
      * @param command 要发布、检查或执行的非空合法账户任务
      */
-    public long submit(Command command) {
+    public long submit(AccountLaneCommand command) {
         if (command == null) throw new IllegalArgumentException("settlement command is required");
         assertHealthy();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
@@ -206,7 +192,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * 单 Owner 向独立准入邮箱发布任务，只重新检查该物理邮箱容量；总预算由上层预检查承担，先发布引用和游标再唤醒。
      * @param command 要发布、检查或执行的非空合法账户任务
      */
-    public long submitAdmission(Command command) {
+    public long submitAdmission(AccountLaneCommand command) {
         if (command == null) throw new IllegalArgumentException("admission command is required");
         assertHealthy();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
@@ -315,7 +301,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     // 当前准入消费位置对应的数组槽下标
                     int admissionIndex = (int) admissionNext & admissionIndexMask;
                     // 准入队首引用，输入就绪后先取走再执行
-                    Command admission = admissionCommands[admissionIndex];
+                    AccountLaneCommand admission = admissionCommands[admissionIndex];
                     if (admission == null) throw new IllegalStateException("admission publication gap");
                     if (ready(admission)) {
                         admissionCommands[admissionIndex] = null;
@@ -334,7 +320,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                 // 本轮选择的可空直接结算事件
                 TradeSettlement direct = peekMatcherSettlement();
                 // 本轮可空普通队首，与直接结算比较优先级
-                Command main = next < cachedProducerSeq ? commands[(int) next & indexMask] : null;
+                AccountLaneCommand main = next < cachedProducerSeq ? commands[(int) next & indexMask] : null;
                 if (direct != null && shouldRunMatcherSettlement(direct, main)) {
                     // Matcher 环只发布已经满足 Lane 就绪条件的事实。
                     // 该邮箱不保存等待载荷的阶段，发布入口先核对一次约定。
@@ -347,7 +333,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     // 当前原始游标通过掩码换算出的物理数组槽
                     int index = (int) next & indexMask;
                     // 本轮保存到局部的普通队首，释放数组槽后再执行
-                    Command command = commands[index];
+                    AccountLaneCommand command = commands[index];
                     if (command == null) throw new IllegalStateException("settlement lane publication gap");
                     if (ready(command)) {
                         // 任务引用已经保存在局部，先清槽并推进消费位置，再执行任务。
@@ -395,7 +381,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * 在当前已绑定的账户上执行任务，不在此提前发布业务终态。
      * @param command 要发布、检查或执行的非空合法账户任务
      */
-    private void execute(Command command) {
+    private void execute(AccountLaneCommand command) {
         command.execute(lane);
     }
 
@@ -416,7 +402,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      */
     private static boolean ready(Object command) {
         return command instanceof TradeSettlement /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event ? event.readyForLane()
-                : ((Command) command).accountReady();
+                : ((AccountLaneCommand) command).accountReady();
     }
 
     /**
@@ -478,7 +464,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param direct 各分片队首选出的最早直接结算事件
      * @param main 普通邮箱当前可空队首，用它决定控制优先与业务顺序
      */
-    private static boolean shouldRunMatcherSettlement(TradeSettlement direct, Command main) {
+    private static boolean shouldRunMatcherSettlement(TradeSettlement direct, AccountLaneCommand main) {
         if (main == null) return true;
         // 普通队首已识别的 Core 序号，零表示无序号控制任务
         long mainSequence = commandSequence(main);
@@ -492,7 +478,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * 从已知撮合、撤单、提交、批量准入及改单任务取 Core 序号，其他控制任务返回零。
      * @param command 要发布、检查或执行的非空合法账户任务
      */
-    private static long commandSequence(Command command) {
+    private static long commandSequence(AccountLaneCommand command) {
         if (command instanceof TradeSettlement /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event) return event.coreSequence();
         if (command instanceof com.surprising.aeron.service.core.change.AccountPartitionCommit /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
             return event.coreSequence();

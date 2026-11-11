@@ -36,6 +36,7 @@ import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.service.account.AccountTransactionRollback;
@@ -345,7 +346,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /** 测试与控制任务按原 Owner 单生产者协议投递，不暴露线程资源。 */
-    public void submitAccountCommand(int laneId, SettlementLaneWorker.Command command) {
+    public void submitAccountCommand(int laneId, AccountLaneCommand command) {
         assertOwner();
         laneLifecycle.worker(laneId).submit(command);
     }
@@ -721,7 +722,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 由 Owner 先检查全部目标 Lane 的容量，全部可接纳才派发同一查询，避免邮箱满造成部分查询；冷阶段逐 Lane 直接执行，活动阶段先归还 Owner 访问权。
      */
-    public boolean dispatchAccountQuery(long laneMask, SettlementLaneWorker.Command query) {
+    public boolean dispatchAccountQuery(long laneMask, AccountLaneCommand query) {
         assertOwner();
         if (Thread.currentThread() != owner)
             throw new IllegalStateException("account query producer must be Owner");

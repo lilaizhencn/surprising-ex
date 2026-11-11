@@ -2,7 +2,7 @@ package com.surprising.aeron.service.matcher;
 
 import com.surprising.aeron.service.order.*;
 
-import com.surprising.aeron.bootstrap.matcher.MatcherThread;
+import com.surprising.aeron.support.concurrent.MatcherThread;
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.order.OrderCommand;
 import com.surprising.aeron.service.order.OrderCommandQueue.Pool;

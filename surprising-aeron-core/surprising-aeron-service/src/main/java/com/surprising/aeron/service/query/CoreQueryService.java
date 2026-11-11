@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.query;
 
-import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreAlgoOrderState;
 import com.surprising.aeron.model.CoreCancelAllAfterKey;
@@ -37,6 +36,7 @@ import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.account.AccountBalance;
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.*;
@@ -169,7 +169,7 @@ public final class CoreQueryService {
     /**
      * 一次下单预检的查询任务：由用户所属 Lane 检查订单和所需预留，只返回估算结果，不创建真实订单或冻结。
      */
-    private final class PreflightQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command,
+    private final class PreflightQuery extends CompletableFuture<QueryResult> implements AccountLaneCommand,
             java.util.function.Function<AccountPartition, CoreResponse> {
         /**
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
@@ -433,7 +433,7 @@ public final class CoreQueryService {
     /**
      * 一笔普通账户或业务列表查询的跨 Lane 任务，保存本次响应槽和原子完成位；所属 Lane 读实体并编码，最后完成者归并结果，消费或关闭后释放引用。
      */
-    private final class AccountQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command,
+    private final class AccountQuery extends CompletableFuture<QueryResult> implements AccountLaneCommand,
             java.util.function.Function<AccountPartition, CoreResponse> {
         /**
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
@@ -666,7 +666,7 @@ public final class CoreQueryService {
     /**
      * 一次强平执行、保险或 ADL 工作页的交接任务。Owner 固定候选和市场输入，Lane 读取计划事实，等待所有 Lane 后计算保险建议并编码有界页，不实际执行强平或赔付。
      */
-    private final class LiquidationWorkQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command {
+    private final class LiquidationWorkQuery extends CompletableFuture<QueryResult> implements AccountLaneCommand {
         /**
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
          * laneMask：本次任务全部目标账户 Lane 的位集合，用于投递和完成条件核对。
@@ -1126,7 +1126,7 @@ public final class CoreQueryService {
 /**
  * 一次风险快照或 ADL 候选查询的线程交接对象：Owner 固定市场输入，Ledger 选择有界路由，各账户 Lane 读取自己的状态，最后完成的 Lane 合并并编码响应。只保留本次路由和查询 DTO，不建立账户镜像。
  */
-static final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<CoreQueryService.QueryResult> implements SettlementLaneWorker.Command, Function<AccountPartition, Void> {
+static final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<CoreQueryService.QueryResult> implements AccountLaneCommand, Function<AccountPartition, Void> {
     /** 提供账本、账户投递及查询结果登记的所属运行时，不代表任意线程都能直接访问其账户。 */
     private final TradingCoreRuntime owner;
     /**

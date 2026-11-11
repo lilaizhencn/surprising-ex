@@ -2,6 +2,7 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -40,7 +41,7 @@ class SettlementLaneWorkerTest {
                 // 较早普通邮箱任务的完成门闩，该任务本身不是 Matcher 结算事件
                 var olderSettlement = new CountDownLatch(1);
                 worker.submit(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> olderSettlement.countDown());
-                worker.submitAdmission(/* 模拟需要等待账本输入的准入任务，门禁打开后按序执行 */ new SettlementLaneWorker.Command() {
+                worker.submitAdmission(/* 模拟需要等待账本输入的准入任务，门禁打开后按序执行 */ new AccountLaneCommand() {
                     /**
                      * 把原子开关作为本准入任务的模拟账本输入就绪条件。
                      */

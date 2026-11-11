@@ -1,4 +1,4 @@
-package com.surprising.aeron.bootstrap.matcher;
+package com.surprising.aeron.support.concurrent;
 
 import lombok.Getter;
 import lombok.experimental.Accessors;

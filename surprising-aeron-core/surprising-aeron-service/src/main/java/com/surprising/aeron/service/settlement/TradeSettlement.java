@@ -1,11 +1,11 @@
 package com.surprising.aeron.service.settlement;
 
-import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountTransactionRollback;
 import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
@@ -40,7 +40,7 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
  */
 @NoArgsConstructor
 public final class TradeSettlement implements
-        SettlementLaneWorker.Command,
+        AccountLaneCommand,
         com.surprising.aeron.service.matcher.OrderMatchingResult {
     /**
      * 原 Matcher 传输占用的释放边界，事件复用现有上下文回调，不新增逐命令任务或状态副本。

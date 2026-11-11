@@ -2,7 +2,6 @@ package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.service.position.Position;
 
-import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.protocol.AmendOrderBatchCommand;
@@ -19,6 +18,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.service.account.AccountPartition;
+import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountTransactionRollback;
 import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
@@ -2272,7 +2272,7 @@ static final class BatchItem {
 }
 
 
-public static final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Command {
+public static final class PlaceBatchAdmissionEvent implements AccountLaneCommand {
     /** 整批下单沿用的 Core 命令序号。 */
     @Accessors(fluent = true, chain = false)
     @Getter

@@ -158,7 +158,7 @@ public final class OrderBookEngine implements AutoCloseable {
     private MatcherCommandScope currentCommandScope() {
         // 当前调用线程，用于选择独占的命令上下文。
         Thread current = Thread.currentThread();
-        if (current instanceof com.surprising.aeron.bootstrap.matcher.MatcherThread /* 携带 Matcher 分片号的工作线程。 */ mt) {
+        if (current instanceof com.surprising.aeron.support.concurrent.MatcherThread /* 携带 Matcher 分片号的工作线程。 */ mt) {
             int shardId = mt.shardId();
             if (shardId >= 0 && shardId < shardCommandScopes.length) {
                 return shardCommandScopes[shardId];
