@@ -20,24 +20,11 @@ import lombok.NoArgsConstructor;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
-/** 下单步骤 4.4 的现货结算。买方从计价资产冻结中支付成交额及收费、得到基础资产，卖方交付冻结基础资产、收到计价资产并扣费或返佣。在线 applyLane 只处理所属账户，按单笔或累加路径更新订单和预留，系统费用留在本事件财务差额中交给账本。 构造约定：只提供静态现货结算入口，不允许单独创建工具实例。 */
+/** 下单步骤 4.4 的现货结算。构造约定：只提供静态现货结算入口，不允许单独创建工具实例。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SpotTradeSettlementService {
 
-    /**
-     * 在线所属 Lane 入口，至多一笔成交直接应用，多笔复用现货累加器；本地 taker 的市价或即时单剩余量转取消，终态订单释放剩余预留。
-     * @param takerOrderId 主动成交订单编号
-     * @param plan 本代结算计划和 Lane 事件范围
-     * @param lane 当前线程持有的账户 Lane
-     * @param laneId 当前账户 Lane 编号
-     * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-     * @param instrument 当前订单的规范现货币对
-     * @param baseAssetId 基础资产的运行时编号
-     * @param quoteAssetId 计价及收费资产的运行时编号
-     * @param treasuryDelta 所属 Lane 系统费用差额接收槽
-     * @param commitTimestamp 成交结果写回的复制业务时间
-     * @param commitPosition 成交结果写回的复制日志位置
-     */
+    /** 在线所属 Lane 入口，至多一笔成交直接应用，多笔复用现货累加器。 */
     static void applyLane(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
                           TradingAccountRuntime runtime, CoreInstrument instrument,
                           int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
@@ -46,7 +33,6 @@ public final class SpotTradeSettlementService {
                 || laneId >= runtime.topology().accountLaneCount()) {
             throw new IllegalArgumentException("invalid spot matcher settlement plan");
         }
-        // 本账户 Lane 持有的主动订单，其他 Lane 可为空。
         Order localTaker = lane.order(takerOrderId);
         if (plan.tradeCount() <= 1) {
             applyLaneDirect(takerOrderId, plan, lane, laneId, runtime, instrument, baseAssetId,
@@ -66,30 +52,14 @@ public final class SpotTradeSettlementService {
         }
     }
 
-    /**
-     * 沿当前 Lane 的事件范围处理成交，只对本 Lane 持有的 taker 或 maker 应用资产、费用及订单变化；maker 被耗尽时立即释放剩余预留。
-     * @param takerOrderId 主动成交订单编号
-     * @param plan 本代结算计划和 Lane 事件范围
-     * @param lane 当前线程持有的账户 Lane
-     * @param laneId 当前账户 Lane 编号
-     * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-     * @param instrument 当前订单的规范现货币对
-     * @param baseAssetId 基础资产的运行时编号
-     * @param quoteAssetId 计价及收费资产的运行时编号
-     * @param treasuryDelta 所属 Lane 系统费用差额接收槽
-     * @param commitTimestamp 成交结果写回的复制业务时间
-     * @param commitPosition 成交结果写回的复制日志位置
-     * @param localTaker 当前 Lane 持有的主动订单，其他 Lane 可为空
-     */
     private static void applyLaneDirect(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
                                         TradingAccountRuntime runtime, CoreInstrument instrument,
                                         int baseAssetId, int quoteAssetId,
                                         RuntimeTreasuryDelta treasuryDelta,
                                         long commitTimestamp, long commitPosition,
                                         Order localTaker) {
-        for (/* 当前沿 Lane 事件链或原始事件顺序读取的下标。 */ int index = plan.firstMatcherEvent(laneId); index >= 0;
+        for (int index = plan.firstMatcherEvent(laneId); index >= 0;
                 index = plan.nextMatcherEvent(index, laneId)) {
-            // 当前原始 Matcher 事件，只有 TRADE 参与计算。
             MatcherEvent match = plan.matcherEvent(index);
             if (match.eventType() != MatcherEventType.TRADE
                     || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
@@ -98,11 +68,9 @@ public final class SpotTradeSettlementService {
                 localTaker = applyFill(runtime, lane, instrument, localTaker, match.price(), match.size(), true,
                         baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
             }
-            // 本笔对应的权威对手订单，Lane 路径只读取本地对象。
             Order maker = lane.order(match.matchedOrderId());
             if (maker != null) {
                 maker = requireOpen(maker, maker.orderId());
-                // 本笔成交量是否恰好耗尽 maker 剩余量。
                 boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
                 maker = applyFill(runtime, lane, instrument, maker, match.price(), match.size(),
                         false, baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
@@ -111,41 +79,24 @@ public final class SpotTradeSettlementService {
         }
     }
 
-    /**
-     * 借用所属 Lane 的现货累加器，按原事件顺序计算本地各订单，先发布余额再发布订单和预留，finally 清理暂存；故障回滚仍由外层结算边界负责。
-     * @param takerOrderId 主动成交订单编号
-     * @param plan 本代结算计划和 Lane 事件范围
-     * @param lane 当前线程持有的账户 Lane
-     * @param laneId 当前账户 Lane 编号
-     * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-     * @param instrument 当前订单的规范现货币对
-     * @param baseAssetId 基础资产的运行时编号
-     * @param quoteAssetId 计价及收费资产的运行时编号
-     * @param treasuryDelta 所属 Lane 系统费用差额接收槽
-     * @param commitTimestamp 成交结果写回的复制业务时间
-     * @param commitPosition 成交结果写回的复制日志位置
-     * @param localTaker 当前 Lane 持有的主动订单，其他 Lane 可为空
-     */
+    /** 借用所属 Lane 的现货累加器，按原事件顺序计算本地各订单，先发布余额再发布订单和预留，finally 清理暂存。故障回滚仍由外层结算边界负责。 */
     private static void applyLaneAccumulated(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
                                              TradingAccountRuntime runtime, CoreInstrument instrument,
                                              int baseAssetId, int quoteAssetId,
                                              RuntimeTreasuryDelta treasuryDelta,
                                              long commitTimestamp, long commitPosition,
                                              Order localTaker) {
-        // 本账户 Lane 独占复用的现货多笔成交累加器。
         SpotSettlementAccumulator accumulator = lane.spotSettlementAccumulator();
         accumulator.reset(runtime, lane, instrument, baseAssetId, quoteAssetId, commitTimestamp, commitPosition);
         try {
-            for (/* 当前沿 Lane 事件链或原始事件顺序读取的下标。 */ int index = plan.firstMatcherEvent(laneId); index >= 0;
+            for (int index = plan.firstMatcherEvent(laneId); index >= 0;
                     index = plan.nextMatcherEvent(index, laneId)) {
-                // 当前原始 Matcher 事件，只有 TRADE 参与计算。
                 MatcherEvent match = plan.matcherEvent(index);
                 if (match.eventType() != MatcherEventType.TRADE
                         || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
                 if (localTaker != null) {
                     accumulator.apply(takerOrderId, true, match.price(), match.size(), treasuryDelta);
                 }
-                // 本笔对应的权威对手订单，Lane 路径只读取本地对象。
                 Order maker = lane.order(match.matchedOrderId());
                 if (maker != null) {
                     accumulator.apply(maker.orderId(), false, match.price(), match.size(), treasuryDelta);
@@ -157,59 +108,31 @@ public final class SpotTradeSettlementService {
         }
     }
 
-    /**
-     * 核对订单预留及扣款资产，按买卖方向计算基础和计价余额、手续费、预留消耗及累计成交，写回所属 Lane 并记录系统费用；发生异常时不在此提供自动事务回滚。
-     * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-     * @param lane 当前线程持有的账户 Lane
-     * @param instrument 当前订单的规范现货币对
-     * @param order 当前需要应用成交的订单引用
-     * @param fillPriceTicks 本笔实际成交价刻度
-     * @param fillQuantitySteps 本笔成交数量步长
-     * @param taker 本笔是否为主动成交，决定订单费用率
-     * @param baseAssetId 基础资产的运行时编号
-     * @param quoteAssetId 计价及收费资产的运行时编号
-     * @param treasuryDelta 所属 Lane 系统费用差额接收槽
-     * @param commitTimestamp 成交结果写回的复制业务时间
-     * @param commitPosition 成交结果写回的复制日志位置
-     */
+    /** 核对订单预留及扣款资产，按买卖方向计算基础和计价余额、手续费、预留消耗及累计成交，写回所属 Lane 并记录系统费用。发生异常时不在此提供自动事务回滚。 */
     static Order applyFill(TradingAccountRuntime runtime, AccountPartition lane, CoreInstrument instrument, Order order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
                                   int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
                                        long commitTimestamp, long commitPosition) {
-        // 当前订单的权威预留，须匹配用户及扣款资产。
         OrderFundsReservation reservation = lane.reservation(order.orderId());
         if (reservation == null || reservation.userId() != order.userId()) {
             throw new IllegalStateException("runtime spot reservation is missing");
         }
-        // 本笔按价格和数量换算的计价资产成交金额。
         long quoteUnits = CoreContractMath.spotQuoteUnits(instrument, fillPriceTicks, fillQuantitySteps);
-        // 本笔按数量换算的基础资产交付金额。
         long baseUnits = CoreContractMath.spotBaseUnits(instrument, fillQuantitySteps);
-        // 按 taker 或 maker 角色选出的订单费率。
         long feeRate = taker ? order.takerFeeRatePpm() : order.makerFeeRatePpm();
-        // 本笔用户计价资产费用变化，负数收费、正数返佣。
         long feeDelta = CoreContractMath.feeDeltaUnits(instrument, fillPriceTicks, fillQuantitySteps, feeRate);
-        // 买单扣计价资产、卖单扣基础资产的实际预留资产编号。
         int debitAssetId = order.side() == CoreOrderSide.BUY ? quoteAssetId : baseAssetId;
         if (reservation.assetId() != debitAssetId) {
             throw new IllegalStateException("spot fill debit asset does not match reservation");
         }
-        // 必须已存在的扣款资产权威余额，用于确认冻结资金来源。
         AccountBalance debit = runtime.balance(lane, order.userId(), debitAssetId);
         if (debit == null) throw new IllegalStateException("runtime spot debit balance is missing");
-        // 当前用户基础资产的可空权威余额。
         AccountBalance base = runtime.balance(lane, order.userId(), baseAssetId);
-        // 当前用户计价资产的可空权威余额。
         AccountBalance quote = runtime.balance(lane, order.userId(), quoteAssetId);
-        // 本笔计算后的基础资产可用余额，原余额缺失时从零开始。
         long nextBaseAvailable = base == null ? 0 : base.availableUnits();
-        // 本笔计算后的基础资产冻结余额。
         long nextBaseLocked = base == null ? 0 : base.lockedUnits();
-        // 本笔计算后的计价资产可用余额。
         long nextQuoteAvailable = quote == null ? 0 : quote.availableUnits();
-        // 本笔计算后的计价资产冻结余额。
         long nextQuoteLocked = quote == null ? 0 : quote.lockedUnits();
-        // 本笔从订单预留消耗的金额，买单含成交额及收费，卖单只扣基础资产数量。
         long reservationDebit;
         if (order.side() == CoreOrderSide.BUY) {
             reservationDebit = Math.addExact(quoteUnits, Math.max(0, Math.negateExact(feeDelta)));
@@ -226,23 +149,16 @@ public final class SpotTradeSettlementService {
         if (nextBaseAvailable < 0 || nextBaseLocked < 0 || nextQuoteAvailable < 0 || nextQuoteLocked < 0) {
             throw new IllegalStateException("runtime spot fill balance would become negative");
         }
-        // 订单加入本笔数量后的累计成交量。
         long nextExecuted = Math.addExact(order.executedQuantitySteps(), fillQuantitySteps);
-        // 订单扣除本笔数量后的剩余量。
         long nextRemaining = Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps);
-        // 本笔后剩余量为零则 FILLED，否则 OPEN。
         CoreOrderStatus nextStatus = nextRemaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
-        // 单笔成交后精确递增的订单修订号。
         long nextRevision = Math.incrementExact(order.revision());
         replaceBalance(runtime, lane, order.userId(), baseAssetId, base, nextBaseAvailable, nextBaseLocked);
         replaceBalance(runtime, lane, order.userId(), quoteAssetId, quote, nextQuoteAvailable, nextQuoteLocked);
-        // 加入本笔成交价值后的宽整数高六十四位。
         long valueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(order.executedValueHigh(), order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
-        // 加入本笔成交价值后的宽整数低六十四位。
         long valueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
         runtime.updateReservationInLane(lane, order.orderId(),
                 Math.addExact(reservation.consumedUnits(), reservationDebit), reservation.releasedUnits(), nextRemaining != 0);
-        // 写回最终累计值后返回的权威订单引用。
         Order nextOrder = runtime.updateOrderInLane(lane, order.orderId(), nextExecuted, nextRemaining,
                 Math.negateExact(feeDelta), valueHigh, valueLow, nextStatus, nextRevision, commitTimestamp, commitPosition);
         treasuryDelta.addFee(quoteAssetId, Math.negateExact(feeDelta));
@@ -250,47 +166,25 @@ public final class SpotTradeSettlementService {
         return nextOrder;
     }
 
-    /**
-     * 本 Lane 独占的多笔现货成交累加器。订单各有游标，同用户同资产共用本轮余额暂存；财务费用仍逐笔生成，最后先写余额再写订单和预留，清理不代替外层回滚。
-     */
+    /** 本 Lane 独占的多笔现货成交累加器。财务费用仍逐笔生成，最后先写余额再写订单和预留，清理不代替外层回滚。 */
     public static final class SpotSettlementAccumulator {
-        /** 本轮按订单保存的独占现货游标，不是长期权威订单表。 */
         private final LongObjectHashMap<SpotFillCursor> cursors = new LongObjectHashMap<>();
-        /** 本轮按用户和资产共享的余额计算暂存，多个订单共同修改同一用户资产后值。 */
         private final LongObjectHashMap<IntObjectHashMap<SpotBalanceState>> balances = new LongObjectHashMap<>();
-        /** 所属 Lane 的空闲现货游标池，clear 后解除业务引用再归还。 */
         private final java.util.ArrayDeque<SpotFillCursor> free = new java.util.ArrayDeque<>();
-        /** 本 Lane 保留的空用户资产 Map 池，不保存旧轮余额暂存对象。 */
         private final java.util.ArrayDeque<IntObjectHashMap<SpotBalanceState>> freeBalanceMaps =
                 new java.util.ArrayDeque<>();
         /** 本 Lane 保留的空闲单用户资产余额暂存对象池，避免每轮结算重新分配。 */
         private final java.util.ArrayDeque<SpotBalanceState> freeBalanceStates =
                 new java.util.ArrayDeque<>();
-        /** 本轮账户写回和修订捕获的所属运行时。 */
         private TradingAccountRuntime runtime;
-        /** 本轮独占服务的账户 Lane。 */
         private AccountPartition lane;
-        /** 本轮所有成交共用的规范现货币对。 */
         private CoreInstrument instrument;
-        /** 本轮基础资产的稠密编号。 */
         private int baseAssetId;
-        /** 本轮计价及收费资产的稠密编号。 */
         private int quoteAssetId;
-        /** 本轮订单写回携带的复制业务时间。 */
         private long commitTimestamp;
-        /** 本轮订单写回携带的复制日志位置。 */
         private long commitPosition;
 
-        /**
-         * 保存本轮单币对、所属 Lane、资产及业务元数据，不清理上一轮活动项，调用方必须先完成 clear。
-         * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-         * @param lane 当前线程持有的账户 Lane
-         * @param instrument 当前订单的规范现货币对
-         * @param baseAssetId 基础资产的运行时编号
-         * @param quoteAssetId 计价及收费资产的运行时编号
-         * @param commitTimestamp 成交结果写回的复制业务时间
-         * @param commitPosition 成交结果写回的复制日志位置
-         */
+        /** 保存本轮单币对、所属 Lane、资产及业务元数据，不清理上一轮活动项，调用方必须先完成 clear。 */
         void reset(TradingAccountRuntime runtime, AccountPartition lane, CoreInstrument instrument,
                    int baseAssetId, int quoteAssetId, long commitTimestamp, long commitPosition) {
             this.runtime = runtime;
@@ -302,21 +196,11 @@ public final class SpotTradeSettlementService {
             this.commitPosition = commitPosition;
         }
 
-        /**
-         * 首次遇到订单时检查权威订单和预留，借用游标并关联同用户同资产共用的本轮余额状态；随后按原成交顺序累加本笔并记录财务差额。
-         * @param orderId 当前要累加、读取或释放预留的订单编号
-         * @param taker 本笔是否为主动成交，决定订单费用率
-         * @param price 本笔实际成交价刻度
-         * @param quantity 本笔成交数量步长
-         * @param treasury 按原成交顺序记录本笔系统费用的差额槽
-         */
+        /** 首次遇到订单时检查权威订单和预留，借用游标并关联同用户同资产共用的本轮余额状态。随后按原成交顺序累加本笔并记录财务差额。 */
         void apply(long orderId, boolean taker, long price, long quantity, RuntimeTreasuryDelta treasury) {
-            // 当前订单独占的现货累加游标，清理后可归还本 Lane 空闲池。
             SpotFillCursor cursor = cursors.get(orderId);
             if (cursor == null) {
-                // 当前首次累加、终态释放或读取时取得的权威订单。
                 Order order = requireOpen(lane, orderId);
-                // 当前订单的权威预留，须匹配用户及扣款资产。
                 OrderFundsReservation reservation = lane.reservation(orderId);
                 if (reservation == null || reservation.userId() != order.userId()) {
                     throw new IllegalStateException("runtime spot reservation is missing");
@@ -330,27 +214,22 @@ public final class SpotTradeSettlementService {
             cursor.apply(price, quantity, taker, treasury);
         }
 
-        /**
-         * 先把全部用户资产余额写回 Lane，再发布每个订单及预留；预留更新会捕获余额后值，不能颠倒此顺序。
-         */
+        /** 先把全部用户资产余额写回 Lane，再发布每个订单及预留。预留更新会捕获余额后值，不能颠倒此顺序。 */
         void publish() {
-            balances.forEachKeyValue((/* 当前遍历的用户余额暂存编号。 */ userId, /* 当前用户本轮共用的按资产余额暂存 Map，清空后才归还 Map 池。 */ userBalances) ->
-                    userBalances.forEachKeyValue((/* 当前遍历的用户资产暂存编号。 */ assetId, /* 当前用户资产的本轮共享余额后值，订单发布前先写回 Lane。 */ balance) -> balance.publish(runtime, lane)));
-            // 预留仍待结算时，更新预留会捕获余额后值，
-            // 因此必须先发布本轮余额，再发布订单及预留最终值。
-            cursors.forEachKeyValue((/* 当前遍历游标对应的订单编号，本发布或清理回调只使用游标。 */ orderId, /* 当前订单独占的现货累加游标，清理后可归还本 Lane 空闲池。 */ cursor) -> cursor.publish(runtime));
+            balances.forEachKeyValue((userId, userBalances) ->
+                    userBalances.forEachKeyValue((assetId, balance) -> balance.publish(runtime, lane)));
+            // 预留仍待结算时，更新预留会捕获余额后值， 因此必须先发布本轮余额，再发布订单及预留最终值。
+            cursors.forEachKeyValue((orderId, cursor) -> cursor.publish(runtime));
         }
 
-        /**
-         * 释放游标引用并归还游标池，清空各用户资产 Map 后归还空 Map 池，解除本轮上下文；余额暂存值不跨轮保留，不自动发布或回滚。
-         */
+        /** 释放游标引用并归还游标池，清空各用户资产 Map 后归还空 Map 池，解除本轮上下文。余额暂存值不跨轮保留，不自动发布或回滚。 */
         void clear() {
-            cursors.forEachKeyValue((/* 当前遍历游标对应的订单编号，本发布或清理回调只使用游标。 */ orderId, /* 当前订单独占的现货累加游标，清理后可归还本 Lane 空闲池。 */ cursor) -> {
+            cursors.forEachKeyValue((orderId, cursor) -> {
                 cursor.clear();
                 free.addFirst(cursor);
             });
             cursors.clear();
-            balances.forEachKeyValue((/* 当前遍历的用户余额暂存编号。 */ userId, /* 当前用户本轮共用的按资产余额暂存 Map，清空后才归还 Map 池。 */ userBalances) -> {
+            balances.forEachKeyValue((userId, userBalances) -> {
                 userBalances.forEachKeyValue((assetId, balanceState) -> freeBalanceStates.addFirst(balanceState));
                 userBalances.clear();
                 freeBalanceMaps.addFirst(userBalances);
@@ -361,23 +240,15 @@ public final class SpotTradeSettlementService {
             instrument = null;
         }
 
-        /**
-         * 为本轮用户资产取得共用余额暂存，首次访问从 Lane 权威余额初始化，缺失余额从零开始；复用空资产 Map 及余额暂存对象。
-         * @param userId 当前余额所属用户编号
-         * @param assetId 当前余额所属资产编号
-         */
         private SpotBalanceState balanceState(long userId, int assetId) {
-            // 当前用户本轮共用的按资产余额暂存 Map，清空后才归还 Map 池。
             IntObjectHashMap<SpotBalanceState> userBalances = balances.get(userId);
             if (userBalances == null) {
                 userBalances = freeBalanceMaps.pollFirst();
                 if (userBalances == null) userBalances = new IntObjectHashMap<>();
                 balances.put(userId, userBalances);
             }
-            // 当前用户资产已加载或新建的本轮余额暂存对象。
             SpotBalanceState state = userBalances.get(assetId);
             if (state == null) {
-                // 首次加载本轮资产暂存时读取的可空权威余额。
                 AccountBalance current = runtime.balance(lane, userId, assetId);
                 state = freeBalanceStates.pollFirst();
                 if (state == null) state = new SpotBalanceState();
@@ -387,27 +258,15 @@ public final class SpotTradeSettlementService {
             return state;
         }
 
-        /**
-         * 仅存活于本轮结算的单用户单资产余额标量后值，由该用户各订单共用；发布后清理并归还池，不作为长期权威余额镜像。
-         */
+        /** 仅存活于本轮结算的单用户单资产余额标量后值，由该用户各订单共用。 */
         private static final class SpotBalanceState {
-            /** 本余额暂存对应的账户用户编号。 */
             private long userId;
-            /** 本余额暂存对应的资产编号。 */
             private int assetId;
-            /** 本轮开始时该账户资产是否已有权威余额，决定发布时创建或更新。 */
             private boolean exists;
-            /** 本轮同用户各订单共同累加后的可用余额。 */
             private long available;
-            /** 本轮共同累加后的冻结余额。 */
             private long locked;
 
-            /**
-             * 保存用户资产身份及本轮起点是否存在，并从权威余额复制可用和冻结标量，缺失时用零。
-             * @param userId 当前余额所属用户编号
-             * @param assetId 当前余额所属资产编号
-             * @param current 起点已有的可空权威余额，空值表示需要创建余额
-             */
+            /** 保存用户资产身份及本轮起点是否存在，并从权威余额复制可用和冻结标量，缺失时用零。 */
             void reset(long userId, int assetId, AccountBalance current) {
                 this.userId = userId;
                 this.assetId = assetId;
@@ -416,52 +275,27 @@ public final class SpotTradeSettlementService {
                 locked = current == null ? 0 : current.lockedUnits();
             }
 
-            /**
-             * 按起点存在标记在所属 Lane 更新或创建余额，写入本轮聚合后的可用和冻结金额。
-             * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-             * @param lane 当前线程持有的账户 Lane
-             */
+            /** 按起点存在标记在所属 Lane 更新或创建余额，写入本轮聚合后的可用和冻结金额。 */
             void publish(TradingAccountRuntime runtime, AccountPartition lane) {
                 if (exists) runtime.replaceBalance(lane, userId, assetId, available, locked);
                 else runtime.putBalance(lane, new AccountBalance(userId, assetId, available, locked));
             }
         }
 
-        /**
-         * 本 Lane 一笔订单的连续成交游标，保存累计成交、费用及预留消耗，引用同用户共享余额后值；只在本轮租约内使用，清理后归还池。
-         */
+        /** 本 Lane 一笔订单的连续成交游标，保存累计成交、费用及预留消耗，引用同用户共享余额后值。只在本轮租约内使用，清理后归还池。 */
         private final class SpotFillCursor {
-            /** 当前游标起点的权威订单引用，用于累计量、费用和修订计算。 */
             private Order originalOrder;
-            /** 当前游标起点的权威预留引用，用于已消费上限及最终释放额。 */
             private OrderFundsReservation originalReservation;
-            /** 同用户基础资产的共享本轮余额暂存。 */
             private SpotBalanceState base;
-            /** 同用户计价资产的共享本轮余额暂存。 */
             private SpotBalanceState quote;
-            /** 游标累计后的订单已成交数量。 */
             private long executed;
-            /** 游标累计后的订单剩余量。 */
             private long remaining;
-            /** 订单累计费用，收费增加、返佣可抵减。 */
             private long cumulativeFee;
-            /**
-             * executedValueHigh：订单累计成交价格乘数量的宽整数高六十四位。
-             * executedValueLow：订单累计成交价格乘数量的宽整数低六十四位。
-             */
             private long executedValueHigh, executedValueLow;
-            /** 订单预留累计已消耗金额，包括本轮此前成交。 */
             private long consumed;
-            /** 本轮已应用成交次数，供最终订单及用户修订累计。 */
             private long fills;
 
-            /**
-             * 保存订单和预留起点引用，关联同用户共用资产余额，载入累计成交、费用和预留消耗并清零本轮成交数。
-             * @param order 当前需要应用成交的订单引用
-             * @param reservation 当前订单对应的权威预留起点
-             * @param base 本用户基础资产共用的本轮余额暂存
-             * @param quote 本用户计价资产共用的本轮余额暂存
-             */
+            /** 保存订单和预留起点引用，关联同用户共用资产余额，载入累计成交、费用和预留消耗并清零本轮成交数。 */
             void reset(Order order, OrderFundsReservation reservation,
                        SpotBalanceState base, SpotBalanceState quote) {
                 originalOrder = order;
@@ -476,31 +310,19 @@ public final class SpotTradeSettlementService {
                 fills = 0;
             }
 
-            /**
-             * 核对正价正量及剩余量，按买卖方向更新共享余额暂存，校验预留累计不超额，累计订单数量、费用和成交价值；每笔费用立即进入系统差额，不在此写回权威订单。
-             * @param price 本笔实际成交价刻度
-             * @param quantity 本笔成交数量步长
-             * @param taker 本笔是否为主动成交，决定订单费用率
-             * @param treasury 按原成交顺序记录本笔系统费用的差额槽
-             */
+            /** 核对正价正量及剩余量，按买卖方向更新共享余额暂存，校验预留累计不超额，累计订单数量、费用和成交价值。 */
             void apply(long price, long quantity, boolean taker, RuntimeTreasuryDelta treasury) {
                 if (price <= 0 || quantity <= 0 || quantity > remaining) {
                     throw new IllegalArgumentException("invalid runtime spot fill");
                 }
-                // 本笔按价格和数量换算的计价资产成交金额。
                 long quoteUnits = CoreContractMath.spotQuoteUnits(instrument, price, quantity);
-                // 本笔按数量换算的基础资产交付金额。
                 long baseUnits = CoreContractMath.spotBaseUnits(instrument, quantity);
-                // 按 taker 或 maker 角色选出的订单费率。
                 long feeRate = taker ? originalOrder.takerFeeRatePpm() : originalOrder.makerFeeRatePpm();
-                // 本笔用户计价资产费用变化，负数收费、正数返佣。
                 long feeDelta = CoreContractMath.feeDeltaUnits(instrument, price, quantity, feeRate);
-                // 买单扣计价资产、卖单扣基础资产的实际预留资产编号。
                 int debitAssetId = originalOrder.side() == CoreOrderSide.BUY ? quoteAssetId : baseAssetId;
                 if (originalReservation.assetId() != debitAssetId) {
                     throw new IllegalStateException("spot fill debit asset does not match reservation");
                 }
-                // 本笔从订单预留消耗的金额，买单含成交额及收费，卖单只扣基础资产数量。
                 long reservationDebit;
                 if (originalOrder.side() == CoreOrderSide.BUY) {
                     reservationDebit = Math.addExact(quoteUnits, Math.max(0, Math.negateExact(feeDelta)));
@@ -518,7 +340,6 @@ public final class SpotTradeSettlementService {
                     throw new IllegalStateException("runtime spot fill balance would become negative");
                 }
                 consumed = Math.addExact(consumed, reservationDebit);
-                // 当前预留原已消耗额加原剩余可用额得到的本轮累计消耗上限。
                 long maxConsumed = Math.addExact(originalReservation.consumedUnits(),
                         originalReservation.reservedUnits());
                 if (consumed > maxConsumed) throw new IllegalStateException("runtime spot reservation was over-consumed");
@@ -531,32 +352,23 @@ public final class SpotTradeSettlementService {
                 treasury.addFee(quoteAssetId, Math.negateExact(feeDelta));
             }
 
-            /**
-             * 有成交才写回预留及订单累计值，按成交次数推进订单与用户修订；达到终态后释放剩余预留，已有余额在外层先行发布。
-             * @param state 用于写回当前所属账户结果的交易运行时
-             */
+            /** 有成交才写回预留及订单累计值，按成交次数推进订单与用户修订。 */
             void publish(TradingAccountRuntime state) {
                 if (fills == 0) return;
-                // 游标最终剩余量对应的 OPEN 或 FILLED 订单状态。
                 CoreOrderStatus status = remaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
-                // 本轮最终累计手续费与权威订单起点费用的差额。
                 long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
                 state.updateReservationInLane(lane, originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
-                // 写回最终累计值后返回的权威订单引用。
                 Order nextOrder = state.updateOrderInLane(lane, originalOrder.orderId(), executed, remaining,
                         feeDelta, executedValueHigh, executedValueLow, status, Math.addExact(originalOrder.revision(), fills),
                         commitTimestamp, commitPosition);
                 state.advanceUserRevision(lane, originalOrder.userId(), fills);
                 if (nextOrder.canceled()) {
-                    // 终态订单当前仍可释放的预留金额，正数才额外推进用户修订。
                     long releaseUnits = state.releaseTerminalReservationInLane(lane, nextOrder, originalReservation);
                     if (releaseUnits > 0) state.advanceUserRevision(lane, nextOrder.userId());
                 }
             }
 
-            /**
-             * 释放本轮订单、预留及两资产余额暂存引用并清零成交数，其他原语值由下次 reset 覆盖。
-             */
+            /** 释放本轮订单、预留及两资产余额暂存引用并清零成交数，其他原语值由下次 reset 覆盖。 */
             void clear() {
                 originalOrder = null;
                 originalReservation = null;
@@ -567,41 +379,20 @@ public final class SpotTradeSettlementService {
         }
     }
 
-    /**
-     * 按已有余额是否存在，在所属 Lane 创建余额或更新原余额；current 只用于选择分支。
-     * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-     * @param lane 当前线程持有的账户 Lane
-     * @param userId 当前余额所属用户编号
-     * @param assetId 当前余额所属资产编号
-     * @param current 起点已有的可空权威余额，空值表示需要创建余额
-     * @param available 要写回的可用余额
-     * @param locked 要写回的冻结余额
-     */
     private static void replaceBalance(TradingAccountRuntime runtime, AccountPartition lane, long userId, int assetId,
                                        AccountBalance current, long available, long locked) {
         if (current == null) runtime.putBalance(lane, new AccountBalance(userId, assetId, available, locked));
         else runtime.replaceBalance(lane, userId, assetId, available, locked);
     }
 
-    /**
-     * 只在原 Matcher 结算作用域释放终态订单的剩余预留，实际释放金额为正才增加用户修订。
-     * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-     * @param lane 当前线程持有的账户 Lane
-     * @param orderId 当前要累加、读取或释放预留的订单编号
-     */
+    /** 只在原 Matcher 结算作用域释放终态订单的剩余预留，实际释放金额为正才增加用户修订。 */
     static void releaseTerminalReservation(TradingAccountRuntime runtime, AccountPartition lane, long orderId) {
-        // 当前首次累加、终态释放或读取时取得的权威订单。
         Order order = lane.order(orderId);
         if (order == null || !order.canceled()) return;
         long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
         if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
     }
 
-    /**
-     * 从指定 Lane 读取存在、非终态且剩余数量非零的订单。
-     * @param lane 当前线程持有的账户 Lane
-     * @param orderId 当前要累加、读取或释放预留的订单编号
-     */
     private static Order requireOpen(AccountPartition lane, long orderId) {
         Order order = lane.order(orderId);
         return requireOpen(order, orderId);

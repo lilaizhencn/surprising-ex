@@ -25,10 +25,7 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
 
-/**
- * 负责将当前 Aeron Core 节点自动注册至 Nacos 注册中心，
- * 并实时上报产品线、节点编号、端口布局以及 Leader/Follower 角色。
- */
+/** 负责将当前 Aeron Core 节点自动注册至 Nacos 注册中心， 并实时上报产品线、节点编号、端口布局以及 Leader/Follower 角色。 */
 @Component
 @EnableConfigurationProperties(AeronRegistryProperties.class)
 public class AeronNodeRegistrationService implements SmartInitializingSingleton, DisposableBean, ClusterRoleChangeListener {
@@ -80,7 +77,6 @@ public class AeronNodeRegistrationService implements SmartInitializingSingleton,
         log.info("Aeron node role changed productLine={} nodeId={} prev={} new={}",
                 topology.productLine(), topology.nodeId(), prev, newRole);
         if (properties.enabled() && !closed) {
-            // 角色变更后更新 Nacos 实例元数据
             doRegister();
         }
     }

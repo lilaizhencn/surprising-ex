@@ -12,23 +12,17 @@ import java.util.*;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/** 快照和确定性业务表示使用的固定枚举编号表。每种业务枚举单独双向映射，已有数字保持不变，新增 Java 枚举不能靠改变 ordinal 混入历史快照；未知持久化编号一律拒绝。 构造约定：工具类不创建实例，编码由固定映射确定。 */
+/** 快照和确定性业务表示使用的固定枚举编号表。每种业务枚举单独双向映射，已有数字保持不变，新增 Java 枚举不能靠改变 ordinal 混入历史快照。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SnapshotEnumCodes {
-    /**
-     * 把预留用途写成固定持久化编号：SPOT_ASSET=0、DERIVATIVE_MARGIN=1。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的预留用途枚举值
-     */
+    /** 把预留用途写成固定持久化编号：SPOT_ASSET=0、DERIVATIVE_MARGIN=1。不使用 Java 枚举声明顺序。 */
     public static int encode(ReservationKind value) {
         return switch (value) {
             case SPOT_ASSET -> 0;
             case DERIVATIVE_MARGIN -> 1;
         };
     }
-    /**
-     * 把固定编号恢复为预留用途：SPOT_ASSET=0、DERIVATIVE_MARGIN=1；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的预留用途固定编号
-     */
+    /** 把固定编号恢复为预留用途：SPOT_ASSET=0、DERIVATIVE_MARGIN=1。 */
     static ReservationKind readReservationKind(int value) {
         return switch (value) {
             case 0 -> ReservationKind.SPOT_ASSET;
@@ -36,20 +30,14 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted ReservationKind code: " + value);
         };
     }
-    /**
-     * 把保证金模式写成固定持久化编号：CROSS=0、ISOLATED=1。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的保证金模式枚举值
-     */
+    /** 把保证金模式写成固定持久化编号：CROSS=0、ISOLATED=1。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreMarginMode value) {
         return switch (value) {
             case CROSS -> 0;
             case ISOLATED -> 1;
         };
     }
-    /**
-     * 把固定编号恢复为保证金模式：CROSS=0、ISOLATED=1；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的保证金模式固定编号
-     */
+    /** 把固定编号恢复为保证金模式：CROSS=0、ISOLATED=1。 */
     static CoreMarginMode readCoreMarginMode(int value) {
         return switch (value) {
             case 0 -> CoreMarginMode.CROSS;
@@ -57,10 +45,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreMarginMode code: " + value);
         };
     }
-    /**
-     * 把持仓方向写成固定持久化编号：NET=0、LONG=1、SHORT=2。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的持仓方向枚举值
-     */
+    /** 把持仓方向写成固定持久化编号：NET=0、LONG=1、SHORT=2。不使用 Java 枚举声明顺序。 */
     public static int encode(CorePositionSide value) {
         return switch (value) {
             case NET -> 0;
@@ -68,10 +53,7 @@ public final class SnapshotEnumCodes {
             case SHORT -> 2;
         };
     }
-    /**
-     * 把固定编号恢复为持仓方向：NET=0、LONG=1、SHORT=2；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的持仓方向固定编号
-     */
+    /** 把固定编号恢复为持仓方向：NET=0、LONG=1、SHORT=2。 */
     static CorePositionSide readCorePositionSide(int value) {
         return switch (value) {
             case 0 -> CorePositionSide.NET;
@@ -80,10 +62,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CorePositionSide code: " + value);
         };
     }
-    /**
-     * 把产品线写成固定持久化编号：现货=0、U 本位永续=1、币本位永续=2、U 本位交割=3、币本位交割=4、期权=5。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的产品线枚举值
-     */
+    /** 把产品线写成固定持久化编号：现货=0、U 本位永续=1、币本位永续=2、U 本位交割=3、币本位交割=4、期权=5。不使用 Java 枚举声明顺序。 */
     public static int encode(ProductLine value) {
         return switch (value) {
             case SPOT -> 0;
@@ -94,10 +73,7 @@ public final class SnapshotEnumCodes {
             case OPTION -> 5;
         };
     }
-    /**
-     * 把固定编号恢复为产品线：现货=0、U 本位永续=1、币本位永续=2、U 本位交割=3、币本位交割=4、期权=5；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的产品线固定编号
-     */
+    /** 把固定编号恢复为产品线：现货=0、U 本位永续=1、币本位永续=2、U 本位交割=3、币本位交割=4、期权=5。 */
     static ProductLine readProductLine(int value) {
         return switch (value) {
             case 0 -> ProductLine.SPOT;
@@ -109,20 +85,14 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted ProductLine code: " + value);
         };
     }
-    /**
-     * 把买卖方向写成固定持久化编号：BUY=0、SELL=1。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的买卖方向枚举值
-     */
+    /** 把买卖方向写成固定持久化编号：BUY=0、SELL=1。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreOrderSide value) {
         return switch (value) {
             case BUY -> 0;
             case SELL -> 1;
         };
     }
-    /**
-     * 把固定编号恢复为买卖方向：BUY=0、SELL=1；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的买卖方向固定编号
-     */
+    /** 把固定编号恢复为买卖方向：BUY=0、SELL=1。 */
     static CoreOrderSide readCoreOrderSide(int value) {
         return switch (value) {
             case 0 -> CoreOrderSide.BUY;
@@ -130,20 +100,14 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreOrderSide code: " + value);
         };
     }
-    /**
-     * 把订单类型写成固定持久化编号：LIMIT=0、MARKET=1。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的订单类型枚举值
-     */
+    /** 把订单类型写成固定持久化编号：LIMIT=0、MARKET=1。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreOrderType value) {
         return switch (value) {
             case LIMIT -> 0;
             case MARKET -> 1;
         };
     }
-    /**
-     * 把固定编号恢复为订单类型：LIMIT=0、MARKET=1；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的订单类型固定编号
-     */
+    /** 把固定编号恢复为订单类型：LIMIT=0、MARKET=1。 */
     static CoreOrderType readCoreOrderType(int value) {
         return switch (value) {
             case 0 -> CoreOrderType.LIMIT;
@@ -151,10 +115,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreOrderType code: " + value);
         };
     }
-    /**
-     * 把订单有效方式写成固定持久化编号：GTC=0、IOC=1、FOK=2、GTX=3。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的订单有效方式枚举值
-     */
+    /** 把订单有效方式写成固定持久化编号：GTC=0、IOC=1、FOK=2、GTX=3。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreTimeInForce value) {
         return switch (value) {
             case GTC -> 0;
@@ -163,10 +124,7 @@ public final class SnapshotEnumCodes {
             case GTX -> 3;
         };
     }
-    /**
-     * 把固定编号恢复为订单有效方式：GTC=0、IOC=1、FOK=2、GTX=3；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的订单有效方式固定编号
-     */
+    /** 把固定编号恢复为订单有效方式：GTC=0、IOC=1、FOK=2、GTX=3。 */
     static CoreTimeInForce readCoreTimeInForce(int value) {
         return switch (value) {
             case 0 -> CoreTimeInForce.GTC;
@@ -176,10 +134,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreTimeInForce code: " + value);
         };
     }
-    /**
-     * 把普通订单状态写成固定持久化编号：OPEN=0、CANCELED=1、FILLED=2、REJECTED=3。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的普通订单状态枚举值
-     */
+    /** 把普通订单状态写成固定持久化编号：OPEN=0、CANCELED=1、FILLED=2、REJECTED=3。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreOrderStatus value) {
         return switch (value) {
             case OPEN -> 0;
@@ -188,10 +143,7 @@ public final class SnapshotEnumCodes {
             case REJECTED -> 3;
         };
     }
-    /**
-     * 把固定编号恢复为普通订单状态：OPEN=0、CANCELED=1、FILLED=2、REJECTED=3；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的普通订单状态固定编号
-     */
+    /** 把固定编号恢复为普通订单状态：OPEN=0、CANCELED=1、FILLED=2、REJECTED=3。 */
     static CoreOrderStatus readCoreOrderStatus(int value) {
         return switch (value) {
             case 0 -> CoreOrderStatus.OPEN;
@@ -201,10 +153,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreOrderStatus code: " + value);
         };
     }
-    /**
-     * 把账户风险状态写成固定持久化编号：NORMAL=0、WARNING=1、LIQUIDATION=2。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的账户风险状态枚举值
-     */
+    /** 把账户风险状态写成固定持久化编号：NORMAL=0、WARNING=1、LIQUIDATION=2。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreRiskStatus value) {
         return switch (value) {
             case NORMAL -> 0;
@@ -212,10 +161,7 @@ public final class SnapshotEnumCodes {
             case LIQUIDATION -> 2;
         };
     }
-    /**
-     * 把强平业务状态写成固定持久化编号：PLANNED=0、ORDERED=1、COMPLETED=2、INSURANCE_REQUIRED=3、ADL_REQUIRED=4、CANCELED=5。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的强平业务状态枚举值
-     */
+    /** 把强平业务状态写成固定持久化编号：PLANNED=0、ORDERED=1、COMPLETED=2、INSURANCE_REQUIRED=3、ADL_REQUIRED=4、CANCELED=5。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreLiquidationState.Status value) {
         return switch (value) {
             case PLANNED -> 0;
@@ -226,10 +172,7 @@ public final class SnapshotEnumCodes {
             case CANCELED -> 5;
         };
     }
-    /**
-     * 把固定编号恢复为强平业务状态：PLANNED=0、ORDERED=1、COMPLETED=2、INSURANCE_REQUIRED=3、ADL_REQUIRED=4、CANCELED=5；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的强平业务状态固定编号
-     */
+    /** 把固定编号恢复为强平业务状态：PLANNED=0、ORDERED=1、COMPLETED=2、INSURANCE_REQUIRED=3、ADL_REQUIRED=4、CANCELED=5。 */
     static CoreLiquidationState.Status readCoreLiquidationStateStatus(int value) {
         return switch (value) {
             case 0 -> CoreLiquidationState.Status.PLANNED;
@@ -241,10 +184,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreLiquidationState.Status code: " + value);
         };
     }
-    /**
-     * 把币对维护模式写成固定持久化编号：TRADING=0、REDUCE_ONLY=1、HALTED=2、SETTLEMENT=3、CLOSED=4。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的币对维护模式枚举值
-     */
+    /** 把币对维护模式写成固定持久化编号：TRADING=0、REDUCE_ONLY=1、HALTED=2、SETTLEMENT=3、CLOSED=4。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreInstrumentMaintenance.Mode value) {
         return switch (value) {
             case TRADING -> 0;
@@ -254,10 +194,7 @@ public final class SnapshotEnumCodes {
             case CLOSED -> 4;
         };
     }
-    /**
-     * 把固定编号恢复为币对维护模式：TRADING=0、REDUCE_ONLY=1、HALTED=2、SETTLEMENT=3、CLOSED=4；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的币对维护模式固定编号
-     */
+    /** 把固定编号恢复为币对维护模式：TRADING=0、REDUCE_ONLY=1、HALTED=2、SETTLEMENT=3、CLOSED=4。 */
     static CoreInstrumentMaintenance.Mode readCoreInstrumentMaintenanceMode(int value) {
         return switch (value) {
             case 0 -> CoreInstrumentMaintenance.Mode.TRADING;
@@ -268,10 +205,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreInstrumentMaintenance.Mode code: " + value);
         };
     }
-    /**
-     * 把倒计时撤单状态写成固定持久化编号：DISABLED=0、ACTIVE=1、TRIGGERING=2、TRIGGERED=3。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的倒计时撤单状态枚举值
-     */
+    /** 把倒计时撤单状态写成固定持久化编号：DISABLED=0、ACTIVE=1、TRIGGERING=2、TRIGGERED=3。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreCancelAllAfterStatus value) {
         return switch (value) {
             case DISABLED -> 0;
@@ -280,10 +214,7 @@ public final class SnapshotEnumCodes {
             case TRIGGERED -> 3;
         };
     }
-    /**
-     * 把固定编号恢复为倒计时撤单状态：DISABLED=0、ACTIVE=1、TRIGGERING=2、TRIGGERED=3；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的倒计时撤单状态固定编号
-     */
+    /** 把固定编号恢复为倒计时撤单状态：DISABLED=0、ACTIVE=1、TRIGGERING=2、TRIGGERED=3。 */
     static CoreCancelAllAfterStatus readCoreCancelAllAfterStatus(int value) {
         return switch (value) {
             case 0 -> CoreCancelAllAfterStatus.DISABLED;
@@ -293,10 +224,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreCancelAllAfterStatus code: " + value);
         };
     }
-    /**
-     * 把触发单类型写成固定持久化编号：TAKE_PROFIT=0、STOP_LOSS=1、TRAILING_STOP=2。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的触发单类型枚举值
-     */
+    /** 把触发单类型写成固定持久化编号：TAKE_PROFIT=0、STOP_LOSS=1、TRAILING_STOP=2。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreTriggerOrderType value) {
         return switch (value) {
             case TAKE_PROFIT -> 0;
@@ -304,10 +232,7 @@ public final class SnapshotEnumCodes {
             case TRAILING_STOP -> 2;
         };
     }
-    /**
-     * 把固定编号恢复为触发单类型：TAKE_PROFIT=0、STOP_LOSS=1、TRAILING_STOP=2；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的触发单类型固定编号
-     */
+    /** 把固定编号恢复为触发单类型：TAKE_PROFIT=0、STOP_LOSS=1、TRAILING_STOP=2。 */
     static CoreTriggerOrderType readCoreTriggerOrderType(int value) {
         return switch (value) {
             case 0 -> CoreTriggerOrderType.TAKE_PROFIT;
@@ -316,20 +241,14 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreTriggerOrderType code: " + value);
         };
     }
-    /**
-     * 把触发比较条件写成固定持久化编号：GREATER_OR_EQUAL=0、LESS_OR_EQUAL=1。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的触发比较条件枚举值
-     */
+    /** 把触发比较条件写成固定持久化编号：GREATER_OR_EQUAL=0、LESS_OR_EQUAL=1。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreTriggerCondition value) {
         return switch (value) {
             case GREATER_OR_EQUAL -> 0;
             case LESS_OR_EQUAL -> 1;
         };
     }
-    /**
-     * 把固定编号恢复为触发比较条件：GREATER_OR_EQUAL=0、LESS_OR_EQUAL=1；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的触发比较条件固定编号
-     */
+    /** 把固定编号恢复为触发比较条件：GREATER_OR_EQUAL=0、LESS_OR_EQUAL=1。 */
     static CoreTriggerCondition readCoreTriggerCondition(int value) {
         return switch (value) {
             case 0 -> CoreTriggerCondition.GREATER_OR_EQUAL;
@@ -337,10 +256,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreTriggerCondition code: " + value);
         };
     }
-    /**
-     * 把触发单状态写成固定持久化编号：PENDING=0、TRIGGERING=1、TRIGGERED=2、TRIGGER_FAILED=3、CANCELED=4、EXPIRED=5。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的触发单状态枚举值
-     */
+    /** 把触发单状态写成固定持久化编号：PENDING=0、TRIGGERING=1、TRIGGERED=2、TRIGGER_FAILED=3、CANCELED=4、EXPIRED=5。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreTriggerOrderStatus value) {
         return switch (value) {
             case PENDING -> 0;
@@ -351,10 +267,7 @@ public final class SnapshotEnumCodes {
             case EXPIRED -> 5;
         };
     }
-    /**
-     * 把固定编号恢复为触发单状态：PENDING=0、TRIGGERING=1、TRIGGERED=2、TRIGGER_FAILED=3、CANCELED=4、EXPIRED=5；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的触发单状态固定编号
-     */
+    /** 把固定编号恢复为触发单状态：PENDING=0、TRIGGERING=1、TRIGGERED=2、TRIGGER_FAILED=3、CANCELED=4、EXPIRED=5。 */
     static CoreTriggerOrderStatus readCoreTriggerOrderStatus(int value) {
         return switch (value) {
             case 0 -> CoreTriggerOrderStatus.PENDING;
@@ -366,10 +279,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreTriggerOrderStatus code: " + value);
         };
     }
-    /**
-     * 把触发价格来源写成固定持久化编号：MARK=0、LAST=1、INDEX=2。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的触发价格来源枚举值
-     */
+    /** 把触发价格来源写成固定持久化编号：MARK=0、LAST=1、INDEX=2。不使用 Java 枚举声明顺序。 */
     public static int encode(CoreTriggerPriceSource value) {
         return switch (value) {
             case MARK -> 0;
@@ -377,10 +287,7 @@ public final class SnapshotEnumCodes {
             case INDEX -> 2;
         };
     }
-    /**
-     * 把固定编号恢复为触发价格来源：MARK=0、LAST=1、INDEX=2；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的触发价格来源固定编号
-     */
+    /** 把固定编号恢复为触发价格来源：MARK=0、LAST=1、INDEX=2。 */
     static CoreTriggerPriceSource readCoreTriggerPriceSource(int value) {
         return switch (value) {
             case 0 -> CoreTriggerPriceSource.MARK;
@@ -389,20 +296,14 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CoreTriggerPriceSource code: " + value);
         };
     }
-    /**
-     * 把账户持仓模式写成固定持久化编号：ONE_WAY=0、HEDGE=1。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的账户持仓模式枚举值
-     */
+    /** 把账户持仓模式写成固定持久化编号：ONE_WAY=0、HEDGE=1。不使用 Java 枚举声明顺序。 */
     public static int encode(CorePositionMode value) {
         return switch (value) {
             case ONE_WAY -> 0;
             case HEDGE -> 1;
         };
     }
-    /**
-     * 把固定编号恢复为账户持仓模式：ONE_WAY=0、HEDGE=1；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的账户持仓模式固定编号
-     */
+    /** 把固定编号恢复为账户持仓模式：ONE_WAY=0、HEDGE=1。 */
     static CorePositionMode readCorePositionMode(int value) {
         return switch (value) {
             case 0 -> CorePositionMode.ONE_WAY;
@@ -410,20 +311,14 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted CorePositionMode code: " + value);
         };
     }
-    /**
-     * 把期权方向写成固定持久化编号：CALL=0、PUT=1。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的期权方向枚举值
-     */
+    /** 把期权方向写成固定持久化编号：CALL=0、PUT=1。不使用 Java 枚举声明顺序。 */
     public static int encode(OptionType value) {
         return switch (value) {
             case CALL -> 0;
             case PUT -> 1;
         };
     }
-    /**
-     * 把固定编号恢复为期权方向：CALL=0、PUT=1；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的期权方向固定编号
-     */
+    /** 把固定编号恢复为期权方向：CALL=0、PUT=1。 */
     static OptionType readOptionType(int value) {
         return switch (value) {
             case 0 -> OptionType.CALL;
@@ -431,10 +326,7 @@ public final class SnapshotEnumCodes {
             default -> throw new ProtocolException("unknown persisted OptionType code: " + value);
         };
     }
-    /**
-     * 把币对业务状态写成固定持久化编号：PRE_TRADING=0、TRADING=1、HALT=2、SETTLING=3、CLOSED=4、DRAFT=5。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的币对业务状态枚举值
-     */
+    /** 把币对业务状态写成固定持久化编号：PRE_TRADING=0、TRADING=1、HALT=2、SETTLING=3、CLOSED=4、DRAFT=5。不使用 Java 枚举声明顺序。 */
     public static int encode(InstrumentStatus value) {
         return switch (value) {
             case PRE_TRADING -> 0;
@@ -445,10 +337,7 @@ public final class SnapshotEnumCodes {
             case DRAFT -> 5;
         };
     }
-    /**
-     * 把固定编号恢复为币对业务状态：PRE_TRADING=0、TRADING=1、HALT=2、SETTLING=3、CLOSED=4、DRAFT=5；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的币对业务状态固定编号
-     */
+    /** 把固定编号恢复为币对业务状态：PRE_TRADING=0、TRADING=1、HALT=2、SETTLING=3、CLOSED=4、DRAFT=5。 */
     static InstrumentStatus readInstrumentStatus(int value) {
         return switch (value) {
             case 0 -> InstrumentStatus.PRE_TRADING;

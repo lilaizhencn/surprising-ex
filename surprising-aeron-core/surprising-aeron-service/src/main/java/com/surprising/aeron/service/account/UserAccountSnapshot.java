@@ -14,50 +14,32 @@ import java.util.Objects;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
-/**
- * 物化后的完整用户业务状态，保存余额、订单冻结、持仓及模式。构造时核对全部键和锁定金额，最终冻结有序映射；在线权威实体仍由账户分片持有。
- */
+/** 物化后的完整用户业务状态，保存余额、订单冻结、持仓及模式。 */
 public final class UserAccountSnapshot {
 
-    /** 完整用户业务状态所属的独立产品线。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final ProductLine productLine;
-    /** 该状态对应的正数用户编号。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final long userId;
-    /** 用户业务版本，允许初始值为零。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final long revision;
-    /** 按资产代码保存的冻结有序余额映射，属于业务快照而非在线分片表。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final Map<String, AssetBalance> balances;
-    /** 按订单编号保存的冻结有序预留记录映射。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final Map<Long, OrderFundsReservation.Snapshot> reservations;
-    /** 按持仓业务键保存的冻结有序持仓映射。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final Map<String, CorePositionState> positions;
-    /** 用户的单向或双向持仓模式。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final CorePositionMode positionMode;
 
-    /**
-     * 按给定模式构造完整用户状态，先从全部冻结及持仓重算可解释锁定额，再校验并冻结映射。
-     * @param productLine 完整用户业务状态所属的独立产品线
-     * @param userId 该状态对应的正数用户编号
-     * @param revision 用户业务版本，允许初始值为零
-     * @param balances 按资产代码保存的冻结有序余额映射，属于业务快照而非在线分片表
-     * @param reservations 按订单编号保存的冻结有序预留记录映射
-     * @param positions 按持仓业务键保存的冻结有序持仓映射
-     * @param positionMode 用户的单向或双向持仓模式
-     */
+    /** 按给定模式构造完整用户状态，先从全部冻结及持仓重算可解释锁定额，再校验并冻结映射。 */
     public UserAccountSnapshot(ProductLine productLine,
                                long userId,
                                long revision,
@@ -80,7 +62,6 @@ public final class UserAccountSnapshot {
         this.positionMode = positionMode;
     }
 
-    /** 检查完整快照中余额、预留和持仓的键与业务身份一致。 */
     private static void validateEntries(Map<String, AssetBalance> balances,
                                         Map<Long, OrderFundsReservation.Snapshot> reservations,
                                         Map<String, CorePositionState> positions) {
@@ -123,30 +104,23 @@ public final class UserAccountSnapshot {
         });
     }
 
-    /**
-     * 比较产品、用户、版本、三张业务映射和模式；校验用派生锁定额不作为额外业务差异。
-     * @param value 需要进行完整用户业务值比较的任意对象
-     */
+    /** 比较产品、用户、版本、三张业务映射和模式。 */
     @Override
     public boolean equals(Object value) {
         if (this == value) return true;
-        if (!(value instanceof UserAccountSnapshot /* 已经确认类型的待比较用户状态，只比较显式业务字段。 */ other)) return false;
+        if (!(value instanceof UserAccountSnapshot other)) return false;
         return userId == other.userId && revision == other.revision && productLine == other.productLine
                 && balances.equals(other.balances) && reservations.equals(other.reservations)
                 && positions.equals(other.positions) && positionMode == other.positionMode;
     }
 
-    /**
-     * 按与 equals 相同的显式业务字段组合哈希值。
-     */
+    /** 按与 equals 相同的显式业务字段组合哈希值。 */
     @Override
     public int hashCode() {
         return Objects.hash(productLine, userId, revision, balances, reservations, positions, positionMode);
     }
 
-    /**
-     * 输出用户、版本、产品及业务映射，供快照差异和测试断言诊断。
-     */
+    /** 输出用户、版本、产品及业务映射，供快照差异和测试断言诊断。 */
     @Override
     public String toString() {
         return "UserAccountSnapshot[productLine=" + productLine + ", userId=" + userId + ", revision=" + revision

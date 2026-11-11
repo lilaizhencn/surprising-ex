@@ -29,67 +29,46 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.Accessors;
 
-/**
- * 账户设置、资金划转与保证金变更命令服务（合并原 AccountControlTask、DerivativeAccountCommandProcessor 与 ControlLaneDispatcher）。
- * 处理余额调整、转出与完成划转、杠杆调整、持仓模式切换和逐仓保证金增减。
- */
+/** 账户设置、资金划转与保证金变更命令服务（合并原 AccountControlTask、DerivativeAccountCommandProcessor 与 ControlLaneDispatcher）。 */
 @NoArgsConstructor
 public final class AccountCommandService implements IntFunction<Object>, BooleanSupplier {
-    /** 余额增减任务标记，对应可用余额调整。 */
     private static final byte KIND_BALANCE = 1;
-    /** 划转源账户扣款并登记待完成划转的任务标记。 */
     private static final byte KIND_TRANSFER_OUT = 2;
-    /** 移除源账户待完成划转记录的任务标记。 */
     private static final byte KIND_TRANSFER_COMPLETE = 3;
-    /** 杠杆设置或显式全仓保证金重定价的任务标记。 */
     private static final byte KIND_LEVERAGE = 4;
-    /** 持仓模式切换的任务标记。 */
     private static final byte KIND_POSITION_MODE = 5;
-    /** 逐仓保证金增减的任务标记。 */
     private static final byte KIND_POSITION_MARGIN = 6;
 
-    /** 当前准备的任务种类，零表示尚未准备。 */
     private byte kind;
     /** 本续步关联的交易运行时，Owner 与账户分片通过既有控制派发交接。 */
     private TradingAccountRuntime runtime;
-    /** 余额、划转或持仓任务的目标用户；杠杆任务使用 leverageKey 中的用户。 */
     private long userId;
-    /** 余额或逐仓保证金调整预先算好的下一产品修订号。 */
     private long nextRevision;
     /** 本续步是否已由 Owner 收集并完成，或划转完成路径无需派发。 */
     private boolean completed;
-    /** 本续步是否已记录需要发布的变化，沿用各分支规则，不表示所有情况都有新扣款。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private boolean stateChanged;
 
-    /** 余额或划转账户操作使用的资产整数编号。 */
     private int assetId;
-    /** 余额任务要增加的有符号可用金额，负数表示扣减。 */
     private long deltaUnits;
 
     /** 当前转出命令，分片处理完且 Owner 收集后解除引用。 */
     private TransferFundsCommand transferCommand;
-    /** 分片的实际变化结果，供转出发布路由、杠杆和持仓模式发布使用；Owner 收齐回执后才读取。 */
+    /** Owner 收齐回执后才读取。 */
     private boolean changedOnLane;
-    /** 完成划转任务要移除的划转编号。 */
     private long transferId;
     /** 分片是否确实移除了对应待完成记录，Owner 据此核对路由一致性。 */
     private boolean transferRemoved;
 
-    /** 用户、合约和保证金模式组成的杠杆业务键。 */
     private CoreLeverageKey leverageKey;
     /** 原始不可变杠杆命令，包含目标杠杆及全仓重定价开关。 */
     private UpdateLeverageCommand leverageCommand;
-    /** 杠杆对应合约的稠密编号。 */
     private int symbolId;
 
-    /** 当前持仓模式切换命令。 */
     private UpdatePositionModeCommand positionModeCommand;
 
-    /** 逐仓保证金任务已解析的运行时持仓键。 */
     private long positionKey;
-    /** 当前逐仓保证金增减命令。 */
     private AdjustPositionMarginCommand positionMarginCommand;
 
     public AccountCommandService prepareBalanceAdjustment(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
@@ -524,20 +503,14 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
         return position.assetId();
     }
 
-    /**
-     * 一个运行时同时推进一项账户控制派发。复用每分片的任务槽，先保存结果和修订增量再发布完成位，Owner 观察到完成位后才读取结果（release/acquire），收齐后再发布变化。
-     */
+    /** 一个运行时同时推进一项账户控制派发。复用每分片的任务槽，先保存结果和修订增量再发布完成位，Owner 观察到完成位后才读取结果（release/acquire），收齐后再发布变化。 */
     @RequiredArgsConstructor
     public static final class Dispatcher {
-        /** 完成标记之间间隔十六个 long，减少不同分片频繁写相邻位置。 */
         private static final int CACHE_LINE_LONGS = 16;
         /** long 数组元素的 VarHandle，完成发布用 release、Owner 观察用 acquire。 */
         private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
-        /** 持有控制命令生命周期与发布水位的运行时。 */
         private final TradingAccountRuntime owner;
-        /** 按实际账户分片编号排列的复用控制任务槽。 */
         private LaneControlTask[] tasks;
-        /** 每分片间隔存放的完成标记，零未完成、非零已发布结果。 */
         private long[] completedLanes;
         /** 当前控制派发必须完成的分片位集合。 */
         private long requiredLaneMask;
@@ -547,7 +520,6 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
         @Accessors(fluent = true, chain = false)
         @Getter
         private boolean pending;
-        /** 当前账户控制操作分类，用于工作队列统计和诊断。 */
         private DirectCommandDispatcher.OperationType operationType;
 
         private void initializeTasks() {

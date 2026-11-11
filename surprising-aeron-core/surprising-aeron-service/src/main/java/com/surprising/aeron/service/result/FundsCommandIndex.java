@@ -5,10 +5,7 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.UUID;
 
-/**
- * 已提交资金命令的 Owner 独占内存身份表。Cluster 日志和 Core 快照是恢复来源，
- * 活动命令不访问本地数据库。完整 UUID 与四个原语 long 指纹列一起保留到运行时退休。
- */
+/** 已提交资金命令的 Owner 独占内存身份表。Cluster 日志和 Core 快照是恢复来源， 活动命令不访问本地数据库。 */
 public final class FundsCommandIndex implements AutoCloseable {
     public enum Match { ABSENT, SAME, CONFLICT }
     private static final int INITIAL_CAPACITY = 1024;
@@ -94,7 +91,7 @@ public final class FundsCommandIndex implements AutoCloseable {
         put(id.getMostSignificantBits(), id.getLeastSignificantBits(), fingerprint);
     }
 
-    /** 在资金业务变更前完成可能失败的扩容；随后本条身份写入不会再分配表容量。 */
+    /** 在资金业务变更前完成可能失败的扩容。 */
     public void reserveNext() {
         assertHealthy();
         assertOwner();

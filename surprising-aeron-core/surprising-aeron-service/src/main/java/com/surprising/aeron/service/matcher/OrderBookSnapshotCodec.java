@@ -26,17 +26,14 @@ import java.util.zip.CRC32C;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/** 原生订单簿快照清单版本十的二进制格式。使用 DataInput/DataOutput 的大端整数顺序，逐模块和整条正文分别校验 CRC32C，保存拓扑、配对水位/哈希、注册表及原生模块；与交易状态快照三十九的小端字段格式不同，不能混用读取器。 构造约定：工具类不创建实例。 */
+/** 原生订单簿快照清单版本十的二进制格式。使用 DataInput/DataOutput 的大端整数顺序，逐模块和整条正文分别校验 CRC32C，保存拓扑、配对水位/哈希、注册表及原生模块。与交易状态快照三十九的小端字段格式不同，不能混用读取器。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class OrderBookSnapshotCodec {
 
-    /** 此原生订单簿清单的固定格式识别数。 */
     private static final int MAGIC = 0x4d534e50;
-    /** 本 Codec 唯一写入和接受的清单版本十。 */
     private static final int VERSION = 10;
     /** 沿用分段 Core 快照规定的最大区段字节数，包含末尾八字节校验值。 */
     private static final int HARD_MAX_SNAPSHOT_BYTES = SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES;
-    /** 解码每类注册表、进度或模块区段允许的通用百万条目粗上限。 */
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     /** 单个原生模块载荷上限，在总快照限额内预留一百二十八字节空间。 */
     private static final int MAX_MODULE_BYTES = HARD_MAX_SNAPSHOT_BYTES - 128;
@@ -46,10 +43,9 @@ public final class OrderBookSnapshotCodec {
         if (maximumSnapshotBytes <= Long.BYTES || maximumSnapshotBytes > HARD_MAX_SNAPSHOT_BYTES)
             throw new IllegalArgumentException("invalid matcher snapshot byte limit");
         try {
-            // 只容纳正文、不包含末尾八字节 CRC 的有上限输出缓冲。
             BoundedByteArrayOutputStream body =
                     new BoundedByteArrayOutputStream(maximumSnapshotBytes - Long.BYTES);
-            try (/* 当前正文大端写入流，关闭后保留底层已写字节。 */ DataOutputStream output = new DataOutputStream(body)) {
+            try (DataOutputStream output = new DataOutputStream(body)) {
                 output.writeInt(MAGIC);
                 output.writeInt(VERSION);
                 output.writeInt(ProductLineWireCode.encode(snapshot.productLine()));
@@ -60,22 +56,21 @@ public final class OrderBookSnapshotCodec {
                 output.writeLong(snapshot.coreSequence());
                 output.writeLong(snapshot.matcherSequence());
                 output.writeInt(snapshot.matcherShardProgress().size());
-                for (ShardProgress /* 本清单当前分片编号及其业务证据进度。 */ progress : snapshot.matcherShardProgress()) {
+                for (ShardProgress progress : snapshot.matcherShardProgress()) {
                     output.writeInt(progress.matcherShardId());
                     output.writeLong(progress.matcherSequence());
                 }
                 output.writeLong(snapshot.coreBusinessStateHash());
                 output.writeInt(snapshot.engineStateHash());
                 output.writeInt(snapshot.symbols().size());
-                for (Map.Entry<String, Integer> /* 当前币对名字及原生引擎符号编号条目。 */ entry : snapshot.symbols().entrySet()) {
+                for (Map.Entry<String, Integer> entry : snapshot.symbols().entrySet()) {
                     writeText(output, entry.getKey());
                     output.writeInt(entry.getValue());
                 }
                 output.writeInt(snapshot.users().size());
-                for (Long /* 当前要写入或从清单恢复的原生正数用户编号。 */ userId : snapshot.users()) output.writeLong(userId);
+                for (Long userId : snapshot.users()) output.writeLong(userId);
                 output.writeInt(snapshot.modules().size());
-                for (SerializedModule /* 当前要写入类型、实例、水位、时间和载荷的原生模块。 */ module : snapshot.modules()) {
-                    // 当前模块的序列化载荷字节，解码时还要核对其 CRC32C。
+                for (SerializedModule module : snapshot.modules()) {
                     byte[] data = module.data();
                     if (data.length == 0 || data.length > MAX_MODULE_BYTES) {
                         throw new IllegalArgumentException("matcher module exceeds maximum size");
@@ -89,18 +84,16 @@ public final class OrderBookSnapshotCodec {
                     output.write(data);
                 }
             }
-            // 正文已经写入的实际字节数，最终再加八字节校验尾部。
             int bodyLength = body.size();
             if (bodyLength > maximumSnapshotBytes - Long.BYTES) {
                 throw new IllegalArgumentException("matcher snapshot exceeds maximum size");
             }
-            // 本次新分配的最终数组，前部为正文，尾部保存无符号 CRC32C 的 long。
             byte[] encoded = new byte[bodyLength + Long.BYTES];
             body.copyTo(encoded);
             ByteBuffer.wrap(encoded, bodyLength, Long.BYTES)
                     .putLong(Integer.toUnsignedLong(checksum(encoded, 0, bodyLength)));
             return encoded;
-        } catch (/* 编码 IO、解码 EOF 或参数/IO 异常，按当前分支转换错误说明。 */ IOException exception) {
+        } catch (IOException exception) {
             throw new IllegalStateException("unable to encode matcher snapshot", exception);
         }
     }
@@ -113,96 +106,67 @@ public final class OrderBookSnapshotCodec {
         if (encoded == null || encoded.length < 64) {
             throw new ProtocolException("matcher snapshot is truncated");
         }
-        // 最终八字节保存的正文 CRC32C 无符号数值。
         long storedChecksum = ByteBuffer.wrap(encoded, encoded.length - Long.BYTES, Long.BYTES).getLong();
-        // 重新计算正文得到的 CRC32C 三十二位位模式。
         int actualChecksum = checksum(encoded, 0, encoded.length - Long.BYTES);
         if (storedChecksum != Integer.toUnsignedLong(actualChecksum)) {
             throw new ProtocolException("matcher snapshot checksum mismatch");
         }
-        try (/* 仅覆盖正文部分的大端读取流，不把校验尾部当作业务字节。 */ DataInputStream input = new DataInputStream(
+        try (DataInputStream input = new DataInputStream(
                 new ByteArrayInputStream(encoded, 0, encoded.length - Long.BYTES))) {
             if (input.readInt() != MAGIC) throw new ProtocolException("invalid matcher snapshot magic");
-            // 魔数之后保存的清单版本，当前只接受十。
             int version = input.readInt();
             if (version != VERSION) throw new ProtocolException("unsupported matcher snapshot version: " + version);
-            // 从固定产品线编码恢复的独立产品线。
             ProductLine productLine = ProductLineWireCode.decode(input.readInt());
-            // 恢复固定分片和账户路由，使用本部署的空队列容量。
             LaneTopology topology = new LaneTopology(input.readInt(), input.readInt(), input.readLong(),
                     deploymentTopology.matcherWindowSize(), deploymentTopology.matchingCompletionCapacity(),
                     deploymentTopology.accountLaneQueueCapacity());
-            // 所有模块必须共同归属的快照编号。
             long snapshotId = input.readLong();
-            // 与 Core 状态配对的命令水位。
             long coreSequence = input.readLong();
-            // 模块序号的清单上界，最大模块必须达到此值。
             long matcherSequence = input.readLong();
-            // 清单保存的证据分片条目数，应为撮合引擎数加一。
             int progressCount = readCount(input, "matcher shard progress");
             if (progressCount != topology.matchingEngineCount() + 1) {
                 throw new ProtocolException("invalid matcher shard progress count");
             }
-            // 按字节原顺序收集的分片进度，构造清单时再检查规定编号顺序。
             List<ShardProgress> matcherShardProgress = new ArrayList<>(progressCount);
-            for (/* 当前进度、注册表或模块区段中的零起点条目下标。 */ int index = 0; index < progressCount; index++) {
+            for (int index = 0; index < progressCount; index++) {
                 matcherShardProgress.add(new ShardProgress(input.readInt(), input.readLong()));
             }
-            // 清单保存的配对 Core 业务哈希。
             long businessHash = input.readLong();
-            // 清单保存的原生引擎状态哈希。
             int engineHash = input.readInt();
-            // 当前币对注册条目数。
             int symbolCount = readCount(input, "instrumentId registry");
-            // 保留载荷迭代顺序的币对名字到符号编号恢复表。
             Map<String, Integer> symbols = new LinkedHashMap<>();
-            // 已经出现的内部符号编号，检查跨币对重复。
             Set<Integer> symbolIds = new LinkedHashSet<>();
-            for (/* 当前进度、注册表或模块区段中的零起点条目下标。 */ int index = 0; index < symbolCount; index++) {
-                // 当前注册的币对业务名称。
+            for (int index = 0; index < symbolCount; index++) {
                 String instrumentId = readText(input);
-                // 当前币对对应的正数原生符号编号。
                 int symbolId = input.readInt();
                 if (symbolId <= 0 || symbols.put(instrumentId, symbolId) != null || !symbolIds.add(symbolId)) {
                     throw new ProtocolException("duplicate matcher instrumentId");
                 }
             }
-            // 清单用户注册条目数。
             int userCount = readCount(input, "user registry");
-            // 按载荷顺序收集、同时查重的原生用户集合。
             Set<Long> users = new LinkedHashSet<>();
-            for (/* 当前进度、注册表或模块区段中的零起点条目下标。 */ int index = 0; index < userCount; index++) {
-                // 当前要写入或从清单恢复的原生正数用户编号。
+            for (int index = 0; index < userCount; index++) {
                 long userId = input.readLong();
                 if (userId <= 0 || !users.add(userId)) throw new ProtocolException("invalid matcher user registry");
             }
-            // 保存的原生模块数量，必须等于撮合和风险引擎数之和。
             int moduleCount = readCount(input, "module");
             if (moduleCount != topology.matchingEngineCount()) {
                 throw new ProtocolException("invalid matcher module count");
             }
-            // 当前已校验 CRC 并恢复出的模块列表。
             List<SerializedModule> modules = new ArrayList<>(moduleCount);
-            for (/* 当前进度、注册表或模块区段中的零起点条目下标。 */ int index = 0; index < moduleCount; index++) {
-                // 原生模块类型枚举在本格式中的 ordinal，读取沿当前枚举排列解释。
+            for (int index = 0; index < moduleCount; index++) {
                 int typeOrdinal = input.readInt();
                 if (typeOrdinal < 0 || typeOrdinal >= SerializedModuleType.values().length) {
                     throw new ProtocolException("invalid matcher module type");
                 }
-                // 当前模块在其类型内的实例编号。
                 int instanceId = input.readInt();
-                // 当前模块保存的原生序号。
                 long sequence = input.readLong();
-                // 模块记录的纳秒时间戳。
                 long timestampNs = input.readLong();
-                // 当前模块或文本声明的载荷字节数。
                 int length = input.readInt();
-                // 当前模块头保存的 CRC32C 无符号 long 数值。
                 long moduleChecksum = input.readLong();
                 if (length <= 0 || length > MAX_MODULE_BYTES || length > input.available()) {
                     throw new ProtocolException("invalid matcher module length");
                 }
-                // 当前模块的序列化载荷字节，解码时还要核对其 CRC32C。
                 byte[] data = input.readNBytes(length);
                 if (moduleChecksum != Integer.toUnsignedLong(checksum(data))) {
                     throw new ProtocolException("matcher module checksum mismatch");
@@ -213,10 +177,10 @@ public final class OrderBookSnapshotCodec {
             if (input.available() != 0) throw new ProtocolException("trailing matcher snapshot bytes");
             return new OrderBookSnapshot(productLine, topology, snapshotId, coreSequence,
                     matcherSequence, matcherShardProgress, businessHash, engineHash, symbols, users, modules);
-        } catch (/* 编码 IO、解码 EOF 或参数/IO 异常，按当前分支转换错误说明。 */ EOFException exception) {
+        } catch (EOFException exception) {
             throw new ProtocolException("matcher snapshot is truncated: " + exception.getMessage());
-        } catch (/* 编码 IO、解码 EOF 或参数/IO 异常，按当前分支转换错误说明。 */ IOException | IllegalArgumentException exception) {
-            if (exception instanceof ProtocolException /* 已经是协议错误的异常对象，原样向调用方传递。 */ protocolException) throw protocolException;
+        } catch (IOException | IllegalArgumentException exception) {
+            if (exception instanceof ProtocolException protocolException) throw protocolException;
             throw new ProtocolException("invalid matcher snapshot: " + exception.getMessage());
         }
     }

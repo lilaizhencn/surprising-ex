@@ -36,22 +36,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-/**
- * Aeron Cluster 生命周期与交易命令内联推进器。
- *
- * <p>本类实现 {@link ClusteredService}，在 Aeron 容器服务线程直接驱动交易状态与命令生命周期：
- * 接收 Cluster 复制消息并解码、入队到与 {@link TradingCoreOwner} 共享的输入环并推进业务流水线，
- * 响应通过 {@link ClusterServiceEgress} 单线程零拷贝发出。
- * 彻底消除跨核交接、中间人转发类与独立后台线程。</p>
- */
+/** Aeron Cluster 生命周期与交易命令内联推进器，在 Aeron 容器服务线程直接驱动命令生命周期。 */
 @Component
 public final class AeronTradingClusterService implements ClusteredService {
     private static final Logger LOG = LoggerFactory.getLogger(AeronTradingClusterService.class);
 
-    /** 普通输入等待使用的默认三十秒预算。 */
     private static final long DEADLINE_NS = 30_000_000_000L;
 
-    /** 一次快照读取或发布允许等待的最长时间，转换成单调时钟使用的纳秒。 */
     private final long snapshotTimeoutNanos;
     private final int maximumSnapshotBytes;
 
@@ -69,7 +60,6 @@ public final class AeronTradingClusterService implements ClusteredService {
 
     /** 跨调用可见的首个故障，后续调用据此终止。 */
     private volatile Throwable failure;
-    /** 是否已完成初始化启动。 */
     private volatile boolean started;
 
     /** 复制给 Owner 的角色、业务时间和日志位置，不把 Cluster 网络能力交给交易状态。 */
@@ -78,17 +68,13 @@ public final class AeronTradingClusterService implements ClusteredService {
     private long ownerEpoch;
 
     private final CoreMessageFlyweightDecoder messageDecoder;
-    /** 复用的命令指纹计算器，用来区分正常重试与同一命令编号携带不同内容的冲突。 */
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
 
-    /** Aeron 提供的当前集群句柄，供快照发布和空闲等待使用，终止时释放引用。 */
     private Cluster cluster;
 
     private final List<ClusterRoleChangeListener> roleChangeListeners;
 
-    /**
-     * Spring 装配主入口，接收统一绑定的拓扑与配置。
-     */
+    /** Spring 装配主入口，接收统一绑定的拓扑与配置。 */
     @Autowired
     public AeronTradingClusterService(
             ClusterTopology topology,
@@ -137,13 +123,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         this.roleChangeListeners = roleChangeListeners != null ? List.copyOf(roleChangeListeners) : List.of();
     }
 
-
-    /**
-     * Cluster 启动入口：保存 Cluster 句柄、启动响应出口，读取可用快照后启动 Owner。
-     *
-     * @param cluster Aeron Cluster 提供的服务运行上下文
-     * @param snapshot Cluster 提供的恢复快照；首次启动时可能为 {@code null}
-     */
+    /** Cluster 启动入口：保存 Cluster 句柄、启动响应出口，读取可用快照后启动 Owner。 */
     @Override
     public void onStart(Cluster cluster, Image snapshot) {
         this.cluster = cluster;
@@ -172,54 +152,34 @@ public final class AeronTradingClusterService implements ClusteredService {
         }
     }
 
-    /**
-     * 接收 Cluster 已提交的客户端消息，解码后连同日志顺序信息交给 Owner，再尝试发送已就绪响应。
-     *
-     * @param session 发送方客户端会话；服务之间的消息可能为 {@code null}
-     * @param timestamp Cluster 为该消息记录的时间戳
-     * @param buffer 包含编码消息的 Aeron 缓冲区
-     * @param offset 编码消息在缓冲区中的起始位置
-     * @param length 编码消息的字节数
-     * @param header Aeron 消息头，提供该消息在 Cluster 日志中的位置等信息
-     */
+    /** 接收 Cluster 已提交的客户端消息，解码后连同日志顺序信息交给 Owner，再尝试发送已就绪响应。 */
     @Override
     public void onSessionMessage(ClientSession session, long timestamp, DirectBuffer buffer,
             int offset, int length, Header header) {
-        // 上一次响应发送可能因背压或超时请求关闭会话。TransportSession.close() 只记下请求，
-        // 这里在 Cluster 回调线程中真正关闭 Aeron ClientSession，再处理新消息。
+        // TransportSession.close() 只记下请求， 这里在 Cluster 回调线程中真正关闭 Aeron ClientSession，再处理新消息。
         egress.flushSessionClosures();
 
-        // 借用的解码消息；入队成功后由 Owner 持有，入队失败时必须在本线程归还槽位。
         CoreMessage command;
         try {
-            // 将 Aeron 收到的协议帧解码为 Core 消息；解码失败时没有可信的命令内容可继续处理。
             command = messageDecoder.decodeBorrowed(buffer, offset, length);
-        } catch (/* 解码发现协议帧非法；此时没有可信命令可供继续处理。 */ IllegalArgumentException invalid) {
+        } catch (IllegalArgumentException invalid) {
             // 非法帧直接丢弃，不进入 Owner 命令队列。
             return;
         }
 
-        // 把已提交消息直接交给输入环：保留来源会话（服务消息可能没有 session）、
-        // Cluster 时间和日志位置；只有业务命令才计算指纹，用于命令幂等/冲突识别。
+        // 只有业务命令才计算指纹，用于命令幂等/冲突识别。
         try {
             enqueue(command, session == null ? ClusterServiceEgress.NO_SESSION_ID : egress.transportSession(session).id(),
                     timestamp, header.position(),
                     command.header().kind() == WireMessageKind.COMMAND ? fingerprints.ofBorrowed(command) : null);
-        } catch (/* 记录输入交接失败，归还未成功转移给 Owner 的解码槽后继续抛出。 */ RuntimeException | Error fail) {
+        } catch (RuntimeException | Error fail) {
             command.releaseDecoderSlot();
             throw fail;
         }
 
     }
 
-    /**
-     * 交接一条已复制业务命令，保留会话、业务时间、日志位置和指纹，并在当前线程立即推进流水线准入。
-     * @param command 借给 Owner 的已复制命令
-     * @param sessionId 原会话 ID；无网络目标时使用 NO_SESSION_ID
-     * @param timestamp 来自复制日志的业务时间
-     * @param position 来自复制日志的位置
-     * @param fingerprint 已解码请求的内容指纹，供原幂等边界使用
-     */
+    /** 交接一条已复制业务命令，保留会话、业务时间、日志位置和指纹，并在当前线程立即推进流水线准入。 */
     public void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                         CommandFingerprint fingerprint) {
         checkFailure();
@@ -229,7 +189,7 @@ public final class AeronTradingClusterService implements ClusteredService {
             }
             return;
         }
-        // 输入环满时，先在当前线程尝试推进排空已有就绪命令
+        // 输入环满时，先在当前线程尝试推进排空已有就绪命令。
         if (started) {
             pollCommands();
         }
@@ -253,10 +213,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         }
     }
 
-    /**
-     * 在当前线程推进一次 Core 命令生命周期及完成信号处理。
-     * @return 实际产生推进的工作单元数
-     */
+    /** 在当前线程推进一次 Core 命令生命周期及完成信号处理。 */
     public int pollCommands() {
         checkFailure();
         if (!started) return 0;
@@ -268,10 +225,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         }
     }
 
-    /**
-     * 推进 Core 命令生命周期及完成信号，并消费 egress 队列实际发送响应。
-     * @return 产生推进与发送的工作单元总数
-     */
+    /** 推进 Core 命令生命周期及完成信号，并消费 egress 队列实际发送响应。 */
     public int drainResponses() {
         int work = 0;
         if (started) {
@@ -280,12 +234,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         return work + egress.drainResponses();
     }
 
-    /**
-     * 新客户端会话建立时检查 Owner 是否发生故障，创建响应传输会话，并处理之前挂起的会话关闭请求。
-     *
-     * @param session 新建立的客户端会话
-     * @param timestamp Cluster 报告的会话建立时间
-     */
+    /** 新客户端会话建立时检查 Owner 是否发生故障，创建响应传输会话，并处理之前挂起的会话关闭请求。 */
     @Override
     public void onSessionOpen(ClientSession session, long timestamp) {
         checkFailure();
@@ -293,60 +242,37 @@ public final class AeronTradingClusterService implements ClusteredService {
         egress.flushSessionClosures();
     }
 
-    /**
-     * 客户端会话关闭时移除其响应队列和传输句柄，然后检查 Owner 故障。
-     *
-     * @param session 已关闭的客户端会话
-     * @param timestamp Cluster 报告的会话关闭时间
-     * @param reason Aeron Cluster 提供的关闭原因
-     */
+    /** 客户端会话关闭时移除其响应队列和传输句柄，然后检查 Owner 故障。 */
     @Override
     public void onSessionClose(ClientSession session, long timestamp, CloseReason reason) {
         egress.closeSession(session);
         checkFailure();
     }
 
-    /**
-     * 处理 Cluster 定时器回调；当前服务不使用旧日志定时器驱动交易状态，只检查 Owner 故障。
-     *
-     * @param correlationId 定时器关联 ID
-     * @param timestamp Cluster 报告的定时器触发时间
-     */
+    /** 处理 Cluster 定时器回调。当前服务不使用旧日志定时器驱动交易状态，只检查 Owner 故障。 */
     @Override
     public void onTimerEvent(long correlationId, long timestamp) {
         checkFailure();
     }
 
-    /**
-     * Cluster 空闲轮询时推进 Owner 命令生命周期与完成信号，并发送已就绪响应。
-     *
-     * @param nowNs Cluster 提供的当前纳秒时间
-     * @return 本次处理的工作数量
-     */
+    /** Cluster 空闲轮询时推进 Owner 命令生命周期与完成信号，并发送已就绪响应。 */
     @Override
     public int doBackgroundWork(long nowNs) {
         checkFailure();
         try {
             return drainResponses();
-        } catch (/* 让 Cluster 看见后台响应处理失败，不能让故障 Owner 悄悄继续服务。 */ RuntimeException fatal) {
+        } catch (RuntimeException fatal) {
             throw new AgentTerminationException(fatal);
         }
     }
 
-    /**
-     * 在当前线程同步执行角色切换：先推进完成前面所有积压命令，再更新角色和响应 epoch。
-     * @param role 本成员切换后的 Leader、Follower 等集群角色
-     */
+    /** 在当前线程同步执行角色切换：先推进完成前面所有积压命令，再更新角色和响应 epoch。 */
     @Override
     public void onRoleChange(Cluster.Role role) {
         onRoleChange(role, egress.onRoleChange(role));
     }
 
-    /**
-     * 允许显式指定代次的角色切换，供精准测试与受控边界调用。
-     * @param role 边界确定的新 Cluster 角色
-     * @param nextEpoch 新角色代次，响应出口用它区分角色变化
-     */
+    /** 允许显式指定代次的角色切换，供精准测试与受控边界调用。 */
     public void onRoleChange(Cluster.Role role, long nextEpoch) {
         checkFailure();
         if (started) {
@@ -368,18 +294,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         }
     }
 
-    /**
-     * 收到新的领导任期事件时更新响应出口使用的 term ID，并检查 Owner 是否正常。
-     *
-     * @param termId 新领导任期 ID
-     * @param logPosition 事件对应的 Cluster 日志位置
-     * @param timestamp Cluster 报告的事件时间
-     * @param termBaseLogPosition 新任期的日志起始位置
-     * @param leaderMemberId 新 Leader 的成员 ID
-     * @param logSessionId 日志 Session ID
-     * @param timeUnit 事件时间所用单位
-     * @param appVersion 集群应用版本
-     */
+    /** 收到新的领导任期事件时更新响应出口使用的 term ID，并检查 Owner 是否正常。 */
     @Override
     public void onNewLeadershipTermEvent(long termId, long logPosition, long timestamp,
             long termBaseLogPosition, int leaderMemberId, int logSessionId,
@@ -388,11 +303,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         checkFailure();
     }
 
-    /**
-     * 将 Owner 捕获的快照 section 分块写入 Cluster 快照 Publication；遇到可重试的背压时等待进展。
-     *
-     * @param publication Cluster 提供的独占快照 Publication
-     */
+    /** 将 Owner 捕获的快照 section 分块写入 Cluster 快照 Publication。 */
     @Override
     public void onTakeSnapshot(ExclusivePublication publication) {
         drainResponses();
@@ -410,11 +321,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         return captureSnapshot(cluster != null ? cluster.logPosition() : 1, cluster != null ? cluster.time() : 0);
     }
 
-    /**
-     * 固定请求的日志位置与时间，并由 Core Owner 同步完成前缀命令后返回合并快照。
-     * @param position 来自复制日志的位置
-     * @param timestamp 来自复制日志的业务时间
-     */
+    /** 固定请求的日志位置与时间，并由 Core Owner 同步完成前缀命令后返回合并快照。 */
     public byte[] captureSnapshot(long position, long timestamp) {
         checkFailure();
         if (logContext != null) {
@@ -424,11 +331,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         return coreOwner.captureSnapshot(Math.max(1, position));
     }
 
-    /**
-     * 按相同语义同步捕获快照，返回分块结果。
-     * @param position 来自复制日志的位置
-     * @param timestamp 来自复制日志的业务时间
-     */
+    /** 按相同语义同步捕获快照，返回分块结果。 */
     public SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(long position, long timestamp) {
         checkFailure();
         if (logContext != null) {
@@ -438,11 +341,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         return coreOwner.captureSnapshotSections(Math.max(1, position));
     }
 
-    /**
-     * Cluster 服务终止时停止 Owner、清理响应出口，并释放本类持有的 Cluster 引用与 CPU 绑定。
-     *
-     * @param ignored Cluster 生命周期回调传入的上下文；当前清理逻辑使用已保存的状态
-     */
+    /** Cluster 服务终止时停止 Owner、清理响应出口，并释放本类持有的 Cluster 引用与 CPU 绑定。 */
     @Override
     public void onTerminate(Cluster ignored) {
         try {
@@ -464,24 +363,17 @@ public final class AeronTradingClusterService implements ClusteredService {
         }
     }
 
-    /**
-     * 读取保存的首个故障，存在时包装成 Agent 终止异常交给调用方。
-     */
+    /** 读取保存的首个故障，存在时包装成 Agent 终止异常交给调用方。 */
     public void checkFailure() {
         if (failure != null) throw new AgentTerminationException(failure);
     }
 
-    /**
-     * 把终态及当前 Owner epoch 交给已有 egress，响应缓冲继续按该出口的租约规则管理。
-     */
+    /** 把终态及当前 Owner epoch 交给已有 egress，响应缓冲继续按该出口的租约规则管理。 */
     private void publishResponse(long sessionId, CoreMessageHeader header, CoreResponse response,
                                  long committedSequence) {
         egress.publishResponse(coreOwner, sessionId, header, response, committedSequence, ownerEpoch);
     }
 
-    /**
-     * 等待时检查故障、中断和截止时间，推进命令并持续排出响应，使用自旋等待。
-     */
     private void awaitProgress(long deadline) {
         checkFailure();
         if (Thread.currentThread().isInterrupted() || System.nanoTime() > deadline) {
@@ -498,12 +390,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         Thread.onSpinWait();
     }
 
-    /**
-     * 读取 Aeron 提供的快照片段并交给恢复缓冲区；这里只接收数据。
-     * @param image 本次恢复的快照流，首次启动时可能为 null
-     * @param cluster 提供空闲等待策略的当前集群上下文
-     * @return 已收集的恢复缓冲区；没有快照时返回 null
-     */
+    /** 读取 Aeron 提供的快照片段并交给恢复缓冲区。 */
     private com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery readSnapshot(Image image, Cluster cluster) {
         if (image == null) return null;
         var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery(maximumSnapshotBytes);
@@ -519,12 +406,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         return recovery;
     }
 
-    /**
-     * 按 Publication 能接收的最大负载切分快照，背压时重试同一段，不能跳过未发送的字节。
-     * @param snapshot Owner 在固定提交边界生成的分段快照
-     * @param publication Aeron 提供的快照写入通道
-     * @param awaitProgress 背压时检查故障、让出线程并继续推进的等待动作
-     */
+    /** 按 Publication 能接收的最大负载切分快照，背压时重试同一段，不能跳过未发送的字节。 */
     private void writeSnapshot(SectionedCoreSnapshotCodec.SectionedSnapshot snapshot,
                               ExclusivePublication publication, LongConsumer awaitProgress) {
         long deadline = System.nanoTime() + snapshotTimeoutNanos;

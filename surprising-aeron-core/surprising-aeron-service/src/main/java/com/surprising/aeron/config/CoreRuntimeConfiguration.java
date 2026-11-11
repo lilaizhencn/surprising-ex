@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.core.env.StandardEnvironment;
 
-/** 节点启动时一次绑定的执行配置；恢复沿用本节点配置，账户路由仍由快照决定。 */
+/** 节点启动时一次绑定的执行配置。恢复沿用本节点配置，账户路由仍由快照决定。 */
 @ConfigurationProperties(prefix = "surprising.aeron")
 public record CoreRuntimeConfiguration(
         @DefaultValue("1024") int laneCompletionSpins,

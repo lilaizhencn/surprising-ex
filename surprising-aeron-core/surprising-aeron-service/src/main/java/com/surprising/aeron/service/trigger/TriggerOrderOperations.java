@@ -13,9 +13,7 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 
-/**
- * 条件单在 TradingAccountRuntime 中的生命周期和准入校验业务操作。
- */
+/** 条件单在 TradingAccountRuntime 中的生命周期和准入校验业务操作。 */
 public final class TriggerOrderOperations {
 
     private final TradingAccountRuntime runtime;
@@ -33,9 +31,7 @@ public final class TriggerOrderOperations {
         runtime.incrementCommandRevision();
     }
 
-    /**
-     * 先校验止盈和止损两腿关系，再分别完成登记校验，并预检两次版本递增容量；两腿都准备好后才依次写入原账户状态。
-     */
+    /** 先校验止盈和止损两腿关系，再分别完成登记校验，并预检两次版本递增容量。 */
     public void placeOcoPair(long userId,
                              CoreTriggerOrderStateView takeProfit, CoreTriggerOrderStateView stopLoss,
                              int symbolId, long positionKey, boolean instrumentSettled) {
@@ -49,9 +45,7 @@ public final class TriggerOrderOperations {
         runtime.incrementCommandRevision();
     }
 
-    /**
-     * 核对归属、客户标识、币对存在和未结算、普通编号与客户编号不重复，再检查持仓容量；准备新条件单，不直接写状态。
-     */
+    /** 核对归属、客户标识、币对存在和未结算、普通编号与客户编号不重复，再检查持仓容量。 */
     public CoreTriggerOrderState prepareTriggerPlacement(long userId,
                                                         CoreTriggerOrderStateView view, int symbolId,
                                                         long positionKey, boolean instrumentSettled) {
@@ -83,9 +77,6 @@ public final class TriggerOrderOperations {
         return CoreTriggerOrderState.from(view, instrument);
     }
 
-    /**
-     * 先要求用户存在；衍生品还须持仓模式和保证金模式一致、有非零持仓、方向确实平仓，并检查已挂只减仓量加本次预计条件单占量不超持仓。
-     */
     private void validateTriggerPlacement(long userId, int symbolId,
                                           long positionKey, CoreTriggerOrderStateView view) {
         UserAccount user = runtime.user(userId);
@@ -120,9 +111,7 @@ public final class TriggerOrderOperations {
         }
     }
 
-    /**
-     * 核对用户归属，已不开放的条件单返回 false；仍开放则保留已有触发信息并转成 CANCELED，推进记录及命令版本。
-     */
+    /** 核对用户归属，已不开放的条件单返回 false。 */
     public boolean cancelTriggerOrder(long userId, long triggerOrderId) {
         requireTriggerInput(userId, triggerOrderId);
         CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
@@ -135,9 +124,7 @@ public final class TriggerOrderOperations {
         return true;
     }
 
-    /**
-     * 只取消仍为 PENDING 的条件单并写回后状态，命令级版本发布由原提交事件负责，本辅助入口不重复递增命令版本。
-     */
+    /** 只取消仍为 PENDING 的条件单并写回后状态，命令级版本发布由原提交事件负责，本辅助入口不重复递增命令版本。 */
     public boolean cancelPendingTriggerOrderForCommit(long triggerId) {
         CoreTriggerOrderState current = requireTriggerOrder(triggerId);
         if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
@@ -145,9 +132,7 @@ public final class TriggerOrderOperations {
         return true;
     }
 
-    /**
-     * 仅允许 PENDING 转为 TRIGGERING，记录本轮触发序号和价格。
-     */
+    /** 仅允许 PENDING 转为 TRIGGERING，记录本轮触发序号和价格。 */
     public boolean claimTriggerOrder(long triggerOrderId, long triggerSequence,
                                     long triggeredPriceTicks, long triggeredAtEpochMillis) {
         CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
@@ -157,9 +142,7 @@ public final class TriggerOrderOperations {
         return true;
     }
 
-    /**
-     * 仅允许已认领的 TRIGGERING 记录按结果转为 TRIGGERED 或 TRIGGER_FAILED，写子单编号及原因。
-     */
+    /** 仅允许已认领的 TRIGGERING 记录按结果转为 TRIGGERED 或 TRIGGER_FAILED，写子单编号及原因。 */
     public boolean completeTriggerOrder(long triggerOrderId, boolean success,
                                        long placedOrderId, String rejectReason, long completedAtEpochMillis) {
         CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
@@ -170,9 +153,7 @@ public final class TriggerOrderOperations {
         return true;
     }
 
-    /**
-     * 只更新仍开放的移动止损，采用调用方算出的高低价格水位和激活时间，保留原执行信息并递增版本。
-     */
+    /** 只更新仍开放的移动止损，采用调用方算出的高低价格水位和激活时间，保留原执行信息并递增版本。 */
     public boolean updateTrailingTriggerOrder(long triggerOrderId,
                                              long highestPriceTicks, long lowestPriceTicks,
                                              long activatedAtEpochMillis) {
@@ -193,9 +174,7 @@ public final class TriggerOrderOperations {
         return true;
     }
 
-    /**
-     * 只有待触发、设置了到期时间且已到期的记录才转为 EXPIRED，其他情况返回 false。
-     */
+    /** 只有待触发、设置了到期时间且已到期的记录才转为 EXPIRED，其他情况返回 false。 */
     public boolean expireTriggerOrder(long triggerOrderId, long expiredAtEpochMillis) {
         CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
         if (current.status() != CoreTriggerOrderStatus.PENDING || current.expiresAtEpochMillis() == 0
@@ -205,9 +184,7 @@ public final class TriggerOrderOperations {
         return true;
     }
 
-    /**
-     * 仅把更新时间不晚于给定界限的 TRIGGERING 记录恢复为 PENDING，清除子单关联及触发序号价格。
-     */
+    /** 仅把更新时间不晚于给定界限的 TRIGGERING 记录恢复为 PENDING，清除子单关联及触发序号价格。 */
     public boolean retryTriggerOrder(long triggerOrderId,
                                     long staleBeforeEpochMillis, long retryAtEpochMillis) {
         CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
@@ -218,9 +195,6 @@ public final class TriggerOrderOperations {
         return true;
     }
 
-    /**
-     * 先检查命令版本容量，再用统一转换生成记录后状态、写入并递增命令版本。
-     */
     private void updateTriggerOrder(CoreTriggerOrderState current,
                                     CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
                                     long triggeredPriceTicks, String rejectReason, long updatedAt) {
@@ -230,9 +204,6 @@ public final class TriggerOrderOperations {
         runtime.incrementCommandRevision();
     }
 
-    /**
-     * 校验运行时和正条件单编号，遵守原所有权并读取记录，不存在返回明确 TRIGGER_ORDER_NOT_FOUND 拒绝。
-     */
     private CoreTriggerOrderState requireTriggerOrder(long triggerOrderId) {
         if (triggerOrderId <= 0) throw new IllegalArgumentException("invalid runtime trigger order");
         runtime.assertOwner();

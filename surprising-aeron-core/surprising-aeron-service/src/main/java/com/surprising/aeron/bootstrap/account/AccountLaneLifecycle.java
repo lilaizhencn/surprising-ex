@@ -28,7 +28,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
 
     public boolean started() { return started; }
     public boolean ownerHasAccess() { return ownerHasAccess; }
-    /** 只借出指定 Lane 的工作入口，不暴露可替换的资源数组；队列仍校验各生产者契约。 */
+    /** 只借出指定 Lane 的工作入口，不暴露可替换的资源数组。 */
     public SettlementLaneWorker worker(int laneId) { return workers[laneId]; }
 
     public void start(TradingCpuAffinity affinity) {
@@ -48,7 +48,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
         }
     }
 
-    /** 非阻塞取得所有账户 Lane；完成标记是事实来源，轮次仅表示本次交接。 */
+    /** 非阻塞取得所有账户 Lane。 */
     public boolean tryAcquireOwnerAccess() {
         assertOwner.run();
         assertHealthy();

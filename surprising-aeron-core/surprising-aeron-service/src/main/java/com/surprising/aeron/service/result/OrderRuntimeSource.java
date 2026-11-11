@@ -14,30 +14,20 @@ import java.util.UUID;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
-/**
- * 协议编码器使用的订单字段适配器，借用现有 Order，不是订单快照；只有当前有效读取作用域内才能编码。
- */
+/** 协议编码器使用的订单字段适配器，借用现有 Order，不是订单快照。 */
 public final class OrderRuntimeSource implements CoreOrderStateSource {
-    /** 当前适配器借用的实际订单，清适配器时移除引用。 */
     private Order order;
-    /** 与当前订单配对的协议币对文本。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private String instrumentId;
 
-    /**
-     * 借用订单引用并固定本次编码需要的币对文本；没有额外复制订单。
-     * @param order 当前有效状态读取边界中借用的订单
-     * @param instrumentId 与该订单配对的协议币对文本
-     */
+    /** 借用订单引用并固定本次编码需要的币对文本。 */
     public void set(Order order, String instrumentId) {
         this.order = order;
         this.instrumentId = instrumentId;
     }
 
-    /**
-     * 移除适配器中的订单和币对引用，不改变实际订单状态。
-     */
+    /** 移除适配器中的订单和币对引用，不改变实际订单状态。 */
     public void clear() {
         order = null;
         instrumentId = null;

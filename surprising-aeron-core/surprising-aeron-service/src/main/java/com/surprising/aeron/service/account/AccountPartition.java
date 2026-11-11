@@ -37,63 +37,41 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
-/**
- * 一个账户分片的权威数据与派生索引。工作线程或受控交接后的持有者串行修改用户、余额、订单、预留和持仓；冷业务表也属于同一账户分片。部分入口会核对或认领线程，许多直接读写方法只依赖调用方已进入命令或查询保护范围，返回的表和缓冲并非线程安全副本。
- */
+/** 一个账户分片的权威数据与派生索引。工作线程或受控交接后的持有者串行修改用户、余额、订单、预留和持仓。部分入口会核对或认领线程，许多直接读写方法只依赖调用方已进入命令或查询保护范围，返回的表和缓冲并非线程安全副本。 */
 public final class AccountPartition {
-    /** 创建时固定的账户分片编号，用于路由与监控。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final int laneId;
-    /** 创建时记录的分片工作队列容量。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final int queueCapacity;
-    /** 登记属于本分片的用户编号集合，和 users 值表分别维护。 */
     private final LongHashSet userIds;
-    /** 用户编号到分片权威用户元数据的表。 */
     final LongObjectHashMap<UserAccount> users;
-    /** 用户编号到资产余额表的权威数据，最内层资产键对应可变余额单元。 */
     final LongObjectHashMap<IntObjectHashMap<AccountBalance>> balances;
     /** 订单编号到分片权威订单的表，采用后移删除避免删除标记累积触发整表重建。 */
     final Long2ObjectHashMap<Order> orders;
-    /** 按订单编号保存的资金预留权威表，采用后移删除。 */
     final Long2ObjectHashMap<OrderFundsReservation> reservations;
-    /** 运行时持仓键到持仓权威记录的表，可能保留零仓位记录。 */
     final LongObjectHashMap<Position> positions;
-    /** 本分片拥有的客户号身份行、引用计数、正向映射及反向索引。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     final ClientOrderIdRegistry clientIdentities;
-    /** 本分片唯一复用的准入汇总与敞口索引视图。 */
     final AccountExposureIndex admissionOrderIndex;
-    /** 同一分片持有的风险、强平、杠杆、条件单和划转等冷业务状态与复用工作缓冲。 */
     final LaneColdState cold = new LaneColdState(this);
-    /** 该分片已应用的修订计数，和单个用户或订单修订号不同。 */
     long revision;
-    /** 该分片已应用的 Core 命令水位。 */
     long appliedSequence;
-    /** 该分片已完成提交的 Core 命令水位。 */
     long committedSequence;
-    /** 由所属写入方累计的命令处理次数。 */
     long commandOperations;
-    /** 由所属写入方累计的 Matcher 结算次数。 */
     long matcherSettlementOperations;
     /** 当前实际拥有分片状态的线程，受控交接期间允许为空。 */
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
     volatile Thread owner;
-    /** 当前命令借用的 Matcher 结算变化收集器。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     @Setter
     TradeSettlement.Changes matcherSettlementChanges;
 
-    /**
-     * 创建一个分片的账户状态和派生索引，检查编号与队列容量，并计算初始空状态哈希；此时不启动工作线程。
-     * @param laneId 本分片编号，范围为 0 到 63
-     * @param queueCapacity 本分片工作队列的正数容量
-     */
+    /** 创建一个分片的账户状态和派生索引，检查编号与队列容量，并计算初始空状态哈希。此时不启动工作线程。 */
     public AccountPartition(int laneId, int queueCapacity) {
         this(laneId, queueCapacity,
                 com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().laneInitialEntities());
@@ -134,10 +112,7 @@ public final class AccountPartition {
     public boolean queryScopeActive() { return cold.queryScopeActive; }
     public void queryScopeActive(boolean queryScopeActive) { cold.queryScopeActive = queryScopeActive; }
 
-    /**
-     * 在串行写入约定下保留见过的最大队列深度并返回它；这里只用 volatile，不是支持多写者竞争的原子取最大值。
-     * @param depth 调用方观察到的当前队列深度
-     */
+    /** 在串行写入约定下保留见过的最大队列深度并返回它。这里只用 volatile，不是支持多写者竞争的原子取最大值。 */
     public int updateQueueHighWaterMark(int depth) {
         int current = cold.queueHighWaterMark;
         if (depth > current) {
@@ -147,10 +122,7 @@ public final class AccountPartition {
         return current;
     }
 
-    /**
-     * 按触发编号写入条件记录并维护用户成员索引；替换为另一用户时先移除旧用户关联，返回旧记录。
-     * @param value 要按触发编号保存的条件记录
-     */
+    /** 按触发编号写入条件记录并维护用户成员索引。 */
     public CoreTriggerOrderState putTrigger(CoreTriggerOrderState value) {
         CoreTriggerOrderState previous = cold.triggerOrders.put(value.triggerOrderId(), value);
         if (previous != null && previous.userId() != value.userId()) unindexTrigger(previous);
@@ -158,10 +130,7 @@ public final class AccountPartition {
         return previous;
     }
 
-    /**
-     * 删除条件记录并解除对应用户关联，返回原记录；调用方负责满足分片写入约定。
-     * @param id 要移除的触发单编号
-     */
+    /** 删除条件记录并解除对应用户关联，返回原记录。 */
     public CoreTriggerOrderState removeTrigger(long id) {
         CoreTriggerOrderState previous = cold.triggerOrders.remove(id);
         if (previous != null) unindexTrigger(previous);
@@ -175,17 +144,12 @@ public final class AccountPartition {
         if (ids.isEmpty()) cold.triggerIdsByUser.remove(value.userId());
     }
 
-    /**
-     * 接收 Owner 交回的已脱离业务表的订单，交给单生产者单消费者回收队列；队列满时放弃缓存该对象，不丢弃业务命令。
-     * @param order 已经脱离业务表、由 Owner 交回的订单对象
-     */
+    /** 接收 Owner 交回的已脱离业务表的订单，交给单生产者单消费者回收队列。 */
     public void returnRetiredOrder(Order order) {
         cold.retiredOrders.offer(order);
     }
 
-    /**
-     * 在所属线程收取已跨过最终退休水位的订单，清除旧引用后放入有界复用池，再准备本次订单；未过退休水位的对象继续等待。
-     */
+    /** 在所属线程收取已跨过最终退休水位的订单，清除旧引用后放入有界复用池，再准备本次订单。 */
     public Order preparedOrder(com.surprising.product.api.ProductLine product, long userId, OrderCommand.ResolvedPlaceOrder intent,
             java.util.UUID commandId, int symbolId, long timestamp, long position, long retiredOwnerSequence) {
         assertOwner();
@@ -198,9 +162,7 @@ public final class AccountPartition {
         return Order.preparePooled(cold.reusableOrders.pollLast(), product, userId, intent, commandId, symbolId, timestamp, position);
     }
 
-    /**
-     * 借用当前命令收据，逐用户应用结算带来的修订增量并写入收据；禁止嵌套遍历，结束后释放借用。
-     */
+    /** 借用当前命令收据，逐用户应用结算带来的修订增量并写入收据。禁止嵌套遍历，结束后释放借用。 */
     public void applyUserRevisions(LongLongHashMap revisions, AccountPartitionCommit.Delta changes) {
         assertOwner();
         if (cold.userRevisionChanges != null) throw new IllegalStateException("nested Lane user revision traversal");

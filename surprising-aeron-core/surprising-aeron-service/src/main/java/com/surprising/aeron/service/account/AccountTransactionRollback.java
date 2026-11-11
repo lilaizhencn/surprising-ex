@@ -15,35 +15,20 @@ import lombok.Getter;
 import lombok.experimental.Accessors;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 
-/**
- * 按账户分片保存当前命令首次修改前的用户、余额、订单、预留、持仓及客户映射等前值（合并原 RuntimeAccountRollback、LaneBalancePatches、LaneClientOrderCaptures 与 LaneLongCaptures）。
- * 回滚先由每个分片恢复权威数据，再由 Owner 恢复发布引用；余额后值另行发布和清空。Matcher 结算已有独立变化作用域时多数前值入口跳过重复捕获，余额则进入对应结算补丁。
- */
+/** 按账户分片保存当前命令首次修改前的前值；回滚先由分片恢复权威数据，再由 Owner 恢复发布引用。 */
 public final class AccountTransactionRollback {
-    /** 拥有产品元数据及账户分片路由的交易运行时。 */
     private final TradingAccountRuntime state;
-    /** 按分片保存用户首次修改前值及必要的可复用用户槽。 */
     final StateChangeBuffer.Users[] patchUsersBeforeByLane;
-    /** 按分片保存用户资产余额前值和最终后值，发布后单独清空。 */
     final BalancePatches[] patchBalancesBeforeByLane;
-    /** 按分片保存订单预留的原值与原待完成标记。 */
     final LongCaptures<PatchReservationBefore>[] patchReservationsBeforeByLane;
     /** 按分片保存订单原值、待完成标记和恢复用权威引用。 */
     final LongCaptures<PatchOrderBefore>[] patchOrdersBeforeByLane;
-    /** 按分片保存持仓首次修改前值，可用 null 表示原来不存在。 */
     final LongCaptures<Position>[] patchPositionsBeforeByLane;
-    /** 按分片保存用户客户身份键原先指向的订单编号。 */
     final ClientOrderCaptures[] patchClientOrdersBeforeByLane;
-    /** 按分片保存触发记录首次修改前值。 */
     final LongCaptures<CoreTriggerOrderState>[] patchTriggersBeforeByLane;
-    /** 按分片保存风险估值首次修改前值。 */
     final LongCaptures<RiskMarginCalculator.Snapshot>[] patchRiskSnapshotsBeforeByLane;
 
-    /**
-     * 按实际分片数量创建各类可复用捕获缓冲，不复制整份账户状态，也不启动工作线程。
-     * @param state 处理本产品线及账户分片的交易运行时
-     * @param laneCount 按当前拓扑分配的账户分片数量
-     */
+    /** 按实际分片数量创建各类可复用捕获缓冲，不复制整份账户状态，也不启动工作线程。 */
     @SuppressWarnings("unchecked")
     public AccountTransactionRollback(TradingAccountRuntime state, int laneCount) {
         this.state = java.util.Objects.requireNonNull(state);
@@ -69,7 +54,6 @@ public final class AccountTransactionRollback {
 
     /** 原订单不存在且没有待完成准入的共享捕获记录，避免为每个新增订单创建哨兵对象。 */
     private static final PatchOrderBefore ABSENT_ORDER_BEFORE = new PatchOrderBefore(null, false);
-    /** 原预留不存在且不待完成的共享捕获记录。 */
     private static final PatchReservationBefore ABSENT_RESERVATION_BEFORE = new PatchReservationBefore(null, false);
 
     public void captureUserBefore(long userId) {
@@ -441,9 +425,7 @@ public final class AccountTransactionRollback {
     public BalancePatches balancePatch(int index) { return patchBalancesBeforeByLane[index]; }
     public int balancePatchCount() { return patchBalancesBeforeByLane.length; }
 
-    /**
-     * 一个命令在各用户资产上捕获的余额前后值。连续原语数组保存金额和存在标记，用户加资产的原语索引用于定位；清空只换代次并保留容量。
-     */
+    /** 一个命令在各用户资产上捕获的余额前后值。 */
     public static final class BalancePatches {
         public void mergeBefore(BalancePatches source) {
             for (int index = 0; index < source.size; index++) {
@@ -633,9 +615,7 @@ public final class AccountTransactionRollback {
         public boolean presentBefore(int index) { return presentBefore[index]; }
     }
 
-    /**
-     * 一个命令中用户加客户身份键的原订单指向捕获。用连续原语数组保存前值及存在标记，供回滚恢复正反向索引。
-     */
+    /** 一个命令中用户加客户身份键的原订单指向捕获。用连续原语数组保存前值及存在标记，供回滚恢复正反向索引。 */
     public static final class ClientOrderCaptures {
         long[] userIds = new long[4];
         long[] clientKeys = new long[4];
@@ -681,9 +661,7 @@ public final class AccountTransactionRollback {
         }
     }
 
-    /**
-     * 一个分片、一个命令的 long 键前值捕获缓冲。按首次捕获顺序保存键和值引用，另用带代次的索引定位。
-     */
+    /** 一个分片、一个命令的 long 键前值捕获缓冲。按首次捕获顺序保存键和值引用，另用带代次的索引定位。 */
     static final class LongCaptures<V> {
         private long[] keys = new long[8];
         private Object[] values = new Object[8];

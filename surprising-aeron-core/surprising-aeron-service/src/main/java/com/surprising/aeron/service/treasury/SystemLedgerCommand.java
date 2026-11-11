@@ -4,19 +4,13 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 
-/**
- * Owner 同步执行控制命令的财库更新；保险预留可跨账户阶段保留同一财务作用域。
- * Treasury 前值和持仓索引撤销信息一直保留到提交或回滚结束。
- */
+/** Owner 同步执行控制命令的财库更新。Treasury 前值和持仓索引撤销信息一直保留到提交或回滚结束。 */
 public abstract class SystemLedgerCommand {
     private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
     private final RuntimeFactIndexes.PositionUndo positionUndo = new RuntimeFactIndexes.PositionUndo();
     protected TradingAccountRuntime runtime;
-    /** 财务作用域关闭后才能重新初始化。 */
     private boolean scopeClosed = true;
-    /** 记账拒绝由业务续步或最终验证传播，允许调用方先收齐账户阶段。 */
     private RuntimeException rejection;
-    /** 保险预留尚待后续账户及最终记账阶段时为 false。 */
     private boolean scopeCompleted = true;
     private boolean validated;
 
@@ -35,7 +29,7 @@ public abstract class SystemLedgerCommand {
 
     protected boolean financialScopeComplete() { return true; }
 
-    /** 同步记账；业务拒绝恢复财库前值，其他异常交外层故障边界。 */
+    /** 同步记账。业务拒绝恢复财库前值，其他异常交外层故障边界。 */
     public final void apply(TreasuryRuntime ledger) {
         rejection = null;
         scopeClosed = false;
@@ -75,7 +69,7 @@ public abstract class SystemLedgerCommand {
         scopeClosed = true;
     }
 
-    /** 同步核对资金并应用持仓索引；失败立即传播，同时保留运行时故障。 */
+    /** 同步核对资金并应用持仓索引。 */
     public final void validateFunds(boolean externalAdjustment) {
         requireLedgerAccepted();
         if (!scopeCompleted) throw new IllegalStateException("Ledger financial scope is incomplete");

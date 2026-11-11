@@ -30,39 +30,24 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
-/**
- * 账户分片的活跃订单敞口统计、预留待完成计数、持仓分组索引及用户分页游标。
- * 从活跃订单增量维护准入需要的数量和模式条数，避免逐次扫描订单；视图中的目标合约和返回槽都由本分片复用。
- */
+/** 账户分片的活跃订单敞口统计、预留待完成计数、持仓分组索引及用户分页游标。从活跃订单增量维护准入需要的数量和模式条数，避免逐次扫描订单。 */
 public final class AccountExposureIndex {
-    /** 所属账户分片。 */
     private final AccountPartition lane;
     /** 当前准入作用域首次创建用户成员集合时使用的容量提示，默认 2，批量结束后由外层恢复。 */
     int admissionIndexCapacity = 2;
-    /** 按用户维护非终态订单编号集合，所属分片更新；普通订单周转保留空容器。 */
     final LongObjectHashMap<org.agrona.collections.LongHashSet> activeOrderIdsByUser;
-    /** 按用户维护已有预留编号集合，和预留值表配套更新。 */
     final LongObjectHashMap<org.agrona.collections.LongHashSet> reservationIdsByUser;
-    /** 用户到持仓键的成员索引，便于只遍历该用户持仓。 */
     final LongObjectHashMap<LongHashSet> positionKeysByUser;
-    /** 按稠密合约和用户分组的开仓持仓键有序原语数组，供分页风险扫描使用。 */
     final IntObjectHashMap<LongObjectHashMap<LongArrayList>> positionKeysBySymbolAndUser = new IntObjectHashMap<>();
-    /** 订单到待完成 Core 序号的索引，正数为有效序号，零为缺失，删除时保留原后移表。 */
     final Long2LongHashMap pendingReservationSequences;
-    /** 各用户仍待完成的预留条数聚合。 */
     final LongIntHashMap pendingReservationCountsByUser;
-    /** 按资产分组的用户待完成预留金额，归零只移除用户项，资产表保留容量。 */
     final IntObjectHashMap<LongLongHashMap> pendingReservedUnitsByAsset = new IntObjectHashMap<>();
-    /** 整个分片仍待完成的预留条数。 */
     int totalPendingReservations;
-    /** 用户到稠密合约准入汇总的索引，和订单权威表按同一更新边界维护。 */
     private final Long2ObjectHashMap<Int2ObjectHashMap<AdmissionAggregate>> summariesByUser =
             new Long2ObjectHashMap<>();
-    /** 已脱离用户合约索引的空汇总单元复用池，不带用户身份，最多保存 256 个。 */
     private final java.util.ArrayDeque<AdmissionAggregate> emptyAggregates = new java.util.ArrayDeque<>();
     /** 每次 inspect 覆盖的准入统计返回槽，调用方不能保存为长期快照。 */
     private final AdmissionSummary summary = new AdmissionSummary();
-    /** 本次复用准入视图选择的稠密合约编号。 */
     int symbolId;
 
     AccountExposureIndex(AccountPartition lane, int initialEntityCapacity) {
@@ -74,9 +59,7 @@ public final class AccountExposureIndex {
         this.pendingReservationCountsByUser = new LongIntHashMap(initialEntityCapacity);
     }
 
-    /**
-     * 用外层选择的稠密合约编号读取准入汇总，把数量和冲突模式条数写入同一个复用返回槽。
-     */
+    /** 用外层选择的稠密合约编号读取准入汇总，把数量和冲突模式条数写入同一个复用返回槽。 */
     public AdmissionSummary inspect(
             long userId, CorePositionSide positionSide,
             CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
@@ -205,9 +188,7 @@ public final class AccountExposureIndex {
         return order != null && !order.status().terminal();
     }
 
-    /**
-     * 单个用户、单个合约的活跃订单统计。普通剩余量按持仓腿及方向分组，只减仓量按买卖方向分组，保证金模式保存条数而不是金额。
-     */
+    /** 单个用户、单个合约的活跃订单统计。 */
     static final class AdmissionAggregate {
         private long netBuy;
         private long netSell;
@@ -304,16 +285,9 @@ public final class AccountExposureIndex {
         }
     }
 
-    /**
-     * 资金费和到期结算共用的账户索引页。读取账本拥有的递增索引，不复制账户状态。
-     * @param userIds 按全局用户编号递增的只读用户列表
-     * @param nextCursorUserId 还有后页时为本页最后编号，完成时为零
-     * @param complete 索引是否已到末尾
-     */
+    /** 资金费和到期结算共用的账户索引页。 */
     public record Page(ImmutableLongArrayList userIds, long nextCursorUserId, boolean complete) {
-        /**
-         * 按全局用户编号选择排他游标之后的一页，并额外观察一条记录判断是否还有后页。
-         */
+        /** 按全局用户编号选择排他游标之后的一页，并额外观察一条记录判断是否还有后页。 */
         public static Page select(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {
             if (limit <= 0) return new Page(ImmutableLongArrayList.empty(), 0, true);
             ImmutableLongArrayList.Builder selected = new ImmutableLongArrayArrayBuilder(limit).builder();
@@ -341,9 +315,7 @@ public final class AccountExposureIndex {
     }
 }
 
-/**
- * 与热订单、余额、预留和持仓分开的冷业务表与本分片复用工作状态集合。仍由同一分片线程或受控读取边界持有，不额外引入锁、线程或第二份资金状态。
- */
+/** 与热订单、余额、预留和持仓分开的冷业务表与本分片复用工作状态集合。仍由同一分片线程或受控读取边界持有，不额外引入锁、线程或第二份资金状态。 */
 final class LaneColdState {
     static final java.lang.invoke.VarHandle METRIC_REVISION = metricField("revision");
     static final java.lang.invoke.VarHandle METRIC_APPLIED = metricField("appliedSequence");
@@ -363,50 +335,31 @@ final class LaneColdState {
         catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
     }
 
-    /** 所属账户分片。 */
     private final AccountPartition lane;
-    /** 按强平编号保存的分片权威强平记录。 */
     final LongObjectHashMap<RiskScanner.LiquidationOrder> liquidations = new LongObjectHashMap<>();
-    /** 用户到稠密合约及持仓腿键的活跃强平编号索引。 */
     final LongObjectHashMap<IntObjectHashMap<LongObjectHashMap<Long>>> activeLiquidationIndex =
             new LongObjectHashMap<>();
-    /** 运行时持仓键到最近风险估值记录的表。 */
     final LongObjectHashMap<com.surprising.aeron.service.risk.RiskMarginCalculator.Snapshot> riskSnapshots =
             new LongObjectHashMap<>();
-    /** 按用户、合约和保证金模式的业务键保存杠杆设置。 */
     final java.util.Map<CoreLeverageKey, Long> leverages = new java.util.HashMap<>();
-    /** 用户到其全部杠杆业务键的成员索引。 */
     final LongObjectHashMap<java.util.HashSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
-    /** 按算法单编号保存的分片权威算法单记录。 */
     final LongObjectHashMap<com.surprising.aeron.model.CoreAlgoOrderState> algoOrders = new LongObjectHashMap<>();
-    /** 按触发编号保存的分片权威条件记录。 */
     final LongObjectHashMap<com.surprising.aeron.model.CoreTriggerOrderState> triggerOrders = new LongObjectHashMap<>();
-    /** 用户到其触发单编号集合的成员索引。 */
     final LongObjectHashMap<LongHashSet> triggerIdsByUser = new LongObjectHashMap<>();
-    /** 按划转编号保存的尚待完成划转状态。 */
     final LongObjectHashMap<com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers = new LongObjectHashMap<>();
-    /** 本分片复用的风险候选输出。 */
     RiskScanner.LiquidationBatch riskLiquidationBatch;
-    /** 本分片复用的杠杆读取结果槽。 */
     final LeverageLookup leverageLookup = new LeverageLookup();
-    /** 本分片复用的运行时身份查找工作槽。 */
     final RuntimeIdentityRegistry.LookupScratch identityLookupScratch = new RuntimeIdentityRegistry.LookupScratch();
     /** 仅遍历用户修订时借用的命令收据，结束后清空，禁止嵌套借用。 */
     AccountPartitionCommit.Delta userRevisionChanges;
-    /** 常驻的用户修订回调，使用当前借用的命令收据收集结果。 */
     final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure advanceUserRevision;
-    /** 本分片复用的衍生品成交结算工作对象。 */
     final DerivativeTradeSettlementService.DerivativeSettlementAccumulator derivativeSettlementAccumulator =
             new DerivativeTradeSettlementService.DerivativeSettlementAccumulator();
-    /** 本分片复用的现货成交结算工作对象。 */
     final SpotTradeSettlementService.SpotSettlementAccumulator spotSettlementAccumulator =
             new SpotTradeSettlementService.SpotSettlementAccumulator();
-    /** 本分片复用的单持仓风险计算工作缓冲。 */
     final RiskScanner.PositionRiskScratch positionRiskScratch = new RiskScanner.PositionRiskScratch();
-    /** 本分片复用的单笔成交计算游标。 */
     final DerivativeTradeSettlementService.FillCursor singleFillCursor =
             new DerivativeTradeSettlementService.FillCursor();
-    /** 队列历史深度峰值，由现有串行观测入口更新并写入指标响应。 */
     volatile int queueHighWaterMark;
     /** 各 Matcher 分片已应用的 Core 命令水位，支持多 Matcher 并发偏序推进。 */
     final long[] appliedSequencesByShard = new long[Long.SIZE];
@@ -423,7 +376,6 @@ final class LaneColdState {
     /** Owner 归还已脱离业务表订单的 SPSC 队列，等最终退休水位后才复用，容量为 4096。 */
     final org.agrona.concurrent.OneToOneConcurrentArrayQueue<Order> retiredOrders =
             new org.agrona.concurrent.OneToOneConcurrentArrayQueue<>(4_096);
-    /** 已清除旧引用且跨过退休水位的本分片订单复用池，最多缓存 4096 个对象。 */
     final java.util.ArrayDeque<Order> reusableOrders = new java.util.ArrayDeque<>();
 
     LaneColdState(AccountPartition lane) {

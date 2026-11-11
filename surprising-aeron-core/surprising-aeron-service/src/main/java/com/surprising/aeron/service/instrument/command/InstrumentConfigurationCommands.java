@@ -7,14 +7,10 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 
-/**
- * 标的注册、配置修改及维护状态转换；校验产品线、进行中的生命周期和固定合约身份。
- */
+/** 标的注册、配置修改及维护状态转换。 */
 public final class InstrumentConfigurationCommands {
     private InstrumentConfigurationCommands() { }
-    /**
-     * 检查输入和所有权，构造本产品线配置并阻止进行中的资金费或生命周期操作；新标的登记资产身份后注册，旧标的先核对固定合约身份，相同配置直接返回，变化配置保留外壳更新并增加修订。
-     */
+    /** 检查输入和所有权，构造本产品线配置并阻止进行中的资金费或生命周期操作。 */
     public static void applyConfiguration(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                          RegisterInstrumentCommand command) {
         if (runtime == null || identities == null || command == null) {
@@ -65,9 +61,7 @@ public final class InstrumentConfigurationCommands {
                 && before.strikePriceTicks() == after.strikePriceTicks();
     }
 
-    /**
-     * 先检查标的并允许相同状态直接返回；状态变化时核对任务归属、清仓到关闭的完整条件、现货限制、未完强平及生命周期冲突，再更新维护并增加修订。
-     */
+    /** 先检查标的并允许相同状态直接返回。 */
     public static void updateMaintenance(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                    CoreMaintenanceCodec.Command command) {
         if (runtime == null || identities == null || command == null) {

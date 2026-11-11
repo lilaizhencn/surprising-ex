@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.core.env.StandardEnvironment;
 
-/** 可选实时传输配置；空输出通道表示不启动实时传输资源。 */
+/** 可选实时传输配置。 */
 @ConfigurationProperties(prefix = "surprising.realtime")
 public record RealtimeConfiguration(@DefaultValue("") String channel, String directory,
         @DefaultValue("2101") int stream, @DefaultValue("") String controlChannel,

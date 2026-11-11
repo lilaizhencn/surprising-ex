@@ -20,11 +20,8 @@ import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 
-/**
- * 按全局分片号路由与执行订单簿命令。调用方先按永久品种号决定分片，本类把请求交给该分片并把普通结果定位回命令槽；分片间可以独立完成，Owner 用就绪位图回收传输槽，单分片内仍保持顺序。跨分片账户提交与成交结算由外层负责。
- */
+/** 按全局分片号路由与执行订单簿命令。分片间可以独立完成，Owner 用就绪位图回收传输槽，单分片内仍保持顺序。 */
 public final class OrderBookRouter implements AutoCloseable {
-    /** 按全局分片号固定排列的订单簿分片队列数组。 */
     private final ShardPipeline[] shards;
     /** Owner 现有命令槽环，Matcher 完成结果直接发布到其中，组内不另存一份业务结果表。 */
     private final OrderCommandQueue.Pool contexts;
@@ -163,9 +160,7 @@ public final class OrderBookRouter implements AutoCloseable {
         if (failure instanceof RuntimeException runtime) throw runtime;
     }
 
-    /**
-     * 单个订单簿分片的串行执行与完成交接。由单一 Owner 提交、独立 MatcherThread 执行、Owner 按本分片顺序回收传输槽。
-     */
+    /** 单个订单簿分片的串行执行与完成交接。由单一 Owner 提交、独立 MatcherThread 执行、Owner 按本分片顺序回收传输槽。 */
     @Slf4j
     public static final class ShardPipeline implements AutoCloseable {
         private static final VarHandle CURSORS = MethodHandles.arrayElementVarHandle(long[].class);

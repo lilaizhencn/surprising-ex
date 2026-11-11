@@ -8,13 +8,9 @@ import java.util.Objects;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
-/**
- * 订单撮合事实的读取契约与控制撤单/合成回执实现，供账户结算和 Owner 完成处理使用。普通结果对象（{@link Control}）和直接命令的池化结算事件均可实现。
- */
+/** 订单撮合事实的读取契约与控制撤单/合成回执实现，供账户结算和 Owner 完成处理使用。 */
 public interface OrderMatchingResult {
-    /**
-     * 决定如何处理撮合回执的业务分类，区分完全未改状态、已知前缀已执行、接受和无法安全继续的分歧。
-     */
+    /** 决定如何处理撮合回执的业务分类，区分完全未改状态、已知前缀已执行、接受和无法安全继续的分歧。 */
     enum Outcome {
         /** 请求被拒绝且没有登记已执行的状态前缀。 */
         REJECTED_UNCHANGED,
@@ -26,7 +22,7 @@ public interface OrderMatchingResult {
         FATAL_DIVERGENCE
     }
 
-    /** 返回引擎是否接受此结果；仍需结合 outcome 判断已知前缀或致命分歧。 */
+    /** 返回引擎是否接受此结果。 */
     boolean accepted();
     /** 返回原撮合结果码文本，不在查询时重新分类。 */
     String resultCode();
@@ -40,18 +36,12 @@ public interface OrderMatchingResult {
     long nativeMatcherSequence();
     /** 返回证据所属 Matcher 分片，控制分片使用负一。 */
     int nativeMatcherShardId();
-    /**
-     * 逐半部比较原命令 UUID，不额外检查 Core 序号、订单编号或事件内容。
-     * @param most 待比较命令 UUID 的高六十四位
-     * @param least 待比较命令 UUID 的低六十四位
-     */
+    /** 逐半部比较原命令 UUID，不额外检查 Core 序号、订单编号或事件内容。 */
     boolean nativeMatches(long most, long least);
-    /** 返回当前结果关联的原生成交、撤量或拒单事件序列；它是账户结算事实输入，不能据此再次撮合。 */
+    /** 返回当前结果关联的原生成交、撤量或拒单事件序列。它是账户结算事实输入，不能据此再次撮合。 */
     List<MatcherResult.MatcherEvent> matcherEvents();
 
-    /**
-     * 一条控制撤单或合成回执，保留接受状态、撤单前缀、事件和命令证据。Matcher 在发布前可原位补齐身份，避免仅为绑定再分配结果；发布后按只读契约消费，事件引用不深拷贝。
-     */
+    /** 一条控制撤单或合成回执，保留接受状态、撤单前缀、事件和命令证据。Matcher 在发布前可原位补齐身份，避免仅为绑定再分配结果。 */
     final class Control implements OrderMatchingResult {
 
         @Accessors(fluent = true, chain = false)
@@ -83,9 +73,7 @@ public interface OrderMatchingResult {
             this(accepted, resultCode, List.of(), false, List.of());
         }
 
-        /**
-         * 保存控制撤单的状态、成功前缀和事件；命令证据由 Matcher 发布前统一绑定。
-         */
+        /** 保存控制撤单的状态、成功前缀和事件。 */
         public Control(boolean accepted, String resultCode,
                        List<OrderCancelResult> cancellations,
                        boolean matcherStateChanged, List<MatcherResult.MatcherEvent> matcherEvents) {

@@ -10,20 +10,15 @@ import java.util.TreeMap;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/** 尚未完成的跨账户或跨产品线划转快照编解码。版本三按字段保存原命令的全部业务字段，所属用户直接取命令源用户。 构造约定：工具类不创建实例。 */
+/** 尚未完成的跨账户或跨产品线划转快照编解码。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CoreTransferSnapshotCodec {
 
-    /** 当前字段格式版本三。 */
     private static final int VERSION = 3;
 
-    /**
-     * 按输入划转 Map 的编号键排序，把划转编号、两端产品线和账户类型、资产金额、引用原因及显式收付款用户写成字段记录，并加版本三头；本入口没有额外检查待划转数量上限。
-     * @param transfers 以划转编号为键的尚未完成划转集合
-     */
+    /** 按输入划转 Map 的编号键排序，把划转编号、两端产品线和账户类型、资产金额、引用原因及显式收付款用户写成字段记录，并加版本三头。 */
     public static byte[] encode(Map<Long, TransferFundsCommand> transfers) {
-        // 版本三的字段记录字节，外层另写版本头。
-        byte[] fields = new SnapshotFields.Writer().list(1, new TreeMap<>(transfers).values(), /* 完整原命令包含两端用户、产品线与资金参数。 */ command -> {
+        byte[] fields = new SnapshotFields.Writer().list(1, new TreeMap<>(transfers).values(), command -> {
             return new SnapshotFields.Writer()
                     .number(2, command.transferId())
                     .number(3, SnapshotEnumCodes.encode(command.sourceProductLine()))
@@ -36,18 +31,12 @@ public final class CoreTransferSnapshotCodec {
         return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(VERSION).put(fields).array();
     }
 
-    /**
-     * 按版本三字段恢复原始划转命令，要求产品线编号有效、条目数不超运行时上限且划转编号不重复；最后返回只读的按编号排序结果。
-     * @param payload 带四字节版本头的完整划转快照
-     */
+    /** 按版本三字段恢复原始划转命令，要求产品线编号有效、条目数不超运行时上限且划转编号不重复。 */
     private static Map<Long, TransferFundsCommand> decodeFields(byte[] payload) {
-        // 按划转编号构建的恢复结果，返回时包装为只读 Map。
         Map<Long, TransferFundsCommand> transfers = new TreeMap<>();
-        // 版本三跳过版本头后的根字段读取器。
         var root = new SnapshotFields.Reader(java.util.Arrays.copyOfRange(payload, 4, payload.length));
         try {
-            for (var /* 当前划转条目的字段读取器。 */ r : root.list(1, SnapshotFields.Reader::new)) {
-                // 该划转保存的原业务命令，包含两端用户、产品线与资金参数。
+            for (var r : root.list(1, SnapshotFields.Reader::new)) {
                 var command = new com.surprising.aeron.protocol.TransferFundsCommand(r.number(2),
                         SnapshotEnumCodes.readProductLine(r.integer(3)), SnapshotEnumCodes.readProductLine(r.integer(4)),
                         r.text(5), r.text(6), r.text(7), r.number(8), r.text(9), r.text(10), r.number(11), r.number(12));
@@ -56,7 +45,7 @@ public final class CoreTransferSnapshotCodec {
                     throw new ProtocolException("invalid/duplicate pending transfer snapshot");
             }
             return java.util.Collections.unmodifiableMap(transfers);
-        } catch (/* 版本三命令或运行时值构造失败的业务异常，作为协议异常原因保留。 */ IllegalArgumentException invalid) { throw new ProtocolException("invalid transfer snapshot", invalid); }
+        } catch (IllegalArgumentException invalid) { throw new ProtocolException("invalid transfer snapshot", invalid); }
     }
 
     /** 仅接受当前字段格式，不读取隐式用户的历史命令布局。 */

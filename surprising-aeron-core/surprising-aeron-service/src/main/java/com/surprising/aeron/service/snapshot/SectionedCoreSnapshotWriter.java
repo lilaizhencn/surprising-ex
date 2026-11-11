@@ -18,19 +18,11 @@ import java.util.zip.CRC32C;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/** 把同一快照边界的运行时状态编码成有序字节片段。捕获阶段校验 Core/Matcher 配对，编码阶段依次生成元数据、消费水位、命令结果、原生模块、交易状态、费率、划转、终态保留及各 Lane 段，最后写 CRC 页尾。调用方负责冻结和输入生命周期，本类不暂停交易线程。 构造约定：禁止实例化静态快照写入工具。 */
+/** 把同一快照边界的运行时状态编码成有序字节片段。调用方负责冻结和输入生命周期，本类不暂停交易线程。构造约定：禁止实例化静态快照写入工具。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SectionedCoreSnapshotWriter {
 
-    /**
-     * 复用同一栅栏物化的状态、费率及划转，审计完整业务哈希并计算资金哈希，核对 Matcher 清单、快照号、Core 水位及 Cluster 元数据；收集结果、终态索引和账户 Lane 清单。
-     * @param state 已建立一致性读取边界的交易运行时
-     * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
-     * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
-     * @param coreSequence 快照覆盖的已应用 Core 命令水位
-     * @param clusterTimestamp 捕获点的非负 Cluster 业务时间
-     * @param clusterPosition 捕获点的非负 Cluster 日志位置
-     */
+    /** 复用同一栅栏物化的状态、费率及划转，审计完整业务哈希并计算资金哈希，核对 Matcher 清单、快照号、Core 水位及 Cluster 元数据。 */
     static CoreSnapshotImage capture(
             TradingCoreRuntime state,
             OrderBookSnapshot matcherSnapshot,
@@ -45,7 +37,6 @@ public final class SectionedCoreSnapshotWriter {
         if (!state.pendingMatching().isEmpty()) {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
-        // 从物化交易状态重算的资金哈希。
         long fundsStateHash = com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(snapshotState);
         matcherSnapshot.verifyCoreManifest(state.productLine(), state.appliedCommandCount(), businessStateHash);
         if (snapshotId != matcherSnapshot.snapshotId() || coreSequence != matcherSnapshot.coreSequence()
@@ -70,11 +61,8 @@ public final class SectionedCoreSnapshotWriter {
     public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image, int maximumSnapshotBytes) {
         if (maximumSnapshotBytes <= 0 || maximumSnapshotBytes > SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES)
             throw new IllegalArgumentException("invalid snapshot byte limit");
-        // 本次镜像已经配对的 Matcher 快照引用。
         OrderBookSnapshot matcherSnapshot = image.matcherSnapshot();
-        // 捕获点物化的交易状态。
         var snapshotState = image.tradingState();
-        // 按固定协议顺序排列的业务负载列表，尚未加上 CRC 页尾。
         ArrayList<byte[]> payloads = new ArrayList<>();
         payloads.add(header(image));
         payloads.add(sources(image.sourceSequences()));
@@ -92,19 +80,17 @@ public final class SectionedCoreSnapshotWriter {
         payloads.add(CoreFeePolicySnapshotCodec.encode(image.feePolicies()));
         payloads.add(CoreTransferSnapshotCodec.encode(image.pendingTransfers()));
         payloads.add(image.terminalRetention());
-        for (AccountLaneSnapshot /* 当前追加编码的账户 Lane 快照，顺序沿用镜像列表。 */ lane : image.accountLanes()) {
+        for (AccountLaneSnapshot lane : image.accountLanes()) {
             payloads.add(accountLane(lane));
         }
-        // 所有业务负载再加一个 CRC 页尾的总段数。
         int sectionCount = Math.addExact(payloads.size(), 1);
         if (sectionCount != SectionedCoreSnapshotCodec.sectionCount(matcherSnapshot.topology().accountLaneCount())) {
             throw new IllegalStateException("account lane snapshot section count mismatch");
         }
-        // 包含封套、所有段头、业务负载及页尾的 long 总长度，检查上限后才转 int。
         long totalLength = SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
                 + (long) sectionCount * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
                 + SectionedCoreSnapshotCodec.FOOTER_LENGTH;
-        for (byte[] /* 当前检查长度或写入片段列表的业务负载数组。 */ payload : payloads) {
+        for (byte[] payload : payloads) {
             requireSectionLength(payload.length);
             totalLength = Math.addExact(totalLength, payload.length);
         }
@@ -112,7 +98,6 @@ public final class SectionedCoreSnapshotWriter {
             throw new IllegalArgumentException("core snapshot exceeds maximum size");
         }
 
-        // 已编码的十二字节小端封套，首先加入 CRC。
         byte[] envelope = ByteBuffer.allocate(SectionedCoreSnapshotCodec.ENVELOPE_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(SectionedCoreSnapshotCodec.MAGIC)
@@ -120,23 +105,18 @@ public final class SectionedCoreSnapshotWriter {
                 .putShort((short) 0)
                 .putInt(sectionCount)
                 .array();
-        // 累计封套和全部非页尾段头/负载的 CRC32C。
         CRC32C checksum = new CRC32C();
         checksum.update(envelope, 0, envelope.length);
-        // 可逐片持久化的外层有序片段列表，包含封套、各段头和负载。
         ArrayList<byte[]> chunks = new ArrayList<>(1 + sectionCount * 2);
         chunks.add(envelope);
-        for (/* 当前业务负载的零基下标，协议段号使用加一。 */ int index = 0; index < payloads.size(); index++) {
-            // 当前检查长度或写入片段列表的业务负载数组。
+        for (int index = 0; index < payloads.size(); index++) {
             byte[] payload = payloads.get(index);
-            // 当前业务负载的八字节段头，也计入 CRC。
             byte[] sectionHeader = sectionHeader(index + 1, payload.length);
             chunks.add(sectionHeader);
             chunks.add(payload);
             checksum.update(sectionHeader, 0, sectionHeader.length);
             checksum.update(payload, 0, payload.length);
         }
-        // 用八字节小端 long 承载的 CRC 数值，页尾段头和页尾自身不进入 CRC。
         byte[] footer = ByteBuffer.allocate(SectionedCoreSnapshotCodec.FOOTER_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN).putLong(checksum.getValue()).array();
         chunks.add(sectionHeader(sectionCount, footer.length));
@@ -144,12 +124,7 @@ public final class SectionedCoreSnapshotWriter {
         return new SectionedCoreSnapshotCodec.SectionedSnapshot(chunks, Math.toIntExact(totalLength));
     }
 
-    /**
-     * 编码固定元数据，包含 Core/投影水位、投影反码、Lane 摘要、Cluster 位置和各哈希；本地 snapshotState 引用未被后续语句读取，业务哈希使用镜像已保存值。
-     * @param image 输入引用在编码期间保持稳定的快照镜像
-     */
     private static byte[] header(CoreSnapshotImage image) {
-        // 当前段或条目的已分配小端写入缓冲。
         ByteBuffer buffer = ByteBuffer.allocate(SectionedCoreSnapshotCodec.HEADER_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .put((byte) ProductLineWireCode.encode(image.productLine()))
@@ -166,15 +141,10 @@ public final class SectionedCoreSnapshotWriter {
         return buffer.array();
     }
 
-    /**
-     * 用精确加乘法分配一个 Lane 段，依次写编号、修订、应用/提交水位、状态/资金哈希及用户数量和现有用户顺序。
-     * @param lane 一个账户 Lane 的冻结水位与用户清单
-     */
+    /** 用精确加乘法分配一个 Lane 段，依次写编号、修订、应用/提交水位、状态/资金哈希及用户数量和现有用户顺序。 */
     private static byte[] accountLane(AccountLaneSnapshot lane) {
-        // 当前 Lane、来源或幂等结果段所需的精确字节长度。
         int length = Math.addExact(Integer.BYTES * 2 + Long.BYTES * 5,
                 Math.multiplyExact(lane.userIds().size(), Long.BYTES));
-        // 当前段或条目的已分配小端写入缓冲。
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(lane.laneId()).putLong(lane.revision()).putLong(lane.appliedSequence())
                 .putLong(lane.committedSequence()).putLong(lane.localStateHash())
@@ -183,19 +153,13 @@ public final class SectionedCoreSnapshotWriter {
         return buffer.array();
     }
 
-    /**
-     * 按来源 Map 当前迭代顺序写条目数、来源码、来源实例和消费水位；本方法不额外排序，条目固定二十字节。
-     * @param sourceSequences 按来源类型及来源实例记录的消费水位表
-     */
+    /** 按来源 Map 当前迭代顺序写条目数、来源码、来源实例和消费水位。 */
     private static byte[] sources(Map<TradingCoreRuntime.SourceKey, Long> sourceSequences) {
-        // 来源水位 Map 的条目数量。
         int count = sourceSequences.size();
-        // 当前 Lane、来源或幂等结果段所需的精确字节长度。
         int length = Math.toIntExact(Integer.BYTES + Math.multiplyExact(
                 (long) count, SectionedCoreSnapshotCodec.SOURCE_SEQUENCE_LENGTH));
-        // 当前段或条目的已分配小端写入缓冲。
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).putInt(count);
-        sourceSequences.forEach((/* 当前来源类型与来源实例号组成的键。 */ sourceKey, /* 该来源已经消费的命令序号。 */ sequence) -> {
+        sourceSequences.forEach((sourceKey, sequence) -> {
             buffer.putInt(sourceKey.source().wireCode());
             buffer.putLong(sourceKey.sourceId());
             buffer.putLong(sequence);
@@ -203,30 +167,19 @@ public final class SectionedCoreSnapshotWriter {
         return buffer.array();
     }
 
-    /**
-     * 先精确累计所有命令结果条目长度并检查单段上限，再按 Map 当前迭代顺序写条目数与每条结果。
-     * @param commandResults 按命令 UUID 保存的幂等结果表
-     */
+    /** 先精确累计所有命令结果条目长度并检查单段上限，再按 Map 当前迭代顺序写条目数与每条结果。 */
     private static byte[] results(Map<UUID, CommandResultLedger.StoredResult> commandResults) {
-        // 当前 Lane、来源或幂等结果段所需的精确字节长度。
         long length = Integer.BYTES;
-        for (CommandResultLedger.StoredResult /* 当前需要计长或编码的一条幂等结果。 */ result : commandResults.values()) {
+        for (CommandResultLedger.StoredResult result : commandResults.values()) {
             length = Math.addExact(length, Math.addExact(Integer.BYTES, resultEntryLength(result)));
         }
         requireSectionLength(Math.toIntExact(length));
-        // 当前段或条目的已分配小端写入缓冲。
         ByteBuffer buffer = ByteBuffer.allocate(Math.toIntExact(length)).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(commandResults.size());
-        commandResults.forEach((/* 当前结果 Map 条目对应的命令 UUID。 */ commandId, /* 当前需要计长或编码的一条幂等结果。 */ result) -> putResult(buffer, commandId, result));
+        commandResults.forEach((commandId, result) -> putResult(buffer, commandId, result));
         return buffer.array();
     }
 
-    /**
-     * 写一条命令 UUID、固定指纹、状态/结果码、已应用数量、保留序号及响应字节，前置长度不包含它自己的四字节。
-     * @param buffer 已分配且定位到条目写入位置的小端目标缓冲
-     * @param commandId 该幂等结果对应的原命令 UUID
-     * @param result 保存原指纹、终态和响应数据的幂等结果
-     */
     private static void putResult(ByteBuffer buffer, UUID commandId, CommandResultLedger.StoredResult result) {
         buffer.putInt(resultEntryLength(result));
         buffer.putLong(commandId.getMostSignificantBits());
@@ -240,28 +193,17 @@ public final class SectionedCoreSnapshotWriter {
         buffer.put(result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
     }
 
-    /**
-     * 返回固定七十六字节加响应数据长度，以精确加法防止条目大小溢出。
-     * @param result 保存原指纹、终态和响应数据的幂等结果
-     */
+    /** 返回固定七十六字节加响应数据长度，以精确加法防止条目大小溢出。 */
     private static int resultEntryLength(CommandResultLedger.StoredResult result) {
         return Math.addExact(SectionedCoreSnapshotCodec.RESULT_FIXED_LENGTH, result.responseDataLength());
     }
 
-    /**
-     * 生成八字节小端段头，包含一基顺序段号和负载字节数，不在此额外检查参数。
-     * @param id 一基顺序段编号
-     * @param payloadLength 该段的负载字节数
-     */
+    /** 生成八字节小端段头，包含一基顺序段号和负载字节数，不在此额外检查参数。 */
     private static byte[] sectionHeader(int id, int payloadLength) {
         return ByteBuffer.allocate(SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN).putInt(id).putInt(payloadLength).array();
     }
 
-    /**
-     * 要求单段负载长度为正且不超过部署单段上限；总大小另由编码流程检查。
-     * @param length 需要检查的单段负载长度
-     */
     private static void requireSectionLength(int length) {
         if (length <= 0 || length > SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES) {
             throw new IllegalArgumentException("invalid snapshot section length");

@@ -3,9 +3,7 @@ package com.surprising.aeron.registry;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
-/**
- * Aeron 节点向 Nacos 自动注册的配置属性。
- */
+/** Aeron 节点向 Nacos 自动注册的配置属性。 */
 @ConfigurationProperties(prefix = "surprising.aeron.registry")
 public record AeronRegistryProperties(
         @DefaultValue("true") boolean enabled,
