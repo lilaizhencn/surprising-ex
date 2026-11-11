@@ -1457,8 +1457,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 返回近期终态墓碑当前条数，用于保留窗口观测。
      */
-    int terminalRetentionTombstoneCount() {
-        return components.terminalRetention.tombstoneCount();
+    int terminalRetentionCompletedCount() {
+        return components.terminalRetention.completedCount();
     }
 
     /**

@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.*;
 /** 验证直接及保留 Lane 删除事实更新真实业务索引，提交清理不触碰源缓冲的新命令。 */
 class CommittedIndexVisitTest {
     @Test
-    void directAndBorrowedLaneTombstonesUpdateIndexesUntilTheCommitClearsThem() {
+    void directAndBorrowedLaneCompletedOrdersUpdateIndexesUntilTheCommitClearsThem() {
         try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             var state = core.runtimeState();
             var identities = core.identities();

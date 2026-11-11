@@ -9,10 +9,10 @@ import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
 
 /** 检查订单身份 FIFO、重复 ID、乱序 ID、扩容和客户号哈希碰撞。 */
-class TerminalTombstoneStoreTest {
+class CompletedOrderStoreTest {
     @Test
     void boundedEvictionRetainsOnlyLatestOrders() {
-        var store = new TerminalTombstoneStore();
+        var store = new CompletedOrderStore();
         for (int i = 1; i <= 100_000; i++) {
             assertThat(store.contains(i)).isFalse();
             assertThat(store.putIfAbsent(i, 7, "client-" + i)).isTrue();
@@ -26,7 +26,7 @@ class TerminalTombstoneStoreTest {
 
     @Test
     void duplicateOrderKeepsOriginalIdentityAndFifoPosition() {
-        var store = new TerminalTombstoneStore();
+        var store = new CompletedOrderStore();
         store.putIfAbsent(7, 11, "original");
         store.putIfAbsent(8, 11, "next");
         assertThat(store.putIfAbsent(7, 12, "replacement")).isFalse();
@@ -44,7 +44,7 @@ class TerminalTombstoneStoreTest {
 
     @Test
     void upperBoundNeverHidesOutOfOrderIdsAfterEviction() {
-        var store = new TerminalTombstoneStore();
+        var store = new CompletedOrderStore();
         store.putIfAbsent(Long.MAX_VALUE, 1, "highest");
         store.putIfAbsent(7, 1, "late");
         store.trim(1);
@@ -60,7 +60,7 @@ class TerminalTombstoneStoreTest {
 
     @Test
     void growthWrapAndClientCollisionsMatchFifoReferenceBytes() throws Exception {
-        var store = new TerminalTombstoneStore(128);
+        var store = new CompletedOrderStore(128);
         var reference = new LinkedHashMap<Long, Value>();
         // 先超过初始容量触发扩容，再重复退窗，检查同用户、同客户号由多笔订单保留。
         for (long id = 1; id < 6000; id++) {
@@ -85,7 +85,7 @@ class TerminalTombstoneStoreTest {
         for (var value : reference.values()) assertThat(store.containsClient(value.user(), value.client())).isFalse();
     }
 
-    private static byte[] bytes(TerminalTombstoneStore store) throws Exception {
+    private static byte[] bytes(CompletedOrderStore store) throws Exception {
         var bytes = new ByteArrayOutputStream();
         store.write(new DataOutputStream(bytes));
         return bytes.toByteArray();

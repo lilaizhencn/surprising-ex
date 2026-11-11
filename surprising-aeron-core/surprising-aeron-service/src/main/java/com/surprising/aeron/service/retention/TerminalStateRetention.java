@@ -21,13 +21,13 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     // 两份内存身份由当前产品 Owner 管理，快照输出为独立字节。
 
     /** 近期订单终态身份的六万五千五百三十六项保留上限。 */
-    static final int MAX_TOMBSTONES = 65_536;
+    static final int MAX_COMPLETED_ORDERS = 65_536;
     /** 订单终态保留段快照版本四。 */
     private static final int VERSION = 4;
     /** 快照客户号的最大 UTF-8 字节数二百五十六。 */
     private static final int MAX_CLIENT_ID_BYTES = 256;
     /** Owner 持有的近期终态身份 FIFO，客户号与实体索引引用同一槽。 */
-    private final TerminalTombstoneStore tombstones;
+    private final CompletedOrderStore completedOrders;
     /** 长期资金命令身份索引，由 Owner 在内存中顺序维护。 */
     private final FundsCommandIndex fundsCommands;
 
@@ -35,7 +35,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      * 创建空终态 FIFO 和资金身份索引。
      */
     public TerminalStateRetention() {
-        this(new TerminalTombstoneStore(), new FundsCommandIndex());
+        this(new CompletedOrderStore(), new FundsCommandIndex());
     }
 
     /** 冷阶段导入结束后，将活动资金索引绑定到当前 Core Owner。 */
@@ -51,7 +51,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      */
     @Override
     public void accept(long orderId, long userId, String clientOrderId) {
-        tombstones.putIfAbsent(orderId, userId,
+        completedOrders.putIfAbsent(orderId, userId,
                 normalizeClientId(clientOrderId));
     }
 
@@ -72,14 +72,14 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      */
     @Override
     public void completeSequence() {
-        trimTombstones();
+        trimCompletedOrders();
     }
 
     /**
      * 让终态 FIFO 只保留最近六万五千五百三十六项，不裁剪长期资金身份。
      */
-    private void trimTombstones() {
-        tombstones.trim(MAX_TOMBSTONES);
+    private void trimCompletedOrders() {
+        completedOrders.trim(MAX_COMPLETED_ORDERS);
     }
 
     /**
@@ -90,9 +90,9 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      */
     public boolean containsOrder(long orderId, long userId, String clientOrderId) {
         if (orderId <= 0) throw new IllegalArgumentException("invalid terminal order key");
-        if (tombstones.contains(orderId)) return true;
+        if (completedOrders.contains(orderId)) return true;
         String client = normalizeClientId(clientOrderId);
-        return !client.isEmpty() && tombstones.containsClient(userId, client);
+        return !client.isEmpty() && completedOrders.containsClient(userId, client);
     }
 
     /**
@@ -101,14 +101,14 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      */
     public boolean orderIdInUse(long orderId) {
         if (orderId <= 0) throw new IllegalArgumentException("invalid terminal order key");
-        return tombstones.contains(orderId);
+        return completedOrders.contains(orderId);
     }
 
     /**
      * 返回当前 FIFO 终态身份数量，不包括长期资金命令。
      */
-    public int tombstoneCount() {
-        return tombstones.size();
+    public int completedCount() {
+        return completedOrders.size();
     }
 
     /**
@@ -178,7 +178,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
             // 写当前快照段的二进制流
             DataOutputStream output = new DataOutputStream(bytes);
             output.writeInt(VERSION);
-            tombstones.write(output);
+            completedOrders.write(output);
             fundsCommands.write(output);
             output.flush();
             return bytes.toByteArray();
@@ -197,7 +197,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
             // 读取本次独立快照字节的二进制流
             DataInputStream input = new DataInputStream(new ByteArrayInputStream(encoded));
             if (input.readInt() != VERSION) throw new IllegalArgumentException("unsupported terminal retention version");
-            TerminalTombstoneStore tombstones = readTombstones(input);
+            CompletedOrderStore completedOrders = readCompletedOrders(input);
             // 资金身份条数，必须精确匹配剩余字节
             int fundsCommandCount = input.readInt();
             if (fundsCommandCount < 0 || (long) fundsCommandCount * (16 + CommandFingerprint.LENGTH) != input.available()) {
@@ -218,7 +218,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
                     fundsCommands.put(commandId, CommandFingerprint.fromBytes(fingerprint));
                 }
                 if (input.available() != 0) throw new IllegalArgumentException("trailing terminal retention bytes");
-                return new TerminalStateRetention(tombstones, fundsCommands);
+                return new TerminalStateRetention(completedOrders, fundsCommands);
             } catch (/* 恢复新资金索引时的运行或 I/O 故障，关闭后继续抛出 */ RuntimeException | IOException failure) {
                 fundsCommands.close();
                 throw failure;
@@ -229,10 +229,10 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     }
 
     /** 直接按 FIFO 顺序恢复近期墓碑，拒绝越界条数、非法身份、重复实体及截断文本。 */
-    private static TerminalTombstoneStore readTombstones(DataInputStream input) throws IOException {
+    private static CompletedOrderStore readCompletedOrders(DataInputStream input) throws IOException {
         int count = input.readInt();
-        if (count < 0 || count > MAX_TOMBSTONES) throw new IllegalArgumentException("invalid terminal retention count");
-        TerminalTombstoneStore tombstones = new TerminalTombstoneStore();
+        if (count < 0 || count > MAX_COMPLETED_ORDERS) throw new IllegalArgumentException("invalid terminal retention count");
+        CompletedOrderStore completedOrders = new CompletedOrderStore();
         for (int index = 0; index < count; index++) {
             long id = input.readLong();
             long userId = input.readLong();
@@ -242,11 +242,11 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
             }
             byte[] text = input.readNBytes(length);
             if (text.length != length) throw new IllegalArgumentException("truncated terminal client id");
-            if (!tombstones.putIfAbsent(id, userId, new String(text, StandardCharsets.UTF_8))) {
+            if (!completedOrders.putIfAbsent(id, userId, new String(text, StandardCharsets.UTF_8))) {
                 throw new IllegalArgumentException("duplicate terminal entity");
             }
         }
-        return tombstones;
+        return completedOrders;
     }
 
     /**

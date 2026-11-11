@@ -528,7 +528,7 @@ class ClusterCommandPipelineTest {
                 assertThat(gate.join()).isTrue();
                 assertThat(live.responses).hasSize(1);
                 assertThat(state.terminalRetention().containsOrder(999_999, 11, (batch ? "batch-" : "order-") + 1000))
-                        .as("ordered publication retains the client ID tombstone after Lane freed the identity")
+                        .as("ordered publication retains the client ID completed-order entry after Lane freed the identity")
                         .isTrue();
                 assertThat(live.hash()).isEqualTo(serial.hash());
                 assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());

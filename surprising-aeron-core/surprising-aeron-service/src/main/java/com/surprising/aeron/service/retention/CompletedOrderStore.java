@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 /**
  * Owner 独占的近期终态订单身份 FIFO。订单及客户号哈希链链接同一组数组槽，只追加新订单，淘汰时按槽解链；同一客户号可由多个订单保留。
  */
-final class TerminalTombstoneStore {
+final class CompletedOrderStore {
     /** 曾新增订单 ID 的保守最大值，淘汰不降低，用于快速排除更大 ID。 */
     private long maximumIndexedId;
     /** 默认初始 FIFO 槽数八千一百九十二。 */
@@ -46,7 +46,7 @@ final class TerminalTombstoneStore {
     /**
      * 使用默认八千一百九十二槽建立终态存储。
      */
-    TerminalTombstoneStore() {
+    CompletedOrderStore() {
         this(DEFAULT_INITIAL_CAPACITY);
     }
 
@@ -54,7 +54,7 @@ final class TerminalTombstoneStore {
      * 从至少一百二十八槽向上取二次幂容量，建立 FIFO 数组与两套索引，空链接用零、未入桶位置用负一；本入口不另行拒绝非正初始建议值。
      * @param initialCapacity 初始建议槽数，实际至少一百二十八并向上取二次幂
      */
-    TerminalTombstoneStore(int initialCapacity) {
+    CompletedOrderStore(int initialCapacity) {
         // 本次构造或扩容采用的二次幂 FIFO 容量
         int capacity = 128;
         while (capacity < initialCapacity) capacity = Math.multiplyExact(capacity, 2);

@@ -71,17 +71,17 @@ class TerminalStateRetentionTest {
      * 同一序号先写超过总上限四十项，序列完成时一次淘汰全部最旧超额项；原实例和编码恢复实例都保留相同最新区间。
      */
     @Test
-    void oneSequenceEvictsEveryExcessTombstoneAndKeepsTheNewestAfterRestore() {
+    void oneSequenceEvictsEveryExcessCompletedOrderAndKeepsTheNewestAfterRestore() {
         // 本场景实际终态与资金身份保留器
         var retention = new TerminalStateRetention();
-        for (/* 当前循环的终态订单 ID */ long id = 1; id <= TerminalStateRetention.MAX_TOMBSTONES + 40; id++)
+        for (/* 当前循环的终态订单 ID */ long id = 1; id <= TerminalStateRetention.MAX_COMPLETED_ORDERS + 40; id++)
             retention.accept(id, 7, "");
         retention.completeSequence();
-        assertThat(retention.tombstoneCount()).isEqualTo(TerminalStateRetention.MAX_TOMBSTONES);
+        assertThat(retention.completedCount()).isEqualTo(TerminalStateRetention.MAX_COMPLETED_ORDERS);
         for (var /* 本次检查的原保留器或编码恢复副本 */ state : new TerminalStateRetention[]{retention, TerminalStateRetention.decode(retention.encode())}) {
             assertThat(state.containsOrder(40, 7, "")).isFalse();
             assertThat(state.containsOrder(41, 7, "")).isTrue();
-            assertThat(state.containsOrder(TerminalStateRetention.MAX_TOMBSTONES + 40, 7, "")).isTrue();
+            assertThat(state.containsOrder(TerminalStateRetention.MAX_COMPLETED_ORDERS + 40, 7, "")).isTrue();
         }
     }
     /**
