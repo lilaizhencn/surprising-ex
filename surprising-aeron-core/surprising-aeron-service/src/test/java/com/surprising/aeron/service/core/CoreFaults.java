@@ -94,8 +94,7 @@ public final class CoreFaults {
     public static ActivationState activationState(TradingCoreRuntime state) {
         return new ActivationState(state.activated(),
                 state.activated(),
-                ((com.surprising.aeron.service.matcher.OrderBookEngine)
-                        get(state, "matchingAdapter")).activated(),
+                state.matchingAdapter().activated(),
                 state.commits.publication.activated());
     }
 

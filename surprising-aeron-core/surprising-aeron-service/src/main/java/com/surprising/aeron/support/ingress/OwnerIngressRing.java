@@ -8,7 +8,7 @@ import lombok.experimental.Accessors;
 import static com.surprising.aeron.support.egress.ClusterServiceEgress.NO_SESSION_ID;
 
 /**
- * 交易输入环：单线程内联模式下的原位待办命令环。
+ * 交易输入环：单生产者（Cluster 回调线程）到单消费者（Owner）的原位待办命令环。
  * 固定槽保存待处理请求、来源会话及日志元数据；移除槽本身不等于归还命令的解码租约。
  */
 public final class OwnerIngressRing {
@@ -18,10 +18,10 @@ public final class OwnerIngressRing {
     private static final int MASK = CAPACITY - 1;
     /** 启动时分配并循环复用的输入条目数组。 */
     private final Entry[] entries = new Entry[CAPACITY];
-    /** 累计生产条数（单线程原位推进）。 */
-    private long producedEntries;
-    /** 累计消费条数（单线程原位推进）。 */
-    private long consumedEntries;
+    /** 累计生产条数；volatile 发布条目字段，供消费者 acquire 读取。 */
+    private volatile long producedEntries;
+    /** 累计消费条数；remove 清空条目后再发布，供生产者判断槽可复用。 */
+    private volatile long consumedEntries;
 
     /**
      * 启动时一次创建全部输入条目，之后按环形下标复用，不逐命令分配输入条目。

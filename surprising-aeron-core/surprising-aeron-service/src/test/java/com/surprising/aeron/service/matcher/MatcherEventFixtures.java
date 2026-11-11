@@ -30,9 +30,12 @@ public final class MatcherEventFixtures {
     public static exchange.core2.core.common.MatcherResult nativeResult(
             com.surprising.aeron.service.settlement.TradeSettlement event) {
         try {
-            var field = event.getClass().getDeclaredField("directNativeResult");
+            var state = event.getClass().getDeclaredField("state");
+            state.setAccessible(true);
+            Object execution = state.get(event);
+            var field = execution.getClass().getDeclaredField("directNativeResult");
             field.setAccessible(true);
-            return (exchange.core2.core.common.MatcherResult) field.get(event);
+            return (exchange.core2.core.common.MatcherResult) field.get(execution);
         } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
     }
 }

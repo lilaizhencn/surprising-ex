@@ -775,16 +775,19 @@ class CoreOrderedOrderBatchTest {
             long batchSequence = state.matchingSequence(batchId);
             // 第一条后续命令对应的 Core 序号
             long laterSequence = state.matchingSequence(laterId);
-            // 当前批次先取得的 Matcher 事实
-            var first = awaitMatching(state, batchSequence);
-            assertThat(state.commits.completeMatching(batchSequence, first, 2_000, 3)).isNull();
-            // 同一前置批次推进到下一项后取得的 Matcher 事实
-            var second = awaitMatching(state, batchSequence);
-
+            // 前置批次仍活动时，后续批次不能提前取得 Matcher 完成
             assertThat(state.pendingMatching().required(laterSequence).hasMatchingCompletion()).isFalse();
 
-            // 前置批次完成时的终态响应
-            CoreResponse batchResponse = completeEventually(state, batchSequence, second, 2_001, 4);
+            // 当前批次先取得的 Matcher 事实
+            var first = awaitMatching(state, batchSequence);
+            // 第一次推进入口最多只能完成已就绪的批内项，不保证只推进一项
+            CoreResponse batchResponse = state.commits.completeMatching(batchSequence, first, 2_000, 3);
+            if (batchResponse == null) {
+                // 同一前置批次推进到下一项后取得的 Matcher 事实
+                var second = awaitMatching(state, batchSequence);
+                // 前置批次完成时的终态响应
+                batchResponse = completeEventually(state, batchSequence, second, 2_001, 4);
+            }
             assertThat(batchResponse).isNotNull();
             // 后续批次取得的 Matcher 事实
             var laterResult = awaitMatching(state, laterSequence);
