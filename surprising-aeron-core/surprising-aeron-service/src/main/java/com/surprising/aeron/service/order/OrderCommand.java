@@ -204,11 +204,9 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 非批量命令按操作选择最多两个需要收集结果的订单号，再绑定 Lane 响应目标；批量沿用自己的 OrderBatchProcessor.PendingBatch 目标，不创建第二份结果容器。
-     * @param responseArena 非空响应编码需要使用的缓冲 Arena
      */
     void prepareLaneResultTarget(ResponseArena responseArena) {
         if (orderBatch != null) return;
-        // 当前操作需要捕获结果的第一个订单号。
         // 替换操作需要捕获的第二个订单号，否则零。
         long first = 0, second = 0;
         switch (operation) {
@@ -243,7 +241,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     public Order laneResultOrder(long orderId) { return settlementState.laneResultTarget.order(orderId); }
     /**
      * 从已捕获结果中取品种字符串，未绑定或未捕获时可为空。
-     * @param orderId 当前逻辑命令或结果绑定的订单号
      */
     public String laneResultSymbol(long orderId) { return settlementState.laneResultTarget.instrumentId(orderId); }
     /**
@@ -265,11 +262,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 准备槽内固定的准入等待任务，Matcher 先等 Lane 收据再决定拒绝、先撤或调用原下单任务，避免每次分配捕获 lambda。
-     * @param owner 所属交易 Owner 运行时
      * @param admission 对应方法签名的准入事件或已解析准入值，使用期间按租约只读
-     * @param matcherShard 调用方确定的目标 Matcher 分片
-     * @param settlement 当前准入等待任务要发布的直达结算事件
-     * @param original 准入接受且内部先撤完成后继续执行的原下单函数
      */
     java.util.function.Supplier<?> gateAdmission(TradingCoreRuntime owner,
             OrderCommand.PlaceAdmissionEvent admission, int matcherShard,
@@ -281,11 +274,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 准备本槽普通下单任务，只接受一种已准入订单表示并保留结算事件租约；实际撮合在 Matcher 调用 get 时执行。
-     * @param owner 所属交易 Owner 运行时
-     * @param matcherShard 调用方确定的目标 Matcher 分片
-     * @param userId 请求所属用户编号
-     * @param resolvedOrder 已经完成准入的下单对象
-     * @param direct 本命令独占并尚未退休的直达结算事件
      */
     java.util.function.Supplier<?> preparePlaceMatching(TradingCoreRuntime owner,
             int matcherShard, long userId,
@@ -297,11 +285,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 准备顺序批量中已冻结的 Order 输入，Matcher 直接消费该项租约，不重建独立撮合 DTO。
-     * @param owner 所属交易 Owner 运行时
-     * @param matcherShard 调用方确定的目标 Matcher 分片
-     * @param userId 请求所属用户编号
      * @param admittedOrder 已经冻结供 Matcher 消费的批量项订单租约
-     * @param direct 本命令独占并尚未退休的直达结算事件
      */
     java.util.function.Supplier<?> prepareAdmittedPlaceMatching(TradingCoreRuntime owner,
             int matcherShard, long userId, Order admittedOrder, TradeSettlement direct) {
@@ -311,12 +295,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 保存撤单身份及直达结算目标到本槽固定任务，不在 Owner 准备阶段撤订单簿。
-     * @param owner 所属交易 Owner 运行时
-     * @param matcherShard 调用方确定的目标 Matcher 分片
-     * @param orderId 当前逻辑命令或结果绑定的订单号
-     * @param userId 请求所属用户编号
-     * @param instrumentId 永久品种字符串
-     * @param direct 本命令独占并尚未退休的直达结算事件
      */
     java.util.function.Supplier<?> prepareCancelMatching(TradingCoreRuntime owner,
             int matcherShard, long orderId, long userId, String instrumentId, TradeSettlement direct) {
@@ -326,14 +304,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 保存旧单号、替换准入和直达结算目标，执行时先处理共同的前置撤单，再由适配器执行撤旧下新。
-     * @param owner 所属交易 Owner 运行时
-     * @param matcherShard 调用方确定的目标 Matcher 分片
-     * @param orderId 当前逻辑命令或结果绑定的订单号
-     * @param userId 请求所属用户编号
-     * @param originalOrderId 替换前要撤销的旧订单号
-     * @param instrumentId 永久品种字符串
-     * @param replacement 已经准入的新单输入
-     * @param direct 本命令独占并尚未退休的直达结算事件
      */
     java.util.function.Supplier<?> prepareReplaceMatching(TradingCoreRuntime owner,
             int matcherShard, long orderId, long userId,
@@ -346,7 +316,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 保留非空前置撤单列表引用，不复制或在这里执行；发布到 Matcher 前后调用方保持内容稳定。
-     * @param orders 执行期间保持稳定的前置或控制撤单有序列表
      */
     void matcherPreCancellations(List<CancellationOrder> orders) {
         matchingTasks.matcherPreCancellations = Objects.requireNonNull(orders);
@@ -354,9 +323,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 准备按既定顺序执行控制撤单的固定任务，要求 Owner 和列表非空，返回本槽同一个 Supplier。
-     * @param owner 所属交易 Owner 运行时
-     * @param orderId 当前逻辑命令或结果绑定的订单号
-     * @param orders 执行期间保持稳定的前置或控制撤单有序列表
      */
     java.util.function.Supplier<?> prepareControlMatching(TradingCoreRuntime owner,
             List<CancellationOrder> orders) {
@@ -366,17 +332,13 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 按当前列表顺序执行原生前置撤单，接受时记入直达事件；首个非接受结果发布为带逻辑命令身份的失败并返回，全部接受返回空。此路径不跳过 UNKNOWN_ORDER，与下单准入等待任务的内部意图规则不同。
-     * @param owner 所属交易 Owner 运行时
-     * @param shard 当前分片号或要缓存的静态分片号
      * @param logicalOrderId 用于关联前置撤单失败的外层逻辑订单号
-     * @param target 接收原生事实的结算目标或接收提交资金缓冲的目标，具体类型见签名
      */
     exchange.core2.core.common.MatcherResult applyMatcherPreCancellations(
             TradingCoreRuntime owner, int shard, long logicalOrderId, TradeSettlement target) {
-        for (/* 当前前置撤单或结果数组中的下标。 */ int index = 0; index < matchingTasks.matcherPreCancellations.size(); index++) {
+        for (int index = 0; index < matchingTasks.matcherPreCancellations.size(); index++) {
             // 当前按既定顺序执行的一条原生撤单身份。
             var cancellation = matchingTasks.matcherPreCancellations.get(index);
-            // 当前前置撤单的原生回执，用其状态决定记录事实或停止。
             var result = owner.matchingAdapter().cancelDirectPrefix(command.header().submittedAtEpochMillis(),
                     cancellation.userId(), cancellation.orderId(), cancellation.symbolId());
             // 原生撤单是否返回 SUCCESS 或 ACCEPTED。
@@ -391,7 +353,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 当前还没有控制续步时绑定非空 BooleanSupplier，之后由 Owner 轮询其完成状态。
-     * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
      */
     public void deferControl(java.util.function.BooleanSupplier work) {
         if (commitControl.controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -407,7 +368,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 保存非空可复用结算工作对象，回收时清内部引用而保留对象。
-     * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
      */
     public void settlementWork(com.surprising.aeron.service.settlement.ContractExpirySettlementService.SettlementWork work) {
         commitControl.reusableSettlementWork = Objects.requireNonNull(work);
@@ -415,8 +375,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求尚无待控制工作，准备固定到期结算轮询器并把它设为当前 controlWork。
-     * @param coordinator 当前有序提交器
-     * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
      */
     public void deferSettlementControl(OrderCommitService coordinator,
             com.surprising.aeron.service.settlement.ContractExpirySettlementService.SettlementWork work) {
@@ -443,7 +401,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 保存非空强平执行工作，后续命令复用同一工作对象。
-     * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
      */
     public void liquidationWork(com.surprising.aeron.service.liquidation.LiquidationService.ExecutionWork work) {
         commitControl.reusableLiquidationWork = Objects.requireNonNull(work);
@@ -451,9 +408,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 当前无待控制工作时，绑定强平执行工作及最终进度，由固定 Owner 回调轮询，不在此重新执行资金业务。
-     * @param coordinator 当前有序提交器
-     * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
-     * @param progress 强平工作完成后要返回的进度值
      */
     public void deferLiquidationExecutionControl(OrderCommitService coordinator,
             com.surprising.aeron.service.liquidation.LiquidationService.ExecutionWork work,
@@ -465,12 +419,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求正序号、命令类消息和必需输入非空，清旧生命周期后绑定命令、指纹、解码及先撤列表，重置本次提交边界和业务阶段。保留槽内可复用任务对象，不是复制一份账户状态。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param fingerprint 本次原命令指纹
-     * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param decodedCommand 当前命令已经解码的输入
      * @param admission 对应方法签名的准入事件或已解析准入值，使用期间按租约只读
      */
     OrderCommand initialize(long sequence, Operation operation, CoreMessage command,
@@ -535,7 +483,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 替换可空的解析准入结果并返回同一槽，不重做准入或读取账户。
-     * @param nextAdmission 准备替换的可空解析准入结果
      */
     OrderCommand withAdmission(OrderCommand.ReplacementAdmission nextAdmission) {
         admissionState.admission = nextAdmission;
@@ -544,8 +491,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求时间与日志位置非负，只在首次保存提交边界；后续合法调用直接返回，不比较是否与首次值相同。
-     * @param clusterTimestamp 要固定或暂存的 Cluster 业务时间
-     * @param clusterPosition 要固定或暂存的 Cluster 日志位置
      */
     public void establishCommitFence(long clusterTimestamp, long clusterPosition) {
         if (clusterTimestamp < 0 || clusterPosition < 0) {
@@ -582,7 +527,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
      * 取走替换准入事件并清该引用，把后续使用责任交给调用方。
      */
     com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent takeReplacementAdmission() {
-        // 当前方法准备取走并清引用的原值。
         var value = admissionState.replacementAdmission; admissionState.replacementAdmission = null; return value;
     }
     /**
@@ -595,7 +539,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
      * 取出并断开结算事件引用，不在此完成结算或回收事件。
      */
     public com.surprising.aeron.service.settlement.TradeSettlement takeSettlementEvent() {
-        // 当前方法准备取走并清引用的原值。
         var value = settlementEvent();
         settlementState.settlementContinuation = null;
         return value;
@@ -627,7 +570,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
      * 取出普通下单准入事件并清引用。
      */
     OrderCommand.PlaceAdmissionEvent takePlaceAdmission() {
-        // 当前方法准备取走并清引用的原值。
         OrderCommand.PlaceAdmissionEvent value = admissionState.placeAdmission;
         admissionState.placeAdmission = null;
         return value;
@@ -656,7 +598,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     public OrderCommand.ResolvedPlaceOrder realtimeResolvedTakerOrder() { return admissionState.realtimeResolvedTakerOrder; }
     /**
      * 保存可空实时准入订单引用，不复制对象。
-     * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
      */
     public void realtimeResolvedTakerOrder(OrderCommand.ResolvedPlaceOrder order) { admissionState.realtimeResolvedTakerOrder = order; }
     /**
@@ -665,7 +606,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     public com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger() { return admissionState.sourceTrigger; }
     /**
      * 首次绑定非空源触发单收据，重复绑定立即拒绝。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
      */
     public void sourceTrigger(com.surprising.aeron.model.CoreTriggerOrderState value) {
         if (value == null || admissionState.sourceTrigger != null) throw new IllegalStateException("trigger receipt already bound");
@@ -677,7 +617,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     public Order triggerAdmissionOrder() { return admissionState.triggerAdmissionOrder; }
     /**
      * 只允许 TRIGGER 且尚无准入收据时保存冻结订单，Matcher 直接消费同一租约。
-     * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
      */
     void triggerAdmission(Order order) {
         if (operation != Operation.TRIGGER || order == null || admissionState.triggerAdmissionOrder != null)
@@ -718,7 +657,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /**
      * 要求事件和计划非空且尚无事件续步，再绑定二者，账户应用由后续流程执行。
      * @param event 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
-     * @param plan 与事件配套的非空结算计划
      */
     public void settlement(com.surprising.aeron.service.settlement.TradeSettlement event,
                     com.surprising.aeron.service.settlement.TradeSettlement.Plan plan) {
@@ -756,9 +694,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 只允许从 ADMITTED 转为 DEFERRED，保存日志时间、位置和非空来源键，等待已有批量边界先完成。
-     * @param clusterTimestamp 要固定或暂存的 Cluster 业务时间
-     * @param clusterPosition 要固定或暂存的 Cluster 日志位置
-     * @param sourceKey 延后执行前保留的来源类型与实例键
      */
     void deferMatching(long clusterTimestamp, long clusterPosition, TradingCoreRuntime.SourceKey sourceKey) {
         if (matchingTasks.matchingLifecycle != MatchingTasks.MATCHING_ADMITTED || sourceKey == null) {
@@ -813,7 +748,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求分片非负后保存，不在此检查拓扑上界。
-     * @param shard 当前分片号或要缓存的静态分片号
      */
     void cachedMatcherShard(int shard) {
         if (shard < 0) throw new IllegalArgumentException("matcher shard cannot be negative");
@@ -889,7 +823,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求槽仍被占用、分片非负、没有现有路由或未收集结果，再由 Owner 绑定提交分片；不检查拓扑上界。
-     * @param shardId 声明占用或释放的 Matcher 分片号
      */
     public void claimMatcherSubmission(int shardId) {
         if (!claimed || shardId < 0 || matchingTasks.submittedMatcherShard != -1 || matchingTasks.completedMatchingResult != null)
@@ -899,7 +832,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求释放分片与当前路由相同，再置为负一；普通发布由 Matcher 在写可见结果之前调用。
-     * @param shardId 声明占用或释放的 Matcher 分片号
      */
     @Override
     public void releaseMatcherSubmission(int shardId) {
@@ -916,7 +848,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     long coreSequence() { return claimed ? coreSequence : 0; }
     /**
      * 要求非空结果匹配本槽 Core 序号且没有未收集结果，先释放 Matcher 路由再用 volatile 结果字段发布；后续 Owner 可直接读取，不能当作多写者 CAS 容器。
-     * @param shardId 声明占用或释放的 Matcher 分片号
      * @param result 当前命令的撮合事实，必须关联同一 Core 序号
      */
     public void publishMatcherResult(int shardId, OrderMatchingResult.Control result) {
@@ -960,7 +891,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     public boolean hasMatchingCompletion() { return matchingTasks.completedMatchingResult != null; }
     /**
      * 当前没有挂起上下文时，把 Owner 结果构建器的 primitive 用户/订单变更缓冲与本槽空缓冲交换，并转交资金累加器及快照标记，供续步让出执行后恢复；不物化 boxed 列表。
-     * @param resultBuilder Owner 当前使用的结果与变更集合构建器
      * @param snapshotDirty 挂起时保存的快照是否有待发布变化
      */
     public void suspendCommitContext(CommandResultBuilder resultBuilder,
@@ -982,7 +912,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求已挂起上下文，把保存的 primitive 变更缓冲交回结果构建器，并收回构建器现有缓冲；本方法不自动清 commitContextActive，资金和快照标记另行处理。
-     * @param resultBuilder Owner 当前使用的结果与变更集合构建器
      */
     public void restoreCommitContext(CommandResultBuilder resultBuilder) {
         requireCommit();
@@ -1029,8 +958,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 先检查提交上下文存在，再原样返回给定字段。
-     * @param <T> 被提交上下文保护的返回值类型
-     * @param value 已挂起上下文保护的字段值，检查通过后原样返回
      */
     private <T> T requiredCommit(T value) {
         requireCommit();
@@ -1069,8 +996,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /**
      * 首次把匹配 Core 序号的事实与合法参与 Lane 位集合绑定，阶段置 MATCHER_DONE；不立即应用账户，零预期 Lane 时 complete 已可为真。
      * @param result 当前命令的撮合事实，必须关联同一 Core 序号
-     * @param expectedMask 当前事实要求参与的账户 Lane 位集合
-     * @param validLaneMask 拓扑允许的 Lane 位集合，用于拒绝越界参与位
      */
     public void result(OrderMatchingResult result, long expectedMask, long validLaneMask) {
         if (result == null || result.nativeCoreSequence() != coreSequence
@@ -1090,8 +1015,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求已经绑定撮合事实且尚未收集任一 Lane，再把合法控制参与位并入预期集合。
-     * @param laneMask 要追加或报告完成的账户 Lane 位集合
-     * @param validLaneMask 拓扑允许的 Lane 位集合，用于拒绝越界参与位
      */
     public void includeControlLanes(long laneMask, long validLaneMask) {
         if (matchingTasks.matchingResult == null || settlementState.completedLaneMask != 0 || (laneMask & ~validLaneMask) != 0) {
@@ -1102,7 +1025,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /**
      * 要求存在事实、完成位是预期子集且无重复位，再合并完成位；全部匹配时标 LANES_DONE。零位集合允许传入，真正幂等边界由调用流程遵守。
-     * @param laneMask 要追加或报告完成的账户 Lane 位集合
      */
     public void completeLanes(long laneMask) {
         if (matchingTasks.matchingResult == null
@@ -1200,9 +1122,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
         /**
          * 先清上次结果，再保存 Arena；只有 first 为正才启用目标，second 为正且不同才增加第二项。
-         * @param first 第一个目标订单号，非正时不启用结果目标
-         * @param second 可选第二目标订单号，须为正且不同于 first 才加入
-         * @param responseArena 非空响应编码需要使用的缓冲 Arena
          */
         void bind(long first, long second, ResponseArena responseArena) {
             clear();
@@ -1222,18 +1141,16 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         boolean active() { return count != 0; }
         /**
          * 在最多两个已绑定身份中查结果副本，找不到返回空。
-         * @param id 需要在已捕获结果中查找的订单号
          */
         Order order(long id) {
-            for (/* 当前前置撤单或结果数组中的下标。 */ int index = 0; index < count; index++) if (ids[index] == id) return orders[index];
+            for (int index = 0; index < count; index++) if (ids[index] == id) return orders[index];
             return null;
         }
         /**
          * 在绑定身份中返回捕获时保存的品种字符串，找不到为空。
-         * @param id 需要在已捕获结果中查找的订单号
          */
         String instrumentId(long id) {
-            for (/* 当前前置撤单或结果数组中的下标。 */ int index = 0; index < count; index++) if (ids[index] == id) return symbols[index];
+            for (int index = 0; index < count; index++) if (ids[index] == id) return symbols[index];
             return null;
         }
 
@@ -1247,24 +1164,18 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         @Override public boolean captureUnchangedResults() { return true; }
         /**
          * 按位判断指定结果项是否已被 Lane 捕获；调用方保证下标有效。
-         * @param index 当前结果位置或压缩列表下标，范围要求见当前方法
          */
         @Override public boolean resultPrepared(int index) { return (capturedMask & (1 << index)) != 0; }
         /**
          * 返回指定绑定项的订单号，不做额外下标检查。
-         * @param index 当前结果位置或压缩列表下标，范围要求见当前方法
          */
         @Override public long resultOrderId(int index) { return ids[index]; }
         /**
          * 返回零；普通替换由两个独立绑定项表达，不在此逐项另存 originalOrderId。
-         * @param index 当前结果位置或压缩列表下标，范围要求见当前方法
          */
         @Override public long resultOriginalOrderId(int index) { return 0; }
         /**
          * 把非空订单复制进本目标持有的可复用副本槽，空订单保持空；保存品种并标已捕获，Owner 后续无需回读 Lane 表。副本在目标清理或复用后不能继续借用。
-         * @param index 当前结果位置或压缩列表下标，范围要求见当前方法
-         * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
-         * @param instrumentId 永久品种字符串
          */
         @Override public void resultOrder(int index, Order order, String instrumentId) {
             orders[index] = order == null ? null : (orderCopies[index] = order.copyIntoCommandSlot(orderCopies[index]));
@@ -1351,9 +1262,8 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
                 responseArena.release(responseSlot);
                 responseSlot = null;
             }
-            for (/* 当前扫描两个结果位置或清理副本的下标。 */ int i = 0; i < count; i++) {
+            for (int i = 0; i < count; i++) {
                 orders[i] = null;
-                // 该位置保留的命令独占订单副本，清内容后仍保留对象。
                 Order copy = orderCopies[i];
                 if (copy != null) copy.clearCommandSlot();
                 sources[i].clear();
@@ -1434,7 +1344,6 @@ public static final class Direct {
      *  本条直接命令待收集的账户提交事件。
      * 借用当前待收集的账户提交事件。
      * 保存调用方派发的可空账户提交事件，不等待 Lane。
-     * @param commitEvent 当前账户提交事件引用
      */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -1488,14 +1397,7 @@ public static final class Direct {
 
     /**
      * 拒绝覆盖仍占用的槽，保存非空命令、指纹及来源，再记下业务时间、日志位置与回滚检查点；其余旧标记由前一轮 clear 清理。
-     * @param command 本方法对应的原始或已解码业务命令，类型见声明
-     * @param fingerprint 完整原命令的指纹
-     * @param sourceKey 已确认的来源类型与实例键
-     * @param timestamp 固定的 Cluster 业务时间
-     * @param position 固定的复制日志位置
-     * @param beforeRevision 工作开始前的权威修订号
      * @param checkpoint 开始前的账户回滚检查点
-     * @param identityCheckpoint 开始前的持仓身份检查点
      */
     public void initialize(CoreMessage command, CommandFingerprint fingerprint,
             TradingCoreRuntime.SourceKey sourceKey, long timestamp, long position,
@@ -1519,8 +1421,6 @@ public static final class Direct {
     public boolean hasControlWork() { return controlWork != null; }
     /**
      * 保存调用方已经决定的状态和结果码，不在此检查非空或完成发布。
-     * @param status 已决定的响应状态
-     * @param resultCode 已决定的业务结果码
      */
     public void result(ResponseStatus status, CoreResultCode resultCode) {
         this.status = status;
@@ -1542,7 +1442,6 @@ public static final class Direct {
 
     /**
      * 要求当前没有续步，再保存非空控制工作，供 Owner 后续轮询。
-     * @param work 当前要保存、替换或轮询的业务续步
      */
     public void deferControl(BooleanSupplier work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1551,7 +1450,6 @@ public static final class Direct {
 
     /**
      * 要求没有旧续步，绑定资金费收集器并保留工作对象供后续命令复用。
-     * @param work 当前要保存、替换或轮询的业务续步
      */
     public void deferFundingControl(FundingSettlementService.FundingWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1561,13 +1459,6 @@ public static final class Direct {
 
     /**
      * 绑定风险扫描和后续触发扫描所需信息；同一槽不能并存第二条控制续步。
-     * @param risk 本轮可空风险扫描器
-     * @param symbolId 已解析的永久品种编号
-     * @param instrumentId 本轮扫描的品种名称
-     * @param maxUsers 本轮风险与触发扫描共用的用户预算
-     * @param pendingBefore 开始前待处理数量，供观测日志使用
-     * @param startedAt 本轮扫描开始的观测时间
-     * @param beforeRevision 工作开始前的权威修订号
      */
     public void deferRiskScanControl(RiskScanner risk, int symbolId,
             String instrumentId, int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
@@ -1579,7 +1470,6 @@ public static final class Direct {
 
     /**
      * 绑定自动减仓续步，并记住原工作对象供后续复用。
-     * @param work 当前要保存、替换或轮询的业务续步
      */
     public void deferAdlControl(AdlService.AdlWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1589,7 +1479,6 @@ public static final class Direct {
 
     /**
      * 绑定强平结果确认续步，并保留原工作对象供后续命令复用。
-     * @param work 当前要保存、替换或轮询的业务续步
      */
     public void deferLiquidationResolutionControl(LiquidationService.ResolutionWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1617,9 +1506,6 @@ public static final class Direct {
 
     /**
      * 准备所属用户的余额调整账户任务，并安装固定轮询函数；账户确有变化才请求发布。
-     * @param userId 操作所属账户用户
-     * @param asset 要调整的资产
-     * @param deltaUnits 有符号可用余额增减金额
      */
     public void deferBalanceAdjustment(long userId, String asset, long deltaUnits) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1629,8 +1515,6 @@ public static final class Direct {
 
     /**
      * 准备所属用户的转出账户任务，完成和变化判断沿用账户任务自身回执。
-     * @param userId 操作所属账户用户
-     * @param command 本方法对应的原始或已解码业务命令，类型见声明
      */
     public void deferTransferOut(long userId, TransferFundsCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1640,8 +1524,6 @@ public static final class Direct {
 
     /**
      * 准备所属用户的划转完成任务，后续轮询成功且有变化时请求发布。
-     * @param userId 操作所属账户用户
-     * @param transferId 当前要完成的划转编号
      */
     public void deferTransferComplete(long userId, long transferId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1651,8 +1533,6 @@ public static final class Direct {
 
     /**
      * 准备杠杆变更账户任务，是否发生变化由账户回执判断。
-     * @param userId 操作所属账户用户
-     * @param command 本方法对应的原始或已解码业务命令，类型见声明
      */
     public void deferLeverageChange(long userId, UpdateLeverageCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1662,8 +1542,6 @@ public static final class Direct {
 
     /**
      * 准备持仓模式变更账户任务，是否发生变化由账户回执判断。
-     * @param userId 操作所属账户用户
-     * @param command 本方法对应的原始或已解码业务命令，类型见声明
      */
     public void deferPositionModeChange(long userId, UpdatePositionModeCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -1673,8 +1551,6 @@ public static final class Direct {
 
     /**
      * 准备逐仓保证金调整账户任务，不在 Owner 直接改 Lane 状态。
-     * @param userId 操作所属账户用户
-     * @param command 本方法对应的原始或已解码业务命令，类型见声明
      */
     public void deferPositionMarginAdjustment(long userId,
                                        AdjustPositionMarginCommand command) {
@@ -1685,13 +1561,6 @@ public static final class Direct {
 
     /**
      * 把触发单变更参数放入固定槽，只派发给该用户所属 Lane，后续由同一对象收集完成。
-     * @param userId 操作所属账户用户
-     * @param mutation 触发单具体变更类别
-     * @param triggerOrderId 待变更触发单编号
-     * @param arg1 认领序号、原生订单号、追踪最高价、失效时间或重试边界，按操作类别解释
-     * @param arg2 触发价、完成时间、追踪最低价或重试时间，按操作类别解释
-     * @param arg3 触发时间或追踪激活时间，按操作类别解释
-     * @param flag 完成操作是否成功
      * @param text 完成操作的拒绝原因，空引用按空串处理
      */
     public void deferTriggerMutationControl(long userId,
@@ -1707,11 +1576,6 @@ public static final class Direct {
 
     /**
      * 准备触发单写入任务并派发给用户所属 Lane，保留合约和持仓身份。
-     * @param userId 操作所属账户用户
-     * @param trigger 待写入的触发单视图
-     * @param symbolId 已解析的永久品种编号
-     * @param positionKey 触发单稳定持仓身份
-     * @param instrumentSettled 当前合约是否已结束结算
      */
     public void deferTriggerUpsertControl(long userId,
             CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
@@ -1726,12 +1590,6 @@ public static final class Direct {
 
     /**
      * 准备互斥触发单对，共用一次所属账户 Lane 派发，第二条保存在同一续步内。
-     * @param userId 操作所属账户用户
-     * @param first 互斥对第一条触发单视图
-     * @param second 互斥对第二条触发单视图
-     * @param symbolId 已解析的永久品种编号
-     * @param positionKey 触发单稳定持仓身份
-     * @param instrumentSettled 当前合约是否已结束结算
      */
     public void deferTriggerOcoPairControl(long userId,
             CoreTriggerOrderStateView first, CoreTriggerOrderStateView second,
@@ -1746,9 +1604,6 @@ public static final class Direct {
 
     /**
      * 准备算法单写入任务并派发给用户所属 Lane。
-     * @param userId 操作所属账户用户
-     * @param algo 算法单的新建意图或生命周期增量
-     * @param symbolId 已解析的永久品种编号
      */
     public void deferAlgoUpsertControl(long userId, CoreAlgoOrderCommand algo,
             int symbolId, long clusterTimestamp) {
@@ -1770,13 +1625,13 @@ public static final class Direct {
                 if (!controlWork.getAsBoolean()) return null;
                 status = ResponseStatus.APPLIED;
                 resultCode = CoreResultCode.NONE;
-            } catch (/* 已知业务、算术或参数错误，映射成相应拒绝码 */ CoreStateRejectedException failure) {
+            } catch (CoreStateRejectedException failure) {
                 status = ResponseStatus.REJECTED;
                 resultCode = CoreResultCode.fromRejectionCode(failure.code());
-            } catch (/* 已知业务、算术或参数错误，映射成相应拒绝码 */ ArithmeticException failure) {
+            } catch (ArithmeticException failure) {
                 status = ResponseStatus.REJECTED;
                 resultCode = CoreResultCode.ARITHMETIC_OVERFLOW;
-            } catch (/* 已知业务、算术或参数错误，映射成相应拒绝码 */ IllegalArgumentException failure) {
+            } catch (IllegalArgumentException failure) {
                 status = ResponseStatus.REJECTED;
                 resultCode = CoreResultCode.INVALID_COMMAND;
             }
@@ -1827,7 +1682,6 @@ public static final class Direct {
         @Override public boolean getAsBoolean() {
             var work = reusableFundingWork;
             if (!work.poll()) return false;
-            // 当前业务工作完成结果或所属 Lane 回执，具体类型见声明
             var result = work.result();
             owner.requestCommitPublication();
             owner.resultBuilder.commandFundingProgress = result.progress();
@@ -1860,13 +1714,6 @@ public static final class Direct {
 
         /**
          * 保存风险续扫输入并清空上一轮触发扫描续步。
-         * @param risk 本轮可空风险扫描器
-         * @param symbolId 已解析的永久品种编号
-         * @param instrumentId 本轮扫描的品种名称
-         * @param maxUsers 本轮风险与触发扫描共用的用户预算
-         * @param pendingBefore 开始前待处理数量，供观测日志使用
-         * @param startedAt 本轮扫描开始的观测时间
-         * @param beforeRevision 工作开始前的权威修订号
          */
         void prepare(RiskScanner risk, int symbolId, String instrumentId,
                 int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
@@ -1896,7 +1743,6 @@ public static final class Direct {
                 if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
                 // 扣除风险已完成工作后留给触发扫描的用户预算
                 int remaining = maxUsers - (risk == null ? 0 : risk.completedWork());
-                // 当前品种已经推进的风险扫描记录，用于判断是否还有触发工作
                 var completedScan = owner.runtimeState().riskScan(symbolId);
                 triggers = remaining > 0 && completedScan != null
                         && !completedScan.triggerComplete()
@@ -1975,13 +1821,6 @@ public static final class Direct {
 
         /**
          * 清除旧参数，保存非空触发单变更种类与各原语输入。
-         * @param userId 操作所属账户用户
-         * @param mutation 触发单具体变更类别
-         * @param triggerOrderId 待变更触发单编号
-         * @param arg1 认领序号、原生订单号、追踪最高价、失效时间或重试边界，按操作类别解释
-         * @param arg2 触发价、完成时间、追踪最低价或重试时间，按操作类别解释
-         * @param arg3 触发时间或追踪激活时间，按操作类别解释
-         * @param flag 完成操作是否成功
          * @param text 完成操作的拒绝原因，空引用按空串处理
          */
         void prepareMutation(long userId,
@@ -1993,11 +1832,6 @@ public static final class Direct {
         }
         /**
          * 清除旧参数并保存非空触发单及其账户、合约、持仓身份。
-         * @param userId 操作所属账户用户
-         * @param trigger 待写入的触发单视图
-         * @param symbolId 已解析的永久品种编号
-         * @param positionKey 触发单稳定持仓身份
-         * @param instrumentSettled 当前合约是否已结束结算
          */
         void prepareTriggerUpsert(long userId,
                 CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
@@ -2008,9 +1842,6 @@ public static final class Direct {
         }
         /**
          * 清除旧参数并保存非空算法单及其账户、合约身份。
-         * @param userId 操作所属账户用户
-         * @param algo 算法单的新建意图或生命周期增量
-         * @param symbolId 已解析的永久品种编号
          */
         void prepareAlgoUpsert(long userId, CoreAlgoOrderCommand algo,
                 int symbolId, long clusterTimestamp) {
@@ -2028,10 +1859,8 @@ public static final class Direct {
 
         /**
          * 在已选中的账户 Lane 执行触发单变更、单条或互斥对写入、算法单写入；返回变化布尔值或写后视图。Lane 参数不参与再次路由。
-         * @param ignoredLaneId 派发器传来的 Lane 编号；本操作已按用户选定唯一 Lane，不读取此参数
          */
         @Override public Object apply(int ignoredLaneId) {
-            // 当前账户 Lane 操作使用的同一权威运行时
             var runtime = owner.runtimeState();
             return switch (kind) {
                 case MUTATION -> switch (mutation) {
@@ -2066,7 +1895,6 @@ public static final class Direct {
          */
         @Override public boolean getAsBoolean() {
             if (!owner.runtimeState().pollControlLanes()) return false;
-            // 当前业务工作完成结果或所属 Lane 回执，具体类型见声明
             Object result = owner.runtimeState().controlLaneResult(
                     owner.runtimeState().topology().accountLaneId(userId));
             if (kind == MUTATION) {
@@ -2115,8 +1943,6 @@ public static final class Decoded {
 
     /**
      * 同标的复用本命令作用域缓存的 Matcher 分片，换标的才查适配器；调用方提供非空规范标的和匹配的拓扑，缓存不跨线程同步。
-     * @param adapter 同一产品拓扑的 Matcher 适配器，提供标的分片路由
-     * @param instrumentId 非空的永久数字标的文本
      */
     public int matcherShard(com.surprising.aeron.service.matcher.OrderBookEngine adapter, String instrumentId) {
         if (!instrumentId.equals(routedSymbol)) {
@@ -2146,7 +1972,6 @@ public static final class Decoded {
 
     /**
      * 只允许复用槽操作，先清旧值、路由及各载体，再按消息类型原位解码常用订单类型；其他类型交通用解码。失败直接传播，当前 value 不发布未完成的解码。
-     * @param message 头部及有效载荷仍可借用的当前原消息
      */
     public void decodeInto(CoreMessage message) {
         if (!commandSlot) throw new IllegalStateException("decoded command is not a window slot");
@@ -2229,7 +2054,6 @@ public static final class Decoded {
 
     /**
      * 创建单次解码持有者，不借用本类的窗口复用槽；通用解码未识别的消息类型仍保存原消息引用。
-     * @param message 头部及有效载荷仍可借用的当前原消息
      */
     public static Decoded decode(CoreMessage message) {
         return new Decoded(decodeRawPayload(message));
@@ -2237,7 +2061,6 @@ public static final class Decoded {
 
     /**
      * 按头部消息类型调用现有订单、触发执行、强平或到期结算解码器；其他类型原样返回消息，后续取类型时再检查，不在此拒绝所有未知分支。
-     * @param message 头部及有效载荷仍可借用的当前原消息
      */
     private static Object decodeRawPayload(CoreMessage message) {
         return switch (message.header().messageType()) {
@@ -2360,16 +2183,8 @@ public static class ResolvedPlaceOrder {
 
     /**
      * 校验并保存完整订单决策输入，包括指数、远期价格及冻结资产与费率。
-     * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
-     * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对已经准备好的非负运行时稠密编号
-     * @param matchingPriceTicks 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界
-     * @param reservationPriceTicks 计算预留金额采用的价格刻度，可能比撮合边界更保守
-     * @param markPriceTicks 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界
-     * @param indexPriceTicks 本次决策使用的指数价格刻度，不需要该价格的入口可为 0
      * @param forwardPriceTicks 本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格
      * @param reservationKind 应冻结现货资产还是衍生品保证金的类别
-     * @param reservationAsset 已经规范化的冻结资产代码，衍生品为结算资产，现货按买卖方向选择
      * @param makerFeeRatePpm Maker 费率，单位为百万分比，负数表示返佣
      * @param takerFeeRatePpm Taker 费率，单位为百万分比，且不能小于 Maker 费率
      */
@@ -2392,16 +2207,8 @@ public static class ResolvedPlaceOrder {
 
     /**
      * 只允许初始化一次完整决策；若路由已先绑定，必须保持相同意图、币对对象和稠密编号，再校验价格与费率并发布已决策标记。
-     * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
-     * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对已经准备好的非负运行时稠密编号
-     * @param matchingPriceTicks 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界
-     * @param reservationPriceTicks 计算预留金额采用的价格刻度，可能比撮合边界更保守
-     * @param markPriceTicks 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界
-     * @param indexPriceTicks 本次决策使用的指数价格刻度，不需要该价格的入口可为 0
      * @param forwardPriceTicks 本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格
      * @param reservationKind 应冻结现货资产还是衍生品保证金的类别
-     * @param reservationAsset 已经规范化的冻结资产代码，衍生品为结算资产，现货按买卖方向选择
      * @param makerFeeRatePpm Maker 费率，单位为百万分比，负数表示返佣
      * @param takerFeeRatePpm Taker 费率，单位为百万分比，且不能小于 Maker 费率
      */
@@ -2437,9 +2244,6 @@ public static class ResolvedPlaceOrder {
 
     /**
      * 先绑定订单意图和币对路由，确认两者币对编号一致；后续 Lane 只能补决策字段，不能换掉路由身份。
-     * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
-     * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对已经准备好的非负运行时稠密编号
      */
     public final void initializeOrderIntent(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId) {
         if (this.intent != null || intent == null || instrument == null || symbolId < 0
@@ -2603,12 +2407,7 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
 
     /**
      * Owner 先绑定意图和币对路由，再保存价格、费率表及决策时间引用；完整价格与费率计算由所属 Lane 进行。
-     * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
-     * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
      * @param symbolId 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配
-     * @param mark Owner 为此命令绑定的价格事实，现货可不需要衍生品价格
-     * @param policies 用于本次用户费率决策的费率表引用
-     * @param timestamp 本命令固定的集群业务时间
      */
     public void prepareDecision(com.surprising.aeron.protocol.PlaceOrderCommand intent,
             com.surprising.aeron.service.instrument.CoreInstrument instrument, int symbolId,
@@ -2623,16 +2422,6 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
 
     /**
      * 校验已绑定路由并固定命令、用户、资产、目标 Lane 和账本事实，重置回执及消费标记，按产品规则决定是否等待 OI。
-     * @param coreSequence 本次正数 Core 命令序号
-     * @param userId 本次下单用户的正数编号
-     * @param commandId 原下单命令的非空 UUID
-     * @param settlementStatus 准入前固定的非空账本结算事实
-     * @param assetId 订单冻结资产的运行时编号
-     * @param laneId 所属账户 Lane 编号
-     * @param runtime 所属交易运行时，提供原账户写入与完成交接
-     * @param identities 当前产品身份表，供所属 Lane 查找持仓和准备客户键
-     * @param timestamp 本命令固定的集群业务时间
-     * @param position 本命令固定的集群日志位置
      */
     public OrderCommand.PlaceAdmissionEvent prepare(long coreSequence, long userId, UUID commandId,
                                 TreasuryRuntime.SettlementStatus settlementStatus,
@@ -2704,7 +2493,6 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
                             this, decisionMark, decisionPolicies, userId, decisionTimestamp, lifecycleSettled);
                 preparedClientKey = RuntimeIdentityRegistry.clientKeyValue(
                         identities.prepareClientKeyInLane(lane, userId, clientOrderId()));
-                // 在当前 Lane 查到的用户持仓身份，无持仓身份时为 0。
                 long positionKey = identities.findPositionKeyValueInLane(
                         lane, userId, instrument(), positionSide());
                 // 本事件先前已固定的币对稠密编号，不能在 Lane 改变路由。
@@ -2714,7 +2502,6 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
                         runtime, lane, userId, this, openInterestSteps,
                         preparedClientKey, positionKey,
                         lifecycleSettled, fundingInProgress);
-                // 当前已有持仓，逆向非只减仓新单可能需要先撤冲突平仓委托。
                 Position currentPosition = positionKey == 0 ? null : lane.position(positionKey);
                 if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
                         && currentPosition != null && currentPosition.signedQuantitySteps() != 0
@@ -2730,7 +2517,7 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
             } finally {
                 runtime.exitLaneCommandScope(lane);
             }
-        } catch (/* 本次准入的业务拒绝、溢出或参数错误，回退客户身份准备并保存到拒绝回执。 */ CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
+        } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             identities.rollbackClientKeyInLane(lane, userId, clientOrderId(), preparedClientKey);
             rejection = failure;
         }
@@ -2763,7 +2550,6 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
 
     /**
      * Matcher 最多等待三十秒取得 Lane 回执，区分成功、业务拒绝、溢出及非法参数并填入原结算事件；读取完撤单编号后先捕获通知对象，再发布消费位，之后不再访问本事件字段。
-     * @param target Matcher 已准备的原结算事件，接收订单身份、准入结果及前置撤单编号
      */
     public void awaitMatcherReceipt(TradeSettlement target) {
         if (target == null) {
@@ -2894,15 +2680,7 @@ public static final class ReplacementAdmissionEvent extends ResolvedPlaceOrder i
 
     /**
      * 要求改单和替换意图恰好提供一种，绑定原订单、用户、配置和 Matcher 分片，重置结果并按产品判断是否等待账本 OI。
-     * @param sequence 本次正数 Core 命令序号
-     * @param userId 原单及新单所属的正数用户编号
-     * @param originalOrderId 当前要修改或替换的原订单编号
-     * @param amend 选择性改单意图，与 replace 恰好提供一个
-     * @param replace 完整替换意图，与 amend 恰好提供一个
-     * @param decision Owner 已准备的币对、价格、费率和账本状态输入
      * @param matcherShard 固定的 Matcher 分片编号，必须在当前拓扑范围内
-     * @param runtime 提供账户检查、账本输入及完成通知的所属运行时
-     * @param identities 当前产品身份表，只查找原有客户和持仓身份
      */
     public OrderCommand.ReplacementAdmissionEvent prepare(long sequence, long userId, long originalOrderId,
             AmendOrderCommand amend, ReplaceOrderCommand replace,
@@ -2921,7 +2699,6 @@ public static final class ReplacementAdmissionEvent extends ResolvedPlaceOrder i
 
     /**
      * 在原单所属 Lane 核对原单存在、用户、OPEN 状态及可改单类型，解析新意图并排除原单占用计算预留；现货改单还检查原冻结和可用金额，最后生成版本化准入结果或保存拒绝。
-     * @param lane 实际执行原单检查的所属账户 Lane
      */
     @Override public void execute(AccountPartition lane) {
         // 完成位发布前先取得的通知目标，发布后不再从可回收事件读取运行时。
@@ -2972,11 +2749,10 @@ public static final class ReplacementAdmissionEvent extends ResolvedPlaceOrder i
             }
             closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId(),
                     side(), matchingPriceTicks(), originalOrderId, orderId(), closeCapacityCancellations);
-            // 当前账户用户元数据，其版本与原单版本一同封入准入结果。
             var user = lane.user(userId);
             admission = new OrderCommand.ReplacementAdmission(userId, originalOrderId, original.revision(),
                     user == null ? 0 : user.revision(), command, this, required);
-        } catch (/* 改单校验产生的业务拒绝、溢出或非法参数，保存为本次拒绝回执。 */ CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
+        } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             rejection = failure;
         } finally { runtime.exitLaneCommandScope(lane); }
         // 完成位可见后 Owner 可能推进回收或复用；通知目标和分片必须提前捕获，发布后不再读取事件字段。
@@ -2987,7 +2763,6 @@ public static final class ReplacementAdmissionEvent extends ResolvedPlaceOrder i
 
     /**
      * 用原订单属性补齐未指定的价格、数量、有效期和 postOnly，改为新的订单编号；未指定新客户端标识时用空文本，不复用旧客户端标识。
-     * @param original 已经核对归属和状态的原订单，用于补齐选择性改单意图
      */
     private PlaceOrderCommand amendCommand(Order original) {
         return new PlaceOrderCommand(amend.replacementOrderId(), decision.instrument().instrumentId(),
@@ -3033,7 +2808,6 @@ public static final class ReplacementAdmissionEvent extends ResolvedPlaceOrder i
     }
     /**
      * 构造带明确业务码的改单拒绝异常，保留原失败原因供上层编码。
-     * @param code 要交给上层映射的明确业务拒绝码
      * @param message 该次改单被拒绝的具体原因
      */
     private static CoreStateRejectedException rejected(String code, String message) {
@@ -3068,17 +2842,14 @@ public interface ResultTarget {
     int resultCount();
     /**
      * 返回指定结果槽主要查询的新单或当前订单编号。
-     * @param index 当前命令有效结果槽的零起始下标
      */
     long resultOrderId(int index);
     /**
      * 返回指定槽对应的原订单编号，没有改单或替换原单时可为 0。
-     * @param index 当前命令有效结果槽的零起始下标
      */
     long resultOriginalOrderId(int index);
     /**
      * 由所属 Lane 把该槽的最终订单及规范币对文本交给原命令捕获，订单已移除时允许为空。
-     * @param index 当前命令有效结果槽的零起始下标
      * @param order 所属 Lane 读到的最终订单或终态后值，没有保留实体时为 null
      * @param instrumentId 对应订单的规范永久币对编号文本，无订单时为 null
      */
@@ -3091,7 +2862,6 @@ public interface ResultTarget {
 
     /**
      * 判断该槽是否已由变化捕获填好，默认 false 让需要补读的实现自行决定。
-     * @param index 当前命令有效结果槽的零起始下标
      */
     default boolean resultPrepared(int index) { return false; }
 
@@ -3102,8 +2872,6 @@ public interface ResultTarget {
 
     /**
      * 可选地记录当前批次项 Matcher 接受或拒绝结果，默认不额外存状态，原发布流程在最终释放边界前调用。
-     * @param index 当前命令有效结果槽的零起始下标
-     * @param accepted 该批次项的 Matcher 是否接受
      */
     default void matcherResult(int index, boolean accepted) { }
 
@@ -3124,21 +2892,15 @@ public interface ResultTarget {
 
     /**
      * 先处理本次变更命中的结果槽，按目标策略选 Lane 当前订单或变化缓冲终态后值，新编号缺失时再取原单；可选补读无变化槽，最后准备响应。
-     * @param target 当前命令已经准备好的结果槽接收者
-     * @param changes 当前 Lane 在本命令产生的原变更回执，不读取全局镜像
-     * @param identities 订单稠密币对到永久编号文本的当前产品映射
-     * @param lane 本次结算已经合法持有的账户 Lane
      */
     static void capture(OrderCommand.ResultTarget target, AccountPartitionCommit.Delta changes,
                         RuntimeIdentityRegistry identities, AccountPartition lane) {
-        for (/* 本次变化捕获正在填入的结果槽下标。 */ int i = 0; i < target.resultCount(); i++) {
-            // 该槽优先读取的新订单或当前订单编号。
+        for (int i = 0; i < target.resultCount(); i++) {
             long id = target.resultOrderId(i);
             // 新编号缺失时可读取的原单编号，没有关联原单时为 0。
             long original = target.resultOriginalOrderId(i);
             if (!changes.orders().containsKey(id) && (original == 0 || !changes.orders().containsKey(original))) continue;
             // 直接单命令可保留本次终态后值；批量目标沿用原协议，对 Lane 已退休且未保留的订单仍返回空结果。
-            // 按目标策略从当前 Lane 或本命令终态变化中取得的最终订单值。
             Order order = lane.order(id);
             if (target.includeTerminalAfterImage() && changes.orders().containsKey(id))
                 order = changes.orders().get(id);
@@ -3155,15 +2917,11 @@ public interface ResultTarget {
 
     /**
      * 仅补读尚未准备的结果槽，从所属 Lane 查询新编号或原单，不查询全局发布表；本辅助方法不单独触发响应编码。
-     * @param target 当前命令已经准备好的结果槽接收者
-     * @param identities 订单稠密币对到永久编号文本的当前产品映射
-     * @param lane 本次结算已经合法持有的账户 Lane
      */
     static void captureUnchanged(OrderCommand.ResultTarget target,
                                  RuntimeIdentityRegistry identities, AccountPartition lane) {
-        for (/* 当前补读或最终刷新阶段的结果槽下标。 */ int index = 0; index < target.resultCount(); index++) {
+        for (int index = 0; index < target.resultCount(); index++) {
             if (target.resultPrepared(index)) continue;
-            // 按目标策略从当前 Lane 或本命令终态变化中取得的最终订单值。
             Order order = lane.order(target.resultOrderId(index));
             if (order == null) {
                 // 新编号缺失时可读取的原单编号，没有关联原单时为 0。
@@ -3176,14 +2934,10 @@ public interface ResultTarget {
 
     /**
      * 顺序批次结束后重新读取全部结果槽的 Lane 最终状态，纳入后续项对前面订单的影响，再准备整批响应。
-     * @param target 当前命令已经准备好的结果槽接收者
-     * @param identities 订单稠密币对到永久编号文本的当前产品映射
-     * @param lane 本次结算已经合法持有的账户 Lane
      */
     static void captureFinal(OrderCommand.ResultTarget target,
                              RuntimeIdentityRegistry identities, AccountPartition lane) {
-        for (/* 当前补读或最终刷新阶段的结果槽下标。 */ int index = 0; index < target.resultCount(); index++) {
-            // 按目标策略从当前 Lane 或本命令终态变化中取得的最终订单值。
+        for (int index = 0; index < target.resultCount(); index++) {
             Order order = lane.order(target.resultOrderId(index));
             // 新编号缺失时可读取的原单编号，没有关联原单时为 0。
             long original = target.resultOriginalOrderId(index);

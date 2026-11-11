@@ -108,7 +108,6 @@ public final class CoreQueryService {
 
     /**
      * 从 Owner 的待完成划转路由取一页，空页直接返回；有数据则登记请求完成状态并投递对应 Lane，投递失败清除关联，成功后完成本次路由页选择并返回待完成。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      * @param limit 本次待完成划转查询最多选择的路由条数
      */
     public CoreResponse beginPendingTransferQuery(CoreMessage message, int limit) {
@@ -140,11 +139,8 @@ public final class CoreQueryService {
 
     /**
      * 解码下单意图并检查用户和订单身份，固定币对决策输入；必要时先投递账本准备未平仓量，再投递用户 Lane 做只读预检，失败时移除查询关联。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
-     * @param timestamp 本次预检采用的集群业务时间，用于订单规则和到期校验
      */
     public CoreResponse beginPreflightQuery(CoreMessage message, long timestamp) {
-        // 从载荷解出的预检下单意图，尚未生成真实订单或冻结。
         var command = TradingCommandCodec.decodePlaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null);
         // 预检消息头指定的用户，必须为正数才能定位账户。
         long userId = message.header().userId();
@@ -188,10 +184,8 @@ public final class CoreQueryService {
 
         /**
          * 保存本次预检的订单和固定决策输入；若标的需要则同步读取未平仓量。
-         * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
          * @param userId 查询目标用户编号，具体查询类型决定是否允许用 0 表示未指定
          * @param command 已解码的普通下单意图，本次只做只读预检，不提交真实订单
-         * @param context Owner 固定的币对、价格、费率和生命周期决策输入
          */
         private PreflightQuery(long commandCount, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command,
                 com.surprising.aeron.service.order.OrderAdmissionService.Context context) {
@@ -209,13 +203,12 @@ public final class CoreQueryService {
          * @param lane 当前执行读取的账户 Lane，必须由其所属线程持有只读权限
          */
         @Override public void execute(AccountPartition lane) {
-            // 当前账户 Lane 执行预检后的成功结果或明确业务拒绝响应。
             CoreResponse response;
             try { response = owner.runtimeState().readAccountLane(lane, this); }
-            catch (/* 订单规则或资金检查产生的明确业务拒绝，使用原拒绝码编码响应。 */ com.surprising.aeron.exception.CoreStateRejectedException failure) {
+            catch (com.surprising.aeron.exception.CoreStateRejectedException failure) {
                 response = rejected(CoreResultCode.fromRejectionCode(failure.code()));
-            } catch (/* 预检金额计算发生算术溢出，返回 ARITHMETIC_OVERFLOW。 */ ArithmeticException failure) { response = rejected(CoreResultCode.ARITHMETIC_OVERFLOW); }
-            catch (/* 预检输入非法，返回 INVALID_COMMAND，不使查询一直等待。 */ IllegalArgumentException failure) { response = rejected(CoreResultCode.INVALID_COMMAND); }
+            } catch (ArithmeticException failure) { response = rejected(CoreResultCode.ARITHMETIC_OVERFLOW); }
+            catch (IllegalArgumentException failure) { response = rejected(CoreResultCode.INVALID_COMMAND); }
             complete(QueryResult.encoded(response));
         }
 
@@ -224,7 +217,6 @@ public final class CoreQueryService {
          * @param lane 当前执行读取的账户 Lane，必须由其所属线程持有只读权限
          */
         @Override public CoreResponse apply(AccountPartition lane) {
-            // 按固定市场和规则输入解析出的预检订单参数。
             var order = com.surprising.aeron.service.order.OrderAdmissionService.resolve(context, userId, command);
             // 本次只读预检算出的所需冻结金额，只编码返回而不真正冻结。
             long reserved = com.surprising.aeron.service.order.OrderAdmissionService.requiredReservationForQuery(
@@ -238,7 +230,6 @@ public final class CoreQueryService {
 
         /**
          * 按本次预检固定的命令计数和业务错误码构造拒绝响应。
-         * @param code 本次查询要返回的明确业务拒绝码
          */
         private CoreResponse rejected(CoreResultCode code) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, code, commandCount);
@@ -247,7 +238,6 @@ public final class CoreQueryService {
 
     /**
      * 创建风险查询对象，登记外部命令与请求完成状态，并投递到相应 Lane。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     public CoreResponse beginRiskAccountQuery(CoreMessage message) {
         var query = RiskAccountQuery.prepare(owner, message);
@@ -258,15 +248,12 @@ public final class CoreQueryService {
 
     /**
      * 按查询类型解析用户、订单或客户端条件；挂单先选固定编号页，普通订单无活跃路由时让各 Lane 探测保留终态，随后登记并投递账户查询。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     public CoreResponse beginAccountQuery(CoreMessage message) {
-        // 当前账户查询类型，决定解码普通订单、客户端订单或挂单条件。
         var type = message.header().messageType();
         if (type == CoreMessageType.ALGO_ORDER_QUERY) return beginAlgoAccountQuery(message);
         // 查询头中的用户条件，按订单编号或全局挂单查询时可为 0。
         long userId = message.header().userId();
-        // 从普通订单详情或哈希载荷解出的订单编号，其他分支为 0。
         long orderId = type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY
                 ? TradingCommandCodec.decodeOrderStateQuery(message.payloadUnsafe()) : 0;
         // 客户端订单查询的标识文本，其他查询不需要。
@@ -287,7 +274,6 @@ public final class CoreQueryService {
                     CoreStateQueryCodec.encodeOpenOrders(new com.surprising.aeron.protocol.CoreOpenOrdersView(List.of())));
             openOrderIds = page.orderIds();
         }
-        // 当前是否为只带普通订单编号的详情或哈希查询，决定是否需要跨 Lane 探测。
         boolean orderQuery = type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY;
         if (!orderQuery && openOrderIds == null && userId <= 0) return missingAccountResponse(type, owner.appliedCommandCount());
         // 累计本次所选记录所属的账户 Lane 位，投递后必须等待这些 Lane 全部完成。
@@ -296,13 +282,11 @@ public final class CoreQueryService {
             laneMask = 0;
             for (int index = 0; index < openOrderIds.size(); index++) {
                 long selected = openOrderIds.valueAt(index);
-                // 当前索引记录的身份与归属路由，用来取得所属用户并定位账户 Lane。
                 var route = owner.activeOrderIndex().activeOrderRoute(selected);
                 if (route == null) throw new IllegalStateException("active order query route is missing");
                 laneMask |= owner.runtimeState().topology().accountLaneMask(route.userId());
             }
         } else if (orderQuery) {
-            // 当前索引记录的身份与归属路由，用来取得所属用户并定位账户 Lane。
             var route = owner.activeOrderIndex().activeOrderRoute(orderId);
             // 只有orderId的内部协议也支持保留的终态订单；无活跃路由时由各Lane原位探测。
             int count = owner.runtimeState().topology().accountLaneCount();
@@ -316,7 +300,6 @@ public final class CoreQueryService {
 
     /**
      * 按过期时间、状态、用户或币对选择触发索引来源，再施加精确编号、游标及活动状态筛选；受扫描和结果条数双重约束，固定路由后由所属 Lane 读取详情。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     public CoreResponse beginTriggerQuery(CoreMessage message) {
         // 触发单查询的币对、状态、编号、游标、过期时间和结果上限条件。
@@ -326,7 +309,6 @@ public final class CoreQueryService {
                 : com.surprising.product.api.utils.InstrumentIds.parse(requested.instrumentId());
         // 规范化后的排他编号游标，协议的 0 转成 Long.MAX_VALUE 作为首页起点。
         long before = requested.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : requested.beforeTriggerOrderId();
-        // 按过期时间、状态、用户或币对选择的触发索引遍历来源，后面继续核对组合条件。
         Iterable<Long> source = requested.expiresBeforeEpochMillis() > 0
                 ? owner.triggerOrderIndex().expired(requested.expiresBeforeEpochMillis(), requested.limit())
                 : requested.instrumentId().isEmpty()
@@ -344,10 +326,9 @@ public final class CoreQueryService {
         long laneMask = 0;
         // 已经遍历的索引项数量，包含被筛掉的项，超过全局扫描预算立即拒绝。
         int scanned = 0;
-        for (long /* 当前遍历的触发单编号，与精确编号及排他游标条件核对。 */ id : source) {
+        for (long id : source) {
             if (++scanned > CoreQueryService.OperationalQueries.MAX_INDEX_SCAN)
                 throw new CoreQueryService.OperationalQueries.QueryTooLargeException();
-            // 当前索引记录的身份与归属路由，用来取得所属用户并定位账户 Lane。
             var route = owner.triggerOrderIndex().route(id);
             if (route == null || requested.beforeTriggerOrderId() != 0 && id >= before || requested.triggerOrderId() != 0 && requested.triggerOrderId() != id
                     || message.header().userId() != 0 && message.header().userId() != route.userId()
@@ -370,7 +351,6 @@ public final class CoreQueryService {
 
     /**
      * 按算法索引选父单，或精确选择仍保留的父单编号，固定用户路由及原顺序，再交给所属 Lane 汇总子单进度。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     private CoreResponse beginAlgoAccountQuery(CoreMessage message) {
         // 已解码的算法父单用户、币对、调度截止时间、精确编号和条数条件。
@@ -387,11 +367,9 @@ public final class CoreQueryService {
         long[] selectedIds = new long[ids.size()], users = new long[ids.size()];
         // 累计本次所选记录所属的账户 Lane 位，投递后必须等待这些 Lane 全部完成。
         long laneMask = 0;
-        for (/* 正在填入父单编号和所属用户两个对齐数组的下标。 */ int index = 0; index < ids.size(); index++) {
-            // 本轮从算法索引取出的父单编号，用于读取所属用户路由。
+        for (int index = 0; index < ids.size(); index++) {
             long selected = ids instanceof com.surprising.aeron.support.collection.ImmutableLongArrayList primitive
                     ? primitive.valueAt(index) : ids.get(index);
-            // 当前索引记录的身份与归属路由，用来取得所属用户并定位账户 Lane。
             var route = owner.algoOrderIndex().value(selected);
             if (route == null) throw new IllegalStateException("algo query route is missing");
             selectedIds[index] = selected; users[index] = route.userId();
@@ -408,9 +386,6 @@ public final class CoreQueryService {
 
     /**
      * 按请求 UUID 登记查询并投递目标 Lane；邮箱拒收或投递异常先清除关联，成功只返回待完成状态。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
-     * @param laneMask 本次查询需要访问的账户 Lane 位集合，全部完成后才归并
-     * @param query 已经固定身份、结果槽和目标 Lane 的账户查询任务
      */
     private CoreResponse dispatchAccountQuery(CoreMessage message, long laneMask, AccountQuery query) {
         registerQuery(message, query);
@@ -429,31 +404,24 @@ public final class CoreQueryService {
     /**
      * 本次触发单页的固定编号、用户路由和响应槽；各 Lane 只填自己的下标，全部完成后按原选择顺序编码。
      * @param ids 按原索引顺序选择的业务记录编号，与用户和响应槽逐项对齐
-     * @param users 各业务记录所属的用户编号，用于决定由哪个账户 Lane 填结果
-     * @param views 与编号逐项对齐的查询 DTO 槽，各 Lane 只填写自己拥有的记录
      */
     private record TriggerQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.CoreTriggerOrderStateView[] views) { }
 
     /**
      * 本次算法父单页的固定路由与响应槽，各 Lane 汇总自己的父单及保留子单，最后合并时再检查全局子单扫描量。
      * @param ids 按原索引顺序选择的业务记录编号，与用户和响应槽逐项对齐
-     * @param users 各业务记录所属的用户编号，用于决定由哪个账户 Lane 填结果
-     * @param views 与编号逐项对齐的查询 DTO 槽，各 Lane 只填写自己拥有的记录
      */
     private record AlgoQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.CoreAlgoOrderView[] views) { }
 
     /**
      * 本次待完成划转页的固定编号、用户路由和 DTO 槽，用于各 Lane 原位读取，不保存第二份划转状态。
      * @param ids 按原索引顺序选择的业务记录编号，与用户和响应槽逐项对齐
-     * @param users 各业务记录所属的用户编号，用于决定由哪个账户 Lane 填结果
-     * @param views 与编号逐项对齐的查询 DTO 槽，各 Lane 只填写自己拥有的记录
      */
     private record PendingTransferQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.TransferFundsCommand[] views) { }
 
     /**
      * 保留缺失实体的协议差异：用户或订单哈希返回成功且哈希为零，详情查询返回 ENTITY_NOT_FOUND。
      * @param type 本次查询的协议消息类型，用来选择账户、账本或编码分支
-     * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
      */
     private static CoreResponse missingAccountResponse(CoreMessageType type, long commandCount) {
         if (type == CoreMessageType.USER_STATE_HASH_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY)
@@ -496,12 +464,8 @@ public final class CoreQueryService {
 
         /**
          * 固定查询类型、身份和目标 Lane 集合，按拓扑创建各 Lane 响应槽，挂单页另外分配与所选编号对齐的 DTO 槽。
-         * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
          * @param type 本次查询的协议消息类型，用来选择账户、账本或编码分支
          * @param userId 查询目标用户编号，具体查询类型决定是否允许用 0 表示未指定
-         * @param orderId 精确查询的普通订单编号；不按普通订单编号查询的分支为 0
-         * @param clientName 客户端订单标识，仅客户端订单详情查询使用
-         * @param laneMask 本次查询需要访问的账户 Lane 位集合，全部完成后才归并
          * @param openOrderIds 按索引页顺序固定的活动订单编号，非挂单页为 null
          * @param algoPage 本次算法父单查询的固定路由及结果槽，其他查询为 null
          */
@@ -509,7 +473,6 @@ public final class CoreQueryService {
                              long orderId, String clientName, long laneMask, com.surprising.aeron.support.collection.ImmutableLongArrayList openOrderIds, AlgoQueryPage algoPage) {
             this.commandCount = commandCount; this.type = type;
             this.userId = userId; this.orderId = orderId; this.clientName = clientName; this.laneMask = laneMask;
-            // 当前拓扑的账户 Lane 总数，按此分配响应与命中槽。
             int count = owner.runtimeState().topology().accountLaneCount();
             responses = new CoreResponse[count]; found = new boolean[count];
             this.openOrderIds = openOrderIds;
@@ -529,15 +492,13 @@ public final class CoreQueryService {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
             }
-            catch (/* 账户读取或最终归并发现非法参数，转换为 INVALID_COMMAND。 */ IllegalArgumentException invalid) {
+            catch (IllegalArgumentException invalid) {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.INVALID_COMMAND, commandCount);
             }
             responses[lane.laneId()] = response;
-            // 当前 Lane 的完成位，用于原子合并及检测重复完成。
             long bit = 1L << lane.laneId();
             // 把当前 Lane 合入后的完成集合，等于目标集合才可归并最终结果。
-            // 本轮 CAS 前已完成的 Lane 集合，更新冲突时重新读取。
             long previous, complete;
             do {
                 previous = completedLaneMask.get(); complete = previous | bit;
@@ -547,7 +508,7 @@ public final class CoreQueryService {
             // 最后完成的 Lane 归并出的整笔查询响应，写入完成表供 Owner 消费。
             CoreResponse completed;
             try { completed = completedResponse(); }
-            catch (/* 账户读取或最终归并发现非法参数，转换为 INVALID_COMMAND。 */ IllegalArgumentException invalid) {
+            catch (IllegalArgumentException invalid) {
                 completed = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.INVALID_COMMAND, commandCount);
             }
@@ -560,7 +521,7 @@ public final class CoreQueryService {
          */
         @Override public CoreResponse apply(AccountPartition lane) {
             if (transferPage != null) {
-                for (/* 当前页编号和 DTO 数组的共同下标，所属 Lane 只写它实际拥有的记录。 */ int index = 0; index < transferPage.ids.length; index++) {
+                for (int index = 0; index < transferPage.ids.length; index++) {
                     if (owner.runtimeState().topology().accountLaneId(transferPage.users[index]) != lane.laneId()) continue;
                     // 所属 Lane 读出的待完成划转，用户身份必须与固定路由一致。
                     var value = owner.runtimeState().pendingTransfer(transferPage.ids[index]);
@@ -571,7 +532,7 @@ public final class CoreQueryService {
                 return null;
             }
             if (triggerPage != null) {
-                for (/* 当前页编号和 DTO 数组的共同下标，所属 Lane 只写它实际拥有的记录。 */ int index = 0; index < triggerPage.ids.length; index++) {
+                for (int index = 0; index < triggerPage.ids.length; index++) {
                     if (owner.runtimeState().topology().accountLaneId(triggerPage.users[index]) != lane.laneId()) continue;
                     // 所属 Lane 当前仍保留的触发单，存在时才填入对应视图槽。
                     var value = owner.runtimeState().triggerOrder(triggerPage.ids[index]);
@@ -580,7 +541,7 @@ public final class CoreQueryService {
                 return null;
             }
             if (algoPage != null) {
-                for (/* 当前页编号和 DTO 数组的共同下标，所属 Lane 只写它实际拥有的记录。 */ int index = 0; index < algoPage.ids.length; index++) {
+                for (int index = 0; index < algoPage.ids.length; index++) {
                     if (owner.runtimeState().topology().accountLaneId(algoPage.users[index]) != lane.laneId()) continue;
                     algoPage.views[index] = CoreQueryService.OperationalQueries.algoOrder(
                             owner.runtimeState(), algoPage.ids[index]);
@@ -588,15 +549,13 @@ public final class CoreQueryService {
                 return null;
             }
             if (openOrderIds != null) {
-                for (/* 当前页编号和 DTO 数组的共同下标，所属 Lane 只写它实际拥有的记录。 */ int index = 0; index < openOrderIds.size(); index++) {
-                    // 当前 Lane 对某个挂单编号的详情探测结果，只把命中且仍 OPEN 的订单写入页槽。
+                for (int index = 0; index < openOrderIds.size(); index++) {
                     var query = CoreQueryService.StateQueries.orderState(owner.runtimeState(), lane, owner.identities(), openOrderIds.valueAt(index), false);
                     if (query.found() && "OPEN".equals(query.view().status())) openOrders[index] = query.view();
                 }
                 return null;
             }
             if (type == CoreMessageType.USER_STATE_QUERY || type == CoreMessageType.USER_STATE_HASH_QUERY) {
-                // 当前用户的完整状态与哈希查询结果，超限标记优先转换为拒绝。
                 var query = CoreQueryService.StateQueries.userState(owner.runtimeState(), lane, owner.identities(), userId,
                         type == CoreMessageType.USER_STATE_HASH_QUERY);
                 if (query.tooLarge()) return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
@@ -627,9 +586,7 @@ public final class CoreQueryService {
             // 尚待检查错误的目标 Lane 位集合，每轮清除最低一位。
             long pending = laneMask;
             while (pending != 0) {
-                // 当前最低有效位对应的账户 Lane 编号，用于读取固定响应或命中槽。
                 int laneId = Long.numberOfTrailingZeros(pending); pending &= pending - 1;
-                // 当前目标 Lane 的响应，非法参数和超限拒绝要优先于部分列表结果返回。
                 var response = responses[laneId];
                 if (response != null && (response.resultCode() == CoreResultCode.INVALID_COMMAND
                         || response.resultCode() == CoreResultCode.QUERY_RESPONSE_TOO_LARGE)) return response;
@@ -648,7 +605,7 @@ public final class CoreQueryService {
                 var selected = new ArrayList<com.surprising.aeron.protocol.CoreAlgoOrderView>(algoPage.views.length);
                 // 所有已合并父单的子单引用总数，不能仅按每个 Lane 独立放宽扫描预算。
                 int children = 0;
-                for (var /* 当前算法父单的汇总视图，其子单列表长度计入全局扫描预算。 */ view : algoPage.views) if (view != null) {
+                for (var view : algoPage.views) if (view != null) {
                     children = Math.addExact(children, view.childOrderIds().size());
                     if (children > CoreQueryService.OperationalQueries.MAX_INDEX_SCAN)
                         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
@@ -661,7 +618,7 @@ public final class CoreQueryService {
             if (openOrders != null) {
                 // 按挂单索引页原顺序过滤空槽后的 OPEN 订单详情列表。
                 var selected = new ArrayList<com.surprising.aeron.protocol.CoreOrderStateView>(openOrders.length);
-                for (var /* 当前挂单页槽中的活动订单 DTO，不存在时不进入结果。 */ order : openOrders) if (order != null) selected.add(order);
+                for (var order : openOrders) if (order != null) selected.add(order);
                 return new CoreResponse(ResponseStatus.OK, commandCount,
                         CoreStateQueryCodec.encodeOpenOrders(new com.surprising.aeron.protocol.CoreOpenOrdersView(selected)));
             }
@@ -670,7 +627,6 @@ public final class CoreQueryService {
             // 尚待检查单实体命中的 Lane 位集合，每轮只访问一个目标 Lane。
             long lanes = laneMask;
             while (lanes != 0) {
-                // 当前最低有效位对应的账户 Lane 编号，用于读取固定响应或命中槽。
                 int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
                 if (!found[laneId]) continue;
                 if (selected != null) throw new IllegalStateException("order identity is present in multiple Account Lanes");
@@ -685,12 +641,9 @@ public final class CoreQueryService {
 
     /**
      * 选择强平工作候选，保险页保留游标外计划以计算全局分配；先投递 Lane 取事实，再投递账本等回执，账本邮箱满时只保留一个延迟投递查询。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
-     * @param requested 强平工作类型、排他游标、页条数及编码字节预算
      */
     public CoreResponse beginLiquidationWorkQuery(CoreMessage message, CoreLiquidationWorkView.Query requested) {
         if (deferredLiquidationWorkQuery != null) return owner.rejected(CoreResultCode.MATCHING_REJECTED);
-        // 本次强平扫描的有序候选；保险查询包含页外计划，其他类型从排他游标后开始。
         var candidates = requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE
                 ? owner.liquidationIndex().activeIds()
                 : owner.liquidationIndex().activeIds().tailSet(requested.afterLiquidationId(), false);
@@ -747,9 +700,6 @@ public final class CoreQueryService {
         private final java.util.concurrent.atomic.AtomicLong completed = new java.util.concurrent.atomic.AtomicLong();
         /**
          * 按扫描上限固定候选编号、所属 Lane、币对、结算资产和标记价，并记录是否已选完来源及风险续扫信息；各 Lane 的结果槽只属于本次查询。
-         * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
-         * @param requested 强平工作类型、排他游标、页条数及编码字节预算
-         * @param candidates 已按强平编号排序的候选集合，保险分支含当前页游标之外的相关计划
          */
         LiquidationWorkQuery(long commandCount, CoreLiquidationWorkView.Query requested, java.util.NavigableSet<Long> candidates) {
             this.commandCount = commandCount; this.requested = requested;
@@ -768,9 +718,8 @@ public final class CoreQueryService {
             long mask = 0;
             // 写入候选编号、Lane、资产、币对和标记价多个对齐数组的共同下标。
             int index = 0;
-            for (long /* 当前遍历的候选强平编号，超过本次固定数量后停止取路由。 */ liquidationId : candidates) {
+            for (long liquidationId : candidates) {
                 if (index == count) break;
-                // 当前索引记录的身份与归属路由，用来取得所属用户并定位账户 Lane。
                 var route = owner.liquidationIndex().route(liquidationId);
                 if (route == null) throw new IllegalStateException("liquidation query route is missing");
                 instruments[index] = owner.runtimeState().instrument(route.instrumentId());
@@ -787,7 +736,7 @@ public final class CoreQueryService {
          */
         @Override public void execute(AccountPartition lane) {
             try { owner.runtimeState().readAccountLane(lane, /* 当前已建立合法只读范围的账户 Lane，只处理分配给它的强平候选。 */ owned -> {
-                for (/* 当前检查的固定候选槽，下标同时定位所属 Lane、计划编号和市场输入。 */ int index = 0; index < ids.length; index++) {
+                for (int index = 0; index < ids.length; index++) {
                     if (lanes[index] != owned.laneId()) continue;
                     // 所属账户当前保留的强平计划，已经不存在时跳过该候选。
                     var value = owned.liquidation(ids[index]);
@@ -829,7 +778,7 @@ public final class CoreQueryService {
             } catch (/* 读取计划事实时发现参数或算术错误，记入当前 Lane 的 INVALID_COMMAND 失败槽。 */ IllegalArgumentException | ArithmeticException invalid) {
                 failures[lane.laneId()] = CoreResultCode.INVALID_COMMAND;
             }
-            completed.getAndUpdate(/* 原子更新前已完成的 Lane 位集合，本次只合入当前 Lane 的位。 */ mask -> mask | (1L << lane.laneId()));
+            completed.getAndUpdate(mask -> mask | (1L << lane.laneId()));
         }
         /**
          * 只有所有目标 Lane 的完成位齐全，才可读取回执；空路由的零位集合直接就绪。
@@ -849,7 +798,6 @@ public final class CoreQueryService {
                             ResponseStatus.REJECTED, ResponseStatus.REJECTED, failure, commandCount)));
                     return;
                 }
-                // 按固定候选和双重预算组装的工作页，保险分支再补建议金额。
                 var result = CoreQueryService.LiquidationQueries.workPage(owner.productLine(), requested, ids, actions,
                         receipts, continuation, sourceComplete);
                 if (requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE) {
@@ -861,7 +809,7 @@ public final class CoreQueryService {
             } catch (/* 当前读取或页组装超过查询规模上限，按所在分支记录或返回查询过大。 */ CoreQueryService.OperationalQueries.QueryTooLargeException tooLarge) {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
-            } catch (/* 工作页或保险建议计算发生非法参数或算术错误，转换为 INVALID_COMMAND。 */ IllegalArgumentException | ArithmeticException invalid) {
+            } catch (IllegalArgumentException | ArithmeticException invalid) {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.INVALID_COMMAND, commandCount);
             }
@@ -887,7 +835,7 @@ public final class CoreQueryService {
                     throw new CoreQueryService.OperationalQueries.QueryTooLargeException();
                 // 与各币对多空汇总一一对应的 OI 协议 DTO 列表。
                 var views = new ArrayList<com.surprising.aeron.protocol.CoreOpenInterestView>(totals.size());
-                for (var /* 当前币对及其多空持仓数量汇总项，转成 OI 查询 DTO。 */ entry : totals.entrySet()) {
+                for (var entry : totals.entrySet()) {
                     views.add(new com.surprising.aeron.protocol.CoreOpenInterestView(
                             entry.getKey(), entry.getValue().longQuantity(), entry.getValue().shortQuantity()));
                 }
@@ -909,9 +857,9 @@ public final class CoreQueryService {
             } else encoded = CoreStateQueryCodec.encodeTreasuryState(
                     CoreQueryService.OperationalQueries.treasuryAssets(ledger, owner.identities()));
             response = new CoreResponse(ResponseStatus.OK, commandCount, encoded);
-        } catch (/* 财库或 OI 返回数量超限，只把本次查询转换为响应过大。 */ CoreQueryService.OperationalQueries.QueryTooLargeException failure) {
+        } catch (CoreQueryService.OperationalQueries.QueryTooLargeException failure) {
             response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
-        } catch (/* 账本查询条件或编码参数非法，转换为 INVALID_COMMAND。 */ IllegalArgumentException failure) {
+        } catch (IllegalArgumentException failure) {
             response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.INVALID_COMMAND, commandCount);
         }
         return response;
@@ -919,7 +867,6 @@ public final class CoreQueryService {
 
     /**
      * 解码单币对盘口查询，在对应 Matcher 提交栅栏之后读取层级；异步完成或失败分别登记，Owner 先返回待完成。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     public CoreResponse beginBookQuery(CoreMessage message) {
         if (message.payloadLength() == 0) {
@@ -945,7 +892,6 @@ public final class CoreQueryService {
 
     /**
      * 已有快照编号时校验会话和深度并续页；新请求异步读取一个或多个 Matcher 的初始化快照，合并后交 Owner 建立有界分页会话。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     public CoreResponse beginBookBootstrapQuery(CoreMessage message) {
         // 初始化盘口请求，含快照标识、币对游标、深度和每页币对上限。
@@ -967,7 +913,7 @@ public final class CoreQueryService {
                     ? owner.matcherPipeline().readAtSubmissionFence(0,
                     () -> owner.matchingAdapter().orderBookBootstrapShard(0, query.depth()))
                     : owner.matcherPipeline().readEachAsync(
-                    /* 当前要读取初始化盘口的 Matcher 分片编号。 */ shardId -> owner.matchingAdapter().orderBookBootstrapShard(shardId, query.depth()))
+ shardId -> owner.matchingAdapter().orderBookBootstrapShard(shardId, query.depth()))
                     .thenApply(owner.matchingAdapter()::mergeBookBootstrapShards);
             snapshot.whenComplete((/* 所有 Matcher 初始化读取及合并完成的快照内容，先包装完成结果，Owner 稍后创建会话。 */ value, /* 初始化读取、分片合并或任务投递失败，登记标记供 Owner 消费时返回拒绝。 */ failure) -> {
                 if (failure != null) result.completeExceptionally(failure);
@@ -1036,7 +982,6 @@ public final class CoreQueryService {
 
     /**
      * 校验币对游标属于固定会话，按币对文本顺序选择其后最多 limit 个币对并汇总层级，计算续页游标，编码后检查条数与字节上限。
-     * @param session 已经固定盘口内容、导出水位和深度的初始化分页会话
      * @param query 当前页使用的快照编号、币对游标、深度和币对数量上限
      */
     CoreResponse bootstrapPageResponse(BookBootstrapSession session, CoreOrderBookBootstrapQuery query) {
@@ -1047,7 +992,7 @@ public final class CoreQueryService {
         var tailSymbols = session.symbols().tailMap(query.symbolCursor(), false).keySet();
         // 本页按字典序选出的币对编号列表，按币对条数上限分页而非按层级数截断。
         List<String> symbols = new ArrayList<>(Math.min(query.limit(), tailSymbols.size()));
-        for (String /* 当前从排他游标之后选入本页的币对编号。 */ symbol : tailSymbols) {
+        for (String symbol : tailSymbols) {
             symbols.add(symbol);
             if (symbols.size() >= query.limit()) break;
         }
@@ -1074,7 +1019,6 @@ public final class CoreQueryService {
 
     /**
      * 统一检查盘口层级数量和编码字节上限，超限返回专用错误，否则按当前已应用命令计数构造成功响应。
-     * @param levelCount 本次编码包含的全部盘口层级数，不是币对数量
      * @param encoded 已经完成的盘口响应字节，用其实际长度检查响应上限
      */
     CoreResponse boundedBookResponse(int levelCount, byte[] encoded) {
@@ -1143,7 +1087,6 @@ public final class CoreQueryService {
     /**
      * 多币对盘口初始化的分页会话，固定快照编号、导出水位、深度和按币对文本排序的只读层级映射，后续页不能混入另一份快照。
      * @param snapshotId 初始化快照及分页会话的稳定标识，用于后续游标校验
-     * @param exportSequence Owner 消费结果时固定的实时发布序号，后续各页共用
      * @param depth 该初始化会话的每侧盘口深度，后续页请求必须一致
      * @param symbols 按币对文本排序的只读盘口分组，列表也保持不可修改
      */
@@ -1156,7 +1099,6 @@ public final class CoreQueryService {
         /**
          * 按币对文本建立有序分组，把层级归入已有币对并拒绝未知引用；最后冻结每组列表和映射，后续分页共用同一快照内容。
          * @param snapshotId 初始化快照及分页会话的稳定标识，用于后续游标校验
-         * @param exportSequence Owner 消费结果时固定的实时发布序号，后续各页共用
          * @param depth 该初始化会话的每侧盘口深度，后续页请求必须一致
          * @param snapshot Matcher 读取及合并后的初始化快照，包含币对集合和对应层级
          */
@@ -1165,7 +1107,6 @@ public final class CoreQueryService {
                 long exportSequence,
                 int depth,
                 OrderBookDepthSnapshot snapshot) {
-            // 按币对文本排序的临时分组表，组装完成后冻结映射及各列表。
             NavigableMap<String, List<com.surprising.aeron.protocol.CoreBookLevelView>> grouped = new TreeMap<>();
             for (String /* 快照声明存在的币对编号，先建立空列表，使空盘口币对也能参与分页。 */ instrumentId : snapshot.symbols()) grouped.put(instrumentId, new ArrayList<>());
             for (com.surprising.aeron.protocol.CoreBookLevelView /* 快照中的一个盘口层级，只能归入快照已声明的币对分组。 */ level : snapshot.levels()) {
@@ -1174,7 +1115,7 @@ public final class CoreQueryService {
                 if (levels == null) throw new IllegalStateException("bootstrap level references unknown instrumentId");
                 levels.add(level);
             }
-            grouped.replaceAll((/* 正在冻结列表的币对键，冻结动作只需要同项的列表内容。 */ instrumentId, /* 本币对已完成分组的层级列表，复制为不可修改列表后交给固定会话。 */ levels) -> List.copyOf(levels));
+            grouped.replaceAll((instrumentId, levels) -> List.copyOf(levels));
             return new BookBootstrapSession(snapshotId, exportSequence, depth,
                     Collections.unmodifiableNavigableMap(grouped));
         }
@@ -1218,7 +1159,6 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
     /**
      * 在 Owner 解码查询类型及 ADL 条件，固定当前命令计数和市场输入，创建稍后交给 Ledger 选择账户路由的查询对象。
      * @param owner 所属交易运行时，提供索引路由、查询登记和线程交接入口
-     * @param message 风险状态或 ADL 候选查询消息，用户条件取自消息头，ADL 条件取自载荷
      */
     static RiskAccountQuery prepare(TradingCoreRuntime owner, CoreMessage message) {
         // 本次 ADL 资产筛选条件，风险快照查询保持 null。
@@ -1238,21 +1178,18 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
     /**
      * 保存本次查询条件，并按原有 Lane 数量分配各 Lane 独写的风险结果、ADL 候选及失败槽，等待账本填好路由。
      * @param owner 所属交易运行时，提供索引路由、查询登记和线程交接入口
-     * @param commandCount 查询进入时固定的已应用命令计数，完成响应沿用此值
      * @param requestedUser 风险查询的用户条件，0 表示按持仓成员查询全部用户
      * @param asset 规范化的 ADL 结算资产；null 表示本次为风险快照查询
      * @param limit ADL 最多返回的候选数量，风险快照查询不使用此限制
-     * @param markets Owner 在进入查询时固定的币对配置与标记价输入，后续账户读取共用它
      */
     private RiskAccountQuery(TradingCoreRuntime owner, long commandCount,
             long requestedUser, String asset, int limit, CoreQueryService.RiskQueries.MarketInputs markets) {
         this.owner = owner; this.commandCount = commandCount; this.requestedUser = requestedUser;
         this.asset = asset; this.limit = limit; this.markets = markets;
-        // 当前账户 Lane 总数，决定结果和错误槽的固定布局。
         int count = owner.runtimeState().topology().accountLaneCount();
         failures = new CoreResultCode[count];
         riskResults = new ArrayList<>(count); adlResults = new ArrayList<>(count);
-        for (/* 正在初始化查询结果列表的账户 Lane 编号。 */ int lane = 0; lane < count; lane++) {
+        for (int lane = 0; lane < count; lane++) {
             riskResults.add(new ArrayList<>());
             adlResults.add(new ArrayList<>(Math.min(limit, 64)));
         }
@@ -1274,24 +1211,23 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
                 users = new long[routes.size()]; positionKeys = new long[routes.size()];
                 // 写入 ADL 用户数组和持仓身份数组的共同下标，保证两数组对齐。
                 int index = 0;
-                for (var /* 当前 ADL 候选的用户、币对及持仓腿路由，用于构造精确持仓键。 */ route : routes) {
+                for (var route : routes) {
                     users[index] = route.userId();
                     positionKeys[index++] = com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.positionIdentityKey(
                             route.userId(), route.instrumentId(), route.positionSide());
                 }
             }
-            for (long /* 当前已选路由的用户编号，用来累计其所属账户 Lane 位。 */ user : users) laneMask |= owner.runtimeState().topology().accountLaneMask(user);
+            for (long user : users) laneMask |= owner.runtimeState().topology().accountLaneMask(user);
             if (laneMask == 0) {
                 complete(CoreQueryService.QueryResult.encoded(completedResponse()));
             }
-        } catch (/* 账本选择路由时发现扫描规模超限，转换为查询响应过大。 */ CoreQueryService.OperationalQueries.QueryTooLargeException failure) {
+        } catch (CoreQueryService.OperationalQueries.QueryTooLargeException failure) {
             failRoutes(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-        } catch (/* 账本选择路由时遇到的非法查询条件，转换为 INVALID_COMMAND。 */ IllegalArgumentException failure) { failRoutes(CoreResultCode.INVALID_COMMAND); }
+        } catch (IllegalArgumentException failure) { failRoutes(CoreResultCode.INVALID_COMMAND); }
     }
 
     /**
      * 路由阶段已经失败，无须再投递账户查询；保存带业务错误码的已编码响应，让 Owner 按普通查询结果消费。
-     * @param code 需要返回的参数错误或查询规模超限等业务错误码
      */
     private void failRoutes(CoreResultCode code) {
         complete(CoreQueryService.QueryResult.encoded(rejected(code)));
@@ -1320,7 +1256,6 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
         // 当前完成 Lane 的唯一位标记，不能重复发布同一位。
         long bit = 1L << lane.laneId();
         // 本轮原子更新前已完成的 Lane 集合；CAS 失败就重新读取。
-        // 本轮把当前 Lane 合入后的集合，等于目标集合时才可归并最终结果。
         long previous, complete;
         do {
             previous = completedLaneMask.get(); complete = previous | bit;
@@ -1330,9 +1265,9 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
         // 最后完成的 Lane 生成的成功或业务拒绝响应，存入异步结果表。
         CoreResponse response;
         try { response = completedResponse(); }
-        catch (/* 最终归并时发现总实体数超限，返回 QUERY_RESPONSE_TOO_LARGE。 */ CoreQueryService.OperationalQueries.QueryTooLargeException failure) {
+        catch (CoreQueryService.OperationalQueries.QueryTooLargeException failure) {
             response = rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-        } catch (/* 最终编码或合并时遇到非法参数，返回 INVALID_COMMAND。 */ IllegalArgumentException failure) { response = rejected(CoreResultCode.INVALID_COMMAND); }
+        } catch (IllegalArgumentException failure) { response = rejected(CoreResultCode.INVALID_COMMAND); }
         complete(CoreQueryService.QueryResult.encoded(response));
     }
 
@@ -1346,7 +1281,7 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
         if (positionKeys == null) {
             // 当前 Lane 独写的风险快照列表，逐用户追加前检查本 Lane 上限。
             var result = riskResults.get(lane.laneId());
-            for (long /* 风险查询路由中的用户，属于其他 Lane 时直接跳过。 */ user : users) {
+            for (long user : users) {
                 if (topology.accountLaneId(user) != lane.laneId()) continue;
                 // 对当前用户和固定市场输入重新估值后得到的风险快照 DTO。
                 var rows = CoreQueryService.RiskQueries.userSnapshots(owner.runtimeState(), owner.identities(), user, markets);
@@ -1357,7 +1292,7 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
         } else {
             // 当前 Lane 独写的 ADL 优先候选列表，最多保留本次 limit 条。
             var result = adlResults.get(lane.laneId());
-            for (/* 逐项读取对齐用户与持仓键的 ADL 路由下标。 */ int index = 0; index < users.length; index++) {
+            for (int index = 0; index < users.length; index++) {
                 if (topology.accountLaneId(users[index]) != lane.laneId()) continue;
                 // 当前账户持仓估值后的 ADL 候选；不满足候选条件时为 null。
                 var candidate = CoreQueryService.RiskQueries.adlCandidate(owner.runtimeState(), owner.identities(),
@@ -1378,7 +1313,7 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
         if (positionKeys == null) {
             // 各 Lane 风险 DTO 总数，先核对全局上限再分配合并列表。
             int count = 0;
-            for (var /* 当前统计数量的 Lane 风险列表，不读取其账户权威对象。 */ rows : riskResults) count = Math.addExact(count, rows.size());
+            for (var rows : riskResults) count = Math.addExact(count, rows.size());
             if (count > CoreQueryService.OperationalQueries.MAX_QUERY_ENTITIES)
                 throw new CoreQueryService.OperationalQueries.QueryTooLargeException();
             // 容量已按总数准备的合并风险列表，仅用于排序及响应编码。
@@ -1394,7 +1329,6 @@ static final class RiskAccountQuery extends java.util.concurrent.CompletableFutu
 
     /**
      * 以查询进入时的命令计数构造业务拒绝响应，不修改交易命令的结果账本或账户状态。
-     * @param code 需要返回的参数错误或查询规模超限等业务错误码
      */
     private CoreResponse rejected(CoreResultCode code) {
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, code, commandCount);
@@ -1407,8 +1341,6 @@ public static final class LiquidationQueries {
 
     /**
      * 把账户 Lane 已捕获的只读动作和补亏回执归并成一页。空回执也消费对应编号，未纳入的有效项保留给下页；同时保持来源是否完整、条数及编码字节预算语义。
-     * @param productLine 这页强平工作的产品线，补亏筛选时还核对合约产品归属
-     * @param query 本次用途、起始强平游标、最大条数及最大编码字节数
      * @param ids 与两个回执数组按相同下标对应的候选编号，顺序与分页遍历一致
      * @param actionReceipts 各账户 Lane 捕获的执行动作回执，不符合用途或失效时该位置为空
      * @param resolutionReceipts 与编号同下标的保险或 ADL 补亏回执，没有可展示项时为空
@@ -1425,11 +1357,10 @@ public static final class LiquidationQueries {
         ArrayList<CoreLiquidationWorkView.Resolution> resolutions = new ArrayList<>();
         // 回执合页已消费到的强平编号，空回执也推进，有效项超限时留在前一项。
         long cursor = query.afterLiquidationId();
-        // 该页是否已消费完来源范围，条数、扫描或字节边界使它变为 false。
         boolean complete = sourceComplete;
         // 回执合页当前已接纳的编码总长度，每次加项前都检查预算。
         int encoded = CoreLiquidationWorkCodec.emptyWorkLength(continuation);
-        for (/* 当前候选编号及对应动作、补亏回执的共同数组下标。 */ int index = 0; index < ids.length; index++) {
+        for (int index = 0; index < ids.length; index++) {
             if (ids[index] <= query.afterLiquidationId()) continue;
             // 当前候选的执行动作视图，补亏用途或无有效执行回执时为空。
             var action = actionReceipts[index];
@@ -1451,14 +1382,12 @@ public static final class LiquidationQueries {
 
     /**
      * 在已有分页结果的补亏项上填入账本推荐覆盖额，缺少推荐时为 0；不改变索赔阶段、动作选择、游标或页面完成标记。
-     * @param work 已经选好动作、补亏项及游标的原分页工作结果
-     * @param allocations 账本按完整同资产索赔范围计算的推荐覆盖金额映射
      */
     public static CoreLiquidationWorkView insuranceRecommendations(CoreLiquidationWorkView work,
                                                                   java.util.Map<Long, Long> allocations) {
         // 本页补亏待办列表，保险推荐填充方法中则表示替换推荐额后的新列表。
         ArrayList<CoreLiquidationWorkView.Resolution> resolutions = new ArrayList<>(work.resolutions().size());
-        for (var /* 当前强平事实或原补亏视图，读取后按本用途筛选或补入推荐额。 */ value : work.resolutions()) resolutions.add(new CoreLiquidationWorkView.Resolution(
+        for (var value : work.resolutions()) resolutions.add(new CoreLiquidationWorkView.Resolution(
                 value.liquidationId(), value.userId(), value.instrumentId(), value.asset(), value.marginMode(), value.positionSide(),
                 value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(),
                 allocations.getOrDefault(value.liquidationId(), 0L), value.purpose()));
@@ -1468,9 +1397,6 @@ public static final class LiquidationQueries {
 
     /**
      * 只在执行用途携带风险续扫信息；先检查币对扫描索引规模，再选下一份未完风险扫描，保留其外部币对、价格序号和最后完成用户。
-     * @param runtime 允许读取本批强平、持仓及行情的运行时，调用方负责满足账户与市场读取边界
-     * @param identities 外部币对、资产和持仓键与运行时整数身份的映射
-     * @param purpose 本次只选择执行、保险补亏还是 ADL 待办
      */
     public static CoreRiskScanContinuation continuation(
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
@@ -1499,22 +1425,17 @@ public static final class OperationalQueries {
 
     /**
      * 通过运行时的账本静止读取入口获取资产视图，再调用账本数据版本的组装方法。
-     * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
-     * @param identities 资产及币对整数编号到外部业务代码的映射
      */
     public static List<CoreTreasuryAssetView> treasuryAssets(
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        return runtime.queryLedgerAtRest(/* 运行时静止读取入口传入的当前资金总账，按它组装资产视图。 */ ledger -> treasuryAssets(ledger, identities));
+        return runtime.queryLedgerAtRest(ledger -> treasuryAssets(ledger, identities));
     }
 
     /**
      * 先检查总账项规模，再合并手续费、保险、亏空及各类残差中的资产编号，读取每种资产各项余额并按资产代码排序，返回只读列表。
-     * @param treasury 当前允许读取的资金总账，包含各资产的手续费、保险和残差记录
-     * @param identities 资产及币对整数编号到外部业务代码的映射
      */
     public static List<CoreTreasuryAssetView> treasuryAssets(TreasuryRuntime treasury, RuntimeIdentityRegistry identities) {
         if (treasury.assetLedgerEntryCount() > MAX_QUERY_ENTITIES) throw new QueryTooLargeException();
-        // 从各类资金项中去重合并的资产整数编号集合。
         var ids = new org.eclipse.collections.impl.set.mutable.primitive.IntHashSet();
         ids.addAll(treasury.feeBalances().keySet());
         ids.addAll(treasury.insuranceBalances().keySet());
@@ -1527,9 +1448,8 @@ public static final class OperationalQueries {
         // 资产编号数组，先按整数排序，再读取对应各项余额。
         int[] sorted = ids.toArray();
         Arrays.sort(sorted);
-        // 当前各资产的完整资金视图，返回前再按对外资产代码排序。
         ArrayList<CoreTreasuryAssetView> views = new ArrayList<>(sorted.length);
-        for (int /* 当前需要读取手续费、保险、亏空及残差余额的资产整数编号。 */ assetId : sorted) {
+        for (int assetId : sorted) {
             views.add(new CoreTreasuryAssetView(identities.asset(assetId), treasury.fee(assetId),
                     treasury.insurance(assetId), treasury.insuranceDeficit(assetId),
                     treasury.liquidationFee(assetId), treasury.fundingResidual(assetId),
@@ -1541,8 +1461,6 @@ public static final class OperationalQueries {
 
     /**
      * 已知币对有进行中的资金费时返回结算编号和下一用户游标；没有进行中任务则返回最近结算编号和已完成标记，未知币对按无任务处理。
-     * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
-     * @param identities 资产及币对整数编号到外部业务代码的映射
      * @param instrumentId 要查询进度的外部币对编号，条件单过滤中空值或空串表示不限定
      */
     public static CoreFundingProgressView fundingProgress(
@@ -1550,9 +1468,7 @@ public static final class OperationalQueries {
         // 外部币对编号在身份表中的已注册整数编号，未注册时直接返回无进行中任务。
         Integer symbolId = identities.findSymbolId(instrumentId);
         if (symbolId == null) return new CoreFundingProgressView(0, true, 0, 0);
-        // 当前运行时中的资金总账，进度记录由该总账维护。
         TreasuryRuntime treasury = runtime.treasury();
-        // 当前币对尚未完成的资金费进度，存在时展示下一用户游标。
         TreasuryRuntime.FundingProgressRuntime progress = treasury.fundingProgress(symbolId);
         return progress == null
                 ? new CoreFundingProgressView(treasury.fundingSettlement(symbolId), true, 0, 0)
@@ -1561,8 +1477,6 @@ public static final class OperationalQueries {
 
     /**
      * 读取到期结算的订单与用户继续游标、订单阶段完成标记及所需保险金额；没有进行中任务时展示最近结算编号为已完成，未知币对按无任务处理。
-     * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
-     * @param identities 资产及币对整数编号到外部业务代码的映射
      * @param instrumentId 要查询进度的外部币对编号，条件单过滤中空值或空串表示不限定
      */
     public static CoreSettlementProgressView settlementProgress(
@@ -1570,9 +1484,7 @@ public static final class OperationalQueries {
         // 外部币对编号在身份表中的已注册整数编号，未注册时直接返回无进行中任务。
         Integer symbolId = identities.findSymbolId(instrumentId);
         if (symbolId == null) return new CoreSettlementProgressView(0, true, true, 0, 0, 0, 0);
-        // 当前运行时中的资金总账，进度记录由该总账维护。
         TreasuryRuntime treasury = runtime.treasury();
-        // 当前币对尚未完成的到期结算进度，包含撤单、用户游标和保险需求。
         TreasuryRuntime.LifecycleProgressRuntime progress = treasury.lifecycleProgress(symbolId);
         return progress == null
                 ? new CoreSettlementProgressView(treasury.lifecycleSettlement(symbolId), true, true, 0, 0, 0, 0)
@@ -1582,8 +1494,6 @@ public static final class OperationalQueries {
 
     /**
      * 查询一笔算法母单，在子单扫描上限内汇总退役及仍保留子单的成交量和活动数量；母单不存在时返回 null。
-     * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
-     * @param algoOrderId 要查看的算法母单编号
      */
     public static CoreAlgoOrderView algoOrder(TradingAccountRuntime runtime, long algoOrderId) {
         CoreAlgoOrderState state = runtime.algoOrder(algoOrderId);
@@ -1595,7 +1505,7 @@ public static final class OperationalQueries {
         long active = 0;
         // 仍有效的 OPEN 子单数量，与总历史子单数量区分。
         int activeCount = 0;
-        for (long /* 母单当前关联的一笔子单编号，用来读取最新成交与剩余数量。 */ childOrderId : state.childOrderIds()) {
+        for (long childOrderId : state.childOrderIds()) {
             // 子单当前订单状态；已退役且不存在时，其最终成交应已计入母单历史进度。
             Order child = runtime.order(childOrderId);
             if (child == null) continue; // 子单退役前，其最终成交量已经累计到母单。
@@ -1617,8 +1527,6 @@ public static final class OperationalQueries {
 
     /**
      * 沿给定定时器键读取仍存在的倒计时撤单记录，扫描超限时报错，结果达到一万条就停止并返回只读视图列表。
-     * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
-     * @param keys 按用户和币对范围定位的定时撤单键集合，空键会跳过
      */
     public static List<CoreCancelAllAfterView> cancelAllAfter(
             TradingAccountRuntime runtime, Iterable<CoreCancelAllAfterKey> keys) {
@@ -1626,7 +1534,7 @@ public static final class OperationalQueries {
         ArrayList<CoreCancelAllAfterView> result = new ArrayList<>();
         // 本次已检查的非空候选数量，按入口规则超限时停止或抛响应过大异常。
         int scanned = 0;
-        for (CoreCancelAllAfterKey /* 本轮需要读取的用户及币对范围定时器键。 */ key : keys) {
+        for (CoreCancelAllAfterKey key : keys) {
             if (key == null) continue;
             if (++scanned > MAX_INDEX_SCAN) throw new QueryTooLargeException();
             // 按该键找到的倒计时撤单状态，存在时转成协议视图。
@@ -1662,9 +1570,6 @@ public static final class RiskQueries {
     /**
      * 生产账户 Lane 的单用户入口，要求正用户编号和 Owner 已固定的市场输入，再按当前持仓计算风险结果。
      * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 所属账户 Lane 本次计算的正用户编号
-     * @param markets Owner 在派发前捕获的非空市场输入
      */
     public static List<CoreRiskSnapshotView> userSnapshots(TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities, long userId, MarketInputs markets) {
@@ -1672,15 +1577,11 @@ public static final class RiskQueries {
         ArrayList<CoreRiskSnapshotView> result = new ArrayList<>();
         if (runtime.positionCountForUser(userId) > CoreQueryService.OperationalQueries.MAX_INDEX_SCAN)
             throw new CoreQueryService.OperationalQueries.QueryTooLargeException();
-        // 当前用户各非空持仓的临时估值列表，先收集再生成组合口径的风险行。
         var values = new ArrayList<PositionValuation>();
-        // 按结算资产归组的本次查询临时累计值，不回写 Core 账户或扫描状态。
         // 仅在本次用户查询中使用的全仓资产汇总，下标 0 为权益变化、1 为维持保证金。
         var cross = new java.util.HashMap<String, long[]>();
-        // 当前用户各结算资产的全仓共享钱包缓存，每种资产只计算一次逐仓扣减。
         var wallets = new java.util.HashMap<String, Long>();
-        for (long /* 当前用户需要读取的一个持仓整数键。 */ key : runtime.positionKeysForUser(userId)) {
-            // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
+        for (long key : runtime.positionKeysForUser(userId)) {
             Position position = runtime.position(key);
             if (position == null || position.signedQuantitySteps() == 0) continue;
             if (values.size() >= CoreQueryService.OperationalQueries.MAX_QUERY_ENTITIES)
@@ -1704,20 +1605,17 @@ public static final class RiskQueries {
             // 本仓按标记价和合约精度算出的名义金额，供风险输出或 ADL 评分使用。
             long notional = CoreContractMath.notionalUnits(instrument, Math.absExact(quantity), mark.markPriceTicks());
             values.add(new PositionValuation(position, instrument, mark, pnl, maintenance, equityDelta, notional));
-            wallets.computeIfAbsent(instrument.settleAsset(), /* 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。 */ asset -> crossWalletBalance(runtime, identities, userId, asset, markets));
+            wallets.computeIfAbsent(instrument.settleAsset(), asset -> crossWalletBalance(runtime, identities, userId, asset, markets));
             if (position.marginMode() == CoreMarginMode.CROSS) {
                 // 同一结算资产的全仓累计值，下标 0 是权益变化合计，下标 1 是维持保证金合计。
-                long[] totals = cross.computeIfAbsent(instrument.settleAsset(), /* 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。 */ asset -> new long[2]);
+                long[] totals = cross.computeIfAbsent(instrument.settleAsset(), asset -> new long[2]);
                 totals[0] = Math.addExact(totals[0], equityDelta);
                 totals[1] = Math.addExact(totals[1], maintenance);
             }
         }
-        for (PositionValuation /* 当前用户已经算好的单持仓估值，结合共享钱包生成最终风险行。 */ value : values) {
-            // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
+        for (PositionValuation value : values) {
             Position position = value.position();
-            // 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。
             String asset = value.instrument().settleAsset();
-            // 当前结算资产扣掉逐仓持仓与委托占用后的全仓共享钱包。
             long wallet = wallets.get(asset);
             // 本行风险占比使用的维持保证金，全仓取该资产全仓合计，逐仓取单仓要求；输出行仍单独展示本仓维持保证金。
             // 本行风险占比采用的权益，全仓为共享钱包加组合估值变化，逐仓只看本仓保证金和市值变化。
@@ -1749,16 +1647,11 @@ public static final class RiskQueries {
     /**
      * 生产 Lane 按 Owner 准备的整数持仓键读取目标用户仓位，核对路由用户一致，再用固定市场输入计算候选；缺失持仓返回 null。
      * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 所属账户 Lane 本次计算的正用户编号
      * @param positionKey Owner 为该用户准备的持仓整数键，0 表示没有定位到持仓
-     * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
-     * @param markets Owner 在派发前捕获的非空市场输入
      */
     public static CoreAdlCandidateView adlCandidate(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             long userId, long positionKey, String asset, MarketInputs markets) {
         if (userId <= 0 || markets == null) throw new IllegalArgumentException("ADL query Lane inputs are required");
-        // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
         Position position = positionKey == 0 ? null : runtime.position(positionKey);
         if (position == null) return null;
         if (position.userId() != userId) throw new IllegalStateException("ADL query position route differs");
@@ -1794,8 +1687,6 @@ public static final class RiskQueries {
 
     /**
      * 按统一 ADL 比较规则二分插入候选，超过条数限制时删除最末项，调用方传入的列表应已按同一规则排序。
-     * @param candidates 已经按 ADL_ORDER 排列的当前 Lane 候选列表
-     * @param candidate 本次要按优先级插入的有效盈利候选
      * @param limit 最多返回或保留的候选条数，调用方应提供非负上限
      */
     public static void addAdlCandidate(ArrayList<CoreAdlCandidateView> candidates, CoreAdlCandidateView candidate, int limit) {
@@ -1821,8 +1712,7 @@ public static final class RiskQueries {
             int bestLane = -1;
             // 本轮从各 Lane 头项中选出的最优候选，尚未找到时为空。
             CoreAdlCandidateView best = null;
-            for (/* 本轮初始化或归并候选列表的账户 Lane 下标。 */ int laneId = 0; laneId < laneCandidates.size(); laneId++) {
-                // 当前 Lane 已排序的候选列表，只有游标尚未到末尾才参与比较。
+            for (int laneId = 0; laneId < laneCandidates.size(); laneId++) {
                 List<CoreAdlCandidateView> lane = laneCandidates.get(laneId);
                 if (cursors[laneId] >= lane.size()) continue;
                 // 当前可用的 ADL 候选，缺失、空仓、资产不符或不盈利时为空。
@@ -1852,9 +1742,6 @@ public static final class RiskQueries {
 
         /**
          * 保存本次查询专用的配置和行情映射，并复制资产编号映射为不可修改 Map；这些输入由捕获方法构造后只读使用。
-         * @param instruments 本次查询按币对整数编号保存的配置查询副本映射
-         * @param marks 本次查询按币对整数编号保存的行情引用映射
-         * @param assetIds 本次查询涉及的结算资产代码到整数编号映射
          */
         private MarketInputs(org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<CoreInstrument> instruments,
                 org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<MarkPrice> marks,
@@ -1867,26 +1754,20 @@ public static final class RiskQueries {
         /**
          * Owner 逐币对捕获当前配置的查询副本与行情引用，跳过未知或重复币对，并记录可用的结算资产编号，让后续账户查询不受 Owner 配置更新影响。
          * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-         * @param identities 币对、资产和持仓业务编号与整数键的映射
-         * @param instrumentIds 本次查询需要固定市场输入的外部币对编号集合
          */
         public static MarketInputs capture(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                 Iterable<String> instrumentIds) {
-            // 本次新建的整数币对配置映射，逐个保存配置查询副本。
             var instruments = new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<CoreInstrument>();
-            // 本次新建的整数币对行情映射，逐个保存捕获时行情引用。
             var marks = new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<MarkPrice>();
             // 查询涉及的结算资产编号映射，未知资产不加入。
             var assets = new java.util.HashMap<String, Integer>();
-            for (String /* 当前币对的外部编号，用来查配置或捕获市场输入。 */ instrumentId : instrumentIds) {
-                // 当前外部币对编号已注册的整数身份，未知或重复身份直接跳过。
+            for (String instrumentId : instrumentIds) {
                 Integer symbolId = identities.findSymbolId(instrumentId);
                 if (symbolId == null || instruments.containsKey(symbolId)) continue;
                 // Owner 当前持有的币对规范配置，下一步用 captureForQuery 生成本次查询副本。
                 CoreInstrument instrument = runtime.instrument(instrumentId);
                 instruments.put(symbolId, instrument == null ? null : instrument.captureForQuery());
                 marks.put(symbolId, runtime.markPrice(symbolId));
-                // 当前配置结算资产的整数身份，缺失时不访问账户余额。
                 Integer assetId = instrument == null ? null : identities.findAssetId(instrument.settleAsset());
                 if (assetId != null) assets.put(instrument.settleAsset(), assetId);
             }
@@ -1895,12 +1776,10 @@ public static final class RiskQueries {
 
         /**
          * 按币对整数编号读取这次查询捕获的配置，缺失时返回 null，不再转读后来的全局配置。
-         * @param symbolId 本次查询中的币对整数编号
          */
         private CoreInstrument instrument(int symbolId) { return instruments.get(symbolId); }
         /**
          * 按币对整数编号读取这次查询捕获的行情引用，缺失时返回 null。
-         * @param symbolId 本次查询中的币对整数编号
          */
         private MarkPrice mark(int symbolId) { return marks.get(symbolId); }
     }
@@ -1908,14 +1787,9 @@ public static final class RiskQueries {
     /**
      * 从用户该资产可用加冻结总余额中，扣掉逐仓持仓保证金和逐仓委托预占，得到全仓可共享的钱包；索引超限或逐仓占用超过总余额时直接报错。
      * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 所属账户 Lane 本次计算的正用户编号
-     * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
-     * @param markets Owner 在派发前捕获的非空市场输入
      */
     private static long crossWalletBalance(
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId, String asset, MarketInputs markets) {
-        // 当前结算资产扣掉逐仓持仓与委托占用后的全仓共享钱包。
         long wallet = totalBalance(runtime, userId, asset, markets);
         if (runtime.reservationCountForUser(userId) > CoreQueryService.OperationalQueries.MAX_INDEX_SCAN) {
             throw new CoreQueryService.OperationalQueries.QueryTooLargeException();
@@ -1928,8 +1802,7 @@ public static final class RiskQueries {
                 wallet = Math.subtractExact(wallet, position.positionMarginUnits());
             }
         }
-        for (long /* 当前需要检查是否占用逐仓资金的冻结订单编号。 */ orderId : runtime.reservationIdsForUser(userId)) {
-            // 当前订单的资金预占记录，只有属于该资产逐仓委托时才扣出全仓钱包。
+        for (long orderId : runtime.reservationIdsForUser(userId)) {
             OrderFundsReservation reservation = runtime.reservation(orderId);
             // 当前预占关联的订单，用它的保证金模式区分逐仓和全仓。
             Order order = runtime.order(orderId);
@@ -1945,9 +1818,6 @@ public static final class RiskQueries {
     /**
      * 按结算资产定位用户余额，缺少资产编号或余额记录时按 0，存在时返回可用与冻结金额之和并检查整数溢出。
      * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param userId 所属账户 Lane 本次计算的正用户编号
-     * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
-     * @param markets Owner 在派发前捕获的非空市场输入
      */
     private static long totalBalance(
             TradingAccountRuntime runtime, long userId, String asset, MarketInputs markets) {
@@ -1960,8 +1830,6 @@ public static final class RiskQueries {
 
     /**
      * 把正的分子除以正的分母并放大一百万倍，任一不为正则返回 0，用于 ADL 盈利率和杠杆率。
-     * @param numerator 需要换算成 ppm 比例的正分子，非正时比例为 0
-     * @param denominator 比例换算的正分母，非正时比例为 0
      */
     private static long ratio(long numerator, long denominator) {
         return numerator <= 0 || denominator <= 0 ? 0 : multiplyDivideCapped(numerator, PPM, denominator);
@@ -1969,9 +1837,6 @@ public static final class RiskQueries {
 
     /**
      * 先精确整数乘法再做整数除法，发生乘法溢出等算术异常时返回最大 long；按中间运算是否溢出来封顶，不重试大整数计算。
-     * @param left 缩放乘法的第一个整数因子
-     * @param right 缩放乘法的第二个整数因子
-     * @param divisor 乘积缩放所用的正整数除数
      */
     private static long multiplyDivideCapped(long left, long right, long divisor) {
         try {
@@ -1983,13 +1848,7 @@ public static final class RiskQueries {
 
     /**
      * 单个持仓在本次查询中的临时估值，先算并保留本仓盈亏、维持保证金和市值变化，再在用户内按结算资产合并全仓风险。
-     * @param position 当前账户 Lane 的目标持仓，按它的数量、模式与入场信息估值
-     * @param instrument 该持仓本次估值采用的配置查询副本或当前有效配置
-     * @param mark 该持仓本次估值采用的行情引用
-     * @param pnl 本仓在标记价下的未实现盈亏，单位为结算资产最小单位
      * @param maintenance 本仓自身要求的维持保证金，合并全仓时还会按资产累计
-     * @param equityDelta 本仓计入权益的变化，期货用未实现盈亏，期权用带方向市值
-     * @param notional 本仓按标记价换算的名义金额，单位按产品的结算口径
      */
     private record PositionValuation(Position position, CoreInstrument instrument, MarkPrice mark,
                                      long pnl, long maintenance, long equityDelta, long notional) {
@@ -2005,11 +1864,6 @@ public static final class StateQueries {
 
     /**
      * 在指定 Lane 定位用户，先核对实体数量上限，再整理有序明细；只构造请求的视图或计算请求的哈希。
-     * @param runtime 当前查询运行时，账户实体通过显式 Lane 参数读取
-     * @param lane 目标用户或订单所属的账户 Lane，调用方应在合法读取范围使用
-     * @param identities 账户内资产、币对、客户端及持仓业务身份的映射
-     * @param userId 本次用户或客户端订单查询所属的用户编号
-     * @param hashOnly true 只计算状态哈希；false 只构造完整用户视图
      */
     public static UserQueryResult userState(
             TradingAccountRuntime runtime,
@@ -2020,38 +1874,28 @@ public static final class StateQueries {
         UserAccount user = runtime.user(lane, userId);
         if (user == null) return UserQueryResult.notFound();
 
-        // 该用户按资产编号组织的余额表，没有余额表时按零条统计。
         var balancesByAsset = runtime.balancesForUser(lane, userId);
-        // 当前用户余额记录条数，加入完整视图物化预算。
         int balanceCount = balancesByAsset == null ? 0 : balancesByAsset.size();
-        // 当前用户冻结预占记录条数，加入实体总量预算。
         int reservationCount = runtime.reservationCountForUser(lane, userId);
-        // 当前用户持仓索引记录条数，先计数量再复制键和视图。
         int positionCount = runtime.positionCountForUser(lane, userId);
-        // 该用户现有杠杆配置键，含合约和全仓或逐仓模式。
         var leverageKeys = runtime.leverageKeysForUser(lane, userId);
         // 余额、冻结、持仓及杠杆条数的精确合计，超过上限就返回过大标记。
         int entityCount = Math.addExact(balanceCount,
                 Math.addExact(reservationCount, Math.addExact(positionCount, leverageKeys.size())));
         if (entityCount > MAX_USER_QUERY_ENTITIES) return UserQueryResult.oversized();
-        // 该用户冻结记录的订单编号数组，按编号排序后读取对应视图。
         long[] reservationIds = runtime.reservationIdsForUser(lane, userId);
-        // 该用户的整数持仓键数组，后续转为按业务键排序的持仓项。
         long[] positionKeys = runtime.positionKeysForUser(lane, userId);
 
-        // 该用户资产代码及可用、冻结余额视图，按资产代码排序。
         ArrayList<CoreBalanceView> balances = new ArrayList<>(balanceCount);
         if (balancesByAsset != null) {
-            balancesByAsset.forEachValue(/* 当前转换或计算哈希的一项资产余额，保留可用与冻结金额。 */ balance -> balances.add(new CoreBalanceView(
+            balancesByAsset.forEachValue(balance -> balances.add(new CoreBalanceView(
                     identities.asset(balance.assetId()), balance.availableUnits(), balance.lockedUnits())));
             balances.sort(Comparator.comparing(CoreBalanceView::asset));
         }
 
         Arrays.sort(reservationIds);
-        // 按订单编号排列的资金预占视图列表，包含累计预占、释放和消费信息。
         ArrayList<CoreReservationView> reservations = new ArrayList<>(reservationIds.length);
-        for (long /* 当前冻结或客户端订单映射对应的普通订单编号。 */ orderId : reservationIds) {
-            // 当前资金冻结记录；生成视图时保留字段，算哈希时跳过已用完的记录。
+        for (long orderId : reservationIds) {
             OrderFundsReservation reservation = runtime.reservation(lane, orderId);
             if (reservation == null) continue;
             reservations.add(new CoreReservationView(reservation.orderId(),
@@ -2062,18 +1906,16 @@ public static final class StateQueries {
 
         // 带业务排序键的临时持仓项，避免按内部整数分配顺序输出。
         ArrayList<PositionEntry> positionEntries = new ArrayList<>(positionKeys.length);
-        for (long /* 当前需要在指定 Lane 读取的整数持仓键。 */ positionKey : positionKeys) {
+        for (long positionKey : positionKeys) {
             // 当前读取或计算哈希的持仓，保证金模式、持仓腿及金额字段都保留。
             Position position = runtime.position(lane, positionKey);
             if (position == null) continue;
-            // 当前持仓整数币对编号对应的外部合约编号。
             String instrumentId = identities.instrumentId(position.symbolId());
             // 当前持仓转换成的协议视图，稍后与业务键一起排序。
             CorePositionView view = new CorePositionView(instrumentId, identities.asset(position.assetId()),
                     position.marginMode(), position.positionSide(),
                     position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
                     position.realizedPnlUnits(), position.positionMarginUnits());
-            // 当前持仓的业务排序键，净仓和双向腿使用不同写法。
             String key = position.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
                     ? instrumentId : instrumentId + ':' + position.positionSide().name();
             positionEntries.add(new PositionEntry(key, view));
@@ -2096,11 +1938,6 @@ public static final class StateQueries {
 
     /**
      * 在指定 Lane 读取订单，按请求构造视图或计算包括内部撮合价在内的状态哈希；缺失返回未找到。
-     * @param runtime 当前查询运行时，账户实体通过显式 Lane 参数读取
-     * @param lane 目标用户或订单所属的账户 Lane，调用方应在合法读取范围使用
-     * @param identities 账户内资产、币对、客户端及持仓业务身份的映射
-     * @param orderId 需要读取的 Core 订单编号
-     * @param hashOnly true 只计算状态哈希；false 只构造订单视图
      */
     public static OrderQueryResult orderState(
             TradingAccountRuntime runtime,
@@ -2125,11 +1962,6 @@ public static final class StateQueries {
 
     /**
      * 先在该 Lane 定位用户的客户端订单身份，再查实际订单编号，任一身份或订单映射不存在时返回未找到，否则复用普通订单查询。
-     * @param runtime 当前查询运行时，账户实体通过显式 Lane 参数读取
-     * @param lane 目标用户或订单所属的账户 Lane，调用方应在合法读取范围使用
-     * @param identities 账户内资产、币对、客户端及持仓业务身份的映射
-     * @param userId 本次用户或客户端订单查询所属的用户编号
-     * @param clientOrderId 该用户在客户端使用的订单标识，与普通 Core 订单编号分开定位
      */
     public static OrderQueryResult clientOrderState(
             TradingAccountRuntime runtime,
@@ -2140,7 +1972,6 @@ public static final class StateQueries {
         // 当前 Lane 中该用户客户端订单标识对应的整数身份，0 表示没有注册。
         long clientKey = identities.findClientKeyValueInLane(lane, userId, clientOrderId);
         if (clientKey == 0) return OrderQueryResult.notFound();
-        // 当前冻结或客户端订单映射对应的普通订单编号。
         long orderId = runtime.orderIdByClientValue(lane, userId, clientKey);
         return orderId == 0 ? OrderQueryResult.notFound() : orderState(runtime, lane, identities, orderId, false);
     }
@@ -2156,12 +1987,12 @@ public static final class StateQueries {
         hash = CoreStateHash.mix(hash, user.userId());
         hash = CoreStateHash.mix(hash, user.revision());
         hash = CoreStateHash.mix(hash, user.positionMode().wireCode());
-        for (CoreBalanceView /* 当前转换或计算哈希的一项资产余额，保留可用与冻结金额。 */ balance : balances) {
+        for (CoreBalanceView balance : balances) {
             hash = CoreStateHash.mix(hash, balance.asset());
             hash = CoreStateHash.mix(hash, balance.availableUnits());
             hash = CoreStateHash.mix(hash, balance.lockedUnits());
         }
-        for (CoreReservationView /* 当前资金冻结记录；生成视图时保留字段，算哈希时跳过已用完的记录。 */ reservation : reservations) {
+        for (CoreReservationView reservation : reservations) {
             if (reservation.reservedUnits() - reservation.releasedUnits() - reservation.consumedUnits() == 0) {
                 continue;
             }
@@ -2195,8 +2026,6 @@ public static final class StateQueries {
 
     /**
      * 按订单身份、委托、成交、费率、费用、时间及状态版本逐字段混合哈希；还包含对外订单视图未单独展示的内部撮合价格。
-     * @param order 需要计算状态哈希的运行时订单，包含内部撮合价及完整版本信息
-     * @param instrumentId 该订单币对整数身份对应的外部编号
      */
     private static long orderStateHash(Order order, String instrumentId) {
         // 按固定字段顺序不断混合的业务状态哈希，返回前计入所有要求的版本字段。
@@ -2233,7 +2062,6 @@ public static final class StateQueries {
 
     /**
      * 组装用户视图时的持仓排序项，把实际持仓视图与净仓或双向腿业务键配对，排序后再提取视图。
-     * @param key 净仓使用合约编号、双向仓再拼持仓腿的业务排序键
      * @param view 本结果已经组装的协议层只读视图，找到记录时有效
      */
     private record PositionEntry(String key, CorePositionView view) {

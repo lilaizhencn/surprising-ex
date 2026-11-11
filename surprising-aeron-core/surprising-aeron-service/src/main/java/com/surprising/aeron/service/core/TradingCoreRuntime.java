@@ -458,10 +458,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 实时功能启用且没有同类请求时，确认业务回调已完成，保存原请求元数据并发起账户快照读取；注册失败只记捕获故障。
-     * @param userId 本次业务所属用户身份
      * @param snapshotId 本次快照身份，交给既有捕获和编码流程
-     * @param position 本次请求原复制日志位置
-     * @param timestamp 本次请求原复制日志业务时间
      */
     public void captureRealtimeSnapshot(long userId, long snapshotId, long position, long timestamp) {
         if (state.realtimeCapture == null || pendingRealtimeSnapshot != null) return;
@@ -477,9 +474,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 实时功能启用且没有同类请求时，在对应 Matcher 的提交栅栏后读取最多 50 档盘口；保留原请求元数据，交由轮询收集结果。
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
-     * @param position 本次请求原复制日志位置
-     * @param timestamp 本次请求原复制日志业务时间
      */
     public void captureRealtimeBook(String instrumentId, long position, long timestamp) {
         if (state.realtimeCapture == null || state.realtimeBook != null) return;
@@ -500,7 +494,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * 大多数分支要求 QUERY 头；标的维护分支这里只检查消息类型，沿用外层协议约束。
      * 不识别的请求返回空，由后续入口继续判断。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param clusterTimestamp 本命令原复制日志业务时间
      */
     CoreResponse routeQuery(CoreMessage message, long clusterTimestamp) {
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
@@ -525,7 +518,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
             try {
                 // 本查询分支从协议载荷解出的筛选条件
                 var query = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeQuery(message.payloadUnsafe());
-                // 当前业务查到的标的配置，用于身份、结算规则或路由判断
                 var instrument = runtimeState.instrument(query.instrumentId());
                 if (instrument == null) return rejected(CoreResultCode.ENTITY_NOT_FOUND);
                 return bookQueries.queryLedger(message.header().messageType(), query, instrument.maintenance());
@@ -590,7 +582,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.FUNDING_PROGRESS_QUERY) {
             try {
-                // 当前进度查询解出的外部标的 ID
                 String instrumentId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeFundingProgressQuery(message.payloadUnsafe());
                 // 按标的构造的资金费或生命周期进度只读视图
                 var view = com.surprising.aeron.service.query.CoreQueryService.OperationalQueries
@@ -604,7 +595,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.SETTLEMENT_PROGRESS_QUERY) {
             try {
-                // 当前进度查询解出的外部标的 ID
                 String instrumentId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeSettlementProgressQuery(message.payloadUnsafe());
                 // 按标的构造的资金费或生命周期进度只读视图
                 var view = com.surprising.aeron.service.query.CoreQueryService.OperationalQueries
@@ -670,11 +660,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ORDER_PREFLIGHT_QUERY) {
             try {
                 return bookQueries.beginPreflightQuery(message, clusterTimestamp);
-            } catch (/* 预检业务拒绝，保留它携带的具体结果码 */ com.surprising.aeron.exception.CoreStateRejectedException exception) {
+            } catch (com.surprising.aeron.exception.CoreStateRejectedException exception) {
                 return rejected(CoreResultCode.fromRejectionCode(exception.code()));
-            } catch (/* 预检整数计算溢出，映射为 OVERFLOW */ ArithmeticException exception) {
+            } catch (ArithmeticException exception) {
                 return rejected(CoreResultCode.ARITHMETIC_OVERFLOW);
-            } catch (/* 预检输入不合法，映射为无效命令 */ IllegalArgumentException exception) {
+            } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
         }
@@ -703,8 +693,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 交易入口：激活并绑定 Owner，检查健康、控制命令和快照边界，登记原日志元数据，按查询需要取得读栅栏；先尝试查询，再把合法命令交给幂等和业务准入入口。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param clusterTimestamp 本命令原复制日志业务时间
-     * @param clusterPosition 本命令原复制日志位置
      */
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         if (!activated()) activate();
@@ -772,8 +760,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 将 Cluster 命令按未提供预解码对象的形式交给统一异步入口。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param timestamp 本次请求原复制日志业务时间
-     * @param position 本次请求原复制日志位置
      */
     public CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
         return applyClusterCommand(message, timestamp, position, null);
@@ -782,9 +768,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 必要时进入异步命令作用域，按独立窗口方式执行已准备的 Cluster 输入；只在本方法进入作用域时负责退出。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param timestamp 本次请求原复制日志业务时间
-     * @param position 本次请求原复制日志位置
-     * @param decoded 与该输入配套的可空解码槽，未解码时由正式准入路径补齐
      */
     public CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position,
                                      OrderCommand.Decoded decoded) {
@@ -794,10 +777,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 为已准备输入补上空的预计算指纹参数，再进入统一执行路径。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param timestamp 本次请求原复制日志业务时间
-     * @param position 本次请求原复制日志位置
-     * @param decoded 与该输入配套的可空解码槽，未解码时由正式准入路径补齐
-     * @param independent 是否允许当前输入使用独立撮合窗口
      */
     public CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      OrderCommand.Decoded decoded, boolean independent) {
@@ -807,11 +786,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 临时接入本条输入的解码对象、指纹和窗口准入标记，调用正常交易入口；无论成功或抛错都恢复外层调用的准备状态。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param timestamp 本次请求原复制日志业务时间
-     * @param position 本次请求原复制日志位置
-     * @param decoded 与该输入配套的可空解码槽，未解码时由正式准入路径补齐
-     * @param independent 是否允许当前输入使用独立撮合窗口
-     * @param fingerprint 与当前命令身份配套的内容指纹
      */
     public CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      OrderCommand.Decoded decoded, boolean independent,
@@ -854,25 +828,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 只做独立窗口的路由预检查：支持同一 Matcher 分片的下单、撤单及对应批量命令，排除需要全局持仓量依赖等情况；解码或路由不适用时返回假，实际业务校验仍走正式入口。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param window 当前输入使用的独立命令窗口，用于记录候选路由
      */
     public boolean prepareClusterPipelineScope(CoreMessage message, OrderCommandQueue.IngressWindow window) {
         if (!activated()) activate();
         assertOwner();
-        // 本次预检查的正用户身份
         long user = message.header().userId();
         if (message.header().productLine() != productLine || user <= 0) {
             return rememberPipelineRoute(window, false);
         }
         window.resetCandidate(user);
         try {
-            // 从当前输入取得或解出的撮合命令内容
             OrderCommand.Decoded decoded = window.decoded(message);
             switch (message.header().messageType()) {
                 case PLACE_ORDER -> {
-                    // 当前下单命令，用于判断持仓量依赖和分片路由
                     var command = decoded.placeOrder();
-                    // 当前业务查到的标的配置，用于身份、结算规则或路由判断
                     var instrument = runtimeState.instrument(command.instrumentId());
                     if (instrument != null && instrument.usesOpenInterestForUserLimit() && !command.reduceOnly())
                         return rememberPipelineRoute(window, false);
@@ -894,8 +863,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 case PLACE_ORDER_BATCH -> {
                     // 当前批次共同使用的 Matcher 分片，负一表示尚未确定
                     int shard = -1;
-                    for (var /* 本次检查的批量下单或撤单描述 */ order : decoded.placeOrderBatch().orders()) {
-                        // 当前业务查到的标的配置，用于身份、结算规则或路由判断
+                    for (var order : decoded.placeOrderBatch().orders()) {
                         var instrument = runtimeState.instrument(order.instrumentId());
                         if (instrument != null && instrument.usesOpenInterestForUserLimit() && !order.reduceOnly())
                             return rememberPipelineRoute(window, false);
@@ -912,7 +880,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 case CANCEL_ORDER_BATCH -> {
                     // 当前批次共同使用的 Matcher 分片，负一表示尚未确定
                     int shard = -1;
-                    for (var /* 本次检查的批量下单或撤单描述 */ order : decoded.cancelOrderBatch().orders()) {
+                    for (var order : decoded.cancelOrderBatch().orders()) {
                         // Owner 索引提供的活动订单路由，还需核对用户及标的
                         var route = components.factIndexes.activeOrders().activeOrderRoute(order.orderId());
                         if (route == null || route.userId() != user || route.instrumentId() == null
@@ -934,8 +902,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 保存本次窗口预检查是否适用及候选路由；不适用时清空路由提示，避免沿用上一条输入。
-     * @param window 当前输入使用的独立命令窗口，用于记录候选路由
-     * @param eligible 本次预检查是否适用独立窗口
      */
     private boolean rememberPipelineRoute(OrderCommandQueue.IngressWindow window, boolean eligible) {
         state.preparedRouteUserLaneBit = eligible ? window.routeUserLaneBit() : 0;
@@ -946,8 +912,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 命令入口：计算或复用指纹，先判定近期收据和在途 UUID，再处理资金长期身份或来源序号，最后分流批量撮合、普通撮合及直接控制命令。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param clusterTimestamp 本命令原复制日志业务时间
-     * @param clusterPosition 本命令原复制日志位置
      */
     private CoreResponse applyCommandIngress(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         // 仅同一原输入可复用预计算值，否则重新计算的请求内容指纹
@@ -995,10 +959,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 直接控制入口：建立命令事实、回滚检查点及发布作用域，执行业务处理并映射已列明的业务异常；有异步续步时返回空，否则继续完成终态。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param clusterTimestamp 本命令原复制日志业务时间
-     * @param clusterPosition 本命令原复制日志位置
-     * @param sourceKey 本次命令的来源类型与来源身份键
-     * @param fingerprint 与当前命令身份配套的内容指纹
      */
     private CoreResponse applyDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                     SourceKey sourceKey, CommandFingerprint fingerprint) {
@@ -1030,13 +990,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     default -> status = null;
                 }
             }
-        } catch (/* 直接命令的明确业务拒绝，保留原结果码 */ CoreStateRejectedException exception) {
+        } catch (CoreStateRejectedException exception) {
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.fromRejectionCode(exception.code());
-        } catch (/* 直接命令整数计算溢出，映射为 OVERFLOW */ ArithmeticException exception) {
+        } catch (ArithmeticException exception) {
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.ARITHMETIC_OVERFLOW;
-        } catch (/* 直接命令参数不合法，映射为无效命令 */ IllegalArgumentException exception) {
+        } catch (IllegalArgumentException exception) {
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.INVALID_COMMAND;
         }
@@ -1049,13 +1009,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 先查询近期终态收据，再查询在途 UUID；指纹冲突直接拒绝，同一在途命令只返回等待提示，避免重复准入。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param fingerprint 与当前命令身份配套的内容指纹
      */
     private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
         if (components.resultLedger.isEmpty() && components.pendingMatching.isEmpty()) return null;
-        // 本次查重命令 UUID 的高 64 位
         long msb = message.header().commandIdMsb();
-        // 本次查重命令 UUID 的低 64 位
         long lsb = message.header().commandIdLsb();
         if (!components.resultLedger.isEmpty()) {
             // 近期收据表中的同 UUID 终态，随后核对指纹
@@ -1085,7 +1042,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 把长期资金身份查询结果转换为重试响应：未命中返回空，指纹不符拒绝，已完成的同一资金命令返回重复成功和当前计数，不重建原响应正文。
-     * @param match 长期资金索引对完整 UUID 和指纹的匹配结果
      */
     private CoreResponse fundsReplayResponse(FundsCommandIndex.Match match) {
         if (match == FundsCommandIndex.Match.ABSENT) return null;
@@ -1121,13 +1077,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 直接控制完成入口：必要时回滚被拒绝的命令，收集关闭的触发单、订单变化和账户提交，等待资金校验及发布完成，最后进入资金长期身份保留与终态保存。空状态表示无效消息，异步未齐返回空。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param clusterTimestamp 本命令原复制日志业务时间
-     * @param clusterPosition 本命令原复制日志位置
-     * @param sourceKey 本次命令的来源类型与来源身份键
-     * @param fingerprint 与当前命令身份配套的内容指纹
      * @param beforeRuntimeRevision 本命令开始前的运行时修订，用于判断失败后是否需要回滚
      * @param runtimeCommandCheckpoint 本命令开始前的账户命令回滚检查点
-     * @param positionIdentityCheckpoint 本命令开始前的持仓身份注册检查点
      * @param status 业务处理得到的状态，空表示未识别直接命令类型
      * @param resultCode 与当前业务状态配套的协议结果码
      */
@@ -1135,7 +1086,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
             SourceKey sourceKey, CommandFingerprint fingerprint,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
-        // 本次计算出的下一个已受理序号，实际写回仍需等待完成条件
         long nextAppliedCommandCount = Math.incrementExact(state.appliedCommandCount);
         if (!directCommand.finalizationPrepared()) {
             if (status != ResponseStatus.APPLIED
@@ -1201,13 +1151,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 成功资金命令同步保存长期身份，再推进计数、记来源、追加衍生撮合并保存近期收据，最后移交响应缓冲租约。长期保存失败可能发生在账户和发布已完成之后，不能据此声称业务已回滚。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     * @param clusterTimestamp 本命令原复制日志业务时间
-     * @param clusterPosition 本命令原复制日志位置
-     * @param sourceKey 本次命令的来源类型与来源身份键
-     * @param fingerprint 与当前命令身份配套的内容指纹
      * @param status 业务处理得到的状态，空表示未识别直接命令类型
      * @param resultCode 与当前业务状态配套的协议结果码
-     * @param nextAppliedCommandCount 本次终态将登记的下一个 Core 序号，调用前尚未写回
      */
     private CoreResponse finishResponseAfterFundsRetention(CoreMessage message, long clusterTimestamp,
             long clusterPosition, SourceKey sourceKey, CommandFingerprint fingerprint,
@@ -1221,9 +1166,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         components.admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
         // 结果构建器交出的池化响应正文，随后移交收据和传输租约
         byte[] responseData = resultBuilder.commandResultData();
-        // 当前响应正文在池化缓冲中的起始字节偏移
         int responseOffset = resultBuilder.responseDataOffset();
-        // 当前响应正文的有效字节数
         int responseLength = resultBuilder.responseDataLength();
         components.resultLedger.storeOwnedResult(message.header().commandIdMsb(), message.header().commandIdLsb(), fingerprint, status, resultCode,
                 state.appliedCommandCount, responseData,
@@ -1246,7 +1189,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 仅在异步命令作用域内，把完成阶段的业务拒绝记回活动控制槽，留给下一轮收尾；同步路径返回假，由调用方立即处理。
-     * @param code 异步完成阶段需要保存的业务拒绝码
      */
     private boolean deferFinalizationRejection(CoreResultCode code) {
         if (!directCommand.active()) {
@@ -1259,8 +1201,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 写入调用方已经判定的来源序号；本方法不另做递增校验。
-     * @param sourceKey 本次命令的来源类型与来源身份键
-     * @param sourceSequence 本次完成后需要登记的来源序号
      */
     void recordSourceSequence(SourceKey sourceKey, long sourceSequence) {
         components.lastSourceSequences.put(sourceKey, sourceSequence);
@@ -1307,8 +1247,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 确认命令、指纹和提交发布边界有效，再标记当前命令事实已经激活。
-     * @param command 本次业务使用的已解码命令或命令槽，沿用当前命令生命周期
-     * @param fingerprint 与当前命令身份配套的内容指纹
      */
     public void activateFactContext(CoreMessage command, CommandFingerprint fingerprint) {
         if (command == null || fingerprint == null) {
@@ -1377,18 +1315,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 按 UUID 两个原始长整数查在途撮合序号；未找到返回零。
-     * @param msb 命令 UUID 的高 64 位
-     * @param lsb 命令 UUID 的低 64 位
      */
     public long matchingSequence(long msb, long lsb) {
-        // 按 UUID 查到的可空在途撮合槽
         OrderCommand pending = components.pendingMatching.findByCommandId(msb, lsb);
         return pending == null ? 0 : pending.sequence();
     }
 
     /**
      * 按可空 UUID 查在途撮合序号；空身份返回零。
-     * @param commandId 要查询的可空命令 UUID，空时返回零
      */
     public long matchingSequence(UUID commandId) {
         return commandId == null ? 0 : matchingSequence(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
@@ -1398,11 +1332,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * 探测控制槽、撮合队首及批次中是否有已完成的账户或账本回执可推进；这是唤醒提示，不表示整条命令已经终态完成。
      */
     boolean hasCompletedLaneCommit() {
-        // 当前直接控制命令保存的账户提交回执
         var directCommit = directCommand.commitEvent();
         if (directCommit != null && directCommit.complete()) return true;
 
-        // 当前在途撮合队首，只观察该前缀的可推进事实
         OrderCommand pending = components.pendingMatching.head();
         if (pending == null) return false;
         // 队首命令持有的结算事件，账户或账本完成后可继续推进
@@ -1426,7 +1358,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public interface MatchingCommitHandler {
         /**
          * 接收已经完成有序提交的命令序号及响应，由外层继续交接终态。
-         * @param sequence 本次业务对应的 Core 序号
          * @param response 要交接或归还的响应，包含其缓冲租约
          */
         void onCommitted(long sequence, CoreResponse response);
@@ -1455,7 +1386,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 matcherPipeline.capacity(), matcherPipeline.completionHighWaterMark(),
                 components.pendingMatching.inFlight(), components.pendingMatching.capacity(),
                 components.pendingMatching.highWaterMark(), state.committedCoreSequence);
-        for (/* 当前正在采样队列指标的 Matcher 分片下标 */ int laneId = 0; laneId < count; laneId++) {
+        for (int laneId = 0; laneId < count; laneId++) {
             runtimeState.writeAccountLaneMetrics(laneId, encoder);
         }
         return encoder.finish();
@@ -1499,7 +1430,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 启动步骤：先校验亲和配置，再启动 Matcher，绑定 Owner，启动账户 Lane 和账本 Lane，最后激活适配器和发布器。启动中的运行时异常会尝试关闭资源并保留关闭故障；已激活调用直接返回。
-     * @param affinity 本次激活采用的 CPU 亲和配置
      */
     public void activate(TradingCpuAffinity affinity) {
         if (state.activated) return;
@@ -1517,7 +1447,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         } catch (/* 激活失败仍关闭所有已启动资源。 */ RuntimeException | Error failure) {
             try {
                 close();
-            } catch (/* 保留原启动错误与清理故障。 */ RuntimeException | Error closeFailure) {
+            } catch (RuntimeException | Error closeFailure) {
                 if (failure != closeFailure) failure.addSuppressed(closeFailure);
             }
             throw failure;
@@ -1582,7 +1512,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 尝试毒化 Matcher 并登记带命令序号的致命分歧；毒化本身失败时保留到异常因果中，返回登记的故障，由后续健康检查传播。
      * @param pending 当前借用的在途命令槽，完成或释放后不能继续使用
-     * @param detail 此次致命分歧的具体诊断内容
      * @param cause 导致撮合失败的可空原异常
      */
     public FatalMatchingDivergenceException failMatching(
@@ -1657,9 +1586,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 写入调用方提供的已受理序号，刷新可提交前缀并按需记录来源；序号有效性和调用顺序由上层保证。
-     * @param sequence 本次业务对应的 Core 序号
-     * @param sourceKey 本次命令的来源类型与来源身份键
-     * @param sourceSequence 本次完成后需要登记的来源序号
      */
     public void recordAppliedSequence(long sequence, SourceKey sourceKey, long sourceSequence) {
         assertOwner();
@@ -1675,7 +1601,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     public void refreshCommittedCoreSequence() {
         assertOwner();
-        // 本次允许推进的 Core 前缀上界，不越过在途撮合队首
         long candidate = components.pendingMatching.isEmpty()
                 ? state.appliedCommandCount
                 : Math.subtractExact(components.pendingMatching.firstSequence(), 1);
@@ -1687,10 +1612,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 活动账户已启动且当前未持有 Owner 访问边界时，最多自旋等待五秒取得访问权；返回是否由本次调用新取得访问权。
-     * @param operation 超时报错信息中的操作名称
      */
     private boolean acquireOwnerLaneAccess(String operation) {
-        // 当前是否需要由本方法取得账户访问边界
         boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess();
         if (acquired) {
             // 等待账户访问权的单调纳秒截止时间，最多五秒
@@ -1713,11 +1636,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         // 当前是否需要由本方法取得账户访问边界；它不表示访问已经取得
         boolean acquired = acquireOwnerLaneAccess("current state materialization");
         try {
-            // 当前运行时修订，与物化缓存对应值比较
             long currentRevision = runtimeState.revision();
-            // 当前行情修订，与物化缓存对应值比较
             long currentMarketRevision = runtimeState.marketRevision();
-            // 当前已发布投影序号，与物化缓存对应值比较
             long currentSequence = commits.publication.publishedSequence();
             if (state.cachedTradingState == null || state.cachedRevision != currentRevision || state.cachedMarketRevision != currentMarketRevision || state.cachedSequence != currentSequence) {
                 state.cachedTradingState = com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer.materialize(runtimeState, identities);
@@ -1745,7 +1665,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     boolean runtimeRiskScanComplete() { return runtimeState.firstIncompleteRiskScan() == null; }
     /**
      * 判断指定标的风险扫描是否不存在或已经完成。
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
      */
     boolean runtimeRiskScanComplete(String instrumentId) {
         // 指定标的当前风险扫描状态，空表示没有该扫描
@@ -1754,7 +1673,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
     /**
      * 把外部标的转成内部身份并查风险扫描状态，未知标的返回空。
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
      */
     RiskScanner.State runtimeRiskScan(String instrumentId) {
         // 从外部标的解析出的内部身份，未知标的可为空
@@ -1763,7 +1681,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
     /**
      * 把外部标的转成内部身份并查标记价格，未知标的返回空。
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
      */
     MarkPrice runtimeMarkPrice(String instrumentId) {
         // 从外部标的解析出的内部身份，未知标的可为空
@@ -1772,7 +1689,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
     /**
      * 查询指定标的已记录的资金费结算进度值，未知标的返回零。
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
      */
     long runtimeFundingSettlement(String instrumentId) {
         // 从外部标的解析出的内部身份，未知标的可为空
@@ -1781,7 +1697,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
     /**
      * 在必要的账户读取边界内查强平状态，并在返回前释放本方法取得的访问权；返回值是借出的运行时引用，不延长调用方的读取权限。
-     * @param liquidationId 需要读取的强平实体 ID
      */
     RiskScanner.LiquidationOrder runtimeLiquidation(long liquidationId) {
         // 当前是否需要由本方法取得账户访问边界；它不表示访问已经取得
@@ -1861,12 +1776,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 借用准入事件，按当前运行时业务时间解析下单规则并确定结算状态与资产，再派发账户准入；准备阶段失败时归还事件，派发后的生命周期由账户路径承担。
-     * @param userId 本次业务所属用户身份
-     * @param command 本次业务使用的已解码命令或命令槽，沿用当前命令生命周期
      * @param commandId 本次命令 UUID，只有标明可空的查询路径允许为空
      * @param coreSequence 本次准备或快照固定的 Core 序号
-     * @param timestamp 本次请求原复制日志业务时间
-     * @param position 本次请求原复制日志位置
      */
     public com.surprising.aeron.service.order.OrderCommand.PlaceAdmissionEvent dispatchPlaceAdmission(
             long userId, PlaceOrderCommand command, UUID commandId, long coreSequence,
@@ -1875,13 +1786,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
         var event = runtimeState.acquirePlaceAdmission();
         // 准入需要观察的标的生命周期结算状态
         com.surprising.aeron.service.treasury.TreasuryRuntime.SettlementStatus settlementStatus;
-        // 本次下单需要预留的结算资产身份
         int assetId;
         try {
             OrderAdmissionService.prepare(event, runtimeState, identities, userId,
                     command, state.currentClusterTimestamp);
             settlementStatus = runtimeState.treasury().settlementStatus(event.symbolId());
-            // 当前业务查到的标的配置，用于身份、结算规则或路由判断
             var instrument = event.instrument();
             assetId = identities.assetId(productLine.isDerivative() ? instrument.settleAsset()
                     : command.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
@@ -1910,7 +1819,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 先查本命令变化缓冲，包括已删除的空值，再查账户运行时中的订单。
-     * @param orderId 需要查询或检查占用的订单实体 ID
      */
     public Order runtimeOrder(long orderId) {
         return runtimeState.hasChangedOrder(orderId) ? runtimeState.changedOrderValue(orderId)
@@ -1919,7 +1827,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 查询标的生命周期进度，未知标的返回空。
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
      */
     public com.surprising.aeron.service.treasury.TreasuryRuntime.LifecycleProgressRuntime
             lifecycleProgress(String instrumentId) {
@@ -1979,8 +1886,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 检查下单身份不为空，且订单号或同用户客户号未命中保留终态；活动身份的其他校验仍由准入负责。
-     * @param userId 本次业务所属用户身份
-     * @param command 本次业务使用的已解码命令或命令槽，沿用当前命令生命周期
      */
     public void requireOrderIdentityAvailable(long userId, PlaceOrderCommand command) {
         if (command == null || components.terminalRetention.containsOrder(command.orderId(), userId, command.clientOrderId())) {
@@ -1990,7 +1895,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 通过 Owner 活动路由、本命令变化订单及终态保留判断订单号是否被占用，不在这里扫描全部账户。
-     * @param orderId 需要查询或检查占用的订单实体 ID
      */
     public boolean orderIdInUse(long orderId) {
         return components.factIndexes.activeOrders().activeOrderRoute(orderId) != null
@@ -2000,7 +1904,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 中止当前发布，按检查点回滚账户命令及持仓身份注册；此入口不回滚已经执行的 Matcher 状态。
      * @param runtimeCheckpoint 需要恢复到账户命令开始前的检查点
-     * @param positionIdentityCheckpoint 本命令开始前的持仓身份注册检查点
      * @param commandSequence 需要回滚的命令 Core 序号
      */
     public void rollbackCommandState(
@@ -2014,11 +1917,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 校验触发子单与原用户一致，派生稳定的内部命令身份，编码触发信息并排入衍生撮合队列；真正派发与提交由后续路径完成。
-     * @param trigger 本次业务关联的原触发单
-     * @param triggerSequence 本次触发派生使用的序号信息
-     * @param triggeredPriceTicks 导致触发的整数价格
-     * @param triggeredAtEpochMillis 原触发业务时间，单位毫秒
-     * @param parentCommandId 父命令身份，空时使用零值参与稳定派生
      * @param childOrder 由触发单生成且必须属于同一用户的子单
      */
     public void queueTriggerMatching(com.surprising.aeron.model.CoreTriggerOrderState trigger,
@@ -2062,16 +1960,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 计算本轮耗时及剩余风险扫描数，在 debug 开启时输出诊断；耗时使用单调时钟，不参与业务时间判断。
-     * @param operation 产生诊断的业务操作名称
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
-     * @param batchSize 本轮风险扫描的工作预算
-     * @param pendingBefore 开始本轮之前的待扫描数量
-     * @param startedAt 本轮扫描开始时的单调纳秒时间
      */
     public void logRiskScan(String operation, String instrumentId, int batchSize, int pendingBefore, long startedAt) {
-        // 本轮扫描由单调时钟测出的微秒耗时
         long elapsedMicros = (System.nanoTime() - startedAt) / 1_000L;
-        // 当前剩余风险扫描数，在判断 debug 日志开关之前已经读取
         int pendingAfter = pendingRiskScanCount();
         if (!log.isDebugEnabled()) return;
         log.debug("risk scan operation={} instrumentId={} batchSize={} elapsedMicros={} "
@@ -2132,15 +2023,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public void captureRealtimeTrades(OrderCommand pending) {
         // 清在途引用之前保存的本次结算计划
         var plan = pending.settlementPlan();
-        // 在途命令此前保存的可空 taker 订单引用
         Order taker = pending.realtimeTakerOrder();
-        // 此前保存的已解析 taker 信息，存在时优先用于实时成交捕获
         OrderCommand.ResolvedPlaceOrder resolvedTaker = pending.realtimeResolvedTakerOrder();
         pending.realtimeTakerOrder(null);
         pending.realtimeResolvedTakerOrder(null);
         if (state.realtimeCapture == null || !state.realtimeCapture.active()) return;
         try {
-            for (/* 当前数组或事件列表的遍历下标 */ int index = 0; index < plan.matcherEventCount(); index++) {
+            for (int index = 0; index < plan.matcherEventCount(); index++) {
                 // 计划中的当前撮合事件，只有 TRADE 事件计入成交捕获
                 MatcherEvent match = plan.matcherEvent(index);
                 if (match.eventType() != MatcherEventType.TRADE) continue;
@@ -2158,19 +2047,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 统计结算计划中的 TRADE 事件条数，不以订单数或成交数量代替。
-     * @param plan 借用的结算计划，按已有订单及成交事件视图读取
      */
     public static long tradeCount(com.surprising.aeron.service.settlement.TradeSettlement.Plan plan) {
-        // 当前已经统计出的 TRADE 事件条数
         long trades = 0;
-        for (/* 当前数组或事件列表的遍历下标 */ int index = 0; index < plan.matcherEventCount(); index++)
+        for (int index = 0; index < plan.matcherEventCount(); index++)
             if (plan.matcherEvent(index).eventType() == MatcherEventType.TRADE) trades++;
         return trades;
     }
 
     /**
      * 以基础状态哈希为起点，依次混入非空费用政策和待完成划转摘要；调用方仍须提供稳定的映射遍历顺序。
-     * @param base 基础业务状态摘要
      * @param policies 待混入摘要的费用政策映射，调用方保证稳定遍历顺序
      * @param transfers 待混入摘要的未完成划转映射，调用方保证稳定遍历顺序
      */
@@ -2246,16 +2132,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 按 UTF-8 字节规则把文本混入摘要，直接遍历字符而不先创建字节数组；先混入字节长度，合法代理对按四字节处理，孤立代理项按问号处理。
-     * @param hash 混入当前值之前的摘要
-     * @param value 要按 UTF-8 规则混入的可空文本
      */
     private static long mixText(long hash, String value) {
         if (value == null || value.isEmpty()) return mix(hash, 0);
-        // 当前文本的 UTF-16 字符单元数量，不等于 UTF-8 字节数
         int length = value.length();
         // 是否所有字符都可直接编码为一个 UTF-8 字节
         boolean isAscii = true;
-        for (/* 当前 UTF-16 字符下标 */ int i = 0; i < length; i++) {
+        for (int i = 0; i < length; i++) {
             if (value.charAt(i) >= 0x80) {
                 isAscii = false;
                 break;
@@ -2264,16 +2147,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (isAscii) {
             // 逐字节混合后的当前文本或整数摘要
             long result = mix(hash, length);
-            for (/* 当前 UTF-16 字符下标 */ int i = 0; i < length; i++) {
+            for (int i = 0; i < length; i++) {
                 result ^= value.charAt(i);
                 result *= ExecutionState.HASH_PRIME;
             }
             return result;
         }
-        // 按既有编码规则计算的 UTF-8 字节长度，先混入摘要
         int utf8Len = 0;
-        for (/* 当前 UTF-16 字符下标 */ int i = 0; i < length; i++) {
-            // 当前 UTF-16 字符单元，用于选择 UTF-8 编码分支
+        for (int i = 0; i < length; i++) {
             char c = value.charAt(i);
             if (c < 0x80) utf8Len++;
             else if (c < 0x800) utf8Len += 2;
@@ -2285,8 +2166,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         // 逐字节混合后的当前文本或整数摘要
         long result = mix(hash, utf8Len);
-        for (/* 当前 UTF-16 字符下标 */ int i = 0; i < length; i++) {
-            // 当前 UTF-16 字符单元，用于选择 UTF-8 编码分支
+        for (int i = 0; i < length; i++) {
             char c = value.charAt(i);
             if (c < 0x80) {
                 result ^= c;
@@ -2324,13 +2204,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 按从低到高的八个字节混入长整数；自然溢出属于哈希算法，与资金算术无关。
-     * @param hash 混入当前值之前的摘要
-     * @param value 要按低字节优先规则混入的长整数
      */
     public static long mix(long hash, long value) {
         // 逐字节混合后的当前文本或整数摘要
         long result = hash;
-        for (/* 按八位递增的移位量，使长整数从低字节向高字节混入 */ int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
+        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
             result ^= (value >>> shift) & 0xff;
             result *= ExecutionState.HASH_PRIME;
         }
@@ -2339,12 +2217,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 将每个来源键及其序号的摘要异或合并，因此不依赖来源表遍历顺序；空表返回零。
-     * @param sequences 要计算摘要的来源序号表
      */
     public static long sourceSequenceDigest(Map<SourceKey, Long> sequences) {
         // 当前摘要累加值，按本方法规定的顺序混合或异或
         long digest = 0;
-        for (Map.Entry<SourceKey, Long> /* 来源序号表当前键值项，单项摘要随后参与异或 */ entry : sequences.entrySet()) {
+        for (Map.Entry<SourceKey, Long> entry : sequences.entrySet()) {
             digest ^= sourceSequenceDigest(entry.getKey(), entry.getValue());
         }
         return digest;
@@ -2352,8 +2229,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 对来源类型、来源身份及该来源序号计算单项摘要。
-     * @param key 来源类型与来源身份组成的键
-     * @param sequence 本次业务对应的 Core 序号
      */
     public static long sourceSequenceDigest(SourceKey key, long sequence) {
         // 当前摘要累加值，按本方法规定的顺序混合或异或
@@ -2387,7 +2262,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 来源类型与来源身份组成的序号跟踪键；构造时不另加合法性校验。
      * @param source 该来源的协议类型
-     * @param sourceId 该类型下的来源身份
      */
     public record SourceKey(CommandSource source, long sourceId) {
     }
@@ -2412,7 +2286,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
         /**
          * 同一命令只登记一次跨分片撤单，保存其稳定撤单描述并立即尝试推进。
-         * @param command 本次跨分片撤单所属的命令槽
          * @param orders 本次按顺序借用的撤单描述，调用方保持列表稳定
          */
         public void start(OrderCommand command, java.util.List<com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder> orders) {
@@ -2427,10 +2300,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
          */
         public void poll() {
             for (/* 本轮跨分片撤单推进次数，最多 64 次 */ int work = 0; work < 64 && !pending.isEmpty(); work++) {
-                // 当前队首撤单工作，后续命令不越过它推进
                 Progress progress = pending.peekFirst();
                 if (progress.token != 0) {
-                    // 当前 Matcher 控制任务的可空撤单证据，未完成时返回等待
                     var result = (com.surprising.aeron.service.matcher.OrderMatchingResult.Control) owner.matcherPipeline().pollControl(progress.shard, progress.token);
                     if (result == null) return;
                     progress.results.add(result);
@@ -2444,7 +2315,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         progress.index++;
                         continue;
                     }
-                    // 当前准备派发或标记未提交的撤单描述
                     var order = progress.orders.get(progress.index);
                     progress.shard = owner.matchingAdapter().topology().matcherShardId(order.symbolId());
                     progress.currentOrder = order;
@@ -2500,7 +2370,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
             boolean failed;
             /**
              * 保留本命令及稳定撤单描述，建立同顺序的结果列表，供逐项串行推进。
-             * @param command 本次跨分片撤单所属的命令槽
              * @param orders 本次按顺序借用的撤单描述，调用方保持列表稳定
              */
             Progress(TradingCoreRuntime owner, OrderCommand command, java.util.List<com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder> orders) {
@@ -2620,7 +2489,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 要求正用户身份，并计算直接结算的初始用户 Lane 位；实际 maker Lane 随后续撮合事实加入。
-     * @param userId 本次业务所属用户身份
      */
     private long directInitialLaneMask(long userId) {
         if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");

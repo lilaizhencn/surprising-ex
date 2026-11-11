@@ -297,7 +297,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按固定拓扑把用户身份路由到所属账户 Lane。
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      */
     public int accountLaneId(long userId) {
         return topology.accountLaneId(userId);
@@ -305,10 +304,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按用户路由取得权威账户 Lane，并校验该 Lane 引用及当前调用者所有权；不通过搜索线程身份决定用户归属。
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      */
     public AccountPartition accountLaneForUser(long userId) {
-        // 本轮路由、交接或回调正在处理的账户 Lane 引用
         AccountPartition lane = accountLanes[topology.accountLaneId(userId)];
         requireLaneAccess(lane, userId);
         return lane;
@@ -316,7 +313,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 仅按用户路由借出 Lane 引用，不做所有权检查或取得读取栅栏；调用方必须已经处于允许的读取边界。
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      */
     public AccountPartition accountLaneForUserReadOnly(long userId) {
         return accountLanes[topology.accountLaneId(userId)];
@@ -324,8 +320,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求 Lane 属于当前运行时、与该用户路由一致，且当前线程满足 Lane 所有权检查。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      */
     public void requireLaneAccess(AccountPartition lane, long userId) {
         if (lane == null || lane.laneId() != topology.accountLaneId(userId)
@@ -336,7 +330,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求 Lane 引用属于当前运行时，并检查当前线程是否拥有它。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
      */
     private void requireLaneAccess(AccountPartition lane) {
         if (lane == null || lane.laneId() < 0 || lane.laneId() >= accountLanes.length
@@ -359,7 +352,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上采样指定工作队列深度；未启动返回零，瞬时负差截为零，只供观测。
-     * @param laneId 账户 Lane 的零起始编号
      */
     public int laneWorkerDepth(int laneId) {
         assertOwner();
@@ -372,7 +364,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上采样队列深度、容量和高水位并写入编码器；不取得账户访问范围，也不收集业务回执。
-     * @param laneId 账户 Lane 的零起始编号
      * @param encoder 接收本轮观测指标的协议编码器
      */
     public void writeAccountLaneMetrics(int laneId, com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder) {
@@ -403,7 +394,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上单调发布已退休命令的序号边界，供 Lane 回收订单身份元数据；不传递第二份订单业务状态。
-     * @param sequence 本次业务交接使用的 Core 序号
      */
     public void releaseRetiredOrderFence(long sequence) {
         assertOwner();
@@ -420,7 +410,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 为每条账户 Lane 创建工作对象并接入统一故障通知，全部创建后标记已启动并交出 Owner 访问权，再记录是否存在普通线程实现。重复启动直接拒绝。
-     * @param affinity 本次账户工作资源采用的 CPU 亲和配置
      */
     public void startAccountLanes(TradingCpuAffinity affinity) {
         laneLifecycle.start(affinity);
@@ -467,7 +456,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 从账本拥有的事实索引读取准入所需持仓量；尚未绑定索引则报错，结果由各准入事件保存。
-     * @param instrumentId 本产品线的外部标的 ID
      */
     public long ledgerAdmissionOpenInterest(String instrumentId) {
         if (changes.factIndexes == null) throw new IllegalStateException("position indexes are not bound");
@@ -476,9 +464,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 索引已绑定时，把指定结算 Lane 的持仓变化交给账本业务索引应用。
-     * @param changes 本次撮合结算借用的变化槽，收集完成前保持占用
-     * @param mask 本次需要应用持仓索引的 Lane 位集合
-     * @param identities 与本产品线状态配套的身份注册表
      */
     public void applyLedgerSettlementPositions(TradeSettlement.Changes changes, long mask, RuntimeIdentityRegistry identities) {
         if (this.changes.factIndexes != null) this.changes.factIndexes.applySettlementPositions(changes, mask, identities);
@@ -502,7 +487,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上派发财务控制命令：内联应用并保证同一控制命令独占财务范围。
-     * @param command 要交给财库处理的财务控制命令
      */
     public void dispatchLedgerCommand(SystemLedgerCommand command) {
         assertOwner();
@@ -530,8 +514,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按目标掩码派发普通控制结算任务，交由唯一控制派发器管理回执。
-     * @param laneMask 本次需要操作或派发的账户 Lane 位集合
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
      */
     public void dispatchControlLanes(long laneMask, java.util.function.IntFunction<Object> operation) {
         coordinator.controlLanes.dispatch(laneMask, DirectCommandDispatcher.OperationType.SETTLEMENT, operation);
@@ -539,8 +521,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按目标掩码派发风险任务，仍使用同一有界控制派发器。
-     * @param laneMask 本次需要操作或派发的账户 Lane 位集合
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
      */
     public void dispatchRiskLanes(long laneMask, java.util.function.IntFunction<Object> operation) {
         coordinator.controlLanes.dispatch(laneMask, DirectCommandDispatcher.OperationType.RISK, operation);
@@ -554,7 +534,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (capacity <= 0 || capacity > 4_096) {
             throw new IllegalArgumentException("invalid risk liquidation batch capacity");
         }
-        // 本轮路由、交接或回调正在处理的账户 Lane 引用
         AccountPartition lane = currentLaneCommandScope();
         if (lane == null && accountLanes != null && accountLanes.length > 0) {
             lane = accountLanes[0];
@@ -562,7 +541,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (lane == null) {
             throw new IllegalStateException("risk liquidation batch requires an owning Lane scope");
         }
-        // 当前 Lane 复用的风险强平批次，容量不足时替换，本轮使用前重置
         RiskScanner.LiquidationBatch batch = lane.riskLiquidationBatch();
         if (batch == null || batch.capacity() < capacity) {
             batch = new RiskScanner.LiquidationBatch(capacity);
@@ -584,13 +562,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 取得指定 Lane 的控制结果，完成与读取条件由控制派发器检查。
-     * @param laneId 账户 Lane 的零起始编号
      */
     public Object controlLaneResult(int laneId) { return coordinator.controlLanes.result(laneId); }
 
     /**
      * 必要时先取得全部账户访问权，再只对目标用户 Lane 建立已提交序号的读栅栏；退出时归还本方法需要取得的访问权。
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      * @param committedCoreSequence 读取必须满足的已提交 Core 前缀
      */
     public void readFence(long userId, long committedCoreSequence) {
@@ -599,7 +575,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         boolean acquired = accountLanesStarted() && !ownerLaneAccess();
         try {
             if (acquired) while (!tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
-            onLane(topology.accountLaneId(userId), /* 本轮路由、交接或回调正在处理的账户 Lane 引用 */ lane -> {
+            onLane(topology.accountLaneId(userId), lane -> {
                 lane.readFence(committedCoreSequence);
                 return null;
             });
@@ -618,18 +594,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
         boolean acquired = accountLanesStarted() && !ownerLaneAccess();
         try {
             if (acquired) while (!tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
-            for (/* 当前按拓扑选中或从掩码取出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-                // 供本轮回调捕获的稳定 Lane 下标
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 final int currentLaneId = laneId;
-                onLane(currentLaneId, /* 本轮路由、交接或回调正在处理的账户 Lane 引用 */ lane -> {
+                onLane(currentLaneId, lane -> {
                     lane.requireReadFence(committedCoreSequence);
                     return null;
                 });
             }
-            for (/* 当前按拓扑选中或从掩码取出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-                // 供本轮回调捕获的稳定 Lane 下标
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 final int currentLaneId = laneId;
-                onLane(currentLaneId, /* 本轮路由、交接或回调正在处理的账户 Lane 引用 */ lane -> {
+                onLane(currentLaneId, lane -> {
                     lane.advanceReadFence(committedCoreSequence);
                     return null;
                 });
@@ -641,9 +615,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按用户所属 Lane 执行给定操作，沿用统一的 Lane 范围检查。
-     * @param <T> 该账户操作返回值的类型
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
      */
     public <T> T onLane(long userId, LaneOperation<T> operation) {
         return onLane(topology.accountLaneId(userId), operation);
@@ -651,9 +622,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 已有命令范围时只允许访问同一 Lane；否则拒绝没有账户访问权的活动 Owner，再进入受检查的 Lane 命令范围执行。
-     * @param <T> 该账户操作返回值的类型
-     * @param laneId 账户 Lane 的零起始编号
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
      */
     public <T> T onLane(int laneId, LaneOperation<T> operation) {
         // 当前线程已经进入的可空账户命令范围，不自动扩展到其他 Lane
@@ -672,9 +640,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 检查回调不为空后直接借出指定 Lane 执行读取；本方法不自动建立线程权限或读取栅栏。
-     * @param <T> 该账户操作返回值的类型
-     * @param laneId 账户 Lane 的零起始编号
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
      */
     public <T> T onLaneReadOnly(int laneId, LaneOperation<T> operation) {
         if (operation == null) {
@@ -685,9 +650,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 进入给定 Lane 的命令范围执行回调，无论正常返回或抛错都退出该范围。
-     * @param <T> 该账户操作返回值的类型
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
      */
     public <T> T inLaneCommandScope(AccountPartition lane, LaneOperation<T> operation) {
         if (operation == null) {
@@ -711,7 +673,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             return coordinator.ownerLaneScope;
         }
         if (current instanceof LaneThread /* 携带固定账户 Lane 引用的专用工作线程 */ laneThread) {
-            // 本轮路由、交接或回调正在处理的账户 Lane 引用
             AccountPartition lane = laneThread.lane();
             return lane.commandScopeActive() ? lane : null;
         }
@@ -720,9 +681,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在查询范围内读权威账户表，冷阶段允许当前拥有者执行，活动阶段要求实际所属工作线程；退出时清查询标记且不生成持仓退休证明。
-     * @param <T> 该账户操作返回值的类型
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param query 要在所属账户 Lane 的查询范围中执行的读取请求
      */
     public <T> T readAccountLane(AccountPartition lane, java.util.function.Function<AccountPartition, T> query) {
         if (!accountLanesStarted()) {
@@ -762,39 +720,31 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 由 Owner 先检查全部目标 Lane 的容量，全部可接纳才派发同一查询，避免邮箱满造成部分查询；冷阶段逐 Lane 直接执行，活动阶段先归还 Owner 访问权。
-     * @param laneMask 本次需要操作或派发的账户 Lane 位集合
-     * @param query 要在所属账户 Lane 的查询范围中执行的读取请求
      */
     public boolean dispatchAccountQuery(long laneMask, SettlementLaneWorker.Command query) {
         assertOwner();
         if (Thread.currentThread() != owner)
             throw new IllegalStateException("account query producer must be Owner");
-        // 当前实际账户数量允许的位集合，64 条时所有位均有效
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1;
         if (query == null || laneMask == 0 || (laneMask & ~validMask) != 0)
             throw new IllegalArgumentException("invalid account query dispatch");
         if (!accountLanesStarted()) {
-            // 本轮还未派发或检查的 Lane 位集合，每次清除最低有效位
             long lanes = laneMask;
             while (lanes != 0) {
-                // 当前按拓扑选中或从掩码取出的账户 Lane 编号
                 int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
                 query.execute(accountLanes[laneId]);
             }
             return true;
         }
         assertAccountLanesHealthy();
-        // 本轮还未派发或检查的 Lane 位集合，每次清除最低有效位
         long lanes = laneMask;
         while (lanes != 0) {
-            // 当前按拓扑选中或从掩码取出的账户 Lane 编号
             int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
             if (!laneLifecycle.worker(laneId).hasCapacity()) return false;
         }
         releaseOwnerLaneAccess();
         lanes = laneMask;
         while (lanes != 0) {
-            // 当前按拓扑选中或从掩码取出的账户 Lane 编号
             int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
             laneLifecycle.worker(laneId).submit(query);
         }
@@ -806,14 +756,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public TradeSettlement.Changes currentMatcherSettlementChangesScope() {
         if (Thread.currentThread() == owner) return coordinator.ownerMatcherSettlementChangesScope;
-        // 本轮路由、交接或回调正在处理的账户 Lane 引用
         AccountPartition lane = currentLaneCommandScope();
         return lane != null ? lane.matcherSettlementChanges() : null;
     }
 
     /**
      * 校验 Lane 引用、当前线程和既有范围，禁止交叉或嵌套账户访问；活动 Owner 还须持有交接后的访问权，再登记当前范围。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
      */
     public void enterLaneCommandScope(AccountPartition lane) {
         if (lane == null || lane.laneId() >= accountLanes.length || accountLanes[lane.laneId()] != lane) {
@@ -845,8 +793,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求撮合变化容器覆盖该 Lane 且没有其他撮合范围，先进入账户命令范围，再登记本次结算变化容器。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param changes 本次撮合结算借用的变化槽，收集完成前保持占用
      */
     public void enterMatcherSettlementScope(AccountPartition lane, TradeSettlement.Changes changes) {
         if (changes == null || lane == null || lane.matcherSettlementChanges() != null
@@ -861,7 +807,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按默认规则退出账户命令范围，需要时保留持仓退休证明。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
      */
     public void exitLaneCommandScope(AccountPartition lane) {
         exitLaneCommandScope(lane, true);
@@ -869,8 +814,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 确认当前命令范围匹配，按线程及冷阶段分支选择是否准备持仓退休证明，然后清范围；Owner 退出时收集该 Lane 已发布变化。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param captureRetirementProof 退出普通命令范围时是否需要记录持仓身份退休证明
      */
     private void exitLaneCommandScope(AccountPartition lane, boolean captureRetirementProof) {
         // 当前调用线程，用于核对 Owner 或所属账户工作线程
@@ -894,8 +837,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 确认正在退出同一撮合变化容器，清 Owner 与 Lane 的撮合引用，再退出账户范围；此处不重复生成退休证明。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param changes 本次撮合结算借用的变化槽，收集完成前保持占用
      */
     public void exitMatcherSettlementScope(AccountPartition lane, TradeSettlement.Changes changes) {
         if (changes == null || lane == null || (Thread.currentThread() == owner
@@ -909,15 +850,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在修改任务状态前检查全部目标账户邮箱；未启动时无需检查，活动阶段任一邮箱满就抛出拒绝执行异常。
-     * @param laneMask 本次需要操作或派发的账户 Lane 位集合
      */
     public void ensureLaneWorkerCapacity(long laneMask) {
         assertAccountLanesHealthy();
         if (!accountLanesStarted()) return;
-        // 本轮还未派发或检查的 Lane 位集合，每次清除最低有效位
         long lanes = laneMask;
         while (lanes != 0) {
-            // 当前按拓扑选中或从掩码取出的账户 Lane 编号
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
             if (!laneLifecycle.worker(laneId).hasCapacity()) {
@@ -928,20 +866,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 已经确定账户 Lane 后执行一次业务的回调；线程与访问范围由调用入口建立。
-     * @param <T> 该账户操作返回值的类型
      */
     public @FunctionalInterface
     interface LaneOperation<T> {
         /**
          * 在调用方已经建立的账户 Lane 范围内执行业务，返回本次操作结果。
-         * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
          */
         T apply(AccountPartition lane);
     }
 
     /**
      * 要求当前已有账户命令范围，再判断给定用户是否路由到该范围的 Lane。
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      */
     public boolean currentLaneOwns(long userId) {
         // 当前线程已经进入的可空账户命令范围，不自动扩展到其他 Lane
@@ -952,9 +887,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在所属 Lane 注册尚未登记的用户，推进已应用与已提交序号，并发布提交序号观测槽。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param users 已经按 Lane 收集的用户原始列表
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      */
     public void applyLaneUsers(AccountPartition lane,
                         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users,
@@ -962,7 +894,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 用户原始列表的长整数迭代器，避免逐项装箱
         org.eclipse.collections.api.iterator.LongIterator iterator = users.longIterator();
         while (iterator.hasNext()) {
-            // 本轮读出的用户身份，按对应入口过滤或路由
             long userId = iterator.next();
             if (!lane.owns(userId)) lane.registerUser(userId);
         }
@@ -973,23 +904,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 把该 Lane 的已提交序号写入独立 volatile 槽，供 Owner 观察完成前缀。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
      */
     public void publishLaneCommittedSequence(AccountPartition lane) {
-        // 当前按拓扑选中或从掩码取出的账户 Lane 编号
         int laneId = lane.laneId();
-        // 该 Lane 当前已经完成提交的 Core 序号，随后写入 volatile 槽
         long committed = lane.committedSequence();
         coordinator.COMMITTED_SEQUENCES.setVolatile(coordinator.publishedLaneCommittedSlots, laneId * coordinator.COMMITTED_SEQUENCE_STRIDE, committed);
     }
 
     /**
      * 复制指定资产的余额数值；原余额表或该资产不存在时返回空。
-     * @param balances 要复制的原余额映射，不修改输入业务对象
-     * @param assetId 本次业务使用的资产内部身份
      */
     static AccountBalance copyBalance(IntObjectHashMap<AccountBalance> balances, int assetId) {
-        // 该资产现有的可空余额对象，按当前分支复制数值或释放冻结
         AccountBalance balance = balances == null ? null : balances.get(assetId);
         return balance == null ? null : new AccountBalance(balance.userId(), balance.assetId(),
                 balance.availableUnits(), balance.lockedUnits());
@@ -997,13 +922,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 复制一名用户的资产映射及每项可变余额对象；空表引用仍返回空。
-     * @param balances 要复制的原余额映射，不修改输入业务对象
      */
     static IntObjectHashMap<AccountBalance> copyBalances(IntObjectHashMap<AccountBalance> balances) {
         if (balances == null) return null;
-        // 本次新建的余额或客户号索引容器，不与输入共享可变余额对象
         IntObjectHashMap<AccountBalance> copy = new IntObjectHashMap<>(balances.size());
-        balances.forEachKeyValue((/* 当前复制余额项的资产内部身份 */ assetId, /* 该资产现有的可空余额对象，按当前分支复制数值或释放冻结 */ balance) -> copy.put(assetId,
+        balances.forEachKeyValue((assetId, balance) -> copy.put(assetId,
                 new AccountBalance(balance.userId(), balance.assetId(),
                         balance.availableUnits(), balance.lockedUnits())));
         return copy;
@@ -1011,26 +934,22 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 复制所有用户的资产映射和余额对象，供明确的冷查询或快照边界使用。
-     * @param balances 要复制的原余额映射，不修改输入业务对象
      */
     public static LongObjectHashMap<IntObjectHashMap<AccountBalance>> copyAllBalances(
             LongObjectHashMap<IntObjectHashMap<AccountBalance>> balances) {
-        // 本次新建的余额或客户号索引容器，不与输入共享可变余额对象
         LongObjectHashMap<IntObjectHashMap<AccountBalance>> copy = new LongObjectHashMap<>(balances.size());
-        balances.forEachKeyValue((/* 本轮读出的用户身份，按对应入口过滤或路由 */ userId, /* 当前用户的原资产余额映射，继续逐项复制其可变余额 */ userBalances) -> copy.put(userId, copyBalances(userBalances)));
+        balances.forEachKeyValue((userId, userBalances) -> copy.put(userId, copyBalances(userBalances)));
         return copy;
     }
 
     /**
      * 复制客户订单号索引，跳过仅作为内部容量缓存的空用户映射。
-     * @param index 原客户订单号索引，复制时跳过内部空用户映射
      */
     public static LongObjectHashMap<LongLongHashMap> copyClientOrderIndex(
             LongObjectHashMap<Long2LongHashMap> index) {
-        // 本次新建的余额或客户号索引容器，不与输入共享可变余额对象
         LongObjectHashMap<LongLongHashMap> copy = new LongObjectHashMap<>(index.size());
         // 每用户空映射只是内部容量缓存，复制发布索引时跳过。
-        index.forEachKeyValue((/* 本轮读出的用户身份，按对应入口过滤或路由 */ userId, /* 当前用户的原客户订单号索引，空映射只作为内部缓存而不复制 */ values) -> {
+        index.forEachKeyValue((userId, values) -> {
             if (!values.isEmpty()) {
                 // 为该非空用户新建的原始客户号索引副本
                 LongLongHashMap entries = new LongLongHashMap(values.size());
@@ -1043,7 +962,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前已有 Lane 范围时把用户变化写入该范围的变化容器；无范围时不写入。
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishUser(long userId, UserAccount value) {
@@ -1056,7 +974,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前已有 Lane 范围时登记订单变化，空值保留删除含义；无范围时不写入。
-     * @param orderId 本次操作关联的订单实体 ID
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishOrder(long orderId, Order value) {
@@ -1069,7 +986,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前已有 Lane 范围时登记订单预留变化，无范围时不写入。
-     * @param orderId 本次操作关联的订单实体 ID
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishReservation(long orderId, OrderFundsReservation value) {
@@ -1082,7 +998,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前已有 Lane 范围时登记持仓变化，无范围时不写入。
-     * @param positionKey 持仓内部身份键
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishPosition(long positionKey, Position value) {
@@ -1095,7 +1010,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * Lane 范围内把强平变化交给该 Lane 容器，否则写入当前 Owner 变化缓冲。
-     * @param liquidationId 本次变化关联的强平实体 ID
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     void publishLiquidation(long liquidationId, RiskScanner.LiquidationOrder value) {
@@ -1107,7 +1021,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * Lane 范围内登记风险快照变化，否则写入当前 Owner 风险变化缓冲。
-     * @param positionKey 持仓内部身份键
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishRiskSnapshot(long positionKey, RiskMarginCalculator.Snapshot value) {
@@ -1119,7 +1032,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按当前是否处于 Lane 范围，把触发单变化交给 Lane 容器或 Owner 缓冲。
-     * @param id 本次查询或发布的业务实体身份
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishTriggerOrder(long id, CoreTriggerOrderState value) {
@@ -1134,28 +1046,22 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 优先取得当前撮合范围的指定 Lane 变化容器，没有撮合范围则使用普通控制变化容器。
-     * @param laneId 账户 Lane 的零起始编号
      */
     public AccountPartitionCommit.Delta laneDelta(int laneId) {
-        // 本次借用或当前范围持有的结算变化槽，按所属 Lane 访问其变化容器
         TradeSettlement.Changes changes = currentMatcherSettlementChangesScope();
         return changes == null ? coordinator.laneDeltas[laneId] : changes.laneDelta(laneId);
     }
 
     /**
      * 按明确的 Lane 引用选择它的撮合变化容器或普通控制变化容器。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
      */
     public AccountPartitionCommit.Delta laneDelta(AccountPartition lane) {
-        // 本次借用或当前范围持有的结算变化槽，按所属 Lane 访问其变化容器
         TradeSettlement.Changes changes = lane.matcherSettlementChanges();
         return changes == null ? coordinator.laneDeltas[lane.laneId()] : changes.laneDelta(lane.laneId());
     }
 
     /**
      * 向明确指定 Lane 的当前变化容器登记用户变化。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishUser(AccountPartition lane, long userId, UserAccount value) {
@@ -1164,8 +1070,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 向明确指定 Lane 的当前变化容器登记订单变化。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param orderId 本次操作关联的订单实体 ID
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishOrder(AccountPartition lane, long orderId, Order value) {
@@ -1174,8 +1078,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 向明确指定 Lane 的当前变化容器登记订单预留变化。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param orderId 本次操作关联的订单实体 ID
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishReservation(AccountPartition lane, long orderId, OrderFundsReservation value) {
@@ -1184,8 +1086,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 向明确指定 Lane 的当前变化容器登记持仓变化。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param positionKey 持仓内部身份键
      * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
      */
     public void publishPosition(AccountPartition lane, long positionKey, Position value) {
@@ -1194,7 +1094,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按默认的空附加身份集合，收集指定 Lane 的控制变化。
-     * @param laneId 账户 Lane 的零起始编号
      */
     public void flushPublishedChanges(int laneId) {
         flushPublishedChanges(laneId, null, null);
@@ -1202,14 +1101,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 收集普通控制变化、余额变化标记及触发单变化，再排入 Owner 变化缓冲和可选身份集合；不在此重做账户业务。
-     * @param laneId 账户 Lane 的零起始编号
-     * @param changedUsers 可空的附加用户变化身份收集器
-     * @param changedOrders 可空的附加订单变化身份收集器
      */
     public void flushPublishedChanges(int laneId,
                                com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
                                com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
-        // 该 Lane 的普通控制变化容器，收集后排入 Owner 变化缓冲
         AccountPartitionCommit.Delta changes = coordinator.laneDeltas[laneId];
         changes.recordControlChanges(this, laneId);
         if (accountRollback.balancePatch(laneId).size() != 0) markBalancesChanged();
@@ -1219,14 +1114,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上从固定环借出空闲变化槽，标记占用并准备目标 Lane 容器；环满或槽已占用视为流程错误。
-     * @param laneMask 本次需要操作或派发的账户 Lane 位集合
      */
     public TradeSettlement.Changes acquireMatcherSettlementChanges(long laneMask) {
         assertOwner();
         if (coordinator.freeMatcherSettlementChangeCount == 0) {
             throw new IllegalStateException("AccountPartitionCommit.Delta ring is full");
         }
-        // 本次借用或当前范围持有的结算变化槽，按所属 Lane 访问其变化容器
         TradeSettlement.Changes changes = coordinator.matcherSettlementChangesRing[
                 coordinator.freeMatcherSettlementChangeSlots[--coordinator.freeMatcherSettlementChangeCount]];
         if (changes.inUse()) throw new IllegalStateException("AccountPartitionCommit.Delta ring slot is already active");
@@ -1238,7 +1131,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求变化槽仍被占用，归还退休订单引用、清空容器并把槽号放回空闲栈；调用方保证消费者已经结束。
-     * @param changes 本次撮合结算借用的变化槽，收集完成前保持占用
      */
     public void releaseMatcherSettlementChanges(TradeSettlement.Changes changes) {
         if (changes == null || !changes.inUse()) throw new IllegalStateException("AccountPartitionCommit.Delta slot is not active");
@@ -1280,12 +1172,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验提交序号和原日志元数据，按变化用户派发账户提交任务，同时携带订单盖章和可选触发取消信息。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
      * @param orderUsers 订单到用户的已捕获归属，null 表示无需补订单元数据
-     * @param triggerIds 可空的待取消触发单身份集合
-     * @param timestamp 原复制日志业务时间，不用当前机器时间替代
-     * @param position 原复制日志位置，随同提交元数据交给账户任务
      */
     public AccountPartitionCommit dispatchLaneMutation(long coreSequence, Iterable<Long> userIds,
             org.eclipse.collections.api.map.primitive.LongLongMap orderUsers, Iterable<Long> triggerIds, long timestamp, long position) {
@@ -1300,14 +1187,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 最终批次响应与账户提交使用同一任务；即使批次没有账户变化，也把响应用户 Lane 加入读取范围，不把纯拒绝批次伪装成账户写入。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
      * @param orderUsers 订单到用户的已捕获归属，null 表示无需补订单元数据
-     * @param timestamp 原复制日志业务时间，不用当前机器时间替代
-     * @param position 原复制日志位置，随同提交元数据交给账户任务
-     * @param responseUserId 最终批次响应所属用户，决定没有账户写入时仍需读取的 Lane
-     * @param target 接收最终订单结果的既有批次结果槽
-     * @param identities 与本产品线状态配套的身份注册表
      */
     public AccountPartitionCommit dispatchBatchCommit(long coreSequence, Iterable<Long> userIds,
             org.eclipse.collections.api.map.primitive.LongLongMap orderUsers, long timestamp, long position, long responseUserId,
@@ -1324,11 +1204,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 从只读原始长整数列表直接取值，其他集合走迭代器；跳过空或非正用户后按 Lane 收集，不额外去重。
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
      */
     private void addLaneUsers(Iterable<Long> userIds) {
         if (userIds instanceof ImmutableLongArrayList /* 支持原始长整数遍历的只读用户列表，直接取值而不逐项装箱 */ primitive) {
-            primitive.forEachLong(/* 本轮读出的用户身份，按对应入口过滤或路由 */ userId -> { if (userId > 0) addLaneUser(userId); });
+            primitive.forEachLong(userId -> { if (userId > 0) addLaneUser(userId); });
             return;
         }
         if (userIds instanceof PrimitiveLongView view) {
@@ -1338,46 +1217,36 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             return;
         }
-        for (Long /* 本轮读出的用户身份，按对应入口过滤或路由 */ userId : userIds) if (userId != null && userId > 0) addLaneUser(userId);
+        for (Long userId : userIds) if (userId != null && userId > 0) addLaneUser(userId);
     }
 
     /**
      * 清空每条 Lane 的临时用户列表，准备下一次派发。
      */
     void clearLaneUserScratch() {
-        for (org.eclipse.collections.impl.list.mutable.primitive.LongArrayList /* 本轮正在清空、提交或检查的 Lane 临时用户列表 */ users : coordinator.laneUserScratch) {
+        for (org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users : coordinator.laneUserScratch) {
             users.clear();
         }
     }
 
     /**
      * 按拓扑把用户身份追加到对应临时列表，不在这里去重。
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      */
     void addLaneUser(long userId) {
-        // 当前按拓扑选中或从掩码取出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
         coordinator.laneUserScratch[laneId].add(userId);
     }
 
     /**
      * 按临时用户列表校验每条写入 Lane 的提交顺序，必要时加入只读响应 Lane，检查容量并借用事件；准备元数据或触发取消失败则归还事件，成功后按掩码内联执行或派发，并仅推进写入 Lane 的派发水位。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      * @param orderUsers 订单到用户的已捕获归属，null 表示无需补订单元数据
-     * @param triggerIds 可空的待取消触发单身份集合
-     * @param timestamp 原复制日志业务时间，不用当前机器时间替代
-     * @param position 原复制日志位置，随同提交元数据交给账户任务
-     * @param target 接收最终订单结果的既有批次结果槽
-     * @param identities 与本产品线状态配套的身份注册表
      * @param responseLaneId 最终批次响应读取所在的 Lane，没有响应目标时为负一
      */
     private AccountPartitionCommit dispatchLaneMutationFromScratch(long coreSequence,
             org.eclipse.collections.api.map.primitive.LongLongMap orderUsers, Iterable<Long> triggerIds, long timestamp, long position,
             OrderCommand.ResultTarget target, RuntimeIdentityRegistry identities, int responseLaneId) {
-        // 本轮实际涉及的账户 Lane 位集合
         long laneMask = 0;
-        for (/* 当前按拓扑选中或从掩码取出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            // 本轮正在清空、提交或检查的 Lane 临时用户列表
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = coordinator.laneUserScratch[laneId];
             if (users.isEmpty()) continue;
             if (coreSequence <= Math.max(
@@ -1387,7 +1256,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             laneMask |= 1L << laneId;
         }
-        // 本次真正推进账户写入水位的 Lane 集合，不含仅为读取最终响应加入的 Lane
         long commitMask = laneMask;
         if (target != null) laneMask |= 1L << responseLaneId;
         if (laneMask == 0) return null;
@@ -1407,10 +1275,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
             coordinator.laneCommitEventPool.addFirst(event);
             throw failure;
         }
-        // 本轮还未派发或检查的 Lane 位集合，每次清除最低有效位
         long lanes = laneMask;
         while (lanes != 0) {
-            // 当前按拓扑选中或从掩码取出的账户 Lane 编号
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
             if (!accountLanesStarted()) {
@@ -1426,7 +1292,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上检查健康并观察给定提交事件是否全部完成。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public boolean laneCommitComplete(AccountPartitionCommit event) {
         assertOwner();
@@ -1437,7 +1302,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在调用方完成等待后发布并清空提交事件，再放回复用池；本方法不替调用方循环等待。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public void releaseLaneCommit(AccountPartitionCommit event) {
         if (event == null) throw new IllegalArgumentException("Account Lane commit event is required");
@@ -1456,7 +1320,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 未派发的准入准备失败时丢弃事件内容并归还池，空事件无需处理。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public void discardPlaceAdmission(OrderCommand.PlaceAdmissionEvent event) {
         if (event == null) return;
@@ -1466,15 +1329,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 准备单笔下单事件，先检查账户准入容量；需要账本输入时先派发该读取，再内联或交给账户准入邮箱。失败时账本仍持有输入则抛出明确故障而不回收该事件，避免复用仍被引用的槽。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
-     * @param commandId 本次原业务命令 UUID
-     * @param settlementStatus 准入需要遵守的标的生命周期结算状态
-     * @param assetId 本次业务使用的资产内部身份
-     * @param identities 与本产品线状态配套的身份注册表
-     * @param timestamp 原复制日志业务时间，不用当前机器时间替代
-     * @param position 原复制日志位置，随同提交元数据交给账户任务
      */
     public OrderCommand.PlaceAdmissionEvent dispatchPlaceAdmission(
             long coreSequence, long userId, OrderCommand.PlaceAdmissionEvent event, java.util.UUID commandId,
@@ -1482,7 +1336,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             int assetId, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
         assertOwner();
-        // 当前按拓扑选中或从掩码取出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
         if (event == null) throw new IllegalArgumentException("place admission event is required");
         event.prepare(
@@ -1510,7 +1363,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 调用方完成准入收集后清空事件并归还池；空事件无需处理。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public void releasePlaceAdmission(OrderCommand.PlaceAdmissionEvent event) {
         if (event == null) return;
@@ -1520,14 +1372,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 准备改单准入，必要时先派发账本输入读取，再交给所属账户的普通工作邮箱；失败时仍由账本持有的输入不能回收，否则丢弃事件并归还池。
-     * @param sequence 本次业务交接使用的 Core 序号
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
-     * @param originalOrderId 本次改单所替换或修改的原订单 ID
-     * @param amend 可空的原地改单参数，与替换单分支按既有约定选择
-     * @param replace 可空的替换订单参数，与原地改单分支按既有约定选择
-     * @param decision 本次订单规则解析使用的既有上下文
-     * @param matcherShard 本次订单准入将交给的 Matcher 分片
-     * @param identities 与本产品线状态配套的身份注册表
      */
     public OrderCommand.ReplacementAdmissionEvent dispatchReplacementAdmission(long sequence, long userId,
             long originalOrderId, com.surprising.aeron.protocol.AmendOrderCommand amend,
@@ -1535,7 +1379,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             com.surprising.aeron.service.order.OrderAdmissionService.Context decision,
             int matcherShard, RuntimeIdentityRegistry identities) {
         assertOwner();
-        // 当前按拓扑选中或从掩码取出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
         ensureLaneWorkerCapacity(1L << laneId);
         // 本次借用的准入或账户提交事件，仍被消费者引用时不能回收
@@ -1564,7 +1407,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上把已完成收集的改单准入事件清空并归还池。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public void releaseReplacementAdmission(OrderCommand.ReplacementAdmissionEvent event) {
         assertOwner();
@@ -1575,18 +1417,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 为该用户借出专用变化槽及批次准入事件，准备订单输入后在冷阶段执行或投递账户准入邮箱；投递阶段失败则归还其变化槽并回收事件。准备阶段与投递阶段的异常范围分别沿用现有实现。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
-     * @param commandId 本次原业务命令 UUID
      * @param orders 本批按原顺序解析的下单参数数组
-     * @param clientKeys 本批各项已经准备的客户订单号内部身份，与订单下标对应
-     * @param admittedOrders 本批账户准入返回或填充的订单收据数组
-     * @param itemCount 本批实际使用的有效项数，不以数组容量代替
-     * @param matcherShard 本次订单准入将交给的 Matcher 分片
-     * @param identities 与本产品线状态配套的身份注册表
-     * @param source 本批原始下单意图来源，供所属账户准入处理读取
-     * @param timestamp 原复制日志业务时间，不用当前机器时间替代
-     * @param position 原复制日志位置，随同提交元数据交给账户任务
      */
     public OrderBatchProcessor.PlaceBatchAdmissionEvent dispatchPlaceBatchAdmission(
             long coreSequence, long userId, java.util.UUID commandId,
@@ -1595,9 +1426,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             int matcherShard, RuntimeIdentityRegistry identities, OrderBatchProcessor.PendingBatch source,
             long timestamp, long position) {
         assertOwner();
-        // 当前按拓扑选中或从掩码取出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
-        // 本次借用或当前范围持有的结算变化槽，按所属 Lane 访问其变化容器
         TradeSettlement.Changes changes = acquireMatcherSettlementChanges(1L << laneId);
         changes.ensureAdmissionCapacity(laneId, itemCount);
         // 本次借用的准入或账户提交事件，仍被消费者引用时不能回收
@@ -1624,14 +1453,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 只登记已经完成且未拒绝的批次准入，把各订单加入待完成预留索引，并按批次项数递增修订；调用方保证只登记一次。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public void registerPlaceBatchAdmission(OrderBatchProcessor.PlaceBatchAdmissionEvent event) {
         assertOwner();
         if (event == null || !event.complete() || event.rejection() != null) {
             throw new IllegalStateException("place batch admission is not collectable");
         }
-        // 本轮读出的用户身份，按对应入口过滤或路由
         long userId = event.userId();
         pendingReservations.registerBatch(event.coreSequence(), userId, event.admittedOrders(), event.itemCount());
         revision = Math.addExact(revision, event.itemCount());
@@ -1639,7 +1466,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在该批次有序提交时才接入账户回滚前值，移交准入标记及可用余额变化；账户实体仍归 Lane，不重放用户、订单和预留发布缓冲。取得变化槽后无论正常或抛错都归还它。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public void collectPlaceBatchAdmission(
             OrderBatchProcessor.PlaceBatchAdmissionEvent event) {
@@ -1647,22 +1473,19 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (event == null || !event.complete() || event.rejection() != null) {
             throw new IllegalStateException("place batch admission is not collectable");
         }
-        // 当前按拓扑选中或从掩码取出的账户 Lane 编号
         int laneId = topology.accountLaneId(event.userId());
         // 只在本批进入有序提交时接入共享回滚前值。
         // 前面的命令不能提前发布或清空未来批次的修改前状态。
         accountRollback.captureBatchAdmissionBefore(event.userId(), event.userBefore(), event.admittedOrders(), event.itemCount(), laneId);
         event.copyBalanceBeforeTo(accountRollback.balancePatch(laneId));
-        // 本次借用或当前范围持有的结算变化槽，按所属 Lane 访问其变化容器
         TradeSettlement.Changes changes = event.takeChanges();
         try {
             // 准入业务对象一直归所属 Lane，直到终态结算完成。
-            // 这里仅交接原始准入标记、资金变化和可用余额，
             // 不重放用户、订单或预留的发布缓冲。
             changes.laneDelta(laneId).commitBatchAdmissionToOwner(this, laneId);
             // 本批专用变化槽保存的余额补丁，只发布本批可用余额变化
             AccountTransactionRollback.BalancePatches balances = changes.balancePatch(laneId);
-            for (/* 当前数组、变化项或已准入订单的遍历下标 */ int index = 0; index < balances.size(); index++) {
+            for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);
                 if (changedUsers != null) changedUsers.add(balances.userId(index));
                 markBalancesChanged();
@@ -1674,7 +1497,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上取走批次专用变化槽并归还；事件本身由独立释放入口回收。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public void discardPlaceBatchAdmission(OrderBatchProcessor.PlaceBatchAdmissionEvent event) {
         assertOwner();
@@ -1684,7 +1506,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上清空已完成使用的批次准入事件并归还池，调用方先处理其变化槽。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
      */
     public void releasePlaceBatchAdmission(OrderBatchProcessor.PlaceBatchAdmissionEvent event) {
         assertOwner();
@@ -1695,11 +1516,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在所属 Lane 按相反顺序撤销本批已准入订单的待预留、客户号、订单与冻结，最后恢复原用户修订及持仓模式；缺少必要预留或余额时直接报错。
-     * @param lane 明确所属的账户 Lane 引用，沿用当前执行入口的权限检查
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      * @param orders 本批按原顺序解析的下单参数数组
-     * @param clientKeys 本批各项已经准备的客户订单号内部身份，与订单下标对应
      * @param admittedCount 回滚前已经成功准入的项数，只逆序撤销这些项
      * @param userBefore 本批修改前的用户状态，用于恢复修订和持仓模式
      */
@@ -1708,8 +1525,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             long[] clientKeys,
             int admittedCount, UserAccount userBefore) {
         lane.assertOwner();
-        for (/* 当前数组、变化项或已准入订单的遍历下标 */ int index = admittedCount - 1; index >= 0; index--) {
-            // 当前逆序撤销的已准入订单实体 ID
+        for (int index = admittedCount - 1; index >= 0; index--) {
             long orderId = orders[index].orderId();
             // 该已准入订单必须存在的预留，用于恢复冻结资金
             OrderFundsReservation reservation = lane.reservation(orderId);
@@ -1723,9 +1539,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             lane.removeReservationValue(orderId);
             lane.removeReservationId(userId, orderId);
             lane.removeOrder(orderId);
-            // 当前用户所属 Lane 的资产余额映射
             IntObjectHashMap<AccountBalance> balances = lane.userBalances(userId);
-            // 该资产现有的可空余额对象，按当前分支复制数值或释放冻结
             AccountBalance balance = balances == null ? null : balances.get(reservation.assetId());
             if (balance == null) throw new IllegalStateException("batch admission rollback balance is missing");
             balance.release(reservation.reservedUnits());
@@ -1740,8 +1554,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 先发布准入完成的 Core 序号，再设置 Lane 唤醒提示；新观察到置位时通知 Owner。
-     * @param laneId 账户 Lane 的零起始编号
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      */
     public void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         coordinator.placeAdmissionReadyQueues[laneId].publish(coreSequence);
@@ -1758,7 +1570,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 上从指定 Lane 的准入完成队列取一个 Core 序号，空队列返回零。
-     * @param laneId 账户 Lane 的零起始编号
      */
     public long pollPlaceAdmissionReady(int laneId) {
         assertOwner();
@@ -1767,7 +1578,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验 Matcher 分片后发布账户准入就绪提示，唤醒对应撮合提交头；业务内容继续保存在原事件中。
-     * @param matcherShard 本次订单准入将交给的 Matcher 分片
      */
     public void publishAccountAdmissionReadyShard(int matcherShard) {
         if (matcherShard < 0 || matcherShard >= topology.matchingEngineCount()) {
@@ -1810,7 +1620,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 直接结算只发布 Lane 唤醒提示；原结算事件持有权威完成标记，不额外建立 Owner 序号队列或预期计数。
-     * @param laneId 账户 Lane 的零起始编号
      */
     public void publishDirectMatcherSettlementReady(int laneId) {
         coordinator.directSettlementReadyLanes.setBit(laneId);
@@ -1825,13 +1634,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在有效执行范围内收集已经完成且未拒绝的单笔准入，禁止重复登记，建立 Owner 的待预留索引并递增修订，返回原解析结果；空、未完成或已拒绝事件返回空。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
      */
     public OrderCommand.ResolvedPlaceOrder collectPlaceAdmission(OrderCommand.PlaceAdmissionEvent event) {
         assertOwner();
         if (event == null || !event.complete()) return null;
         if (event.rejection() != null) return null;
-        // 本轮正在登记、完成或撤销的订单实体 ID
         long orderId = event.orderId();
         // 本轮业务项所属用户，用于恢复索引或核对账户路由
         long userId = event.userId();
@@ -1846,7 +1653,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求直接财务控制范围已经结束，再登记原撮合事件的财务结算；没有事件时无需登记。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
      */
     public void dispatchMatcherFinancialSettlement(TradeSettlement event) {
         assertOwner();
@@ -1857,7 +1663,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 先尝试派发财务部分，推进内联财务结算并检查原事件整体完成状态。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
      */
     public boolean pollMatcherFinancialSettlement(TradeSettlement event) {
         if (event == null) return true;
@@ -1867,10 +1672,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 等待账户及财务结算完成，标记事件单次收集；一次遍历 Lane 变化交接终态、余额和响应身份。取走变化槽后在 finally 归还，事件本身仍由外层管理。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
-     * @param terminalOrderSink 可空终态身份接收器，接收完本序号后调用结束钩子
-     * @param changedUsers 可空的响应用户变化身份集合，随同 Lane 遍历填充
-     * @param changedOrders 可空的响应订单变化身份集合，随同 Lane 遍历填充
      */
     public boolean collectMatcherSettlement(
             TradeSettlement event,
@@ -1880,38 +1681,33 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         if (event == null || !event.complete()) return false;
         event.markCollected();
-        // 该计划 Core 序号是否仍有 Owner 侧待预留索引，需要按原计划移除
         boolean ownerPending = pendingReservations.containsSequence(event.plan().coreSequence());
-        for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < event.planCount(); index++) {
+        for (int index = 0; index < event.planCount(); index++) {
             if (ownerPending) pendingReservations.unindexMatcherPendingReservations(event.plan(index));
             // Lane 不修改全局版本；全部结算成功后由 owner 合并一次触发终态变更。
             if (event.plan(index).completedTrigger() != null) revision = Math.incrementExact(revision);
         }
         // 本次结算或回滚需要处理的账户 Lane 位集合
         long laneMask = event.requiredLaneMask();
-        // 本次撮合或撤单的变化容器，按当前分支借出、取走或读取
         TradeSettlement.Changes changes = event.takeChanges();
         try {
             // 尚待收集的 Lane 位集合，每轮清除最低有效位
             long remainingLanes = laneMask;
-            // 本轮已经统计完成的待预留项数，随后与原索引数量核对或扣减
             int completed = 0;
             while (remainingLanes != 0) {
-                // 本轮按用户路由或从掩码选出的账户 Lane 编号
                 int laneId = Long.numberOfTrailingZeros(remainingLanes);
                 remainingLanes &= remainingLanes - 1;
                 completed += changes.laneDelta(laneId).completedPending();
                 if (changes.directPositionIdentities()) {
                     // 本 Lane 已交出的持仓变化及身份键，用于释放发布后的身份引用
                     var positions = changes.laneDelta(laneId).positions();
-                    for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < positions.size(); index++)
+                    for (int index = 0; index < positions.size(); index++)
                         event.identities().releasePublishedPosition(positions.keyAt(index));
                 }
                 changes.laneDelta(laneId).commitTerminalToOwner(this, laneId, terminalOrderSink, changedUsers,
                         changedOrders);
-                // 该 Lane 交出的余额补丁，逐项发布可用余额并标记变化用户
                 AccountTransactionRollback.BalancePatches balances = changes.balancePatch(laneId);
-                for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < balances.size(); index++) {
+                for (int index = 0; index < balances.size(); index++) {
                     balances.publishAvailableAt(this, index);
                     if (changedUsers != null) changedUsers.add(balances.userId(index));
                     markBalancesChanged();
@@ -1927,7 +1723,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 判断当前命令是否已经收集该订单键，删除所用的空值也算有效变化。
-     * @param orderId 本次需要读取、登记或撤销的订单实体 ID
      */
     public boolean hasChangedOrder(long orderId) {
         assertOwner();
@@ -1936,7 +1731,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 取得当前命令已收集的订单变化；空值可能表示删除，也可能未登记，需配合 hasChangedOrder 区分。
-     * @param orderId 本次需要读取、登记或撤销的订单实体 ID
      */
     public Order changedOrderValue(long orderId) {
         assertOwner();
@@ -1945,7 +1739,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 取得当前命令已收集的持仓变化，返回借用值而不是再次查询账户。
-     * @param positionKey 持仓内部身份键
      */
     public Position changedPositionValue(long positionKey) {
         assertOwner();
@@ -1959,18 +1752,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public interface TerminalOrderSink {
         /**
          * 接收一个终态订单的原始身份，避免 Owner 再遍历订单对象取得这些字段。
-         * @param orderId 本次需要读取、登记或撤销的订单实体 ID
-         * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-         * @param clientOrderId 该终态订单所属用户下的客户订单号
          */
         void accept(long orderId, long userId, String clientOrderId);
 
         /**
          * 按已有 Lane 终态缓冲的顺序逐项调用接收器，不另建订单列表。
-         * @param delta 已完成 Lane 交出的终态订单原始缓冲，不在接收器内复制
          */
         default void acceptBatch(AccountPartitionCommit.Delta delta) {
-            for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < delta.terminalOrderCount(); index++) {
+            for (int index = 0; index < delta.terminalOrderCount(); index++) {
                 accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
                         delta.terminalOrderClient(index));
             }
@@ -1985,14 +1774,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在所属账户 Lane 完成与本计划序号匹配的待预留。按当前是否有撮合变化槽保存回滚前值及完成计数，补记订单变化和余额前后值；全字段未变化时复用准入版本，避免仅凭修订号判断提交元数据是否相同。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param plan 本次撮合结算计划，订单身份与完成序号沿用原计划
-     * @param admissionVersion 可空的既有准入订单版本，全字段相等时可直接复用
      */
     public void completeMatcherPendingReservations(AccountPartition lane, TradeSettlement.Plan plan,
                                             Order admissionVersion) {
-        for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < plan.orderCount(); index++) {
-            // 本轮正在登记、完成或撤销的订单实体 ID
+        for (int index = 0; index < plan.orderCount(); index++) {
             long orderId = plan.orderId(index);
             if (lane.pendingReservationSequence(orderId) != plan.coreSequence()) continue;
             // 计划订单必须存在的预留，还需核对该用户确实路由到当前 Lane
@@ -2000,7 +1785,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             if (reservation == null || topology.accountLaneId(reservation.userId()) != lane.laneId()) {
                 throw new IllegalStateException("matcher pending reservation is missing from its owner lane");
             }
-            // 本次撮合或撤单的变化容器，按当前分支借出、取走或读取
             TradeSettlement.Changes changes = lane.matcherSettlementChanges();
             if (changes == null) {
                 accountRollback.captureUserBefore(reservation.userId());
@@ -2030,14 +1814,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按计划逐个检查订单，只有原提交时间或日志位置变化时更新元数据；沿用当前普通或撮合变化范围，保留订单状态与业务修订。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param plan 本次撮合结算计划，订单身份与完成序号沿用原计划
-     * @param timestamp 原复制日志业务时间，用于更新订单提交元数据
-     * @param clusterPosition 原复制日志位置，用于更新订单提交元数据
      */
     public void stampMatcherOrders(AccountPartition lane, TradeSettlement.Plan plan,
                             long timestamp, long clusterPosition) {
-        for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < plan.orderCount(); index++) {
+        for (int index = 0; index < plan.orderCount(); index++) {
             // 计划中对应的账户当前订单，更新提交元数据时保留其状态和修订
             Order order = lane.order(plan.orderId(index));
             if (order == null || order.updatedAtEpochMillis() == timestamp
@@ -2051,9 +1831,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验用户、资产及持仓身份后，标记用户、余额和持仓发生变化；这里登记变化范围，不重新计算资产余额。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param assetId 需要校验为非负的资产内部身份，具体余额明细由已有变化缓冲保存
-     * @param positionKey 持仓内部身份键
      */
     public void recordUserSettlementChanges(long userId, int assetId, long positionKey) {
         assertOwner();
@@ -2094,7 +1871,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             if (acquired) {
                 while (!tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
             }
-            for (/* 本轮按用户路由或从掩码选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 onLane(laneId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> {
                     lane.requireSnapshot(fenceSequence);
                     return null;
@@ -2102,8 +1879,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             // 按 Lane 捕获的账户快照结果，最后核对后转换为固定列表
             java.util.List<AccountLaneSnapshot> snapshots = new java.util.ArrayList<>(accountLanes.length);
-            for (/* 本轮按用户路由或从掩码选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-                // 供本轮账户回调捕获的稳定 Lane 下标
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 int currentLaneId = laneId;
                 snapshots.add(onLane(currentLaneId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> lane.snapshot(fenceSequence)));
             }
@@ -2180,7 +1956,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         validateAccountLaneSnapshotManifest(snapshots, fenceSequence, globalState, topology);
         for (AccountLaneSnapshot /* 本轮正在核对或恢复的账户 Lane 快照 */ snapshot : snapshots) {
-            // 本轮按用户路由或从掩码选出的账户 Lane 编号
             int laneId = snapshot.laneId();
             for (Long /* 本轮业务项所属用户，用于恢复索引或核对账户路由 */ userId : snapshot.userIds()) {
                 if (!onLane(laneId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> lane.user(userId) != null)) {
@@ -2188,8 +1963,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 }
             }
         }
-        for (/* 本轮按用户路由或从掩码选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            // 供本轮账户回调捕获的稳定 Lane 下标
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             int currentLaneId = laneId;
             onLane(currentLaneId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> {
                 lane.forEachUserId(/* 本轮业务项所属用户，用于恢复索引或核对账户路由 */ userId -> {
@@ -2226,10 +2000,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 || globalState == null || fenceSequence < 0) {
             throw new IllegalArgumentException("incomplete account lane snapshot set");
         }
-        // 从全局用户集合按拓扑分好的每 Lane 预期用户集合
         @SuppressWarnings("unchecked")
         java.util.TreeSet<Long>[] expectedUsers = new java.util.TreeSet[topology.accountLaneCount()];
-        for (/* 本轮按用户路由或从掩码选出的账户 Lane 编号 */ int laneId = 0; laneId < expectedUsers.length; laneId++) {
+        for (int laneId = 0; laneId < expectedUsers.length; laneId++) {
             expectedUsers[laneId] = new java.util.TreeSet<>();
         }
         globalState.users().keySet().forEach(/* 本轮业务项所属用户，用于恢复索引或核对账户路由 */ userId ->
@@ -2237,7 +2010,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 清单中各 Lane 是否已经出现，防止同一 Lane 重复占位
         boolean[] present = new boolean[topology.accountLaneCount()];
         for (AccountLaneSnapshot /* 本轮正在核对或恢复的账户 Lane 快照 */ snapshot : snapshots) {
-            // 本轮按用户路由或从掩码选出的账户 Lane 编号
             int laneId = snapshot.laneId();
             if (laneId < 0 || laneId >= present.length || present[laneId]
                     || snapshot.appliedSequence() != fenceSequence
@@ -2324,7 +2096,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前处于订单批量范围时拒绝指定业务域的交叉修改，范围外不额外拦截。
-     * @param domain 批量订单范围内不允许交叉修改的业务域名称
      */
     void rejectUnsupportedOrderBatchMutation(String domain) {
         if (coordinator.orderBatchMutationScope) {
@@ -2335,7 +2106,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 为异步命令建立失败续步：中止私有实时批次，向各账户 Lane 派发待预留完成与前值恢复，返回可轮询回调；账户恢复收集完成后才恢复 Owner，再等待财务范围逆向收尾。
      * @param revisionCheckpoint 失败命令开始前的非负全局修订检查点
-     * @param coreSequence 原命令或当前收集结果关联的 Core 序号
      */
     public java.util.function.BooleanSupplier beginCommandRollback(long revisionCheckpoint, long coreSequence) {
         assertOwner();
@@ -2353,9 +2123,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         dispatchControlLanes(laneMask, /* 当前恢复任务实际执行的账户 Lane 下标 */ id -> {
             // 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限
             AccountPartition lane = currentLaneCommandScope();
-            // 本轮已经统计完成的待预留项数，随后与原索引数量核对或扣减
             int completed = 0;
-            for (long /* 本轮正在登记、完成或撤销的订单实体 ID */ orderId : pendingOrders) {
+            for (long orderId : pendingOrders) {
                 // 本轮业务项所属用户，用于恢复索引或核对账户路由
                 long userId = pendingReservations.pendingUser(orderId);
                 if (topology.accountLaneId(userId) != id) continue;
@@ -2363,7 +2132,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 completed++;
             }
             if (batch != null && topology.accountLaneId(batch.userId()) == id) {
-                for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < batch.count(); index++) {
+                for (int index = 0; index < batch.count(); index++) {
                     // 本批此前准入的订单收据，用来核对并完成这个 Core 序号的待预留
                     Order order = batch.order(index);
                     if (order == null || lane.pendingReservationSequence(order.orderId()) != coreSequence)
@@ -2381,12 +2150,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
              */
             @Override public boolean getAsBoolean() {
                 if (!pollControlLanes()) return false;
-                // 本轮已经统计完成的待预留项数，随后与原索引数量核对或扣减
                 int completed = 0;
                 for (/* 正在收集恢复结果的账户 Lane 下标 */ int id = 0; id < accountLanes.length; id++)
                     completed = Math.addExact(completed, (Integer) controlLaneResult(id));
                 if (completed != expectedPending) throw new IllegalStateException("rollback reservation count mismatch");
-                for (long /* 本轮正在登记、完成或撤销的订单实体 ID */ orderId : pendingOrders) {
+                for (long orderId : pendingOrders) {
                     // 本轮业务项所属用户，用于恢复索引或核对账户路由
                     long userId = pendingReservations.pendingUser(orderId);
                     pendingReservations.unindexPendingReservation(orderId, coreSequence, userId,
@@ -2406,7 +2174,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 同步恢复失败命令的预留、各 Lane 和 Owner 前值；活动财务控制尚未收尾时要求改走异步续步。该检查发生在账户恢复之后，因此不能把一次抛错理解为此前没有状态变化。
      * @param revisionCheckpoint 失败命令开始前的非负全局修订检查点
-     * @param coreSequence 原命令或当前收集结果关联的 Core 序号
      */
     public void rollbackActiveCommand(long revisionCheckpoint, long coreSequence) {
         assertOwner();
@@ -2420,7 +2187,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 || pendingReservations.hasBatch(coreSequence)) {
             pendingReservations.completePendingReservations(coreSequence);
         }
-        for (/* 本轮按用户路由或从掩码选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> {
                 accountRollback.restoreLane(lane);
                 return null;
@@ -2459,7 +2226,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 校验产品线非空及修订非负后保存元数据，不在这里重新划分既有账户或执行产品线迁移。
      * @param productLine 要保存到运行时元数据中的产品线，必须非空
-     * @param revision 要保存的非负业务修订值
      */
     public void setMetadata(ProductLine productLine, long revision) {
         assertOwner();
@@ -2478,7 +2244,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求不在不支持的订单批量修改范围，且配置非空，再替换当前风险扫描配置。
-     * @param riskScanControl 非空的风险扫描开关与预算配置
      */
     public void setRiskScanControl(CoreRiskScanControlView value) {
         assertOwner();
@@ -2497,11 +2262,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在当前 Lane 范围内读取该用户，跨 Lane 返回空；没有范围时检查访问权后临时进入所属 Lane 读取。返回运行时引用，不复制用户。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public UserAccount user(long userId) {
         assertOwner();
-        // 本轮按用户路由或从掩码选出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
         // 当前线程已经进入的可空账户 Lane 范围，不允许借此读取其他 Lane
         AccountPartition scoped = currentLaneCommandScope();
@@ -2521,7 +2284,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 读取用户并在未注册时抛出带用户身份的参数异常。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public UserAccount requireUser(long userId) {
         // 已经按合法账户范围读取的可空用户值，缺失时由 requireUser 拒绝
@@ -2534,8 +2296,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验明确 Lane 与用户路由及所有权后，借出该用户的运行时值。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public UserAccount user(AccountPartition lane, long userId) {
         requireLaneAccess(lane, userId);
@@ -2544,12 +2304,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前账户范围内返回原余额，跨 Lane 直接拒绝；无范围时检查访问权并在所属 Lane 内复制该资产余额，再退出范围。不存在时返回空。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param assetId 本次读取或登记变化的资产内部身份
      */
     public AccountBalance balance(long userId, int assetId) {
         assertOwner();
-        // 本轮按用户路由或从掩码选出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
         // 当前线程已经进入的可空账户 Lane 范围，不允许借此读取其他 Lane
         AccountPartition scoped = currentLaneCommandScope();
@@ -2557,7 +2314,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             if (scoped.laneId() != laneId) {
                 throw new IllegalStateException("balance query crossed its owner lane");
             }
-            // 该用户在所属 Lane 的原资产余额映射，资产不存在时返回空
             IntObjectHashMap<AccountBalance> balances = scoped.userBalances(userId);
             return balances == null ? null : balances.get(assetId);
         }
@@ -2583,21 +2339,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 核对明确 Lane 与用户的归属后，借出该资产原余额对象，缺少资产时返回空。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param assetId 本次读取或登记变化的资产内部身份
      */
     public AccountBalance balance(AccountPartition lane, long userId, int assetId) {
         requireLaneAccess(lane, userId);
-        // 该用户在所属 Lane 的原资产余额映射，资产不存在时返回空
         IntObjectHashMap<AccountBalance> balances = lane.userBalances(userId);
         return balances == null ? null : balances.get(assetId);
     }
 
     /**
      * 核对账户所有权后复制该用户的资产映射和可变余额对象；原表为空引用时返回空。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public IntObjectHashMap<AccountBalance> balancesForUser(AccountPartition lane, long userId) {
         requireLaneAccess(lane, userId);
@@ -2606,7 +2356,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在该用户所属 Lane 扫描预留身份，取严格大于游标的最小订单号，没有后续项返回零。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      * @param cursor 上次已消费的订单号，结果必须严格大于它
      */
     public long nextRiskReservationId(long userId, long cursor) {
@@ -2629,9 +2378,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 按持仓对外身份文本的字典序取下一项，返回它的内部长整数键；游标为减号时从头开始，没有后续项返回零。
      * 单持仓快速路径无需遍历，多持仓时按序递进。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      * @param cursor 上次持仓对外身份文本，减号表示从第一项开始
-     * @param identities 与本产品线配套的身份注册表
      */
     public long nextRiskPositionKey(long userId, String cursor, RuntimeIdentityRegistry identities) {
         AccountPartition lane = riskCursorLane(userId);
@@ -2659,7 +2406,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 核对读取权限并定位当前用户 Lane；已有范围必须路由一致，最后检查实际 Lane 所有权，不自行建立新的命令范围。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     AccountPartition riskCursorLane(long userId) {
         assertOwner();
@@ -2678,18 +2424,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 只查该用户已有索引，判断是否存在活动订单、非零持仓或仍有冻结数量的预留，供持仓模式修改前校验。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public boolean hasOpenAccountExposure(long userId) {
         assertOwner();
         return onLane(userId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> {
-            // 该用户已有的活动订单身份索引，非空即存在订单暴露
             var orders = lane.activeOrderIds(userId);
             if (orders != null && !orders.isEmpty()) return true;
-            // 该用户已有的持仓身份索引，继续检查每个持仓的实际数量
             LongHashSet positions = lane.positionKeys(userId);
             if (positions != null) {
-                // 当前订单、持仓或预留身份索引的原始迭代器
                 var it = positions.longIterator();
                 while (it.hasNext()) {
                     // 该用户当前持仓，非零数量表示仍有持仓暴露
@@ -2697,10 +2439,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
                     if (position != null && position.signedQuantitySteps() != 0) return true;
                 }
             }
-            // 该用户已有的预留身份索引，还需检查实际冻结数量
             var reservations = lane.reservationIds(userId);
             if (reservations != null) {
-                // 当前订单、持仓或预留身份索引的原始迭代器
                 var it = reservations.iterator();
                 while (it.hasNext()) {
                     // 该用户当前预留，仍有非零冻结数量就算账户暴露
@@ -2715,7 +2455,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 只查用户所属 Lane，判断同标的、同保证金模式是否有 OPEN 订单或非零持仓，供杠杆变更前校验。
      * @param key 需要检查的用户、标的及保证金模式杠杆键
-     * @param symbolId 本产品线标的内部身份
      */
     public boolean hasOpenLeverageExposure(CoreLeverageKey key, int symbolId) {
         assertOwner();
@@ -2723,7 +2462,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             // 该用户活动订单身份索引，还需逐单核对标的与保证金模式
             var orders = lane.activeOrderIds(key.userId());
             if (orders != null) {
-                // 当前订单、持仓或预留身份索引的原始迭代器
                 var it = orders.iterator();
                 while (it.hasNext()) {
                     // 活动索引中的当前订单，还需核对 OPEN 状态、标的和保证金模式
@@ -2732,10 +2470,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
                             && order.symbolId() == symbolId && order.marginMode() == key.marginMode()) return true;
                 }
             }
-            // 该用户已有的持仓身份索引，继续检查每个持仓的实际数量
             LongHashSet positions = lane.positionKeys(key.userId());
             if (positions != null) {
-                // 当前订单、持仓或预留身份索引的原始迭代器
                 var it = positions.longIterator();
                 while (it.hasNext()) {
                     // 该用户当前持仓，需同时满足非零数量、同标的及同保证金模式
@@ -2750,7 +2486,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 已有 Lane 范围时登记该 Lane 当前用户值，否则把用户身份加入 Owner 的本命令变化集合。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public void markUserChanged(long userId) {
         assertOwner();
@@ -2762,7 +2497,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在用户所属 Lane 的有效读取范围内复制预留身份集合。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public long[] reservationIdsForUser(long userId) {
         assertOwner();
@@ -2771,7 +2505,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在用户所属 Lane 的有效范围内读取预留数量，不为计数复制集合。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public int reservationCountForUser(long userId) {
         assertOwner();
@@ -2780,12 +2513,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验账户归属后复制当前预留身份，缺少索引时返回独立空集合。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public long[] reservationIdsForUser(AccountPartition lane, long userId) {
         requireLaneAccess(lane, userId);
-        // 该用户当前预留或持仓身份索引，只在对应账户读取边界内遍历
         var ids = lane.reservationIds(userId);
         if (ids == null) return new long[0];
         long[] result = new long[ids.size()];
@@ -2796,19 +2526,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验账户归属后读取预留索引大小，缺少索引返回零。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public int reservationCountForUser(AccountPartition lane, long userId) {
         requireLaneAccess(lane, userId);
-        // 该用户当前预留或持仓身份索引，只在对应账户读取边界内遍历
         var ids = lane.reservationIds(userId);
         return ids == null ? 0 : ids.size();
     }
 
     /**
      * 在所属账户范围内复制用户持仓内部键集合。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public long[] positionKeysForUser(long userId) {
         assertOwner();
@@ -2817,7 +2543,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在所属账户范围内读取用户持仓键数量。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public int positionCountForUser(long userId) {
         assertOwner();
@@ -2826,20 +2551,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验账户归属后复制持仓键，缺少索引时返回独立空集合。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public long[] positionKeysForUser(AccountPartition lane, long userId) {
         requireLaneAccess(lane, userId);
-        // 该用户原持仓键集合，随后创建独立副本
         LongHashSet keys = lane.positionKeys(userId);
         return keys == null ? new long[0] : keys.toArray();
     }
 
     /**
      * 校验账户归属后直接读取持仓键数量，缺少索引返回零。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public int positionCountForUser(AccountPartition lane, long userId) {
         requireLaneAccess(lane, userId);
@@ -2850,8 +2570,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验账户归属后复制并排序杠杆业务键，返回只读集合；没有索引时复用空集合。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      */
     public NavigableSet<CoreLeverageKey> leverageKeysForUser(AccountPartition lane, long userId) {
         requireLaneAccess(lane, userId);
@@ -2863,7 +2581,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 核对明确 Lane 与杠杆键用户的路由及所有权后读取配置值，缺失可返回空。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
      * @param key 需要读取的正式杠杆业务键，其中用户必须归属给定 Lane
      */
     public Long leverage(AccountPartition lane, CoreLeverageKey key) {
@@ -2873,8 +2590,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验明确 Lane 的所有权后直接借出该订单引用，沿用调用方已经建立的可见性边界。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param orderId 本次需要读取、登记或撤销的订单实体 ID
      */
     public Order order(AccountPartition lane, long orderId) {
         requireLaneAccess(lane);
@@ -2883,8 +2598,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验明确 Lane 的所有权后直接借出该订单预留引用。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param orderId 本次需要读取、登记或撤销的订单实体 ID
      */
     public OrderFundsReservation reservation(AccountPartition lane, long orderId) {
         requireLaneAccess(lane);
@@ -2893,8 +2606,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验明确 Lane 的所有权后直接借出该持仓引用。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param positionKey 持仓内部身份键
      */
     public Position position(AccountPartition lane, long positionKey) {
         requireLaneAccess(lane);
@@ -2903,7 +2614,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按当前 Lane、活动路由和必要的全 Lane 检索读取订单。查询范围隐藏未完成预留；Owner 准备范围仅按已变化、批量或触发子单规则暴露在途订单，返回引用仍遵守读取权限。
-     * @param orderId 本次需要读取、登记或撤销的订单实体 ID
      */
     public Order order(long orderId) {
         assertOwner();
@@ -2911,7 +2621,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 当前线程已经进入的可空账户 Lane 范围，不允许借此读取其他 Lane
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null) {
-            // 从当前账户或路由定位到的订单，继续按本入口的在途可见性条件处理
             Order order = scoped.order(orderId);
             if (order != null) {
                 if (scoped.queryScopeActive() && scoped.pendingReservation(orderId)) {
@@ -2937,7 +2646,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 // 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限
                 AccountPartition lane = accountLanes[topology.accountLaneId(route.userId())];
                 lane.assertOwner();
-                // 从当前账户或路由定位到的订单，继续按本入口的在途可见性条件处理
                 Order order = lane.order(orderId);
                 if (order != null) {
                     if (lane.pendingReservation(orderId)) {
@@ -2953,9 +2661,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 }
             }
         }
-        for (/* 当前在可访问账户数组中检索业务值的 Lane 下标 */ int i = 0; i < accountLanes.length; i++) {
+        for (int i = 0; i < accountLanes.length; i++) {
             accountLanes[i].assertOwner();
-            // 从当前账户或路由定位到的订单，继续按本入口的在途可见性条件处理
             Order order = accountLanes[i].order(orderId);
             if (order != null) {
                 if (accountLanes[i].pendingReservation(orderId)) {
@@ -2975,7 +2682,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按当前 Lane、活动路由和必要的全 Lane 检索读取预留。查询范围隐藏待完成项；Owner 仅在该预留已变化或批量范围内取得在途值，没有订单读取的触发子单特例。
-     * @param orderId 本次需要读取、登记或撤销的订单实体 ID
      */
     public OrderFundsReservation reservation(long orderId) {
         assertOwner();
@@ -2983,7 +2689,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 当前线程已经进入的可空账户 Lane 范围，不允许借此读取其他 Lane
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null) {
-            // 本次从账户查到的预留，继续按查询或 Owner 准备范围判断是否可见
             OrderFundsReservation reservation = scoped.reservation(orderId);
             if (reservation != null) {
                 if (scoped.queryScopeActive() && scoped.pendingReservation(orderId)) {
@@ -3006,7 +2711,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 // 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限
                 AccountPartition lane = accountLanes[topology.accountLaneId(route.userId())];
                 lane.assertOwner();
-                // 本次从账户查到的预留，继续按查询或 Owner 准备范围判断是否可见
                 OrderFundsReservation reservation = lane.reservation(orderId);
                 if (reservation != null) {
                     if (lane.pendingReservation(orderId)) {
@@ -3019,9 +2723,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 }
             }
         }
-        for (/* 当前在可访问账户数组中检索业务值的 Lane 下标 */ int i = 0; i < accountLanes.length; i++) {
+        for (int i = 0; i < accountLanes.length; i++) {
             accountLanes[i].assertOwner();
-            // 本次从账户查到的预留，继续按查询或 Owner 准备范围判断是否可见
             OrderFundsReservation reservation = accountLanes[i].reservation(orderId);
             if (reservation != null) {
                 if (accountLanes[i].pendingReservation(orderId)) {
@@ -3038,7 +2741,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在有效账户权限内读取持仓，优先使用当前范围或持仓身份路由，必要时检查各 Lane；借出原引用，不复制持仓。
-     * @param positionKey 持仓内部身份键
      */
     public Position position(long positionKey) {
         assertOwner();
@@ -3049,20 +2751,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
             return scoped.position(positionKey);
         }
         if (changes.indexIdentities != null) {
-            // 该持仓键已登记的身份元数据，用其中用户身份定位所属 Lane
             var identity = changes.indexIdentities.positionIdentity(positionKey);
             if (identity != null) {
                 // 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限
                 AccountPartition lane = accountLanes[topology.accountLaneId(identity.userId())];
                 lane.assertOwner();
-                // 按身份路由或账户检索得到的持仓，存在时直接借出，不按数量过滤
                 Position position = lane.position(positionKey);
                 if (position != null) return position;
             }
         }
-        for (/* 当前在可访问账户数组中检索业务值的 Lane 下标 */ int i = 0; i < accountLanes.length; i++) {
+        for (int i = 0; i < accountLanes.length; i++) {
             accountLanes[i].assertOwner();
-            // 按身份路由或账户检索得到的持仓，存在时直接借出，不按数量过滤
             Position position = accountLanes[i].position(positionKey);
             if (position != null) return position;
         }
@@ -3071,8 +2770,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求当前已经进入该用户 Lane 范围，借出原始持仓键列表；只能在范围退出前使用，缺失时返回共享空列表。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param symbolId 本产品线标的内部身份
      */
     public org.eclipse.collections.impl.list.mutable.primitive.LongArrayList positionKeysForUserAndSymbolPrimitive(
             long userId, int symbolId) {
@@ -3081,7 +2778,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (scoped == null || scoped.laneId() != topology.accountLaneId(userId)) {
             throw new IllegalStateException("primitive position index access requires owning Lane scope");
         }
-        // 该标的按用户分组的原始持仓键列表索引
         LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
                 scoped.symbolPositionKeys(symbolId);
         // 该用户该标的的原始持仓键列表，借用期间必须保持当前 Lane 范围有效
@@ -3091,7 +2787,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前有账户范围时只查该 Lane，否则要求有效账户读取权限后逐 Lane 查强平状态，返回借用引用。
-     * @param liquidationId 需要查询的强平实体 ID
      */
     public RiskScanner.LiquidationOrder liquidation(long liquidationId) {
         // 当前线程已经进入的可空账户 Lane 范围，不允许借此读取其他 Lane
@@ -3101,7 +2796,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         requireAccountReadOwnership();
         for (AccountPartition /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane : accountLanes) {
             lane.assertOwner();
-            // 当前 Lane 查到的可空强平运行时引用
             RiskScanner.LiquidationOrder value = lane.liquidation(liquidationId);
             if (value != null) return value;
         }
@@ -3110,18 +2804,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在用户所属 Lane 按标的及持仓方向索引定位活动强平，再取得其运行时引用。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param symbolId 本产品线标的内部身份
-     * @param positionSide 用于定位活动强平的持仓方向
      */
     public RiskScanner.LiquidationOrder activeLiquidation(long userId, int symbolId, CorePositionSide positionSide) {
         assertOwner();
         return onLane(userId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> {
-            // 该用户按标的分组的活动强平索引
             IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.activeLiquidations(userId);
-            // 该标的按持仓方向保存的活动强平身份索引
             LongObjectHashMap<Long> bySide = bySymbol == null ? null : bySymbol.get(symbolId);
-            // 从用户、标的和方向索引找到的可空强平身份
             Long liquidationId = bySide == null ? null : bySide.get(positionSide.ordinal());
             return liquidationId == null ? null : lane.liquidation(liquidationId);
         });
@@ -3129,7 +2817,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 供 Core 配置边界检查尚未结束的强平：禁止在账户命令范围内调用，优先查询已绑定事实索引；缺少索引时要求账户读取权限并检查所有 Lane，标的内部身份为负表示全部标的。
-     * @param instrumentId 与配置检查配套的对外标的 ID，全部标的查询会传空给事实索引
      * @param symbolId 要筛选的内部标的身份，负值表示全部标的
      */
     public boolean hasUnresolvedLiquidation(String instrumentId, int symbolId) {
@@ -3140,7 +2827,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         requireAccountReadOwnership();
         for (AccountPartition /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane : accountLanes) {
             lane.assertOwner();
-            if (lane.anyLiquidation(/* 当前检查的强平状态，完成或取消之外的状态均算未结束 */ value ->
+            if (lane.anyLiquidation(value ->
                     (symbolId < 0 || value.symbolId() == symbolId)
                     && value.status() != CoreLiquidationState.Status.COMPLETED
                     && value.status() != CoreLiquidationState.Status.CANCELED)) return true;
@@ -3150,7 +2837,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在有效执行范围内按内部标的身份读取本产品线标记价。
-     * @param symbolId 本产品线标的内部身份
      */
     public MarkPrice markPrice(int symbolId) {
         assertOwner();
@@ -3159,8 +2845,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求当前线程拥有传入 Lane，再读取本运行时的共享标记价元数据。
-     * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
-     * @param symbolId 本产品线标的内部身份
      */
     public MarkPrice markPrice(AccountPartition lane, int symbolId) {
         lane.assertOwner();
@@ -3169,7 +2853,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前有账户范围时只查该 Lane，否则在有效账户权限下逐 Lane 查风险快照，返回借用引用。
-     * @param positionKey 持仓内部身份键
      */
     public RiskMarginCalculator.Snapshot riskSnapshot(long positionKey) {
         assertOwner();
@@ -3188,7 +2871,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按内部标的身份取得当前风险扫描续步状态。
-     * @param symbolId 本产品线标的内部身份
      */
     public RiskScanner.State riskScan(int symbolId) {
         assertOwner();
@@ -3200,9 +2882,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public RiskScanner.State firstIncompleteRiskScan() {
         assertOwner();
-        // 当前整体未完成且内部标的身份最小的候选风险扫描
         RiskScanner.State selected = null;
-        for (RiskScanner.State /* 当前遍历的风险扫描，整体完成与风险阶段完成按各入口分别判断 */ scan : changes.riskScans.values()) {
+        for (RiskScanner.State scan : changes.riskScans.values()) {
             if (!scan.complete()
                     && (selected == null || scan.symbolId() < selected.symbolId())) {
                 selected = scan;
@@ -3218,7 +2899,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         // 当前风险阶段未完成且按调度顺序最先的候选扫描
         RiskScanner.State selected = null;
-        for (RiskScanner.State /* 当前遍历的风险扫描，整体完成与风险阶段完成按各入口分别判断 */ scan : changes.riskScans.values()) {
+        for (RiskScanner.State scan : changes.riskScans.values()) {
             if (!scan.riskComplete() && (selected == null
                     || compareRiskProgress(scan, selected) < 0)) {
                 selected = scan;
@@ -3243,9 +2924,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public int incompleteRiskScanCount() {
         assertOwner();
-        // 当前累计的整体未完成风险扫描条数
         int count = 0;
-        for (RiskScanner.State /* 当前遍历的风险扫描，整体完成与风险阶段完成按各入口分别判断 */ scan : changes.riskScans.values()) {
+        for (RiskScanner.State scan : changes.riskScans.values()) {
             if (!scan.complete()) {
                 count++;
             }
@@ -3263,15 +2943,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在实际财库拥有者线程上物化不可变财库导出值，不把财库所有权交给 Owner。
-     * @param identities 与本产品线配套的身份注册表
      */
     public CoreTreasuryState treasuryForQuery(RuntimeIdentityRegistry identities) {
-        return queryLedgerAtRest(/* 读取回调所获得的唯一财库，由实际拥有者执行物化 */ ledger -> RuntimeStateMaterializer.materializeTreasury(ledger, identities));
+        return queryLedgerAtRest(ledger -> RuntimeStateMaterializer.materializeTreasury(ledger, identities));
     }
 
     /**
      * 在 Owner 的既有财库读取边界同步执行导出；仍有未结束财务控制时拒绝读取。
-     * @param <T> 财库读取回调返回的结果类型
      * @param read 在财库实际拥有者线程执行的读取函数，已入队后超时不会自动取消
      */
     public <T> T queryLedgerAtRest(java.util.function.Function<TreasuryRuntime, T> read) {
@@ -3307,7 +2985,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public Iterable<String> instrumentIdsForQuery() {
         assertOwner();
-        return () -> /* 把原配置对象转换成标的名称的借用迭代器，消费期间保持查询输入边界有效 */ new java.util.Iterator<>() {
+        return () -> new java.util.Iterator<>() {
             /** 当前配置集合的借用迭代器，消费期间沿用 Owner 查询输入边界，不复制配置。 */
             private final java.util.Iterator<CoreInstrument> values = instruments.values().iterator();
             /**
@@ -3323,7 +3001,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 把外部标的 ID 解析为内部身份，再读取已有标的配置。
-     * @param instrumentId 本产品线标的身份，文本重载先解析为内部数值
      */
     public CoreInstrument instrument(String instrumentId) {
         return instrument(com.surprising.product.api.utils.InstrumentIds.parse(instrumentId));
@@ -3337,7 +3014,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在有效执行范围内按内部身份读取标的配置，缺失返回空。
-     * @param instrumentId 本产品线标的身份，文本重载先解析为内部数值
      */
     public CoreInstrument instrument(int instrumentId) {
         assertOwner();
@@ -3347,7 +3023,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 要求当前线程拥有传入 Lane，再解析外部标的 ID 并读取共享配置。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param instrumentId 本产品线标的身份，文本重载先解析为内部数值
      */
     public CoreInstrument instrument(AccountPartition lane, String instrumentId) {
         lane.assertOwner();
@@ -3356,7 +3031,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 禁止订单批量范围内注册，校验配置非空且身份未注册后保存原配置对象。
-     * @param instrument 本产品线标的配置对象，已有对象更新要求保持注册身份
      */
     public void registerInstrument(CoreInstrument instrument) {
         assertOwner();
@@ -3369,8 +3043,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求原对象正是注册表中的对象，且新旧标的身份一致，再原地更新配置，保持已有引用身份。
-     * @param instrument 本产品线标的配置对象，已有对象更新要求保持注册身份
-     * @param updated 与原标的身份相同的新配置内容
      */
     public void updateInstrumentConfiguration(CoreInstrument instrument, CoreInstrument updated) {
         assertOwner();
@@ -3384,8 +3056,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验已注册对象身份和维护参数，在允许的控制边界内原地更新维护状态。
-     * @param instrument 本产品线标的配置对象，已有对象更新要求保持注册身份
-     * @param maintenance 非空的标的维护状态配置
      */
     public void updateInstrumentMaintenance(
             CoreInstrument instrument,
@@ -3400,18 +3070,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在用户所属账户范围内用正式业务键读取杠杆值。
-     * @param key 本次查询或修改使用的业务键
      */
     public Long leverage(CoreLeverageKey key) {
         assertOwner();
-        return onLane(key.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.leverage(key));
+        return onLane(key.userId(), lane -> lane.leverage(key));
     }
 
     /**
      * 核对明确 Lane 与用户归属后，复用该 Lane 探针读取杠杆，finally 清理探针引用。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param canonicalSymbol 已经由入口规范化的标的名称，直接用于杠杆键比较
      * @param marginMode 订单、持仓或杠杆配置的保证金模式
      */
     public Long leverage(AccountPartition lane, long userId, String canonicalSymbol, CoreMarginMode marginMode) {
@@ -3425,7 +3092,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验杠杆至少为一倍且不在订单批量范围内，写入用户所属 Lane 并登记用户杠杆键；范围外调用再记录 Owner 变化。
-     * @param key 本次查询或修改使用的业务键
      * @param leveragePpm 百万分比表示的杠杆，一倍为 1000000
      */
     public void putLeverage(CoreLeverageKey key, long leveragePpm) {
@@ -3434,9 +3100,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (key == null || leveragePpm < 1_000_000L) {
             throw new IllegalArgumentException("invalid runtime leverage");
         }
-        onLane(key.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(key.userId(), lane -> {
             lane.storeLeverage(key, leveragePpm);
-            // 该用户已有的杠杆业务键集合，缺失时新建后登记
             HashSet<CoreLeverageKey> userKeys = lane.leverageKeys(key.userId());
             if (userKeys == null) {
                 userKeys = new HashSet<>();
@@ -3450,7 +3115,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 收集已经完成的杠杆变化并按需捕获实时值，账户任务不直接操作共享捕获器。
-     * @param key 本次查询或修改使用的业务键
      * @param leveragePpm 百万分比表示的杠杆，一倍为 1000000
      */
     public void recordLeverageChange(CoreLeverageKey key, long leveragePpm) {
@@ -3461,7 +3125,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 取得事实索引中的算法单路由，尚未绑定索引时返回空。
-     * @param id 本次路由、登记或删除使用的业务实体 ID
      */
     public com.surprising.aeron.service.core.index.AlgoOrderIndex.AlgoRoute algoRoute(long id) {
         assertOwner(); return changes.factIndexes == null ? null : changes.factIndexes.algos().value(id);
@@ -3469,7 +3132,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 优先取已有触发单路由；没有事实索引时要求账户读取权限，并从原触发单构造路由。
-     * @param id 本次路由、登记或删除使用的业务实体 ID
      */
     public com.surprising.aeron.service.core.index.TriggerOrderIndex.TriggerRoute triggerRoute(long id) {
         assertOwner();
@@ -3482,17 +3144,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前有账户范围时只查该 Lane，否则在有效读取权限下逐 Lane 查询算法单。
-     * @param algoOrderId 算法单实体 ID
      */
     public CoreAlgoOrderState algoOrder(long algoOrderId) {
         assertOwner();
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null) return scoped.algoOrder(algoOrderId);
         requireAccountReadOwnership();
-        for (AccountPartition /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane : accountLanes) {
+        for (AccountPartition lane : accountLanes) {
             lane.assertOwner();
-            // 当前 Lane 查到的可空算法单，存在时直接返回
             CoreAlgoOrderState value = lane.algoOrder(algoOrderId);
             if (value != null) return value;
         }
@@ -3501,22 +3160,18 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在用户所属 Lane 检查同用户客户算法单号是否已经存在。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param clientId 同一用户下需要检查的客户算法单号或客户触发单号
      */
     public boolean hasAlgoClient(long userId, String clientId) {
         assertOwner();
-        return onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.anyAlgoOrder(
-                /* 当前检查的算法单，需同时匹配用户及客户号 */ value -> value.userId() == userId && value.clientAlgoOrderId().equals(clientId)));
+        return onLane(userId, lane -> lane.anyAlgoOrder(
+ value -> value.userId() == userId && value.clientAlgoOrderId().equals(clientId)));
     }
 
     /**
      * 把算法单变化登记到当前 Lane 容器或 Owner 本命令变化缓冲。
-     * @param order 要交接的算法单变化值
      */
     public void publishAlgoOrder(CoreAlgoOrderState order) {
         assertOwner();
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped == null) changes.changedAlgoOrders.put(order.algoOrderId(), order);
         else laneDelta(scoped.laneId()).putAlgo(order.algoOrderId(), order);
@@ -3524,13 +3179,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验算法单非空且允许修改后，在所属 Lane 保存并登记变化。
-     * @param algoOrder 需要保存的非空算法单状态
      */
     public void putAlgoOrder(CoreAlgoOrderState algoOrder) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("algo-order state");
         if (algoOrder == null) throw new IllegalArgumentException("invalid runtime algo order");
-        onLane(algoOrder.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(algoOrder.userId(), lane -> {
             lane.storeAlgoOrder(algoOrder.algoOrderId(), algoOrder);
             publishAlgoOrder(algoOrder);
             return null;
@@ -3539,7 +3193,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 读取用户及标的范围对应的定时全撤状态。
-     * @param key 本次查询或修改使用的业务键
      */
     public CoreCancelAllAfterState cancelAllAfterTimer(CoreCancelAllAfterKey key) {
         assertOwner();
@@ -3548,8 +3201,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验业务键与定时器非空，写入定时全撤表并记录变化键。
-     * @param key 本次查询或修改使用的业务键
-     * @param timer 非空的定时全撤状态
      */
     public void putCancelAllAfterTimer(CoreCancelAllAfterKey key, CoreCancelAllAfterState timer) {
         assertOwner();
@@ -3561,8 +3212,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 核对用户后按用户及币对范围读旧计时器；SET 新建或重置，其他动作须匹配原版本及到期或认领状态，成功写入下一状态并推进命令版本。
-     * @param userId 命令头所指定的计时器用户，作为唯一归属身份
-     * @param command 复制命令中的动作、范围、业务时间、预期版本
      */
     public void updateCancelAllAfter(long userId, CoreCancelAllAfterCommand command) {
         if (command == null || userId <= 0) {
@@ -3636,23 +3285,19 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 读取本命令已经收集的触发单变化，保留到有序发布清理结束。
-     * @param id 本次路由、登记或删除使用的业务实体 ID
      */
     public CoreTriggerOrderState changedTriggerOrder(long id) { assertOwner(); return changes.changedTriggerOrders.get(id); }
 
     /**
      * 当前有账户范围时只查该 Lane，否则在有效账户权限下逐 Lane 读取触发单。
-     * @param triggerOrderId 触发单实体 ID
      */
     public CoreTriggerOrderState triggerOrder(long triggerOrderId) {
         assertOwner();
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null) return scoped.triggerOrder(triggerOrderId);
         requireAccountReadOwnership();
-        for (AccountPartition /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane : accountLanes) {
+        for (AccountPartition lane : accountLanes) {
             lane.assertOwner();
-            // 当前 Lane 查到的可空触发单，存在时直接返回
             CoreTriggerOrderState value = lane.triggerOrder(triggerOrderId);
             if (value != null) return value;
         }
@@ -3661,14 +3306,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存触发单修改前值，在用户所属 Lane 写入新值并登记变化；禁止不支持的订单批量交叉修改。
-     * @param triggerOrder 需要保存或交接的触发单状态
      */
     public void putTriggerOrder(CoreTriggerOrderState triggerOrder) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("trigger-order state");
         if (triggerOrder == null) throw new IllegalArgumentException("invalid runtime trigger order");
         accountRollback.captureTriggerOrderBefore(triggerOrder.triggerOrderId(), triggerOrder.userId());
-        onLane(triggerOrder.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(triggerOrder.userId(), lane -> {
             lane.putTrigger(triggerOrder);
             publishTriggerOrder(triggerOrder.triggerOrderId(), triggerOrder);
             return null;
@@ -3678,7 +3322,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 要求明确 Lane 归属且已经接入撮合变化容器，直接写入触发单并交接本次变化。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param triggerOrder 需要保存或交接的触发单状态
      */
     public void putTriggerOrder(AccountPartition lane, CoreTriggerOrderState triggerOrder) {
         requireLaneAccess(lane, triggerOrder.userId());
@@ -3694,9 +3337,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public Map<String, CoreInstrument> instrumentsForRuntime() {
         assertOwner();
-        // 按标的名称新建的有序配置映射，里面仍引用原配置对象
         Map<String, CoreInstrument> exported = new TreeMap<>();
-        instruments.forEachValue(/* 当前收集的标的配置，以其外部身份作为导出键 */ instrument -> exported.put(instrument.instrumentId(), instrument));
+        instruments.forEachValue(instrument -> exported.put(instrument.instrumentId(), instrument));
         return exported;
     }
 
@@ -3705,10 +3347,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public Map<CoreLeverageKey, Long> leveragesForRuntime() {
         assertOwner();
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         TreeMap<CoreLeverageKey, Long> values = new TreeMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.leveragesSnapshot()));
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            values.putAll(onLaneReadOnly(laneId, lane -> lane.leveragesSnapshot()));
         }
         return values;
     }
@@ -3718,10 +3359,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public Map<Long, CoreAlgoOrderState> algoOrdersForRuntime() {
         assertOwner();
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         TreeMap<Long, CoreAlgoOrderState> values = new TreeMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++)
-            onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> { lane.forEachAlgoOrder(values::put); return null; });
+        for (int laneId = 0; laneId < accountLanes.length; laneId++)
+            onLaneReadOnly(laneId, lane -> { lane.forEachAlgoOrder(values::put); return null; });
         return values;
     }
 
@@ -3735,15 +3375,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在所属账户触发单索引中检查客户触发单号是否存在。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param clientId 同一用户下需要检查的客户算法单号或客户触发单号
      */
     public boolean hasTriggerClient(long userId, String clientId) {
-        return onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            // 该用户已有的触发单身份集合，只在所属账户范围内遍历
+        return onLane(userId, lane -> {
             LongHashSet ids = lane.triggerIds(userId);
             if (ids == null) return false;
-            // 当前用户触发单身份的原始迭代器
             var iterator = ids.longIterator();
             while (iterator.hasNext()) {
                 if (lane.triggerOrder(iterator.next()).clientTriggerOrderId().equals(clientId)) return true;
@@ -3754,22 +3390,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 汇总同标的、模式、方向及买卖侧的活动触发数量，再用当前同 OCO 组最大值与新数量的较大者替换该最大项；其余旧组成员仍按现有公式计入。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param view 需要加入容量计算的新触发单视图
      */
     public long projectedTriggerCapacity(long userId, com.surprising.aeron.protocol.CoreTriggerOrderStateView view) {
-        return onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        return onLane(userId, lane -> {
             // 符合新单标的、模式、方向及买卖侧的旧触发数量总和
             long capacity = 0;
             // 符合条件且属于新单同一非空 OCO 组的旧单最大数量
             long sameOcoMax = 0;
-            // 该用户已有的触发单身份集合，只在所属账户范围内遍历
             LongHashSet ids = lane.triggerIds(userId);
             if (ids != null) {
-                // 当前用户触发单身份的原始迭代器
                 var iterator = ids.longIterator();
                 while (iterator.hasNext()) {
-                    // 当前参与投影容量筛选的触发单，只有活动且分类一致才累计
                     CoreTriggerOrderState trigger = lane.triggerOrder(iterator.next());
                     if (!trigger.status().open() || !trigger.instrumentId().equals(view.instrumentId())
                             || trigger.marginMode() != view.marginMode()
@@ -3790,18 +3421,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
         assertOwner();
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null) {
-            // 本次新建的汇总映射，按既有读取边界收集各账户内容
             TreeMap<Long, CoreTriggerOrderState> values = new TreeMap<>();
             scoped.forEachTriggerOrder(values::put);
             return values;
         }
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         TreeMap<Long, CoreTriggerOrderState> values = new TreeMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            onLaneReadOnly(laneId, lane -> {
                 lane.forEachTriggerOrder(values::put);
                 return null;
             });
@@ -3811,7 +3439,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在 Owner 路由边界读取财库保存的划转用户身份，账户命令范围禁止调用。
-     * @param transferId 待完成划转的业务身份
      */
     public long pendingTransferUser(long transferId) {
         assertOwner();
@@ -3821,15 +3448,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 当前账户范围内读取本 Lane 划转；没有范围时只允许账户未启动的冷路径，通过财库路由定位用户，路由缺失返回空。
-     * @param transferId 待完成划转的业务身份
      */
     public TransferFundsCommand pendingTransfer(long transferId) {
         assertOwner();
-        // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountPartition lane = currentLaneCommandScope();
         if (lane != null) return lane.pendingTransfer(transferId);
         if (accountLanesStarted()) throw new IllegalStateException("active transfer identity must be read on its Account Lane");
-        // 本次余额、预留或划转实际所属的用户身份
         long userId = pendingTransferUser(transferId);
         return userId == 0 ? null : accountLanes[topology.accountLaneId(userId)].pendingTransfer(transferId);
     }
@@ -3842,17 +3466,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (accountLanesStarted() && !ownerLaneAccess()) {
             throw new IllegalStateException("pending transfers snapshot requires owner lane access");
         }
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         TreeMap<Long, TransferFundsCommand> values = new TreeMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> { lane.forEachPendingTransfer(values::put); return null; });
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            onLaneReadOnly(laneId, lane -> { lane.forEachPendingTransfer(values::put); return null; });
         }
         return Collections.unmodifiableMap(values);
     }
 
     /**
      * 向财库取得有限页的划转 ID、用户 ID 和 Lane 掩码，仅交接路由，不复制账户划转正文。
-     * @param limit 本次向财库请求的最大分页条数，具体范围由财库入口检查
      */
     public TreasuryRuntime.PendingTransferRoutes pendingTransferRoutes(int limit) {
         assertOwner();
@@ -3861,7 +3483,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 用该页最后一个划转 ID 推进财库分页边界，空页使用零。
-     * @param page 已经读取的划转路由页，完成时使用最后一个 ID 推进页边界
      */
     public void completePendingTransferPage(TreasuryRuntime.PendingTransferRoutes page) {
         assertOwner();
@@ -3880,7 +3501,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 || entry.getValue() == null || entry.getKey() != entry.getValue().transferId()))
             throw new IllegalArgumentException("invalid pending transfer snapshot");
         treasury.clearPendingTransfers();
-        for (AccountPartition /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane : accountLanes) lane.clearPendingTransferValues();
+        for (AccountPartition lane : accountLanes) lane.clearPendingTransferValues();
         restored.forEach((/* 本轮正在恢复、读取或捕获的业务实体身份 */ id, /* 恢复输入中当前划转值，按其用户分别登记财库路由和账户正文 */ transfer) -> {
             treasury.restorePendingTransferRoute(id, transfer.sourceUserId());
             accountLanes[topology.accountLaneId(transfer.sourceUserId())].storePendingTransfer(id, transfer);
@@ -3897,8 +3518,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 把划转 ID 与所属用户登记到唯一财库路由索引。
-     * @param id 本次路由、登记或删除使用的业务实体 ID
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      */
     public void registerPendingTransferRoute(long id, long userId) {
         assertOwner();
@@ -3907,8 +3526,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 让财库按划转 ID 和用户身份完成对应路由，不在此重复删除账户正文。
-     * @param id 本次路由、登记或删除使用的业务实体 ID
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      */
     public void completePendingTransferRoute(long id, long userId) {
         assertOwner();
@@ -3917,13 +3534,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 禁止订单批量交叉修改，在所属账户范围保存新划转；冷路径可按路由取得 Lane 并检查容量，活动路径要求账户范围，冷执行同时登记财库路由。
-     * @param transfer 非空待完成划转业务值
      */
     public void putPendingTransfer(TransferFundsCommand transfer) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("pending-transfer state");
         if (transfer == null) throw new IllegalArgumentException("pending transfer is required");
-        // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountPartition lane = currentLaneCommandScope();
         if (lane == null) {
             if (accountLanesStarted()) throw new IllegalStateException("active transfer writes require their Account Lane");
@@ -3939,13 +3554,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 核对划转所属用户与 Lane，存在时检查修订容量并删除账户值；冷阶段同时完成财库路由。未找到返回假，用户冲突按幂等冲突拒绝。
-     * @param transferId 待完成划转的业务身份
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      */
     public boolean removePendingTransfer(long transferId, long userId) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("pending-transfer state");
-        // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountPartition lane = currentLaneCommandScope();
         if (lane == null) {
             if (accountLanesStarted()) throw new IllegalStateException("active transfer completion requires its Account Lane");
@@ -3956,7 +3568,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             lane = accountLanes[topology.accountLaneId(userId)];
         }
         if (lane.laneId() != topology.accountLaneId(userId)) throw new IllegalStateException("transfer completion crossed Account Lane");
-        // 当前 Lane 的原划转值，存在时核对所属用户再删除
         TransferFundsCommand current = lane.pendingTransfer(transferId);
         if (current == null) return false;
         if (current.sourceUserId() != userId) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
@@ -3995,14 +3606,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 活动阶段只允许配置 Lane 0 修改，构造并合并不可变政策版本；内容未变直接返回，否则登记变化并推进命令修订。
-     * @param command 本次已经解码的费用政策或下单参数
      */
     public void upsertFeePolicy(com.surprising.aeron.protocol.UpsertFeePolicyCommand command) {
         assertOwner();
         if (accountLanesStarted() && (currentLaneCommandScope() == null || currentLaneCommandScope().laneId() != 0))
             throw new IllegalStateException("active fee policy updates must run on configuration Lane 0");
         rejectUnsupportedOrderBatchMutation("fee-policy state");
-        // 从政策命令构造的新政策状态
         CoreFeePolicyState next = CoreFeePolicyState.from(command);
         // 合并后的不可变政策书，与旧对象相同表示内容未变
         FeePolicyBook updated = changes.feePolicies.upsert(next);
@@ -4015,16 +3624,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按给定状态替换产品元数据、风险配置、标的、杠杆、算法单、定时器和触发单；依次调用现有 Lane 入口，不替换资金、订单或持仓，也不自行建立回滚事务。
-     * @param source 要用于替换辅助状态的完整业务镜像
      */
     public void replaceAuxiliaryState(TradingCoreState source) {
         assertOwner();
         setMetadata(source.productLine(), source.revision());
         setRiskScanControl(source.riskState().scanControl());
         instruments.clear();
-        source.instruments().values().forEach(/* 当前收集的标的配置，以其外部身份作为导出键 */ instrument -> instruments.put(instrument.instrumentIdValue(), instrument));
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLane(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        source.instruments().values().forEach(instrument -> instruments.put(instrument.instrumentIdValue(), instrument));
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            onLane(laneId, lane -> {
                 lane.clearLeverageValues();
                 lane.clearLeverageKeys();
                 lane.clearAlgoOrderValues();
@@ -4042,24 +3650,20 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 查客户号对应订单，把原始索引的缺失值零转换为空引用。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param clientKey 客户订单号内部键，零表示没有客户号
      */
     public Long orderIdByClient(long userId, long clientKey) {
         assertOwner();
-        // 当前客户号、订单或预留对应的订单实体 ID
         long orderId = orderIdByClientValue(userId, clientKey);
         return orderId == 0 ? null : orderId;
     }
 
     /**
      * 在当前所属账户范围或临时用户 Lane 范围中查客户号，跨 Lane 拒绝，缺失保留零。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param clientKey 客户订单号内部键，零表示没有客户号
      */
     public long orderIdByClientValue(long userId, long clientKey) {
         assertOwner();
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null) {
             if (scoped.laneId() != topology.accountLaneId(userId)) {
@@ -4067,7 +3671,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             return orderIdByClientValue(scoped, userId, clientKey);
         }
-        return onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        return onLane(userId, lane -> {
             return orderIdByClientValue(lane, userId, clientKey);
         });
     }
@@ -4075,7 +3679,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 核对明确 Lane 与用户归属后读取客户号原始索引，缺少用户映射返回零。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param clientKey 客户订单号内部键，零表示没有客户号
      */
     public long orderIdByClientValue(AccountPartition lane, long userId, long clientKey) {
@@ -4087,15 +3690,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存用户前值，在所属 Lane 写入用户并登记用户身份；活动阶段保持 Lane 可变值形态，随后交接用户变化。
-     * @param user 需要写入账户的用户状态
      */
     public void putUser(UserAccount user) {
         assertOwner();
         accountRollback.captureUserBefore(user.userId());
-        onLane(user.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            // 该 Lane 已有用户值，活动写入尽量保留其 Lane 形态
+        onLane(user.userId(), lane -> {
             UserAccount current = lane.user(user.userId());
-            // 本次实际交给 Lane 保存的用户值，活动阶段使用 Lane 可变形态
             UserAccount value = user;
             if (accountLanesStarted()) {
                 value = current == null || current.productLine() != user.productLine() ? user.laneValue()
@@ -4111,7 +3711,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 把用户修订按默认一步推进。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      */
     public void advanceUserRevision(long userId) {
         advanceUserRevision(userId, 1);
@@ -4119,16 +3718,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求正增量；撮合范围内只累计该用户修订差额，等 Lane 完成时冻结最终值，其他路径精确相加并保存用户状态。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param count 必须为正的用户修订增量
      */
     public void advanceUserRevision(long userId, long count) {
         if (count <= 0) throw new IllegalArgumentException("revision advance must be positive");
         assertOwner();
-        // 当前可空撮合变化容器，存在时只累计用户修订差额
         TradeSettlement.Changes settlementChanges = currentMatcherSettlementChangesScope();
         if (settlementChanges != null) {
-            // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
             AccountPartition lane = currentLaneCommandScope();
             if (lane == null || topology.accountLaneId(userId) != lane.laneId()) {
                 throw new IllegalStateException("user revision crossed its owner lane");
@@ -4149,7 +3745,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 使用明确 Lane，把用户修订按默认一步推进。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      */
     public void advanceUserRevision(AccountPartition lane, long userId) {
         advanceUserRevision(lane, userId, 1);
@@ -4158,8 +3753,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 核对 Lane 后忽略非正增量；有撮合变化槽时累计用户差额，否则交给普通修订入口。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param count 用户修订增量，非正值在本重载直接忽略
      */
     public void advanceUserRevision(AccountPartition lane, long userId, long count) {
         requireLaneAccess(lane, userId);
@@ -4175,19 +3768,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验用户、修订及持仓模式，保存前值，在所属 Lane 创建或更新用户元数据，再交接独立变化收据。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param revision 要写入的用户或订单业务修订值
-     * @param mode 用户需要保存的非空持仓模式
      */
     public void setUserState(long userId, long revision, com.surprising.aeron.protocol.CorePositionMode mode) {
         assertOwner();
         if (userId <= 0 || revision < 0 || mode == null) throw new IllegalArgumentException("invalid runtime user");
         accountRollback.captureUserBefore(userId);
         // 用户所属 Lane 写入后交回的用户值，随后登记本命令收据
-        UserAccount updated = onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            // 当前 Lane 已有的可空用户，缺失则创建新用户值
+        UserAccount updated = onLane(userId, lane -> {
             UserAccount current = lane.user(userId);
-            // 本次创建或由原用户更新得到的值，活动阶段转成 Lane 形态
             UserAccount value = current == null ? new UserAccount(productLine, userId, revision, mode)
                     : (accountLanesStarted() ? current.laneValue() : current).withState(revision, mode);
             if (accountLanesStarted()) value = value.laneValue();
@@ -4201,22 +3789,18 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 读取输入余额数值，保存前值后在所属 Lane 建立独立余额对象并捕获后值；没有外层账户范围时再标记 Owner 变化。
-     * @param balance 本次需要保存或更新的资产余额值
      */
     public void putBalance(AccountBalance balance) {
         assertOwner();
-        // 本次余额、预留或划转实际所属的用户身份
         long userId = balance.userId();
-        // 本次余额或预留对应的资产内部身份
         int assetId = balance.assetId();
         // 输入余额当前可用数量，先取数值再在 Lane 建立独立对象
         long availableUnits = balance.availableUnits();
         // 输入余额当前冻结数量，先取数值再在 Lane 建立独立对象
         long lockedUnits = balance.lockedUnits();
-        onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(userId, lane -> {
             accountRollback.captureUserBefore(userId);
             accountRollback.captureBalanceBefore(userId, assetId);
-            // 该用户原资产余额表，缺失时按当前写入分支建立或拒绝
             IntObjectHashMap<AccountBalance> userBalances = lane.userBalances(userId);
             if (userBalances == null) {
                 userBalances = new IntObjectHashMap<>();
@@ -4235,7 +3819,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 明确撮合 Lane 内保存给定余额对象及前后补丁；没有撮合变化槽则沿用普通余额写入入口。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param balance 本次需要保存或更新的资产余额值
      */
     public void putBalance(AccountPartition lane, AccountBalance balance) {
         requireLaneAccess(lane, balance.userId());
@@ -4244,7 +3827,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             return;
         }
         accountRollback.captureBalanceBefore(lane, balance.userId(), balance.assetId());
-        // 本次所属用户的原资产余额映射，用于按预留资产取得余额
         IntObjectHashMap<AccountBalance> balances = lane.userBalances(balance.userId());
         if (balances == null) {
             balances = new IntObjectHashMap<>();
@@ -4256,13 +3838,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存用户及订单前值，在所属 Lane 写入订单，再登记订单与用户变化。
-     * @param order 本次安装、更新或交接的订单值
      */
     public void putOrder(Order order) {
         assertOwner();
         accountRollback.captureUserBefore(order.userId());
         accountRollback.captureOrderBefore(order.orderId());
-        onLane(order.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> { lane.putOrder(order); return null; });
+        onLane(order.userId(), lane -> { lane.putOrder(order); return null; });
         publishOrder(order.orderId(), order);
         changedOrder(order.orderId(), order);
         markUserChanged(order.userId());
@@ -4270,25 +3851,23 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存前值，旧预留若仍待撮合则拒绝；移除旧用户索引后写入新预留及所属用户索引，并登记新旧用户变化。
-     * @param reservation 与订单对应的资金预留值
      */
     public void putReservation(OrderFundsReservation reservation) {
         assertOwner();
         accountRollback.captureUserBefore(reservation.userId());
         accountRollback.captureReservationBefore(reservation.orderId());
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
         OrderFundsReservation previous = reservation(reservation.orderId());
-        if (previous != null && onLane(previous.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.pendingReservation(previous.orderId()))) {
+        if (previous != null && onLane(previous.userId(), lane -> lane.pendingReservation(previous.orderId()))) {
             throw new IllegalStateException("pending reservation must be replaced through its owner lane");
         }
         if (previous != null) {
-            onLane(previous.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+            onLane(previous.userId(), lane -> {
                 lane.removeReservationValue(previous.orderId());
                 lane.removeReservationId(previous.userId(), previous.orderId());
                 return null;
             });
         }
-        onLane(reservation.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(reservation.userId(), lane -> {
             lane.storeReservation(reservation.orderId(), reservation.laneValue());
             lane.addReservationId(reservation.userId(), reservation.orderId());
             return null;
@@ -4301,18 +3880,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存订单前值并禁止更换用户，在所属 Lane 替换订单；没有撮合变化范围时登记 Owner 订单和用户变化。
-     * @param order 本次安装、更新或交接的订单值
      */
     public void replaceOrder(Order order) {
         assertOwner();
         accountRollback.captureUserBefore(order.userId());
         accountRollback.captureOrderBefore(order.orderId());
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
         Order previous = order(order.orderId());
         if (previous != null && previous.userId() != order.userId()) {
             throw new IllegalArgumentException("runtime order owner cannot change");
         }
-        onLane(order.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> { lane.putOrder(order); return null; });
+        onLane(order.userId(), lane -> { lane.putOrder(order); return null; });
         publishOrder(order.orderId(), order);
         if (currentMatcherSettlementChangesScope() == null) {
             changedOrder(order.orderId(), order);
@@ -4322,7 +3899,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 把余额对象的用户、资产及数值交给原地更新入口。
-     * @param balance 本次需要保存或更新的资产余额值
      */
     public void replaceBalance(AccountBalance balance) {
         assertOwner();
@@ -4331,14 +3907,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在有效账户范围内保存前值并原地替换余额，跨 Lane 拒绝；没有范围时临时进入用户 Lane，退出后补记 Owner 变化。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param assetId 本产品线资产内部身份
-     * @param availableUnits 新的可用资金整数数量
-     * @param lockedUnits 新的冻结资金整数数量
      */
     public void replaceBalance(long userId, int assetId, long availableUnits, long lockedUnits) {
         assertOwner();
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null && scoped.laneId() != topology.accountLaneId(userId))
             throw new IllegalStateException("balance write crossed its owner Lane");
@@ -4348,7 +3919,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             replaceBalanceInLane(scoped, userId, assetId, availableUnits, lockedUnits);
             return;
         }
-        onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(userId, lane -> {
             accountRollback.captureUserBefore(userId);
             accountRollback.captureBalanceBefore(userId, assetId);
             replaceBalanceInLane(lane, userId, assetId, availableUnits, lockedUnits);
@@ -4361,14 +3932,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 要求该资产余额已经存在，原地替换可用和冻结数量，再捕获余额后值。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param assetId 本产品线资产内部身份
-     * @param availableUnits 新的可用资金整数数量
-     * @param lockedUnits 新的冻结资金整数数量
      */
     private void replaceBalanceInLane(AccountPartition lane, long userId, int assetId,
                                       long availableUnits, long lockedUnits) {
-        // 本次所属用户的原资产余额映射，用于按预留资产取得余额
         IntObjectHashMap<AccountBalance> balances = lane.userBalances(userId);
         // 该资产必须已经存在的余额对象，直接原地替换数值
         AccountBalance current = balances == null ? null : balances.get(assetId);
@@ -4380,10 +3946,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 核对明确 Lane 与用户，撮合范围内只捕获本 Lane 补丁并原地修改，否则沿用普通更新。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param assetId 本产品线资产内部身份
-     * @param available 新的可用资金整数数量
-     * @param locked 新的冻结资金整数数量
      */
     public void replaceBalance(AccountPartition lane, long userId, int assetId, long available, long locked) {
         requireLaneAccess(lane, userId);
@@ -4398,18 +3960,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 在所属 Lane 创建或原地更新持仓；根据非零暴露及标的变化维护活动持仓索引，最后交出本次持仓值。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param positionKey 持仓内部身份键
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param symbolId 本产品线标的内部身份
-     * @param assetId 本产品线资产内部身份
-     * @param instrument 本产品线标的配置对象，已有对象更新要求保持注册身份
-     * @param signedQuantitySteps 按数量步长计的有符号持仓量
-     * @param entryPriceTicks 按价格刻度计的持仓入场价
-     * @param entryValueTicks 持仓入场价值的整数刻度值
-     * @param realizedPnlUnits 已实现盈亏的资金整数数量
      * @param positionMarginUnits 持仓保证金的资金整数数量
      * @param marginMode 订单、持仓或杠杆配置的保证金模式
-     * @param positionSide 持仓方向，用于持仓及强平身份区分
      */
     public Position updatePositionInLane(AccountPartition lane, long positionKey, long userId, int symbolId, int assetId,
                                          CoreInstrument instrument, long signedQuantitySteps,
@@ -4420,7 +3972,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (lane == null || lane.laneId() != topology.accountLaneId(userId)) {
             throw new IllegalStateException("position update must execute in its owning Account Lane");
         }
-        // 该内部持仓键的现有值，缺失则建立新持仓
         Position current = lane.position(positionKey);
         if (current == null) {
             // 由本次参数构造的新持仓，随后保存 Lane 形态并建立索引
@@ -4450,14 +4001,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 在账户线程原地更新订单执行数量、费用、状态及提交元数据，写入成交价值高低位，再发布本次变化。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param executed 新的累计已执行数量
-     * @param remaining 新的剩余订单数量
-     * @param feeUnits 新的累计手续费整数数量
-     * @param executedValueHigh 累计成交价值宽整数的高位部分
-     * @param executedValueLow 累计成交价值宽整数的低位部分
-     * @param status 本次需要写入的订单状态
-     * @param revision 要写入的用户或订单业务修订值
      * @param commitTimestamp 原命令提交业务时间，未指定时沿用负值哨兵约定
      * @param commitPosition 原命令复制日志位置，未指定时沿用负值哨兵约定
      */
@@ -4480,9 +4023,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 在账户线程原地更新订单状态、修订及提交元数据，再交出订单变化。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param status 本次需要写入的订单状态
-     * @param revision 要写入的用户或订单业务修订值
      * @param commitTimestamp 原命令提交业务时间，未指定时沿用负值哨兵约定
      * @param commitPosition 原命令复制日志位置，未指定时沿用负值哨兵约定
      */
@@ -4502,10 +4042,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 要求预留存在且释放累计量不回退，原地更新消耗与释放，同步待预留数量差，按开关交出变化。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param nextConsumed 预留新的累计消耗数量
      * @param nextReleased 预留新的累计释放数量，不得小于已有累计值
-     * @param publish 是否把本次预留后值写入 Lane 变化容器
      */
     public OrderFundsReservation updateReservationInLane(AccountPartition lane, long orderId, long nextConsumed, long nextReleased,
                                                boolean publish) {
@@ -4513,7 +4050,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (lane == null) {
             throw new IllegalStateException("reservation update must execute in its owning Account Lane");
         }
-        // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
         OrderFundsReservation reservation = lane.reservation(orderId);
         if (reservation == null) throw new IllegalArgumentException("runtime reservation is not registered: " + orderId);
         // 修改前的剩余冻结量，用来修正账户待预留数量
@@ -4529,19 +4065,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存持仓前值并禁止更换用户，在所属 Lane 替换实体及索引，随后按当前范围登记持仓与用户变化。
-     * @param positionKey 持仓内部身份键
      * @param position 要替换的持仓状态，用户身份不得改变
      */
     public void replacePosition(long positionKey, Position position) {
         assertOwner();
         accountRollback.captureUserBefore(position.userId());
         accountRollback.capturePositionBefore(positionKey, position.userId());
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
         Position previous = position(positionKey);
         if (previous != null && previous.userId() != position.userId()) {
             throw new IllegalArgumentException("runtime position owner cannot change");
         }
-        onLane(position.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(position.userId(), lane -> {
             lane.storePosition(positionKey, position.laneValue());
             replacePositionIndexes(lane, positionKey, previous, position);
             return null;
@@ -4556,7 +4090,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求强平身份尚未存在，在所属 Lane 保存强平及活动索引并交出变化，随后登记用户变化。
-     * @param liquidation 本次保存、替换或活动索引处理的强平状态
      */
     public void putLiquidation(RiskScanner.LiquidationOrder liquidation) {
         assertOwner();
@@ -4564,7 +4097,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (liquidation(liquidation.liquidationId()) != null) {
             throw new IllegalArgumentException("runtime liquidation already exists: " + liquidation.liquidationId());
         }
-        onLane(liquidation.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(liquidation.userId(), lane -> {
             lane.storeLiquidation(liquidation.liquidationId(), liquidation);
             indexActiveLiquidation(lane, liquidation);
             publishLiquidation(liquidation.liquidationId(), liquidation);
@@ -4578,7 +4111,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在允许的非批量范围内写入标记价，并记录标的变化身份。
-     * @param markPrice 要保存的标记价格状态
      */
     public void putMarkPrice(MarkPrice markPrice) {
         assertOwner();
@@ -4589,7 +4121,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存用户及风险快照前值，在所属 Lane 写入并交出变化，登记相关用户。
-     * @param positionKey 持仓内部身份键
      * @param snapshot 要写入账户的风险快照状态
      */
     public void putRiskSnapshot(long positionKey, RiskMarginCalculator.Snapshot snapshot) {
@@ -4597,7 +4128,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         rejectUnsupportedOrderBatchMutation("risk snapshot");
         accountRollback.captureUserBefore(snapshot.userId());
         accountRollback.captureRiskSnapshotBefore(positionKey, snapshot.userId());
-        onLane(snapshot.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(snapshot.userId(), lane -> {
             lane.storeRiskSnapshot(positionKey, snapshot);
             publishRiskSnapshot(positionKey, snapshot);
             return null;
@@ -4608,7 +4139,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在允许的非批量范围内保存标的风险扫描续步，并登记标的变化。
-     * @param scan 要保存的风险扫描续步状态
      */
     public void putRiskScan(RiskScanner.State scan) {
         assertOwner();
@@ -4642,7 +4172,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 直接写入已使用整数币对编号的运行时扫描记录，再增加命令修订号。
-     * @param scan 包含账户风险及条件单游标的原扫描记录
      */
     public void replaceRiskScan(RiskScanner.State scan) {
         if (scan == null) {
@@ -4664,7 +4193,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 禁止订单批量交叉修改，校验正值后保存下一个强平身份。
-     * @param nextLiquidationId 需要保存的正值下一强平身份
      */
     public void setNextLiquidationId(long value) {
         assertOwner();
@@ -4675,26 +4203,24 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求原强平存在，先移除旧活动索引，按新用户保存并重建索引；现有实现允许强平用户改变，必要时分别访问新旧用户 Lane。
-     * @param liquidation 本次保存、替换或活动索引处理的强平状态
      */
     public void replaceLiquidation(RiskScanner.LiquidationOrder liquidation) {
         assertOwner();
         accountRollback.captureUserBefore(liquidation.userId());
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
         RiskScanner.LiquidationOrder previous = liquidation(liquidation.liquidationId());
         if (previous == null) {
             throw new IllegalArgumentException("runtime liquidation is not registered: "
                     + liquidation.liquidationId());
         }
         if (previous.userId() != liquidation.userId()) {
-            onLane(previous.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+            onLane(previous.userId(), lane -> {
                 removeActiveLiquidation(lane, previous);
                 lane.removeLiquidationValue(previous.liquidationId());
                 publishLiquidation(previous.liquidationId(), null);
                 return null;
             });
         }
-        onLane(liquidation.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(liquidation.userId(), lane -> {
             if (previous.userId() == liquidation.userId()) removeActiveLiquidation(lane, previous);
             lane.storeLiquidation(liquidation.liquidationId(), liquidation);
             indexActiveLiquidation(lane, liquidation);
@@ -4710,8 +4236,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存用户、订单与预留前值，在所属账户完成精确冻结释放及终态更新，再交出变化并推进用户修订。
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param releaseUnits 必须与预留剩余冻结一致的本次释放数量
      */
     public void cancelOrder(long orderId, long userId, long releaseUnits) {
@@ -4719,10 +4243,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
         accountRollback.captureUserBefore(userId);
         accountRollback.captureOrderBefore(orderId);
         accountRollback.captureReservationBefore(orderId);
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountPartition scoped = currentLaneCommandScope();
         Order terminalOrder = scoped == null
-                ? onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> cancelOrderInOwnerLane(lane, orderId, userId, releaseUnits))
+                ? onLane(userId, lane -> cancelOrderInOwnerLane(lane, orderId, userId, releaseUnits))
                 : cancelOrderInOwnerLane(scoped, orderId, userId, releaseUnits);
         if (currentMatcherSettlementChangesScope() == null) {
             changedOrder(orderId, terminalOrder);
@@ -4742,7 +4265,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         // 当前处理的原订单或更新后订单，使用范围由本分支的账户所有权限定
         Order order = lane.order(orderId);
-        // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
         OrderFundsReservation reservation = lane.reservation(orderId);
         if (order == null || reservation == null || order.userId() != userId || order.canceled()) {
             throw new IllegalArgumentException("runtime order is not cancelable: " + orderId);
@@ -4750,7 +4272,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (releaseUnits != reservation.reservedUnits()) {
             throw new IllegalArgumentException("runtime cancellation release mismatch: " + orderId);
         }
-        // 本次所属用户的原资产余额映射，用于按预留资产取得余额
         IntObjectHashMap<AccountBalance> balances = lane.userBalances(userId);
         // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
         AccountBalance balance = balances == null ? null : balances.get(reservation.assetId());
@@ -4789,8 +4310,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 使用原负值元数据哨兵，在明确撮合 Lane 中取消订单。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orderId 本次操作关联的订单实体 ID
      */
     public void cancelOrderInLane(AccountPartition lane, long userId, long orderId) {
         cancelOrderInLane(lane, userId, orderId, -1, -1);
@@ -4799,10 +4318,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 在明确撮合 Lane 中释放剩余冻结并把已解析订单改为 CANCELED，避免重复 HashMap 查表。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param order 本次操作关联的已解析订单引用
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
      */
     public void cancelOrderInLane(AccountPartition lane, long userId, Order order,
                            long timestamp, long position) {
@@ -4812,10 +4327,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 在明确撮合 Lane 中释放剩余冻结并把订单改为 CANCELED。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
      */
     public void cancelOrderInLane(AccountPartition lane, long userId, long orderId,
                            long timestamp, long position) {
@@ -4825,10 +4336,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 在明确撮合 Lane 中释放剩余冻结并把订单改为 REJECTED。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
      */
     public void rejectOrderInLane(AccountPartition lane, long userId, long orderId,
                            long timestamp, long position) {
@@ -4838,11 +4345,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 要求有效撮合范围及尚未终态的订单，释放全部剩余冻结，原地更新预留与订单并发布前后变化，最后累计用户修订。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
-     * @param status 本次需要写入的订单状态
      */
     private void releaseOrderToTerminalInLane(AccountPartition lane, long userId, long orderId,
             long timestamp, long position, CoreOrderStatus status) {
@@ -4861,14 +4363,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (order == null || order.userId() != userId || order.status().terminal())
             throw new IllegalStateException("terminal order reservation is missing: " + (order == null ? 0 : order.orderId()));
         long orderId = order.orderId();
-        // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
         OrderFundsReservation reservation = preparedReservation == null ? lane.reservation(orderId) : preparedReservation;
         if (reservation == null)
             throw new IllegalStateException("terminal order reservation is missing: " + orderId);
         // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
         AccountBalance balance = balance(lane, userId, reservation.assetId());
         if (balance == null) throw new IllegalStateException("terminal order balance is missing: " + orderId);
-        // 该预留当前全部剩余冻结量，零时不再产生余额释放
         long releaseUnits = reservation.reservedUnits();
         accountRollback.captureBalanceBefore(lane, userId, reservation.assetId());
         balance.release(releaseUnits);
@@ -4884,7 +4384,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 在明确撮合 Lane 内释放已经终态订单仍保留的冻结，原地更新预留及余额补丁；没有剩余冻结返回零。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param orderId 本次操作关联的订单实体 ID
      */
     public long releaseTerminalReservationInLane(AccountPartition lane, long orderId) {
         return releaseTerminalReservationInLane(lane, orderId, null, null);
@@ -4911,15 +4410,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 当前处理的原订单或更新后订单，使用范围由本分支的账户所有权限定
         Order order = preparedOrder == null ? lane.order(orderId) : preparedOrder;
         long targetOrderId = order != null ? order.orderId() : orderId;
-        // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
         OrderFundsReservation reservation = preparedReservation == null ? lane.reservation(targetOrderId) : preparedReservation;
         if (order == null || reservation == null || !order.canceled()) {
             throw new IllegalArgumentException("runtime order is not terminal: " + targetOrderId);
         }
-        // 该预留当前全部剩余冻结量，零时不再产生余额释放
         long releaseUnits = reservation.reservedUnits();
         if (releaseUnits == 0) return 0;
-        // 本次所属用户的原资产余额映射，用于按预留资产取得余额
         IntObjectHashMap<AccountBalance> balances = lane.userBalances(order.userId());
         // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
         AccountBalance balance = balances == null ? null : balances.get(reservation.assetId());
@@ -4937,15 +4433,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存用户及客户号索引前值，在所属 Lane 更新客户号与订单的双向索引，并标记用户变化。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param clientKey 客户订单号内部键，零表示没有客户号
-     * @param orderId 本次操作关联的订单实体 ID
      */
     public void putClientOrder(long userId, long clientKey, long orderId) {
         assertOwner();
         accountRollback.captureUserBefore(userId);
         accountRollback.captureClientOrderBefore(userId, clientKey);
-        onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        onLane(userId, lane -> {
             putClientOrderIndex(lane, userId, clientKey, orderId);
             return null;
         });
@@ -4954,20 +4448,18 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 冷阶段内联捕获并返回完成或失败的 future；活动阶段向所属账户派发读取，邮箱拒绝及读取运行时异常完成为失败结果。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      */
     public java.util.concurrent.CompletableFuture<TradingRealtimeBoundary.UserSnapshot> realtimeSnapshot(long userId) {
         assertOwner();
-        // 本轮正在处理或按用户路由选出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
         if (!accountLanesStarted()) {
-            try { return java.util.concurrent.CompletableFuture.completedFuture(onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> TradingRealtimeBoundary.UserSnapshot.capture(lane, userId))); }
+            try { return java.util.concurrent.CompletableFuture.completedFuture(onLane(userId, lane -> TradingRealtimeBoundary.UserSnapshot.capture(lane, userId))); }
             catch (/* 当前实时读取或捕获发生的运行时异常，由所在入口完成失败结果或记录捕获失败 */ RuntimeException failure) { return java.util.concurrent.CompletableFuture.failedFuture(failure); }
         }
         // 本次快照返回的 future，账户读取或邮箱拒绝负责完成它
         var result = new java.util.concurrent.CompletableFuture<TradingRealtimeBoundary.UserSnapshot>();
         // 账户查询邮箱是否接纳本次快照读取，拒绝则把 future 完成为失败
-        boolean accepted = dispatchAccountQuery(1L << laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        boolean accepted = dispatchAccountQuery(1L << laneId, lane -> {
             try { result.complete(readAccountLane(lane, /* 已经由读取入口核对所属线程的账户 Lane，在该范围捕获用户快照 */ owned -> TradingRealtimeBoundary.UserSnapshot.capture(owned, userId))); }
             catch (/* 当前实时读取或捕获发生的运行时异常，由所在入口完成失败结果或记录捕获失败 */ RuntimeException failure) { result.completeExceptionally(failure); }
         });
@@ -4978,13 +4470,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 接入可空实时捕获器，不在此启动输出线程。
-     * @param capture 接入或使用的可空实时变化捕获器
      */
     public void realtimeCapture(TradingRealtimeBoundary.StateCapture capture) { assertOwner(); changes.realtimeCapture = capture; }
 
     /**
      * 实时捕获器存在时记录用户元数据，捕获运行时异常只记失败。
-     * @param value 需要捕获的用户元数据值
      */
     public void captureUserMetadata(com.surprising.aeron.service.account.UserAccount value) {
         if (changes.realtimeCapture == null) return;
@@ -4993,7 +4483,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
     /**
      * 实时捕获器存在时记录预留变化，捕获运行时异常只记失败。
-     * @param value 需要捕获的预留变化值
      */
     public void captureReservation(OrderFundsReservation value) {
         if (changes.realtimeCapture == null) return;
@@ -5003,21 +4492,20 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 启用私有捕获时导出本命令风险、订单和持仓变化；仅纯冷执行另导出用户与预留，活动执行已由 Lane 交接负责。捕获异常只记失败。
-     * @param capture 接入或使用的可空实时变化捕获器
      */
     public void captureRealtimeChanges(TradingRealtimeBoundary.StateCapture capture) {
         assertOwner();
         if (capture == null || !capture.active()) return;
         try {
-            changedRiskSnapshots.forEach((/* 本轮正在恢复、读取或捕获的业务实体身份 */ id,/* 本次风险、订单或持仓变化后值，空持仓按补丁前值捕获删除 */ value) -> capture.risk(value));
+            changedRiskSnapshots.forEach((/* 本轮正在恢复、读取或捕获的业务实体身份 */ id, value) -> capture.risk(value));
             // 活动执行通过已提交 Lane 变化交接用户和预留。
             // 纯冷执行没有这个交接边界，才在这里另导出用户与预留变化集合。
             if (!accountLanesStarted()) {
                 changedUsers.forEach(/* 本轮正在恢复、读取或捕获的业务实体身份 */ id -> capture.metadata(user(id)));
                 changedReservations.forEach(/* 本轮正在恢复、读取或捕获的业务实体身份 */ id -> capture.reservation(reservation(id)));
             }
-            changedOrders.forEach((/* 当前客户号、订单或预留对应的订单实体 ID */ orderId, /* 本次风险、订单或持仓变化后值，空持仓按补丁前值捕获删除 */ value) -> capture.order(value));
-            changes.changedPositions.forEach((/* 本次变化或退休检查涉及的持仓内部键 */ positionKey, /* 本次风险、订单或持仓变化后值，空持仓按补丁前值捕获删除 */ value) -> {
+            changedOrders.forEach((orderId, value) -> capture.order(value));
+            changes.changedPositions.forEach((positionKey, value) -> {
                 if(value==null)capture.removedPosition(currentPatchPositionBefore(positionKey));else capture.position(value);
             });
         } catch (/* 当前实时读取或捕获发生的运行时异常，由所在入口完成失败结果或记录捕获失败 */ RuntimeException failure) { capture.failed(); }
@@ -5025,7 +4513,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验接收函数后直接遍历原始变化用户身份，不先创建集合副本。
-     * @param consumer 接收本次变化身份的回调
      */
     public void acceptChangedUserIds(java.util.function.LongConsumer consumer) {
         assertOwner();
@@ -5035,7 +4522,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 标记本命令涉及余额及用户变化；具体资产明细仍由余额补丁持有。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      */
     public void markBalanceChanged(long userId) {
         assertOwner();
@@ -5045,10 +4531,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按当前范围把预留身份交给 Owner 集合或所属 Lane 的变化容器。
-     * @param orderId 本次操作关联的订单实体 ID
      */
     private void markReservationChanged(long orderId) {
-        // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountPartition lane = currentLaneCommandScope();
         if (lane == null) changedReservations.add(orderId);
         else laneDelta(lane.laneId()).putReservation(orderId, lane.reservation(orderId));
@@ -5056,7 +4540,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 活动账户没有当前范围时要求已有收集收据，避免退回账户读取；其他路径读取本次值后交给变化缓冲。
-     * @param orderId 本次操作关联的订单实体 ID
      */
     public void changedOrder(long orderId) {
         if (currentLaneCommandScope() == null && accountLanesStarted()) {
@@ -5069,11 +4552,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按当前执行范围登记订单值或删除标记，不在此再次修改账户。
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param order 本次安装、更新或交接的订单值
      */
     public void changedOrder(long orderId, Order order) {
-        // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountPartition lane = currentLaneCommandScope();
         if (lane == null) changedOrders.put(orderId, order);
         else laneDelta(lane.laneId()).putOrder(orderId, order);
@@ -5081,7 +4561,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 活动账户没有当前范围时要求已有持仓收据；其他路径取得本次持仓值后登记变化。
-     * @param positionKey 持仓内部身份键
      */
     void changedPosition(long positionKey) {
         if (currentLaneCommandScope() == null && accountLanesStarted()) {
@@ -5094,11 +4573,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 把持仓变化或空删除值交给当前 Lane 容器或 Owner 缓冲。
-     * @param positionKey 持仓内部身份键
      * @param position 本次持仓变化后值，空值表示删除
      */
     void changedPosition(long positionKey, Position position) {
-        // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountPartition lane = currentLaneCommandScope();
         if (lane == null) changes.changedPositions.put(positionKey, position);
         else laneDelta(lane.laneId()).putPosition(positionKey, position);
@@ -5130,11 +4607,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 还未遍历的保留 Lane 变化缓冲位集合
         long remaining = changedOrders.retainedLaneMask();
         while (remaining != 0) {
-            // 本轮正在处理或按用户路由选出的账户 Lane 编号
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
             applyChangedOrderIndexes(changedOrders.laneBuffer(laneId));
         }
-        for (/* 本轮有效强平后值，Lane 已完成交接。 */ int index = 0; index < changes.changedLiquidations.size(); index++) {
+        for (int index = 0; index < changes.changedLiquidations.size(); index++) {
             RiskScanner.LiquidationOrder value = changes.changedLiquidations.valueAt(index);
             if (changes.realtimeCapture != null && changes.realtimeCapture.active()) {
                 try { changes.realtimeCapture.liquidation(value); }
@@ -5142,12 +4618,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             changes.factIndexes.liquidations().apply(changes.changedLiquidations.keyAt(index), value, changes.indexIdentities);
         }
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < changes.changedAlgoOrders.size(); index++)
+        for (int index = 0; index < changes.changedAlgoOrders.size(); index++)
             changes.factIndexes.algos().apply(changes.changedAlgoOrders.keyAt(index), changes.changedAlgoOrders.valueAt(index));
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < changes.changedTriggerOrders.size(); index++) {
+        for (int index = 0; index < changes.changedTriggerOrders.size(); index++) {
             // 当前触发单变化身份，空后值表示从索引删除
             long triggerOrderId = changes.changedTriggerOrders.keyAt(index);
-            // 当前触发单变化后值，先按需捕获实时值再更新索引
             CoreTriggerOrderState value = changes.changedTriggerOrders.valueAt(index);
             if (changes.realtimeCapture != null && changes.realtimeCapture.active()) {
                 try { changes.realtimeCapture.trigger(value); } catch (/* 当前实时读取或捕获发生的运行时异常，由所在入口完成失败结果或记录捕获失败 */ RuntimeException failure) { changes.realtimeCapture.failed(); }
@@ -5155,28 +4630,25 @@ public final class TradingAccountRuntime implements AutoCloseable {
             changes.factIndexes.triggers().apply(triggerOrderId, value);
         }
         if (!changes.changedCancelAllAfterTimers.isEmpty())
-            for (var /* 当前变化的定时全撤业务键，后值从原定时器表读取 */ key : changes.changedCancelAllAfterTimers) changes.factIndexes.timers().apply(key, cancelAllAfterTimer(key));
+            for (var key : changes.changedCancelAllAfterTimers) changes.factIndexes.timers().apply(key, cancelAllAfterTimer(key));
     }
 
     /**
      * 只遍历本订单变化缓冲的有效项，空后值保留删除含义。
-     * @param orders 本轮有效订单变化缓冲，包含空删除值
      */
     private void applyChangedOrderIndexes(StateChangeBuffer<Order> orders) {
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < orders.size(); index++)
+        for (int index = 0; index < orders.size(); index++)
             changes.factIndexes.activeOrders().apply(orders.keyAt(index), orders.valueAt(index), changes.indexIdentities);
     }
 
     /**
      * 日志发布后先处理风险与持仓身份退休，再清变化容器并执行普通提交清理；仍被风险记录持有的身份继续保留。
-     * @param identities 与本产品线配套的内部身份注册表
      */
     public void clearCommittedChanges(RuntimeIdentityRegistry identities) {
         assertOwner();
         if (identities == null) throw new IllegalArgumentException("runtime identities are required");
         // 风险先清理，以已有持仓变更排除本次随后重开的持仓；不回读Lane表。
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < changedRiskSnapshots.size(); index++) {
-            // 本次变化或退休检查涉及的持仓内部键
+        for (int index = 0; index < changedRiskSnapshots.size(); index++) {
             long positionKey = changedRiskSnapshots.keyAt(index);
             if (changedRiskSnapshots.valueAt(index) == null && changedRiskSnapshots.hasPreparedAt(index)
                     && Boolean.TRUE.equals(changedRiskSnapshots.preparedAt(index))
@@ -5188,7 +4660,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 还未遍历的保留 Lane 变化缓冲位集合
         long remaining = changes.changedPositions.retainedLaneMask();
         while (remaining != 0) {
-            // 本轮正在处理或按用户路由选出的账户 Lane 编号
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
             releaseRetiredPositionIdentities(identities, changes.changedPositions.laneBuffer(laneId));
         }
@@ -5198,19 +4669,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 遍历持仓删除项，尝试释放其内部身份；不为仍存在的持仓释放。
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param positions 当前持仓变化缓冲，包含删除项或已准备索引值
      */
     private void releaseRetiredPositionIdentities(RuntimeIdentityRegistry identities,
             StateChangeBuffer<Position> positions) {
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < positions.size(); index++)
+        for (int index = 0; index < positions.size(); index++)
             if (positions.valueAt(index) == null) releaseRetiredPositionIdentity(identities, positions.keyAt(index));
     }
 
     /**
      * 只有风险记录不再持有该键时才请求身份表释放持仓身份。
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param positionKey 持仓内部身份键
      */
     void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
         if (!changes.riskPositionIdentities.contains(positionKey)) {
@@ -5221,14 +4688,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 衍生品直接结算在当前 Lane 输出中只保留一次持仓身份，核对保留结果未换键，再登记当前持仓值以便发布后归还。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param instrument 本产品线标的配置对象，已有对象更新要求保持注册身份
-     * @param order 本次安装、更新或交接的订单值
      */
     public void retainDirectPositionIdentity(AccountPartition lane, RuntimeIdentityRegistry identities,
                                       CoreInstrument instrument, Order order) {
         if (!productLine.isDerivative()) return;
-        // 当前 Lane 撮合变化容器，要求支持直接持仓身份保留
         TradeSettlement.Changes changes = lane.matcherSettlementChanges();
         if (changes == null || !changes.directPositionIdentities() || (!lane.commandScopeActive() && coordinator.ownerLaneScope != lane))
             throw new IllegalStateException("direct position identity requires its settlement Lane");
@@ -5255,7 +4718,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 活动财务控制已有专用槽时沿用其校验；否则仅在账户余额或持仓有变化时同步校验。校验失败直接抛出，财务范围关闭仍需后续提交或回滚。
-     * @param externalAdjustment 本命令是否允许外部资金增减，交给账本资金守恒检查
      */
     public void validateControlFunds(boolean externalAdjustment) {
         assertOwner();
@@ -5265,8 +4727,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         // 各 Lane 是否存在余额补丁条目，不等同于每条补丁都有非零差额
         boolean accountFundsChanged = false;
-        for (/* 正在汇总资金差额的余额补丁 Lane 下标 */ int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
-            // 该 Lane 已完成的账户余额前后补丁，财务收尾前保持有效
+        for (int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
             AccountTransactionRollback.BalancePatches patches = accountRollback.balancePatch(laneIndex);
             accountFundsChanged |= patches.size() != 0;
         }
@@ -5282,11 +4743,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 遍历现有各 Lane 余额前后补丁，将本控制命令资金差额追加到目标累加器，不清空目标。
-     * @param target 要追加本控制命令账户资金差额的目标累加器
      */
     public void appendControlAccountFunds(RuntimeFundsAccumulator target) {
-        for (/* 正在汇总资金差额的余额补丁 Lane 下标 */ int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
-            // 该 Lane 已完成的账户余额前后补丁，财务收尾前保持有效
+        for (int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
             AccountTransactionRollback.BalancePatches patches = accountRollback.balancePatch(laneIndex);
             appendBalanceFundsDelta(patches, target);
         }
@@ -5294,8 +4753,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 清空目标累加器后，按一份 Lane 余额补丁重建资金差额。
-     * @param patches 需要转换为资金差额的 Lane 余额前后补丁
-     * @param accumulator 资金差额接收器，是否先清空由入口决定
      */
     public static void prepareBalanceFundsDelta(AccountTransactionRollback.BalancePatches patches,
                                                  RuntimeFundsAccumulator accumulator) {
@@ -5305,15 +4762,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 要求每项余额已发布后值，将缺失前后值按零处理，分别精确计算可用与冻结差额并追加用户分账项。
-     * @param balances 已捕获前后值的 Lane 余额补丁
-     * @param accumulator 资金差额接收器，是否先清空由入口决定
      */
     static void appendBalanceFundsDelta(AccountTransactionRollback.BalancePatches balances,
                                                 RuntimeFundsAccumulator accumulator) {
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < balances.size(); index++) {
-            // 本次余额、预留或划转实际所属的用户身份
+        for (int index = 0; index < balances.size(); index++) {
             long userId = balances.userId(index);
-            // 本次余额或预留对应的资产内部身份
             int assetId = balances.assetId(index);
             if (!balances.capturedAfter(index)) {
                 throw new IllegalStateException("balance mutation did not publish its lane after-state");
@@ -5337,7 +4790,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 借出当前命令回滚补丁保存的持仓前值。
-     * @param positionKey 持仓内部身份键
      */
     public Position currentPatchPositionBefore(long positionKey) {
         return accountRollback.currentPositionBefore(positionKey);
@@ -5378,7 +4830,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 清空非空长整数变化集合，原数量达到压缩阈值时再压缩内部容量。
-     * @param values 要清理的原始变化集合或要排序复制的长整数列表
      */
     static void clearChanged(LongHashSet values) {
         if (values.isEmpty()) return;
@@ -5390,7 +4841,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 清空非空整数变化集合，原数量达到阈值时压缩内部容量。
-     * @param values 要清理的原始变化集合或要排序复制的长整数列表
      */
     static void clearChanged(IntHashSet values) {
         if (values.isEmpty()) return;
@@ -5404,9 +4854,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在调用方已建立的读取边界内，合并各 Lane 用户快照到新映射，不自行取得账户权限。
      */
     public LongObjectHashMap<UserAccount> usersForSnapshot() {
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         LongObjectHashMap<UserAccount> values = new LongObjectHashMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             values.putAll(onLaneReadOnly(laneId, AccountPartition::usersSnapshot));
         }
         return values;
@@ -5416,10 +4865,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在已有读取边界内合并各 Lane 余额快照，返回新顶层映射。
      */
     public LongObjectHashMap<IntObjectHashMap<AccountBalance>> balancesForSnapshot() {
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         LongObjectHashMap<IntObjectHashMap<AccountBalance>> values = new LongObjectHashMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.balancesSnapshot()));
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            values.putAll(onLaneReadOnly(laneId, lane -> lane.balancesSnapshot()));
         }
         return values;
     }
@@ -5428,10 +4876,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在已有读取边界内把各 Lane 订单引用收集到新映射，不深复制订单。
      */
     public LongObjectHashMap<Order> ordersForSnapshot() {
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         LongObjectHashMap<Order> values = new LongObjectHashMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            onLaneReadOnly(laneId, lane -> {
                 lane.forEachOrder(values::put);
                 return null;
             });
@@ -5441,16 +4888,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在所属账户范围内，按用户、标的、持仓方向、买卖侧和保证金模式读取现有减仓单数量。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param symbolId 本产品线标的内部身份
-     * @param positionSide 持仓方向，用于持仓及强平身份区分
-     * @param side 订单买卖方向
      * @param marginMode 订单、持仓或杠杆配置的保证金模式
      */
     public long openReduceOnlyQuantity(long userId, int symbolId, CorePositionSide positionSide,
                                 CoreOrderSide side, CoreMarginMode marginMode) {
         assertOwner();
-        return onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.openReduceOnlyQuantity(
+        return onLane(userId, lane -> lane.openReduceOnlyQuantity(
                 userId, symbolId, positionSide, side, marginMode));
     }
 
@@ -5458,10 +4901,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在已有读取边界内收集各 Lane 预留引用到新映射。
      */
     public LongObjectHashMap<OrderFundsReservation> reservationsForSnapshot() {
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         LongObjectHashMap<OrderFundsReservation> values = new LongObjectHashMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            onLaneReadOnly(laneId, lane -> {
                 lane.forEachReservation(values::put);
                 return null;
             });
@@ -5473,10 +4915,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在已有读取边界内合并各 Lane 客户订单号索引快照。
      */
     public LongObjectHashMap<LongLongHashMap> clientOrderIndexForSnapshot() {
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         LongObjectHashMap<LongLongHashMap> values = new LongObjectHashMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.clientOrdersSnapshot()));
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            values.putAll(onLaneReadOnly(laneId, lane -> lane.clientOrdersSnapshot()));
         }
         return values;
     }
@@ -5485,10 +4926,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在已有读取边界内合并各 Lane 提供的持仓快照。
      */
     public LongObjectHashMap<Position> positionsForSnapshot() {
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         LongObjectHashMap<Position> values = new LongObjectHashMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.positionsSnapshot()));
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            values.putAll(onLaneReadOnly(laneId, lane -> lane.positionsSnapshot()));
         }
         return values;
     }
@@ -5497,10 +4937,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在已有读取边界内合并各 Lane 提供的强平快照。
      */
     public LongObjectHashMap<RiskScanner.LiquidationOrder> liquidationsForSnapshot() {
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         LongObjectHashMap<RiskScanner.LiquidationOrder> values = new LongObjectHashMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.liquidationsSnapshot()));
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            values.putAll(onLaneReadOnly(laneId, lane -> lane.liquidationsSnapshot()));
         }
         return values;
     }
@@ -5516,10 +4955,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在已有读取边界内合并各 Lane 提供的风险快照映射。
      */
     public LongObjectHashMap<RiskMarginCalculator.Snapshot> riskSnapshotsForSnapshot() {
-        // 本次新建的汇总映射，按既有读取边界收集各账户内容
         LongObjectHashMap<RiskMarginCalculator.Snapshot> values = new LongObjectHashMap<>();
-        for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.riskSnapshotsSnapshot()));
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            values.putAll(onLaneReadOnly(laneId, lane -> lane.riskSnapshotsSnapshot()));
         }
         return values;
     }
@@ -5538,8 +4976,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验已准备订单与预留的身份、用户、标的和数量一致，再以预留剩余量调用冻结安装入口。
-     * @param order 本次安装、更新或交接的订单值
-     * @param reservation 与订单对应的资金预留值
      * @param clientKey 客户订单号内部键，零表示没有客户号
      */
     public void reserveOrder(Order order, OrderFundsReservation reservation, long clientKey) {
@@ -5553,19 +4989,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 保存命令回滚前值，在所属 Lane 冻结指定资金并安装已有订单、预留及客户号；范围内通过 Lane 变化交接，范围外登记 Owner 变化。匹配输入由调用方准备。
-     * @param order 本次安装、更新或交接的订单值
-     * @param reservation 与订单对应的资金预留值
      * @param clientKey 客户订单号内部键，零表示没有客户号
-     * @param reservedUnits 本次需要实际冻结的资金整数数量
      */
     public void reserveOrder(Order order, OrderFundsReservation reservation,
                               long clientKey, long reservedUnits) {
         assertOwner();
-        // 当前客户号、订单或预留对应的订单实体 ID
         long orderId = order.orderId();
-        // 本次余额、预留或划转实际所属的用户身份
         long userId = order.userId();
-        // 本次余额或预留对应的资产内部身份
         int assetId = reservation.assetId();
         if (order(orderId) != null) {
             throw new IllegalArgumentException("runtime order already exists: " + orderId);
@@ -5575,10 +5005,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
         accountRollback.captureReservationBefore(orderId, userId);
         accountRollback.captureBalanceBefore(userId, assetId);
         if (clientKey != 0) accountRollback.captureClientOrderBefore(userId, clientKey);
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null) reserveOrderInLane(scoped, order, reservation, clientKey, reservedUnits);
-        else onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        else onLane(userId, lane -> {
             reserveOrderInLane(lane, order, reservation, clientKey, reservedUnits);
             return null;
         });
@@ -5598,18 +5027,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 核对所属 Lane、客户号唯一性、用户及余额存在，冻结指定数量并安装订单与预留索引，再捕获余额后值。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param order 本次安装、更新或交接的订单值
-     * @param reservation 与订单对应的资金预留值
      * @param clientKey 客户订单号内部键，零表示没有客户号
-     * @param reservedUnits 本次需要实际冻结的资金整数数量
      */
     private void reserveOrderInLane(AccountPartition lane, Order order, OrderFundsReservation reservation,
                                     long clientKey, long reservedUnits) {
         lane.assertOwner();
-        // 当前客户号、订单或预留对应的订单实体 ID
-        // 本次余额、预留或划转实际所属的用户身份
         long userId = order.userId(), orderId = order.orderId();
-        // 本次余额或预留对应的资产内部身份
         int assetId = reservation.assetId();
         if (lane.laneId() != topology.accountLaneId(userId))
             throw new IllegalStateException("reservation crossed Account Lane");
@@ -5619,7 +5042,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             throw new IllegalArgumentException("runtime client order already exists: " + clientKey);
         if (lane.user(userId) == null)
             throw new IllegalArgumentException("runtime user is not registered: " + userId);
-        // 本次所属用户的原资产余额映射，用于按预留资产取得余额
         IntObjectHashMap<AccountBalance> balances = lane.userBalances(userId);
         // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
         AccountBalance balance = balances == null ? null : balances.get(assetId);
@@ -5635,13 +5057,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 用已解析参数构造独立 OPEN 订单，初始修订为一；冷构造与基准可复用此入口，活动准入使用 Lane 池。
-     * @param productLine 新订单唯一所属产品线
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param command 本次已经解码的费用政策或下单参数
-     * @param commandId 原业务命令 UUID
-     * @param symbolId 本产品线标的内部身份
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
      */
     static Order preparedOrder(com.surprising.product.api.ProductLine productLine,
             long userId, OrderCommand.ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId,
@@ -5656,15 +5071,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 纯冷阶段构造独立订单，活动执行要求当前所属 Lane 并使用共享退休栅栏的订单池。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param command 本次已经解码的费用政策或下单参数
-     * @param commandId 原业务命令 UUID
-     * @param symbolId 本产品线标的内部身份
      */
     public Order prepareControlOrder(long userId, OrderCommand.ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId) {
         if (!accountLanesStarted())
             return preparedOrder(productLine, userId, command, commandId, symbolId, 0, 0);
-        // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountPartition lane = currentLaneCommandScope();
         if (lane == null || lane.laneId() != topology.accountLaneId(userId))
             throw new IllegalStateException("active order creation requires its Account Lane");
@@ -5674,17 +5084,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 校验所属范围、身份、客户号及可用余额，选择已准备值或 Lane 池订单，冻结资金并写入预留、索引及用户修订。仅未传 prepared 时自行登记待预留，普通临时下单不保存控制命令回滚前值。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param command 本次已经解码的费用政策或下单参数
-     * @param commandId 原业务命令 UUID
-     * @param requiredReservation 本次准入要求冻结的正值资金数量
      * @param clientKey 客户订单号内部键，零表示没有客户号
-     * @param symbolId 本产品线标的内部身份
-     * @param assetId 本产品线资产内部身份
-     * @param coreSequence 原业务命令的 Core 序号
-     * @param prepared 可空的已准备订单，调用方保持其身份与本次参数一致
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
      */
     public void placeOrderInLane(AccountPartition lane, long userId, OrderCommand.ResolvedPlaceOrder command,
             java.util.UUID commandId, long requiredReservation, long clientKey,
@@ -5704,9 +5104,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (clientKey != 0 && userClientOrders != null && userClientOrders.containsKey(clientKey)) {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
-        // 本次下单所属用户的原状态，计算下一修订并保留当前持仓模式
         UserAccount user = lane.user(userId);
-        // 本次所属用户的原资产余额映射，用于按预留资产取得余额
         IntObjectHashMap<AccountBalance> balances = lane.userBalances(userId);
         // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
         AccountBalance balance = balances == null ? null : balances.get(assetId);
@@ -5719,7 +5117,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 : accountLanesStarted()
                 ? lane.preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position, coordinator.retiredOwnerSequence)
                 : preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position);
-        // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
         OrderFundsReservation reservation = order.prepareReservation(
                 command.reservationKind(), assetId, requiredReservation);
         // 写入订单前计算的下一用户修订，溢出立即失败
@@ -5736,15 +5133,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在所属 Lane 保存前值并禁止换用户，写入持仓及索引；没有撮合变化范围时再登记 Owner 变化。
-     * @param positionKey 持仓内部身份键
      * @param position 要保存的持仓状态，已有身份不得更换用户
      */
     public void putPosition(long positionKey, Position position) {
         assertOwner();
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
-        Position previous = onLane(position.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        Position previous = onLane(position.userId(), lane -> {
             accountRollback.capturePositionBefore(positionKey, position.userId());
-            // 当前用户 Lane 内的原预留或持仓，用于替换前值和索引比较
             Position prev = lane.position(positionKey);
             if (prev != null && prev.userId() != position.userId()) {
                 throw new IllegalArgumentException("runtime position owner cannot change");
@@ -5764,8 +5158,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 首次持仓建立用户和活动索引；已有同用户持仓只在标的或非零暴露状态变化时改动活动索引，不为普通数量或正负变化重复维护成员关系。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param positionKey 持仓内部身份键
-     * @param previous 索引替换前的可空持仓值
      * @param replacement 索引替换后的持仓值，调用方已保证同一用户
      */
     private static void replacePositionIndexes(AccountPartition lane, long positionKey,
@@ -5811,18 +5203,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 以同一业务序号和提交序号，把已准备单笔或批量订单交给直接结算准备入口。
-     * @param sequence 当前直接结算使用的业务 Core 序号
-     * @param laneMask 当前直接结算初始需要覆盖的账户 Lane 位集合
      * @param single 单笔路径已有的订单值，批量路径可为空
      * @param orders 批量路径已有的订单值数组，单笔路径可为空
-     * @param count 本次订单数组的实际有效项数，不以数组容量代替
-     * @param commandId 原业务命令 UUID
-     * @param shard 本命令对应的 Matcher 分片
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
-     * @param cancellations 结算前需要处理的撤单身份列表
-     * @param target 接收本次直接结算订单结果的既有槽
      */
     public TradeSettlement prepareDirectMatcherSettlement(long sequence, long laneMask,
             Order single, Order[] orders, int count, java.util.UUID commandId, int shard,
@@ -5834,16 +5216,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 普通下单准入尚未完成时先准备直接结算槽，固定命令证明字段；实际账户订单由后续准入收据接入。
-     * @param sequence 当前直接结算使用的业务 Core 序号
-     * @param laneMask 当前直接结算初始需要覆盖的账户 Lane 位集合
-     * @param admission 已有下单或改单准入结果，沿用对应事件生命周期
-     * @param commandId 原业务命令 UUID
-     * @param shard 本命令对应的 Matcher 分片
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
-     * @param cancellations 结算前需要处理的撤单身份列表
-     * @param target 接收本次准入后直接结算订单结果的既有槽
      */
     public TradeSettlement prepareDirectMatcherSettlement(
             long sequence, long laneMask, OrderCommand.PlaceAdmissionEvent admission,
@@ -5874,19 +5246,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 显式区分原业务序号与提交序号，准备直接撮合结算事件，不在此应用账户成交。
-     * @param coreSequence 原业务命令的 Core 序号
-     * @param commitSequence 本次实际账户提交序号，与原业务序号显式区分
-     * @param laneMask 当前直接结算初始需要覆盖的账户 Lane 位集合
      * @param single 单笔路径已有的订单值，批量路径可为空
      * @param orders 批量路径已有的订单值数组，单笔路径可为空
-     * @param count 本次订单数组的实际有效项数，不以数组容量代替
-     * @param commandId 原业务命令 UUID
-     * @param shard 本命令对应的 Matcher 分片
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
-     * @param cancellations 结算前需要处理的撤单身份列表
-     * @param target 接收本次直接结算订单结果的既有槽
      */
     public TradeSettlement prepareDirectMatcherSettlement(long coreSequence, long commitSequence,
             long laneMask, Order single, Order[] orders, int count, java.util.UUID commandId,
@@ -5942,17 +5303,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 把已解决的改单准入及原提交边界交给直接替换结算准备入口。
-     * @param sequence 当前直接结算使用的业务 Core 序号
-     * @param commitSequence 本次实际账户提交序号，与原业务序号显式区分
-     * @param laneMask 当前直接结算初始需要覆盖的账户 Lane 位集合
-     * @param admission 已有下单或改单准入结果，沿用对应事件生命周期
-     * @param commandId 原业务命令 UUID
-     * @param shard 本命令对应的 Matcher 分片
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
-     * @param cancellations 结算前需要处理的撤单身份列表
-     * @param resultTarget 可空的直接结算最终订单结果槽
      */
     public TradeSettlement prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
             com.surprising.aeron.service.order.OrderCommand.ReplacementAdmission admission,
@@ -5968,14 +5318,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 为直接撤单准备补上空的最终结果槽。
-     * @param sequence 当前直接结算使用的业务 Core 序号
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param commandId 原业务命令 UUID
-     * @param shard 本命令对应的 Matcher 分片
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
      */
     public TradeSettlement prepareDirectCancellation(long sequence, long userId, long orderId,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
@@ -5986,15 +5328,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按用户、订单和原提交边界准备直接撤单结算事件。
-     * @param sequence 当前直接结算使用的业务 Core 序号
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param commandId 原业务命令 UUID
-     * @param shard 本命令对应的 Matcher 分片
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
-     * @param resultTarget 可空的直接结算最终订单结果槽
      */
     public TradeSettlement prepareDirectCancellation(long sequence, long userId, long orderId,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
@@ -6014,17 +5347,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 把批量撤单身份、有效项数及是否最后一段交给直接结算准备入口。
-     * @param sequence 当前直接结算使用的业务 Core 序号
-     * @param finalChunk 本次是否为批量撤单最后一段，决定最终收尾边界
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orders 本段实际撤单的原始订单号数组
-     * @param count 本次订单数组的实际有效项数，不以数组容量代替
-     * @param commandId 原业务命令 UUID
-     * @param shard 本命令对应的 Matcher 分片
-     * @param identities 与本产品线配套的内部身份注册表
-     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
-     * @param position 原复制日志位置，随本次账户或结算边界保存
-     * @param resultTarget 可空的直接结算最终订单结果槽
      */
     public TradeSettlement prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, long[] orders,
             int count, java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
@@ -6066,7 +5388,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * Owner 清理已完成且已交出 changes 的事件并归还对象池；具体完成与租约校验由 event.clear 执行，空事件不处理。
-     * @param event 要收集或归还的原结算事件
      */
     public void releaseMatcherSettlement(TradeSettlement event) {
         assertOwner();
@@ -6077,7 +5398,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * Owner 丢弃已完成的拒绝等直达事件；若还持有 changes 先归还变化缓冲，再清理事件入池，未完成事件拒绝回收。
-     * @param event 要收集或归还的原结算事件
      */
     public void discardMatcherSettlement(TradeSettlement event) {
         assertOwner();
@@ -6092,8 +5412,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 在批量账户作用域中等待本项结算完成，先把余额前后值按顺序接入批次回滚边界，再交既有收集入口处理变化。
-     * @param event 要收集或归还的原结算事件
-     * @param terminalOrderSink 可空的本批终态订单身份接收器
      */
     public void collectOrderBatchMatcherSettlement(
             TradeSettlement event, TerminalOrderSink terminalOrderSink) {
@@ -6121,7 +5439,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 按数组下标借出原账户 Lane，调用方保证下标及访问边界有效。
-     * @param index 调用方已经核对有效性的账户 Lane 数组下标
      */
     public AccountPartition accountLane(int index) { return accountLanes[index]; }
     /**
@@ -6131,22 +5448,18 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 直接向 Owner 变化集合加入用户身份，调用方保证当前收集范围正确。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
      */
     public void changedUser(long userId) { changedUsers.add(userId); }
     /**
      * 直接向 Owner 变化集合加入预留订单身份。
-     * @param orderId 本次操作关联的订单实体 ID
      */
     public void changedReservation(long orderId) { changedReservations.add(orderId); }
     /**
      * 登记仍由风险记录持有的持仓身份，延后其退休释放。
-     * @param key 本次查询或修改使用的业务键
      */
     public void addRiskPositionIdentity(long key) { changes.riskPositionIdentities.add(key); }
     /**
      * 取消风险记录对持仓身份的保留标记。
-     * @param key 本次查询或修改使用的业务键
      */
     public void removeRiskPositionIdentity(long key) { changes.riskPositionIdentities.remove(key); }
     /**

@@ -149,7 +149,7 @@ public final class OrderBookEngine implements AutoCloseable {
     private void initializeCommandScopes() {
         shardCommandScopes = new MatcherCommandScope[topology.matchingEngineCount()];
         shardThreads = new Thread[shardCommandScopes.length];
-        for (/* 当前遍历数组或模块列表的下标。 */ int i = 0; i < shardCommandScopes.length; i++) shardCommandScopes[i] = new MatcherCommandScope();
+        for (int i = 0; i < shardCommandScopes.length; i++) shardCommandScopes[i] = new MatcherCommandScope();
     }
 
     /**
@@ -159,7 +159,6 @@ public final class OrderBookEngine implements AutoCloseable {
         // 当前调用线程，用于选择独占的命令上下文。
         Thread current = Thread.currentThread();
         if (current instanceof com.surprising.aeron.bootstrap.matcher.MatcherThread /* 携带 Matcher 分片号的工作线程。 */ mt) {
-            // 当前需要操作或汇总的 Matcher 分片号。
             int shardId = mt.shardId();
             if (shardId >= 0 && shardId < shardCommandScopes.length) {
                 return shardCommandScopes[shardId];
@@ -169,7 +168,7 @@ public final class OrderBookEngine implements AutoCloseable {
         // 当前已登记分片线程数组的局部引用。
         Thread[] threads = shardThreads;
         if (threads != null) {
-            for (/* 当前遍历数组或模块列表的下标。 */ int i = 0; i < threads.length; i++) {
+            for (int i = 0; i < threads.length; i++) {
                 if (threads[i] == current) return shardCommandScopes[i];
             }
         }
@@ -178,7 +177,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 在当前允许调用的线程上下文中登记用户，供冷态快照与哈希边界汇总；不是原生风险引擎开户。
-     * @param userId 请求或对账订单所属用户号
      */
     private void recordUser(long userId) {
         currentCommandScope().users.add(userId);
@@ -206,7 +204,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 创建空白适配器，可立即创建全部订单簿，也可留给后续分片激活。
-     * @param startImmediately 是否在构造时同步激活全部引擎
      */
     public OrderBookEngine(boolean startImmediately) {
         this(CoreConfiguration.standaloneLaneTopology(), startImmediately);
@@ -215,7 +212,6 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 使用账户运行时共用的显式拓扑创建空白 Matcher，不再自行读取配置。
      * @param topology 启动入口绑定并校验的不可变交易拓扑
-     * @param startImmediately 是否立即创建引擎，假时留给后续激活
      */
     public OrderBookEngine(LaneTopology topology, boolean startImmediately) {
         this(topology, startImmediately, CoreRuntimeConfiguration.standalone());
@@ -236,8 +232,6 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 按 Core 快照元数据恢复，默认立即激活并核对订单簿。
      * @param state 对应恢复或快照点的 Core 状态，具体读取边界见方法说明
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param snapshot 已有 Matcher 快照；启动路径为空时表示空白引擎
      */
     public OrderBookEngine(
@@ -251,10 +245,7 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 从非空 Core 状态计算预期业务哈希，再交给完整恢复构造器；state 为空时传零，最终校验负责拒绝。
      * @param state 对应恢复或快照点的 Core 状态，具体读取边界见方法说明
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param snapshot 已有 Matcher 快照；启动路径为空时表示空白引擎
-     * @param startImmediately 是否在构造时同步激活全部引擎
      */
     public OrderBookEngine(
             TradingCoreState state,
@@ -269,11 +260,7 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 先校验 Core 与 Matcher 快照元数据，导入模块字节和路由/用户表，复制活动订单并保存待激活动作；可立即执行恢复。这里只恢复路由登记，不把它当成原生品种注册证据。恢复异常停止已建引擎并包装为致命分歧。
      * @param state 对应恢复或快照点的 Core 状态，具体读取边界见方法说明
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param snapshot 已有 Matcher 快照；启动路径为空时表示空白引擎
-     * @param startImmediately 是否在构造时同步激活全部引擎
-     * @param expectedCoreBusinessStateHash 调用方提供的预期 Core 业务哈希
      */
     public OrderBookEngine(
             TradingCoreState state,
@@ -301,7 +288,7 @@ public final class OrderBookEngine implements AutoCloseable {
             this.matcherEvidence = new MatcherEvidenceLedger(
                     topology, 0, snapshot.matcherShardProgress());
             serializationProcessor.importSnapshot(snapshot.modules());
-            snapshot.symbols().forEach((/* 当前正在登记、规范化或查询的品种字符串。 */ instrumentId, /* 当前品种的永久原生编号。 */ symbolId) -> {
+            snapshot.symbols().forEach((instrumentId, symbolId) -> {
                 // 恢复反向路由时原有的品种字符串，用来发现同编号冲突。
                 String previous = symbolNames.put(symbolId, instrumentId);
                 if (previous != null && !previous.equals(instrumentId)) {
@@ -358,7 +345,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 由所属线程激活指定分片，登记线程并构造一个独立同步引擎；恢复时核对该分片活动订单和哈希，最后一个分片再比对全局引擎哈希并发布全体就绪。单分片走整体激活分支，此方法不负责创建工作线程。
-     * @param shardId 目标全局 Matcher 分片号
      */
     public void activateShard(int shardId) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()) {
@@ -386,14 +372,12 @@ public final class OrderBookEngine implements AutoCloseable {
         if (restoredSnapshot != null) {
             reconcileOpenOrdersShard(restoredActiveOrders, shardId, restoredCoreSequence,
                     restoredSnapshot.snapshotId(), "matcher restore");
-            // 当前冷态读取或汇总出的引擎哈希。
             int engineHash = engineStateHash(shardId);
             restoredShardHashes[shardId] = new MatcherShardSnapshot(
                     shardId, engineHash);
         }
         if (activatedShardCount.incrementAndGet() == topology.matchingEngineCount()) {
             if (restoredSnapshot != null) {
-                // 当前冷态读取或汇总出的引擎哈希。
                 int engineHash = aggregateEngineStateHash(List.of(restoredShardHashes));
                 if (engineHash != restoredSnapshot.engineStateHash()) {
                     throw new FatalMatchingDivergenceException("matcher restore", restoredCoreSequence,
@@ -409,8 +393,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 同步加载全部原生快照，逐单对账并比对汇总引擎哈希；Core 元数据已在构造阶段检查。
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param snapshot 已有 Matcher 快照；启动路径为空时表示空白引擎
      */
     private void activateRestoredMatcher(Iterable<CoreOrderState> activeOrders,
@@ -429,12 +411,9 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 直接读取已完成准入的订单输入，按产品线滑点规则计算市价边界并填入原生槽。
-     * @param userId 请求或对账订单所属用户号
      * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     private exchange.core2.core.common.MatcherResult placeNative(long userId, com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder command, exchange.core2.core.common.MatcherResult target) {
-        // 当前品种的永久原生编号。
         int symbolId = ensureSymbol(command.instrument().instrumentIdValue());
         recordUser(userId);
         // 市价保护收紧后的原生撮合价格，限价单保留原价。
@@ -449,13 +428,10 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 从冻结的批量准入输入读取剩余数量等字段，转换后直接写原生槽；冻结身份检查由外层入口先执行。
-     * @param userId 请求或对账订单所属用户号
      * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     private exchange.core2.core.common.MatcherResult placeNativeAdmitted(long userId,
             com.surprising.aeron.service.order.Order command, exchange.core2.core.common.MatcherResult target) {
-        // 当前品种的永久原生编号。
         int symbolId = ensureSymbol(command.instrument().instrumentIdValue());
         recordUser(userId);
         // 市价保护收紧后的原生撮合价格，限价单保留原价。
@@ -470,14 +446,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 检查分片、冻结输入身份和命令证据后开启串行命令，撮合并发布到结算事件；运行异常记为全局首个故障，finally 释放命令作用域。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandIdMsb 逻辑命令 UUID 高六十四位
-     * @param commandIdLsb 逻辑命令 UUID 低六十四位
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
      * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public exchange.core2.core.common.MatcherResult placeAdmittedDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
@@ -502,14 +471,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 检查分片和准入输入后同步下单，将原生结果与证据写入复用结算事件；异常置故障标记，成功与失败均退出命令作用域。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandIdMsb 逻辑命令 UUID 高六十四位
-     * @param commandIdLsb 逻辑命令 UUID 低六十四位
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
      * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public exchange.core2.core.common.MatcherResult placeDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
@@ -533,15 +495,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 检查分片、品种和命令证据，同步撤单并发布结果；运行异常记录首个故障，最后清理命令作用域。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandIdMsb 逻辑命令 UUID 高六十四位
-     * @param commandIdLsb 逻辑命令 UUID 低六十四位
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param instrumentId 外部永久数字品种字符串
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public exchange.core2.core.common.MatcherResult cancelDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
@@ -566,17 +519,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 先写独立的旧单撤单槽，只有撤单接受才下新单，再发布两段事实及最终结果；新单被拒也不会回滚已执行撤单。检查最终原生分片与证据分片一致，异常记故障并退出作用域。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandIdMsb 逻辑命令 UUID 高六十四位
-     * @param commandIdLsb 逻辑命令 UUID 低六十四位
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param originalOrderId 需要先撤掉的旧订单号
-     * @param instrumentId 外部永久数字品种字符串
-     * @param replacement 旧单撤销接受后才提交的新单准入输入
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public exchange.core2.core.common.MatcherResult replaceDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
@@ -615,14 +557,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 执行同一批次中的一个已准入下单项，写指定原生槽并推进本分片证据序号；只检查下标非负，槽容量由目标对象约束，此方法不负责整批账户完成。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param index 当前批次项在目标原生槽中的下标
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
      * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public exchange.core2.core.common.MatcherResult placeDirectBatchItem(
             int shardId, int index, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
@@ -654,15 +589,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 执行批次中的一个撤单项，核对原生与证据分片一致后发布到指定结算槽；任一运行异常记为故障并清理作用域。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param index 当前批次项在目标原生槽中的下标
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param instrumentId 外部永久数字品种字符串
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public exchange.core2.core.common.MatcherResult cancelDirectBatchItem(
             int shardId, int index, long coreSequence, java.util.UUID commandId, long orderId,
@@ -694,7 +620,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 只有原生 SUCCESS 或 ACCEPTED 算接受，不把任意非异常结果都视为成功。
-     * @param result 当前原生或普通撮合结果，方法签名决定具体类型
      */
     private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
         return result.resultCode() == CommandResultCode.SUCCESS
@@ -703,13 +628,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 拒绝已有故障后的完成结果，核对有效原生分片与业务分片相符，再分配业务证据序号并写入目标事件；这里不执行账户结算或直接推进 Core 提交。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandIdMsb 逻辑命令 UUID 高六十四位
-     * @param commandIdLsb 逻辑命令 UUID 低六十四位
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param result 当前原生或普通撮合结果，方法签名决定具体类型
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     private exchange.core2.core.common.MatcherResult publishNativeMatcherResult(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId, exchange.core2.core.common.MatcherResult result,
@@ -728,10 +646,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 在当前线程的临时槽里执行一条撤单前缀，finally 退出作用域；此处不分配业务证据序号，也不自行捕获运行异常置故障，返回槽在下次复用前消费。
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param instrumentId 外部永久数字品种字符串
      */
     public exchange.core2.core.common.MatcherResult cancelDirectPrefix(
             long aeronTimestamp, long userId, long orderId, int symbolId) {
@@ -749,12 +663,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 可选记录 JFR 失败证据，把临时原生结果捕获到结算槽后按逻辑命令发布；防止后续复用临时槽覆盖需保留的失败事实。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param logicalOrderId 外层控制命令关联的逻辑订单号
-     * @param result 当前原生或普通撮合结果，方法签名决定具体类型
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public exchange.core2.core.common.MatcherResult publishDirectPrefixFailure(
             int shardId, long coreSequence, java.util.UUID commandId, long logicalOrderId, exchange.core2.core.common.MatcherResult result,
@@ -783,13 +691,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 发布未进入订单簿的准入拒单证据，仍推进分片业务序号；检查参数和已有故障，不开启原生命令作用域，也不使用时间戳写原生结果。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
      * @param resultCode 拒单原因文本
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public void rejectedPlaceDirect(
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
@@ -809,14 +711,13 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 校验用户和品种列表，在当前允许调用的上下文逐个确保原生品种已注册，最后登记用户；不是只往路由 Map 里预填编号。
-     * @param userId 请求或对账订单所属用户号
      * @param symbols 需要在当前线程确保注册的品种字符串序列
      */
     public void prepareOrderRoutes(long userId, Iterable<String> symbols) {
         if (userId <= 0 || symbols == null) {
             throw new IllegalArgumentException("invalid matcher route preparation");
         }
-        for (String /* 当前正在登记、规范化或查询的品种字符串。 */ instrumentId : symbols) {
+        for (String instrumentId : symbols) {
             if (instrumentId == null || instrumentId.isBlank()) {
                 throw new IllegalArgumentException("invalid matcher route preparation instrumentId");
             }
@@ -827,10 +728,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 检查 Core 序号为正、UUID 非空、订单号及时间非负；UUID 对象即使全零也不会在此重载被拒绝。
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
      */
     private static void validateCommandEvidence(long coreSequence, java.util.UUID commandId,
             long orderId, long aeronTimestamp) {
@@ -841,11 +738,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 检查 Core 序号为正、UUID 两半不能同时为零、订单号及时间非负；不核对命令是否已经执行。
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandIdMsb 逻辑命令 UUID 高六十四位
-     * @param commandIdLsb 逻辑命令 UUID 低六十四位
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
      */
     private static void validateCommandEvidence(long coreSequence, long commandIdMsb, long commandIdLsb,
             long orderId, long aeronTimestamp) {
@@ -856,7 +748,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 先拒绝已有故障，再取得当前线程上下文并禁止嵌套调用，保存业务时间且标记活跃；调用方必须在 finally 清掉两个字段。
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
      */
     private MatcherCommandScope beginSynchronousCommand(long aeronTimestamp) {
         // 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。
@@ -872,10 +763,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 拒绝空结果及故障后的回执，绑定已聚合控制命令的业务证据；致命结果仍登记故障后返回原事实。
-     * @param coreSequence 当前控制命令的 Core 序号
-     * @param commandId 原命令 UUID
-     * @param sequence 控制分片已经分配的业务证据序号
-     * @param result 已聚合的控制撤单结果
      */
     private OrderMatchingResult.Control bindControlEvidence(long coreSequence, java.util.UUID commandId,
                                                    long sequence, OrderMatchingResult.Control result) {
@@ -891,7 +778,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 只有结果分类是 FATAL_DIVERGENCE 才记录首个异常，防止随后继续接受完成事实；不覆盖更早故障。
-     * @param result 当前原生或普通撮合结果，方法签名决定具体类型
      */
     private void poisonIfFatal(OrderMatchingResult.Control result) {
         if (result.outcome() == OrderMatchingResult.Outcome.FATAL_DIVERGENCE) {
@@ -902,7 +788,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 让 Owner 将非空故障说明登记为首个 Matcher 故障，不在此线程继续尝试修复订单簿。
-     * @param detail Owner 提供的非空白故障说明
      */
     public void poisonFromOwner(String detail) {
         if (detail == null || detail.isBlank()) throw new IllegalArgumentException("matcher poison detail is required");
@@ -935,7 +820,6 @@ public final class OrderBookEngine implements AutoCloseable {
             try {
                 routerField = exchange.core2.core.SynchronousMatchingEngine.class.getDeclaredField("router");
                 routerField.setAccessible(true);
-                // 按固定名称加载的直接订单簿实现类型。
                 Class<?> directBookClass = Class.forName("exchange.core2.core.orderbook.OrderBookDirectImpl");
                 bestAskField = directBookClass.getDeclaredField("bestAskOrder");
                 bestAskField.setAccessible(true);
@@ -952,24 +836,18 @@ public final class OrderBookEngine implements AutoCloseable {
 
         /**
          * 反射直接读取目标订单簿的对手侧最优订单价格；字段不可用、没有订单簿或最优单、类型不符以及读取异常都返回负一，由外层决定使用原界限或查询盘口。
-         * @param engine 需要读取对手最优价的同步引擎
-         * @param symbolId 永久原生品种编号
-         * @param isBuy 是否为买单，买单读取卖一，卖单读取买一
          */
         static long readBestPrice(exchange.core2.core.SynchronousMatchingEngine engine, int symbolId, boolean isBuy) {
             if (!AVAILABLE || engine == null) return -1L;
             try {
-                // 从当前引擎反射取出的订单簿路由对象。
                 exchange.core2.core.processors.MatchingEngineRouter router =
                         (exchange.core2.core.processors.MatchingEngineRouter) ROUTER_FIELD.get(engine);
                 if (router == null) return -1L;
-                // 当前品种的原生订单簿。
                 exchange.core2.core.orderbook.IOrderBook book = router.getOrderBooks().get(symbolId);
                 if (book == null) return -1L;
-                // 按买卖方向读出的对手侧最优订单引用。
                 Object directOrder = isBuy ? BEST_ASK_FIELD.get(book) : BEST_BID_FIELD.get(book);
                 if (directOrder == null) return -1L;
-                if (directOrder instanceof exchange.core2.core.common.IOrder /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order) {
+                if (directOrder instanceof exchange.core2.core.common.IOrder order) {
                     return order.getPrice();
                 }
                 return -1L;
@@ -981,10 +859,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 仅为启用滑点的市价单计算保护价：在当前 Matcher 线程读对手最优价，向内取整滑点距离后与原界限收紧。只有反射初始化不可用才查询一档盘口；可用但读不到价格时保留原界限，算术精确操作溢出会抛异常。
-     * @param symbolId 永久原生品种编号
-     * @param side 订单买卖方向
      * @param type 协议订单类型
-     * @param originalBound 准入时已有的市价撮合价格界限
      * @param slippagePpm 以百万分比表示的最优价滑点距离
      */
     private long protectedMarketPrice(int symbolId, CoreOrderSide side,
@@ -1005,7 +880,6 @@ public final class OrderBookEngine implements AutoCloseable {
             }
         }
         // 滑点价差向最优价一侧取整；向外取整可能多出一个完整 tick。
-        // 按百万分比向内取整的价差，用于收紧市价保护界限。
         long distance = Math.addExact(Math.multiplyExact(best / 1_000_000L, slippagePpm),
                 (best % 1_000_000L) * slippagePpm / 1_000_000L);
         return buy ? Math.min(originalBound, Math.addExact(best, distance))
@@ -1020,7 +894,6 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 市价单映射为 FOK 或 IOC；限价单按 IOC、FOK、GTC、GTX 原样对应到原生类型。
      * @param orderType 协议订单类型
-     * @param timeInForce 订单有效期策略
      */
     private static OrderType orderType(com.surprising.aeron.protocol.CoreOrderType orderType,
                                        com.surprising.aeron.protocol.CoreTimeInForce timeInForce) {
@@ -1077,19 +950,17 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 要求请求与结果等长且各结果非空，生成逐项撤单回执并统计首个失败之前的成功数，按原顺序组合事件；部分前缀成功而整体拒绝时明确登记状态变化，不重做撤单。
      * @param requested 按原顺序排列的控制撤单请求
-     * @param results 与每个请求一一对应的撤单结果，未执行项需用占位结果
      */
     private OrderMatchingResult.Control aggregateRoutedCancellationResults(
             List<CancellationOrder> requested, List<OrderMatchingResult.Control> results) {
         if (requested == null || results == null || requested.size() != results.size())
             throw new IllegalArgumentException("cancellation aggregation size mismatch");
-        // 用于对外说明每笔订单撤单是否接受的结果列表。
         List<OrderCancelResult> cancellations = new ArrayList<>(requested.size());
         // 首个未接受结果之前已成功撤单的连续数量。
         int successfulPrefix = 0;
         // 按结果顺序找到的首个未接受回执，用于整体结果码与成功前缀边界。
         OrderMatchingResult.Control failure = null;
-        for (/* 当前批次项或盘口档位的下标。 */ int index = 0; index < results.size(); index++) {
+        for (int index = 0; index < results.size(); index++) {
             // 当前顺序位置的非空撤单回执，用来生成逐项结果并确定成功前缀。
             OrderMatchingResult.Control result = java.util.Objects.requireNonNull(results.get(index), "cancellation result");
             cancellations.add(new OrderCancelResult(requested.get(index).orderId(), result.accepted()));
@@ -1104,12 +975,8 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 执行一条原生控制撤单，先登记真实订单簿分片的原生序号，再包装普通结果，业务控制序号留给后续聚合绑定。
-     * @param userId 请求或对账订单所属用户号
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param instrumentId 外部永久数字品种字符串
      */
     private OrderMatchingResult.Control cancelControlNative(long userId, long orderId, int symbolId) {
-        // 当前控制撤单的原生结果，先按真实引擎分片登记原生序号。
         var result = cancelNative(userId, orderId, symbolId);
         matcherEvidence.recordControlNative(topology.matcherShardId(result.symbol()), result.sequence());
         return OrderMatchingResult.Control.fromNative(result);
@@ -1117,9 +984,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 确保品种注册、登记用户后同步撤单，返回原生新结果，时间取自当前命令上下文。
-     * @param userId 请求或对账订单所属用户号
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param instrumentId 外部永久数字品种字符串
      */
     private exchange.core2.core.common.MatcherResult cancelNative(long userId, long orderId, int symbolId) {
         symbolId = ensureSymbol(symbolId);
@@ -1129,10 +993,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 确保品种注册并记用户，将同步撤单结果直接填入目标原生槽。
-     * @param userId 请求或对账订单所属用户号
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param instrumentId 外部永久数字品种字符串
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     private exchange.core2.core.common.MatcherResult cancelNative(long userId, long orderId, String instrumentId,
             exchange.core2.core.common.MatcherResult target) {
@@ -1148,9 +1008,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 在当前命令作用域按既定顺序执行控制撤单并绑定控制分片负一的业务证据；运行异常记录故障，已执行前缀不回滚。
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param timestamp Cluster 提供的确定性业务时间戳
      * @param orders 按调用方确定顺序排列的控制撤单请求
      */
     public OrderMatchingResult.Control cancelControlOrders(long coreSequence, java.util.UUID commandId,
@@ -1170,10 +1027,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 由目标分片线程执行一条控制撤单，只记录原生序号；Owner 后续汇总控制事实。校验时间、用户和订单，异常记故障，finally 清理作用域。
-     * @param timestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param instrumentId 外部永久数字品种字符串
      */
     public OrderMatchingResult.Control cancelControlOrder(long timestamp, long userId, long orderId, int symbolId) {
         if (timestamp < 0 || userId <= 0 || orderId <= 0)
@@ -1190,11 +1043,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 仅聚合已经在原生分片执行过的撤单结果，绑定一次控制业务证据，不重新操作任何订单簿。
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param timestamp Cluster 提供的确定性业务时间戳
      * @param orders 按调用方确定顺序排列的控制撤单请求
-     * @param results 与每个请求一一对应的撤单结果，未执行项需用占位结果
      */
     public OrderMatchingResult.Control completeControlCancellations(long coreSequence, java.util.UUID commandId,
             long timestamp, List<CancellationOrder> orders, List<OrderMatchingResult.Control> results) {
@@ -1205,10 +1054,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 由所属分片线程先逐单对账并取哈希，再同步持久化该分片原生快照；只有成功才返回分片哈希。
-     * @param shardId 目标全局 Matcher 分片号
      * @param snapshotId 正的快照编号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
      */
     public MatcherShardSnapshot captureShardSnapshot(
             int shardId, long snapshotId, long coreSequence, Iterable<CoreOrderState> activeOrders) {
@@ -1217,7 +1063,6 @@ public final class OrderBookEngine implements AutoCloseable {
             throw new IllegalArgumentException("invalid matcher shard snapshot request");
         }
         reconcileOpenOrdersShard(activeOrders, shardId, coreSequence, snapshotId, "matcher snapshot");
-        // 当前冷态读取或汇总出的引擎哈希。
         int engineHash = engineStateHash(shardId);
         if (!engines[shardId].storeSnapshot(snapshotId, coreSequence, coreSequence)) {
             throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence, snapshotId,
@@ -1229,10 +1074,7 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 要求分片结果数量完整，汇总哈希、导出已写入的模块和证据进度、物化用户集合并构造快照；无论构造是否成功都删除该编号的内存模块。对各分片的冻结与存储已由调用方完成。
      * @param snapshotId 正的快照编号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param businessStateHash 冻结点的 Core 业务哈希
      * @param state 对应恢复或快照点的 Core 状态，具体读取边界见方法说明
-     * @param shardSnapshots 已完成相同冻结点捕获的分片哈希列表
      */
     public OrderBookSnapshot finishShardedSnapshot(
             long snapshotId, long coreSequence, long businessStateHash, TradingCoreState state,
@@ -1241,7 +1083,6 @@ public final class OrderBookEngine implements AutoCloseable {
                 || shardSnapshots == null || shardSnapshots.size() != topology.matchingEngineCount()) {
             throw new IllegalArgumentException("incomplete matcher shard snapshot set");
         }
-        // 当前冷态读取或汇总出的引擎哈希。
         int engineHash = aggregateEngineStateHash(shardSnapshots);
         try {
             // 从当前快照号导出的原生模块字节，构造后删除内存存储副本。
@@ -1249,7 +1090,6 @@ public final class OrderBookEngine implements AutoCloseable {
                     serializationProcessor.exportSnapshot(snapshotId);
             // 导出模块中最大的原生持久化序号。
             long matcherSequence = maxMatcherSequence(modules);
-            // 在冷态边界汇总并排序的已见用户集合。
             Set<Long> userSnapshot = snapshotUsers();
             return new OrderBookSnapshot(state.productLine(), topology, snapshotId, coreSequence, matcherSequence,
                     matcherEvidence.snapshot(), businessStateHash, engineHash,
@@ -1266,8 +1106,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 同步构建 Core OPEN 订单与所有原生活动订单的精确投影，拒绝终态、未登记品种、重复订单号和字段不一致，不匹配时直接抛出故障；不自动切线程。
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param snapshotId 正的快照编号
      * @param operation 对账操作名称或正在进行的快照对象，具体类型见签名
      */
@@ -1276,14 +1114,12 @@ public final class OrderBookEngine implements AutoCloseable {
             long coreSequence,
             long snapshotId,
             String operation) {
-        // 从冻结 Core 活动订单建立的精确投影，以订单号去重。
         Map<Long, ReconciledOrder> expected = new HashMap<>();
-        for (CoreOrderState /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order : activeOrders) {
+        for (CoreOrderState order : activeOrders) {
             if (order.status() != com.surprising.aeron.model.CoreOrderStatus.OPEN) {
                 throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
                         "active-order index contains a terminal order");
             }
-            // 当前品种的永久原生编号。
             Integer symbolId = symbols.get(order.instrumentId());
             if (symbolId == null) {
                 throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
@@ -1297,10 +1133,9 @@ public final class OrderBookEngine implements AutoCloseable {
                         "active-order index contains duplicate order ID " + order.orderId());
             }
         }
-        // 从原生订单簿活动订单建立的精确投影，以订单号去重。
         Map<Long, ReconciledOrder> actual = new HashMap<>();
-        for (SynchronousMatchingEngine /* 当前遍历或关闭的同步引擎实例。 */ matcher : engines) {
-            for (SynchronousMatchingEngine.OpenOrder /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order : matcher.openOrders()) {
+        for (SynchronousMatchingEngine matcher : engines) {
+            for (SynchronousMatchingEngine.OpenOrder order : matcher.openOrders()) {
                 // 把一笔原生活动订单投影为可逐字段比较的值。
                 ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
                         order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
@@ -1319,25 +1154,19 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 只比较属于指定分片的 Core 与原生活动订单，检查终态、重复和字段差异；未登记品种或属于其他分片的 Core 订单在此分支直接跳过，与全分片对账边界不同。
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param snapshotId 正的快照编号
      * @param operation 对账操作名称或正在进行的快照对象，具体类型见签名
      */
     private void reconcileOpenOrdersShard(Iterable<CoreOrderState> activeOrders, int shardId,
                                           long coreSequence, long snapshotId, String operation) {
-        // 从冻结 Core 活动订单建立的精确投影，以订单号去重。
         Map<Long, ReconciledOrder> expected = new HashMap<>();
-        for (CoreOrderState /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order : activeOrders) {
-            // 当前品种的永久原生编号。
+        for (CoreOrderState order : activeOrders) {
             Integer symbolId = symbols.get(order.instrumentId());
             if (symbolId == null || topology.matcherShardId(symbolId) != shardId) continue;
             if (order.status() != com.surprising.aeron.model.CoreOrderStatus.OPEN) {
                 throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
                         "active-order index contains a terminal order");
             }
-            // 当前 Core 或原生活动订单的对账投影。
             ReconciledOrder value = new ReconciledOrder(symbolId, order.orderId(), order.userId(),
                     order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                     order.matchingPriceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
@@ -1347,10 +1176,8 @@ public final class OrderBookEngine implements AutoCloseable {
                         "active-order index contains duplicate order ID " + order.orderId());
             }
         }
-        // 从原生订单簿活动订单建立的精确投影，以订单号去重。
         Map<Long, ReconciledOrder> actual = new HashMap<>();
-        for (SynchronousMatchingEngine.OpenOrder /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order : engines[shardId].openOrders()) {
-            // 当前 Core 或原生活动订单的对账投影。
+        for (SynchronousMatchingEngine.OpenOrder order : engines[shardId].openOrders()) {
             ReconciledOrder value = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
                     order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
             if (actual.put(order.orderId(), value) != null) {
@@ -1379,7 +1206,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 按原生报告的迭代顺序折叠子模块类型、编号和数值为引擎哈希；int 溢出按 Java 哈希运算保留，不是资金数值或密码摘要。
-     * @param shardId 目标全局 Matcher 分片号
      */
     private int engineStateHash(int shardId) {
         // 原生引擎当前各子模块状态哈希报告。
@@ -1387,7 +1213,7 @@ public final class OrderBookEngine implements AutoCloseable {
         // 顺序折叠出的引擎哈希，int 自然溢出属于哈希算法。
         int engineHash = 1;
         for (Map.Entry<exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleKey,
-                Integer> /* 当前子模块哈希或品种路由条目，具体类型见循环声明。 */ entry : report.getHashCodes().entrySet()) {
+                Integer> entry : report.getHashCodes().entrySet()) {
             engineHash = engineHash * 31 + entry.getKey().submodule.code;
             engineHash = engineHash * 31 + entry.getKey().moduleId;
             engineHash = engineHash * 31 + entry.getValue();
@@ -1403,8 +1229,7 @@ public final class OrderBookEngine implements AutoCloseable {
         if (shards.size() == 1) return shards.getFirst().engineHash();
         // 顺序折叠出的引擎哈希，int 自然溢出属于哈希算法。
         int engineHash = 1;
-        for (/* 当前需要操作或汇总的 Matcher 分片号。 */ int shardId = 0; shardId < shards.size(); shardId++) {
-            // 当前参与汇总的分片哈希或启动盘口结果。
+        for (int shardId = 0; shardId < shards.size(); shardId++) {
             MatcherShardSnapshot shard = shards.get(shardId);
             if (shard.shardId() != shardId) throw new IllegalArgumentException("matcher shards are not ordered");
             engineHash = (engineHash * 31 + shardId) * 31 + shard.engineHash();
@@ -1414,16 +1239,12 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 校验深度 1 至 100 并规范品种字符串，未登记返回空列表；已登记则在调用线程读订单簿，转换结果排序为买卖侧再价格升序。
-     * @param requestedSymbol 待查询的品种字符串，会 trim 并按 ROOT 转为大写
-     * @param depth 每侧期望读取的盘口深度，范围 1 至 100
      */
     public List<CoreBookLevelView> orderBookLevels(String requestedSymbol, int depth) {
         if (requestedSymbol == null || requestedSymbol.isBlank() || depth < 1 || depth > 100) {
             throw new IllegalArgumentException("invalid single-instrumentId book query");
         }
-        // 当前正在登记、规范化或查询的品种字符串。
         String instrumentId = requestedSymbol.trim().toUpperCase(java.util.Locale.ROOT);
-        // 当前品种的永久原生编号。
         Integer symbolId = symbols.get(instrumentId);
         if (symbolId == null) return List.of();
         return bookLevels(instrumentId, engine(symbolId).orderBook(symbolId, depth));
@@ -1431,16 +1252,13 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 在当前分片线程筛选路由表，按品种名读取本分片各盘口并转换为启动视图，深度限制 1 至 100；不在这里等待其他分片。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param depth 每侧期望读取的盘口深度，范围 1 至 100
      */
     public OrderBookDepthSnapshot orderBookBootstrapShard(int shardId, int depth) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || depth < 1 || depth > 100) {
             throw new IllegalArgumentException("invalid matcher shard bootstrap query");
         }
-        // 当前需要读取盘口的路由条目副本，随后按品种字符串排序。
         List<Map.Entry<String, Integer>> entries = new ArrayList<>();
-        for (Map.Entry<String, Integer> /* 当前子模块哈希或品种路由条目，具体类型见循环声明。 */ entry : symbols.entrySet()) {
+        for (Map.Entry<String, Integer> entry : symbols.entrySet()) {
             if (topology.matcherShardId(entry.getValue()) == shardId) {
                 entries.add(entry);
             }
@@ -1450,7 +1268,7 @@ public final class OrderBookEngine implements AutoCloseable {
         ArrayList<CoreBookLevelView> levels = new ArrayList<>();
         // 需保留在启动视图中的有序品种清单，包括无档位的品种。
         List<String> entrySymbols = new ArrayList<>(entries.size());
-        for (Map.Entry<String, Integer> /* 当前子模块哈希或品种路由条目，具体类型见循环声明。 */ entry : entries) {
+        for (Map.Entry<String, Integer> entry : entries) {
             entrySymbols.add(entry.getKey());
             levels.addAll(bookLevels(entry.getKey(), engines[shardId].orderBook(entry.getValue(), depth)));
         }
@@ -1469,7 +1287,7 @@ public final class OrderBookEngine implements AutoCloseable {
         ArrayList<String> mergedSymbols = new ArrayList<>();
         // 汇总各分片盘口档位的临时列表，最终按品种、方向和价格排序。
         ArrayList<CoreBookLevelView> mergedLevels = new ArrayList<>();
-        for (OrderBookDepthSnapshot /* 当前参与汇总的分片哈希或启动盘口结果。 */ shard : shards) {
+        for (OrderBookDepthSnapshot shard : shards) {
             mergedSymbols.addAll(shard.symbols());
             mergedLevels.addAll(shard.levels());
         }
@@ -1482,17 +1300,15 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 把原生卖档、买档的价格、数量和订单数转成协议视图，再按买卖侧和价格升序排序；不会把买档单独改成价格降序。
-     * @param instrumentId 外部永久数字品种字符串
-     * @param book 当前同步读取的原生盘口数据
      */
     private static List<CoreBookLevelView> bookLevels(String instrumentId, L2MarketData book) {
         // 本次转换出的协议盘口档位，返回前按既定规则排序。
         List<CoreBookLevelView> levels = new ArrayList<>(Math.addExact(book.askSize, book.bidSize));
-        for (/* 当前批次项或盘口档位的下标。 */ int index = 0; index < book.askSize; index++) {
+        for (int index = 0; index < book.askSize; index++) {
             levels.add(new CoreBookLevelView(instrumentId, CoreOrderSide.SELL, book.askPrices[index],
                     book.askVolumes[index], book.askOrders[index]));
         }
-        for (/* 当前批次项或盘口档位的下标。 */ int index = 0; index < book.bidSize; index++) {
+        for (int index = 0; index < book.bidSize; index++) {
             levels.add(new CoreBookLevelView(instrumentId, CoreOrderSide.BUY, book.bidPrices[index],
                     book.bidVolumes[index], book.bidOrders[index]));
         }
@@ -1514,13 +1330,12 @@ public final class OrderBookEngine implements AutoCloseable {
      */
     private void start(OrderBookSnapshot snapshot) {
         engines = new SynchronousMatchingEngine[topology.matchingEngineCount()];
-        for (/* 当前需要操作或汇总的 Matcher 分片号。 */ int shardId = 0; shardId < engines.length; shardId++) startShard(shardId, snapshot);
+        for (int shardId = 0; shardId < engines.length; shardId++) startShard(shardId, snapshot);
         activatedShardCount.set(engines.length);
     }
 
     /**
      * 在当前线程创建一个 MATCHING_ONLY 同步引擎，原生每个实例只有一个 Matcher，账户风险和原生日志关闭；从快照或空白启动，并用分片序列化包装器将本地模块号映射为全局分片号。
-     * @param shardId 目标全局 Matcher 分片号
      * @param snapshot 已有 Matcher 快照；启动路径为空时表示空白引擎
      */
     private void startShard(int shardId, OrderBookSnapshot snapshot) {
@@ -1555,7 +1370,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 校验品种字符串并预留稳定路由编号，返回目标 Matcher 分片；预留路由不等于该分片原生品种已注册。
-     * @param instrumentId 外部永久数字品种字符串
      */
     public int matcherShardId(String instrumentId) {
         if (instrumentId == null || instrumentId.isBlank()) throw new IllegalArgumentException("matcher instrumentId is required");
@@ -1563,7 +1377,6 @@ public final class OrderBookEngine implements AutoCloseable {
     }
     /**
      * 把外部数字品种字符串解析成永久编号，再走当前线程的原生品种注册路径。
-     * @param instrumentId 外部永久数字品种字符串
      */
     private int ensureSymbol(String instrumentId) {
         return ensureSymbol(permanentInstrumentId(instrumentId));
@@ -1571,14 +1384,11 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 先查本线程上下文的注册集合，未注册则建立数字字符串路由并向所属引擎注册零费率、单位缩放的撮合品种；接受首次成功或已存在后才缓存。真实业务费率与资金由账户侧负责。
-     * @param symbolId 永久原生品种编号
      */
     private int ensureSymbol(int symbolId) {
         if (symbolId <= 0) throw new IllegalArgumentException("positive instrumentId is required");
-        // 当前写者独占的已完成原生注册集合。
         var registeredSymbols = currentCommandScope().registeredSymbols;
         if (registeredSymbols.contains(symbolId)) return symbolId;
-        // 当前正在登记、规范化或查询的品种字符串。
         String instrumentId = Integer.toString(symbolId);
         registerSymbolId(instrumentId);
         // 只服务撮合的零费率、单位缩放原生品种规格，资金业务由账户侧处理。
@@ -1598,7 +1408,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 通过共享 InstrumentIds 契约解析数字字符串为永久正品种编号，不使用本地自增或名称哈希。
-     * @param instrumentId 外部永久数字品种字符串
      */
     private int permanentInstrumentId(String instrumentId) {
         return com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
@@ -1606,7 +1415,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 已有字符串路由直接读取并发字典，新路由进入双向表冲突检查；只预留映射，不触碰原生订单簿。
-     * @param instrumentId 外部永久数字品种字符串
      */
     private int reserveSymbolId(String instrumentId) {
         // 已登记路由直接读并发字典；新路由通过反向表 putIfAbsent 检查永久编号冲突。
@@ -1616,13 +1424,11 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 解析永久品种编号，先用反向表拒绝同编号不同字符串，再按原字符串登记正向路由；没有全局 synchronized 块，依赖并发表原子 putIfAbsent。
-     * @param instrumentId 外部永久数字品种字符串
      */
     private int registerSymbolId(String instrumentId) {
         // 并发路由表中已经登记的永久品种编号。
         Integer existing = symbols.get(instrumentId);
         if (existing != null) return existing;
-        // 当前品种的永久原生编号。
         int symbolId = permanentInstrumentId(instrumentId);
         // 同一永久编号已登记的原字符串，用来检查冲突。
         String collision = symbolNames.putIfAbsent(symbolId, instrumentId);
@@ -1635,7 +1441,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 要求引擎数组已建立后按品种路由取分片实例；此方法不再单独检查该元素已激活或调用线程。
-     * @param symbolId 永久原生品种编号
      */
     private SynchronousMatchingEngine engine(int symbolId) {
         if (engines == null) throw new IllegalStateException("matcher engines are not active");
@@ -1644,12 +1449,11 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 按字符执行固定的 FNV 风格 int 哈希并清掉符号位，仅给原生占位资产编号使用；不保证无碰撞，也不排除结果为零。
-     * @param value 待计算占位资产编号的字符串
      */
     private static int stableId(String value) {
         // 占位资产字符串的固定 int 哈希累加值。
         int hash = 0x811c9dc5;
-        for (/* 当前批次项或盘口档位的下标。 */ int index = 0; index < value.length(); index++) {
+        for (int index = 0; index < value.length(); index++) {
             hash ^= value.charAt(index);
             hash *= 0x01000193;
         }
@@ -1658,14 +1462,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * Core 与原生活动订单对账时使用的逐字段投影；只比较订单号、用户、品种、方向、价格、总量、已成交量和买单保留界限，不含资金账户或 FIFO 链接。
-     * @param symbolId 永久原生品种编号
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param userId 请求或对账订单所属用户号
-     * @param action 对账订单的原生买卖方向
-     * @param price 对账订单的撮合价
-     * @param size 原始订单数量步数
-     * @param filled 原生已成交数量步数
-     * @param reserveBidPrice 原生买单保留界限，对账时取 Core 撮合价
      */
     private record ReconciledOrder(
             int symbolId,
@@ -1680,8 +1476,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 一个分片已完成冷态快照或读取后的哈希结果，不携带模块字节。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param engineHash 原生子模块报告折叠出的 int 引擎哈希
      */
     public record MatcherShardSnapshot(int shardId, int engineHash) {
         /**
@@ -1699,7 +1493,7 @@ public final class OrderBookEngine implements AutoCloseable {
         if (engines != null) {
             // 关闭循环遇到的首个运行异常，后续异常作为 suppressed 附上。
             RuntimeException failure = null;
-            for (SynchronousMatchingEngine /* 当前遍历或关闭的同步引擎实例。 */ matcher : engines) {
+            for (SynchronousMatchingEngine matcher : engines) {
                 try {
                     if (matcherFailure.get() == null) matcher.stateHashReport();
                     matcher.close();
@@ -1715,7 +1509,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 只关闭指定已存在的引擎，未启动时直接返回；无故障时先取哈希，再 close 并清该槽。任一步抛异常会保留该数组元素，调用方负责后续退出。
-     * @param shardId 目标全局 Matcher 分片号
      */
     public void closeShard(int shardId) {
         // 当前引擎数组引用，整体未激活或已停止时为空。
@@ -1724,7 +1517,6 @@ public final class OrderBookEngine implements AutoCloseable {
         if (shardId < 0 || shardId >= active.length) {
             throw new IllegalArgumentException("matcher shard is outside configured topology");
         }
-        // 当前遍历或关闭的同步引擎实例。
         SynchronousMatchingEngine matcher = active[shardId];
         if (matcher == null) return;
         if (matcherFailure.get() == null) matcher.stateHashReport();
@@ -1751,9 +1543,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 按确定性顺序执行控制撤单需要的最小身份，不携带账户余额或撤单执行状态。
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param userId 请求或对账订单所属用户号
-     * @param instrumentId 外部永久数字品种字符串
      */
     public record CancellationOrder(long orderId, long userId, int symbolId) {
         public CancellationOrder(long orderId, long userId, String instrumentId) {
@@ -1773,14 +1562,12 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 从非空模块列表读取最大原生持久化序号；空列表明确抛异常，不据此递增业务证据序号。
-     * @param modules 需要读取最大原生持久化序号的非空模块列表
      */
     private static long maxMatcherSequence(List<InMemorySerializationProcessor.SerializedModule> modules) {
         if (modules.isEmpty()) throw new java.util.NoSuchElementException("modules is empty");
         // 已扫描模块中的最大原生持久化序号。
         long max = Long.MIN_VALUE;
-        for (/* 当前遍历数组或模块列表的下标。 */ int i = 0; i < modules.size(); i++) {
-            // 当前模块保存的原生持久化序号。
+        for (int i = 0; i < modules.size(); i++) {
             long seq = modules.get(i).sequence();
             if (seq > max) {
                 max = seq;
@@ -1797,8 +1584,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 要求委托存在且全局分片编号非负；编号上界由组装方拓扑保证，包装器不另检查。
-     * @param delegate 原序列化处理器实例
-     * @param shardId 全局撮合分片编号
      */
     ShardSerializationProcessor(ISerializationProcessor delegate, int shardId) {
         if (delegate == null || shardId < 0) throw new IllegalArgumentException("invalid shard serializer");
@@ -1808,7 +1593,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 撮合路由模块必须使用本地实例零，转换为本包装器全局分片号；其他模块类型保留原实例编号。
-     * @param type 当前序列化模块类型
      * @param localInstance 原引擎给出的本地模块实例编号，撮合模块必须为零
      */
     private int globalInstance(SerializedModuleType type, int localInstance) {
@@ -1822,11 +1606,6 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 先映射当前模块实例编号，再把同一快照、水位、时间和写入器交给原处理器，返回委托写入结果。
      * @param snapshotId 本次模块所属快照编号
-     * @param sequence 原引擎模块保存的序号水位
-     * @param timestampNs 原模块记录时间，纳秒
-     * @param type 当前序列化模块类型
-     * @param instanceId 待映射的本地模块实例编号
-     * @param writer 原模块内容写入函数
      */
     @Override
     public boolean storeData(long snapshotId, long sequence, long timestampNs, SerializedModuleType type,
@@ -1839,8 +1618,6 @@ public final class OrderBookEngine implements AutoCloseable {
      * 按同一实例映射规则读取模块，业务对象解析函数原样交给委托。
      * @param <T> 模块载荷恢复出的业务对象类型
      * @param snapshotId 本次模块所属快照编号
-     * @param type 当前序列化模块类型
-     * @param instanceId 待映射的本地模块实例编号
      * @param reader 从模块字节恢复业务对象的函数
      */
     @Override
@@ -1852,8 +1629,6 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 按同一实例映射规则向委托检查模块是否存在，避免检查本地零号造成跨分片混淆。
      * @param snapshotId 本次模块所属快照编号
-     * @param type 当前序列化模块类型
-     * @param instanceId 待映射的本地模块实例编号
      */
     @Override
     public boolean checkSnapshotExists(long snapshotId, SerializedModuleType type, int instanceId) {
@@ -1862,17 +1637,12 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 把原命令、日志序号和批次结束标记原样委托，不在此复制命令或重排日志。
-     * @param cmd 要写入原引擎日志的命令
-     * @param dSeq 原处理器使用的日志序号
-     * @param eob 是否本批次最后一条日志命令
      */
     @Override public void writeToJournal(OrderCommand cmd, long dSeq, boolean eob) throws IOException {
         delegate.writeToJournal(cmd, dSeq, eob);
     }
     /**
      * 把原启用序号和引擎 API 交给委托，日志启用边界沿用原处理器。
-     * @param afterSeq 交给委托的日志启用序号边界
-     * @param api 接收日志回放命令的原引擎 API
      */
     @Override public void enableJournaling(long afterSeq, ExchangeApi api) {
         delegate.enableJournaling(afterSeq, api);
@@ -1886,9 +1656,6 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 把指定快照及序号范围交给委托分段回放，范围包含规则由原处理器决定。
      * @param snapshotId 本次模块所属快照编号
-     * @param seqFrom 分段回放起始序号，边界规则沿用委托
-     * @param seqTo 分段回放结束序号，边界规则沿用委托
-     * @param api 接收日志回放命令的原引擎 API
      */
     @Override public void replayJournalStep(long snapshotId, long seqFrom, long seqTo, ExchangeApi api) {
         delegate.replayJournalStep(snapshotId, seqFrom, seqTo, api);
@@ -1896,7 +1663,6 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 按初始状态配置回放委托日志，并返回其报告的回放序号。
      * @param initialState 全量回放使用的快照及启动状态配置
-     * @param api 接收日志回放命令的原引擎 API
      */
     @Override public long replayJournalFull(InitialStateConfiguration initialState, ExchangeApi api) {
         return delegate.replayJournalFull(initialState, api);
@@ -1904,7 +1670,6 @@ public final class OrderBookEngine implements AutoCloseable {
     /**
      * 由委托完成全量日志回放后启用日志；保留原接口方法名称和行为。
      * @param initialState 全量回放使用的快照及启动状态配置
-     * @param api 接收日志回放命令的原引擎 API
      */
     @Override public void replayJournalFullAndThenEnableJouraling(
             InitialStateConfiguration initialState, ExchangeApi api) {
@@ -1932,7 +1697,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 以零下限和从控制分片到各撮合分片的全零进度创建新证据账本。
-     * @param topology 包含撮合分片数量的有效 Lane 拓扑
      */
     MatcherEvidenceLedger(LaneTopology topology) {
         if (topology == null) throw new IllegalArgumentException("matcher topology is required");
@@ -1946,9 +1710,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 按拓扑创建留有间隔的序号数组，恢复每个分片已发布进度，已发号位置取给定下限与原进度较大值；原生序号数组从零开始。输入进度可以不按编号排列，但分片必须齐全且不能重复。
-     * @param topology 包含撮合分片数量的有效 Lane 拓扑
      * @param sequenceFloor 仅恢复发号数组使用的非负下限，不直接替换各分片已发布进度
-     * @param progress 控制分片及所有撮合分片的完整进度列表
      */
     MatcherEvidenceLedger(LaneTopology topology, long sequenceFloor, List<ShardProgress> progress) {
         if (topology == null || sequenceFloor < 0 || progress == null
@@ -1969,7 +1731,6 @@ public final class OrderBookEngine implements AutoCloseable {
             int index = index(shard.matcherShardId());
             if (restored[index]) throw new IllegalArgumentException("duplicate matcher shard progress");
             restored[index] = true;
-            // 当前逻辑分片在留间隔数组中的实际偏移。
             int offset = offset(index);
             shardSequences[offset] = shard.matcherSequence();
             issuedSequences[offset] = Math.max(sequenceFloor, shard.matcherSequence());
@@ -1984,9 +1745,7 @@ public final class OrderBookEngine implements AutoCloseable {
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      */
     long nextSequence(int matcherShardId) {
-        // 当前逻辑分片在留间隔数组中的实际偏移。
         int offset = offset(index(matcherShardId));
-        // 在当前已发号值上精确加一后的新序号。
         long next = Math.incrementExact((long) LONGS.getAcquire(issuedSequences, offset));
         LONGS.setRelease(issuedSequences, offset, next);
         return next;
@@ -1994,8 +1753,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 按实际订单簿分片严格推进本轮原生序号，用于控制命令中已发生的原生调用；不改变业务证据发布进度。
-     * @param shardId 此次实际原生控制调用所属的订单簿分片
-     * @param nativeSequence 本次要严格推进的原生 exchange-core 序号
      */
     void recordControlNative(int shardId, long nativeSequence) {
         advanceStrictly(shardNativeSequences, index(shardId), nativeSequence,
@@ -2004,10 +1761,7 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 聚合控制撤单已经逐项登记过原生序号；这里只推进控制分片的业务证据，再绑定原命令身份。
-     * @param coreSequence 控制命令的 Core 序号
-     * @param commandId 原命令非空 UUID
      * @param sequence 要发布的控制业务序号，必须严格大于原已发布值
-     * @param result 已聚合的控制结果或合成结果
      */
     OrderMatchingResult.Control bindControl(long coreSequence, java.util.UUID commandId,
                                    long sequence, OrderMatchingResult.Control result) {
@@ -2020,14 +1774,8 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 检查结果和目标非空，正原生序号先按实际订单簿分片推进，再推进业务证据分片并向现有结算事件直接发布原生成交或撤单结果。失败不自动回退已写进度。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandIdMsb 原命令 UUID 高六十四位
-     * @param commandIdLsb 原命令 UUID 低六十四位
-     * @param orderId 该事实关联的订单编号
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
-     * @param result 要绑定或发布的非空原生结果/普通结果对象
      * @param target 当前命令持有租约的原 TradeSettlement，不新建账户结算状态
      */
     exchange.core2.core.common.MatcherResult publishNative(
@@ -2037,9 +1785,7 @@ public final class OrderBookEngine implements AutoCloseable {
             com.surprising.aeron.service.settlement.TradeSettlement target) {
         if (result == null || target == null)
             throw new IllegalArgumentException("native matcher publication is required");
-        // 本次业务证据分片的数组逻辑下标。
         int matcherIndex = index(matcherShardId);
-        // 当前结果携带的原生序号，仅正数进入严格原生进度检查。
         long nativeSequence = result.sequence();
         if (nativeSequence > 0) {
             advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
@@ -2055,15 +1801,8 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 检查撤旧、放新结果和目标非空，以最终放新结果的原生序号推进实际分片，再推进业务证据并把两结果交给现有事件。不在此单独登记撤旧结果的原生序号，也不读取 aeronTimestamp，后续失败不回退已写序号。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandIdMsb 原命令 UUID 高六十四位
-     * @param commandIdLsb 原命令 UUID 低六十四位
-     * @param orderId 该事实关联的订单编号
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
-     * @param cancellation 替换操作中已经发生的撤旧原生结果
-     * @param result 要绑定或发布的非空原生结果/普通结果对象
      * @param target 当前命令持有租约的原 TradeSettlement，不新建账户结算状态
      */
     exchange.core2.core.common.MatcherResult publishReplacement(
@@ -2074,7 +1813,6 @@ public final class OrderBookEngine implements AutoCloseable {
             com.surprising.aeron.service.settlement.TradeSettlement target) {
         if (cancellation == null || result == null || target == null)
             throw new IllegalArgumentException("native matcher replacement publication is required");
-        // 当前结果携带的原生序号，仅正数进入严格原生进度检查。
         long nativeSequence = result.sequence();
         if (nativeSequence > 0) {
             advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
@@ -2090,15 +1828,8 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 检查结果和目标非空，推进正原生序号及业务证据序号，再将结果和批次下标交给现有事件；本方法不额外检查目标批次下标，也不读取 aeronTimestamp，失败不回退已写序号。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandIdMsb 原命令 UUID 高六十四位
-     * @param commandIdLsb 原命令 UUID 低六十四位
-     * @param orderId 该事实关联的订单编号
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
-     * @param result 要绑定或发布的非空原生结果/普通结果对象
-     * @param index 逻辑数组下标，或 publishBatchItem 中目标批次子项下标
      * @param target 当前命令持有租约的原 TradeSettlement，不新建账户结算状态
      */
     exchange.core2.core.common.MatcherResult publishBatchItem(
@@ -2108,7 +1839,6 @@ public final class OrderBookEngine implements AutoCloseable {
             com.surprising.aeron.service.settlement.TradeSettlement target) {
         if (result == null || target == null)
             throw new IllegalArgumentException("native matcher batch publication is required");
-        // 当前结果携带的原生序号，仅正数进入严格原生进度检查。
         long nativeSequence = result.sequence();
         if (nativeSequence > 0) {
             advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
@@ -2124,13 +1854,8 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 要求拒绝码非空且目标存在，只推进业务证据分片，再向现有事件发布拒绝身份；不推进原生序号数组。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandIdMsb 原命令 UUID 高六十四位
-     * @param commandIdLsb 原命令 UUID 低六十四位
-     * @param orderId 该事实关联的订单编号
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param resultCode 要保存的非空拒绝结果码
      * @param target 当前命令持有租约的原 TradeSettlement，不新建账户结算状态
      */
     void publishRejection(
@@ -2153,7 +1878,6 @@ public final class OrderBookEngine implements AutoCloseable {
         // 本次快照或初始零进度的列表构建器，返回前固定列表。
         ArrayList<ShardProgress> progress = new ArrayList<>(shardCount);
         for (/* 当前逻辑分片的零起点下标，负一控制分片映射到零。 */ int index = 0; index < shardCount; index++) {
-            // 当前逻辑分片在留间隔数组中的实际偏移。
             int offset = offset(index);
             progress.add(new ShardProgress(index - 1,
                     (long) LONGS.getAcquire(shardSequences, offset)));
@@ -2174,15 +1898,9 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 在单所有者约定下读取原值，要求新值严格更大，再以 release 发布；不是 CAS 重试，也不替调用方协调两个线程同时写同一分片。
-     * @param values 指定分片的原生或业务序号数组
-     * @param index 逻辑数组下标，或 publishBatchItem 中目标批次子项下标
-     * @param next 本次期望写入的严格递增序号
-     * @param message 序号倒退或重复时使用的错误说明
      */
     private static void advanceStrictly(long[] values, int index, long next, String message) {
-        // 当前逻辑分片在留间隔数组中的实际偏移。
         int offset = offset(index);
-        // 从对应数组以 acquire 取得的已发布原值。
         long previous = (long) LONGS.getAcquire(values, offset);
         if (next <= previous) {
             throw new IllegalStateException(message + " shard=" + (index - 1)
@@ -2195,7 +1913,6 @@ public final class OrderBookEngine implements AutoCloseable {
 
     /**
      * 把逻辑分片下标乘十六转换为实际数组偏移，给相邻分片写入留间隔。
-     * @param index 逻辑数组下标，或 publishBatchItem 中目标批次子项下标
      */
     private static int offset(int index) {
         return index * CACHE_LINE_LONGS;

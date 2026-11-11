@@ -48,7 +48,6 @@ public final class TradeSettlement implements
     public interface MatcherCompletionRoute {
         /**
          * 由事件发布方通知原 Matcher 传输上下文释放本分片提交占用，仍须由事件发布租约保护后续 Lane 投递。
-         * @param matcherShard 本代结果或释放回调对应的 Matcher 分片编号
          */
         void releaseMatcherSubmission(int matcherShard);
     }
@@ -175,11 +174,10 @@ public final class TradeSettlement implements
         private int activeSize;
         /**
          * 按所需容量预创建计划和各元数据列；原生结果命令槽按需建立，不为每一项提前创建。
-         * @param size 本次批量存储需要的容量或有效前缀数量
          */
         BatchStorage(int size) {
             plans = new TradeSettlement.Plan[size];
-            for (/* 创建每个计划槽时使用的有效数组下标。 */ int i = 0; i < size; i++) plans[i] = new TradeSettlement.Plan();
+            for (int i = 0; i < size; i++) plans[i] = new TradeSettlement.Plan();
             instruments = new CoreInstrument[size];
             admittedOrders = new Order[size];
             cancellationOrderIds = new long[size];
@@ -188,7 +186,6 @@ public final class TradeSettlement implements
         }
         /**
          * 设置本次准备会使用的有效前缀，必须为正且不超过已有计划容量。
-         * @param size 本次批量存储需要的容量或有效前缀数量
          */
         void activate(int size) {
             if (size <= 0 || size > plans.length) throw new IllegalArgumentException("invalid active batch size");
@@ -199,7 +196,7 @@ public final class TradeSettlement implements
          */
         void clear() {
             metadataSlots.clear();
-            for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; index < activeSize; index++) {
+            for (int index = 0; index < activeSize; index++) {
                 plans[index].clearReferences();
                 instruments[index] = null;
                 admittedOrders[index] = null;
@@ -213,12 +210,10 @@ public final class TradeSettlement implements
     }
     /**
      * 在当前结果尚未发布且下标有效时借用事件独占的原生命令结果槽，首次使用按需创建；消费者结束前不得改作另一条命令。
-     * @param index 本代有效计划或原生成交结果槽的下标
      */
     public exchange.core2.core.common.MatcherResult nativeResultSlot(int index) {
         if (batchStorage == null || index < 0 || index >= state.batchPlanCount || directPublished)
             throw new IllegalStateException("native result slot is not writable");
-        // 当前项已经创建或需要按需创建的事件自有原生命令槽。
         var result = batchStorage.nativeResults[index];
         if (result == null) batchStorage.nativeResults[index] = result = exchange.core2.core.common.MatcherResult.commandSlot();
         return result;
@@ -237,7 +232,6 @@ public final class TradeSettlement implements
 
     /**
      * 事件尚未激活时准备批量存储，容量不足才重建；设置本次有效前缀，调用方仍须确保没有旧代消费者。
-     * @param size 本次批量存储需要的容量或有效前缀数量
      */
     public BatchStorage batchStorage(int size) {
         if (state.batchPlanCount != 0) throw new IllegalStateException("settlement event is still active");
@@ -250,15 +244,6 @@ public final class TradeSettlement implements
 
     /**
      * 准备一代直达事件，默认以同一 Core 序号作为最终 Lane 提交序号，委托完整入口登记租约输入。
-     * @param sequence 当前事实的 Core 序号，简化入口也用它推进最终 Lane 水位
-     * @param laneMask 准备时已知的账户 Lane 路由位图
-     * @param timestamp 复制日志中的业务时间或本次触发业务时间
-     * @param position 复制日志中的命令位置
-     * @param commandId 本代复制命令 UUID
-     * @param shard 本代固定的 Matcher 分片编号
-     * @param runtime 事件关联的交易运行时
-     * @param identities 本代运行时身份字典
-     * @param count 本代批量事件的有效计划项数
      * @param cancellations 准入已授权的前置撤单编号，只读保留到本代事件结束
      * @param target 在事件租约内接收最终订单值的命令目标，可为空
      */
@@ -272,16 +257,7 @@ public final class TradeSettlement implements
 
     /**
      * 检查序号、时间、路由及有效数量，重置本代准入和发布状态，保存命令证据并借用变化缓冲。顺序批次可用零提交序号先应用本项事实，整批终态再统一推进水位；这里不投递 Lane 队列。
-     * @param coreSequence 需要与本代事件身份一致的 Core 证据序号
      * @param commitSequence 最终账户提交序号，中间批次项可用零表示本段不推进水位
-     * @param laneMask 准备时已知的账户 Lane 路由位图
-     * @param timestamp 复制日志中的业务时间或本次触发业务时间
-     * @param position 复制日志中的命令位置
-     * @param commandId 本代复制命令 UUID
-     * @param shard 本代固定的 Matcher 分片编号
-     * @param runtime 事件关联的交易运行时
-     * @param identities 本代运行时身份字典
-     * @param count 本代批量事件的有效计划项数
      * @param cancellations 准入已授权的前置撤单编号，只读保留到本代事件结束
      * @param target 在事件租约内接收最终订单值的命令目标，可为空
      */
@@ -320,7 +296,6 @@ public final class TradeSettlement implements
 
     /**
      * Owner 在预约 Matcher 发布前选定撤单业务及用户，后续 Lane 只应用 Matcher 接受的撤单。
-     * @param userId 当前撤单、普通准入或改单所属用户编号
      */
     public void cancellation(long userId) {
         if (state.batchPlanCount == 0 || state.dispatched || directPublished || userId <= 0)
@@ -331,8 +306,6 @@ public final class TradeSettlement implements
 
     /**
      * 在单项事件发布前保存源触发单和业务触发时间，后续按 Matcher 结果生成成功或失败终态；每代只可准备一次。
-     * @param trigger 触发子订单所关联的源触发单状态
-     * @param timestamp 复制日志中的业务时间或本次触发业务时间
      */
     public void triggerCompletion(com.surprising.aeron.model.CoreTriggerOrderState trigger,
                                   long timestamp) {
@@ -345,8 +318,6 @@ public final class TradeSettlement implements
 
     /**
      * 在单项事件预约发布前保存改单准入输入及新预留资产编号，供所属 Lane 原位执行。
-     * @param admission 已经校验的改单输入及原单身份
-     * @param assetId 改单新预留所用资产编号
      */
     public void replacement(com.surprising.aeron.service.order.OrderCommand.ReplacementAdmission admission, int assetId) {
         if (state.dispatched || directPublished || state.batchPlanCount != 1 || admission == null)
@@ -373,12 +344,10 @@ public final class TradeSettlement implements
     public long coreSequence() { return state.directCoreSequence; }
     /**
      * 单 Matcher 发布方为实际路由中的 Lane 登记一次投递，拒绝越界、未预约、非路由和重复投递。
-     * @param laneId 当前操作的账户 Lane 编号
      */
     public void markLaneQueued(int laneId) {
         if (state.batchPlanCount == 0 || !state.dispatched || laneId < 0 || laneId >= Long.SIZE)
             throw new IllegalStateException("invalid direct settlement Lane queue");
-        // 当前账户 Lane 在位图中的单个位。
         long bit = 1L << laneId;
         if ((routedLaneMask & bit) == 0 || (state.queuedLaneMask & bit) != 0) {
             throw new IllegalStateException("direct settlement Lane queue is outside its route");
@@ -413,7 +382,6 @@ public final class TradeSettlement implements
     /**
      * 在已登记普通下单准入路由的事件中保存不可变订单输入与用户，预留回执须匹配该订单编号。
      * @param order 普通下单已经解析的不可变准入订单输入
-     * @param userId 当前撤单、普通准入或改单所属用户编号
      */
     public void admissionOrder(OrderCommand.ResolvedPlaceOrder order, long userId) {
         if (state.batchPlanCount == 0 || !state.admissionRequired || order == null || userId <= 0) {
@@ -427,7 +395,6 @@ public final class TradeSettlement implements
     /**
      * Matcher 校验 Lane 固定收据槽的订单身份，只保存接受标记和结果码，最后通过 volatile 标记发布回执；同代不允许重复发布。
      * @param reservationId 准入回执中的预留编号，必须等于本代准入订单编号
-     * @param accepted 账户准入是否接受本单
      * @param resultCode 准入编码或合成拒绝业务码，类型及约束以对应入口为准
      */
     public void admissionReceipt(long reservationId, boolean accepted, int resultCode) {
@@ -471,12 +438,6 @@ public final class TradeSettlement implements
     /**
      * 校验单项结果的命令、序号、分片及订单证据，按撤单、普通准入或已有订单构建计划；保留已成功前置撤单，触发单补终态，最后准备实际路由和发布。构建异常登记为直达故障后继续抛出。
      * @param result 当前需要保存的原生 Matcher 结果，借用有效期受事件租约限制
-     * @param coreSequence 需要与本代事件身份一致的 Core 证据序号
-     * @param commandIdMostSignificantBits Matcher 证据携带的命令 UUID 高六十四位
-     * @param commandIdLeastSignificantBits Matcher 证据携带的命令 UUID 低六十四位
-     * @param orderId 需要核对证据或记录已接受撤单的订单编号
-     * @param matcherSequence 当前 Matcher 结果证据序号，批量项要求严格递增
-     * @param matcherShard 本代结果或释放回调对应的 Matcher 分片编号
      */
     public void publishDirectNativeResult(exchange.core2.core.common.MatcherResult result,
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
@@ -532,13 +493,6 @@ public final class TradeSettlement implements
     /**
      * 严格按项下标和递增 Matcher 序号保存批量原生事实，首项承载已成功前置撤单及汇总接口的首项结果；每项记录接受标记，全部有效项齐备后才结束发布准备。
      * @param result 当前需要保存的原生 Matcher 结果，借用有效期受事件租约限制
-     * @param index 本代有效计划或原生成交结果槽的下标
-     * @param coreSequence 需要与本代事件身份一致的 Core 证据序号
-     * @param commandIdMostSignificantBits Matcher 证据携带的命令 UUID 高六十四位
-     * @param commandIdLeastSignificantBits Matcher 证据携带的命令 UUID 低六十四位
-     * @param orderId 需要核对证据或记录已接受撤单的订单编号
-     * @param matcherSequence 当前 Matcher 结果证据序号，批量项要求严格递增
-     * @param matcherShard 本代结果或释放回调对应的 Matcher 分片编号
      */
     public void publishDirectNativeBatchItem(exchange.core2.core.common.MatcherResult result,
             int index, long coreSequence,
@@ -581,14 +535,7 @@ public final class TradeSettlement implements
 
     /**
      * 关联原单撤单与新单结果，区分新单接受、post-only 拒绝和其他部分变化；记录允许保留的原单撤单，未下出的新单从变化身份中移除，随后发布完整结算事实。
-     * @param state.cancellation 替换原单撤单的原生结果，区别于新单原生结果
      * @param result 当前需要保存的原生 Matcher 结果，借用有效期受事件租约限制
-     * @param coreSequence 需要与本代事件身份一致的 Core 证据序号
-     * @param commandIdMostSignificantBits Matcher 证据携带的命令 UUID 高六十四位
-     * @param commandIdLeastSignificantBits Matcher 证据携带的命令 UUID 低六十四位
-     * @param orderId 需要核对证据或记录已接受撤单的订单编号
-     * @param matcherSequence 当前 Matcher 结果证据序号，批量项要求严格递增
-     * @param matcherShard 本代结果或释放回调对应的 Matcher 分片编号
      */
     public void publishDirectNativeReplacement(
             exchange.core2.core.common.MatcherResult cancelResult,
@@ -635,12 +582,6 @@ public final class TradeSettlement implements
     /**
      * 为普通下单准入拒绝校验命令证据并构造无原生成交的拒绝计划，使已登记账户路径能够交回回执，不创建订单后值。
      * @param resultCode 准入编码或合成拒绝业务码，类型及约束以对应入口为准
-     * @param coreSequence 需要与本代事件身份一致的 Core 证据序号
-     * @param commandIdMostSignificantBits Matcher 证据携带的命令 UUID 高六十四位
-     * @param commandIdLeastSignificantBits Matcher 证据携带的命令 UUID 低六十四位
-     * @param orderId 需要核对证据或记录已接受撤单的订单编号
-     * @param matcherSequence 当前 Matcher 结果证据序号，批量项要求严格递增
-     * @param matcherShard 本代结果或释放回调对应的 Matcher 分片编号
      */
     public void publishDirectRejection(String resultCode, long coreSequence,
             long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
@@ -674,18 +615,15 @@ public final class TradeSettlement implements
 
     /**
      * 准入回执已复制且接受后，将 Owner 已授权撤单与 Lane 新授权撤单合并去重并按编号排序，保存为本代只读授权列表；不表示这些撤单已经成功。
-     * @param orderIds 本次准入授权或待读取的撤单编号列表
      */
     public void addAdmissionCancellations(java.util.List<Long> orderIds) {
         if (state.batchPlanCount == 0 || directPublished || !state.admissionResolved || !state.admissionAccepted)
             throw new IllegalStateException("place admission cancellations are not ready");
         if (orderIds.isEmpty()) return;
-        // 本次合并 Owner 与账户准入授权撤单的临时原语去重集合。
         var combined = new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
-        for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; index < state.authorizedCancellations.size(); index++)
+        for (int index = 0; index < state.authorizedCancellations.size(); index++)
             combined.add(cancellationIdAt(state.authorizedCancellations, index));
-        for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; index < orderIds.size(); index++) {
-            // 当前授权、取消或发布最终值的原语订单编号。
+        for (int index = 0; index < orderIds.size(); index++) {
             long orderId = cancellationIdAt(orderIds, index);
             if (orderId <= 0) throw new IllegalArgumentException("invalid admission cancellation order");
             combined.add(orderId);
@@ -715,8 +653,6 @@ public final class TradeSettlement implements
 
     /**
      * 按下标读取撤单编号，专用原语列表直接读取 long，普通列表走既有装箱接口。
-     * @param orderIds 本次准入授权或待读取的撤单编号列表
-     * @param index 本代有效计划或原生成交结果槽的下标
      */
     private static long cancellationIdAt(java.util.List<Long> orderIds, int index) {
         return orderIds instanceof com.surprising.aeron.support.collection.ImmutableLongArrayList /* 已经识别为专用原语只读列表的撤单编号视图。 */ primitive
@@ -725,10 +661,8 @@ public final class TradeSettlement implements
 
     /**
      * 结果发布前记录一项已经接受的授权撤单，必要时扩容自有数组；这里检查授权但不另行去重，调用方保证记录顺序。
-     * @param orderId 需要核对证据或记录已接受撤单的订单编号
      */
     public void recordDirectPreCancellation(long orderId) {
-        // 当前实际成功撤单编号是否属于本代授权列表。
         boolean authorized = state.authorizedCancellations instanceof com.surprising.aeron.support.collection.ImmutableLongArrayList /* 已经识别为专用原语只读列表的撤单编号视图。 */ primitive
                 ? primitive.containsLong(orderId) : state.authorizedCancellations.contains(orderId);
         if (state.batchPlanCount == 0 || directPublished || orderId <= 0 || !authorized)
@@ -754,8 +688,8 @@ public final class TradeSettlement implements
      */
     private void finishDirectPublication() {
         // 所有有效计划合并得到的实际业务 Lane 位图。
-        long actualLanes = 0; /* 所有有效计划需要准备的订单变化槽总数，以精确加法累计。 */ int orders = 0;
-        for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; index < state.batchPlanCount; index++) {
+        long actualLanes = 0; int orders = 0;
+        for (int index = 0; index < state.batchPlanCount; index++) {
             actualLanes |= batchStorage.plans[index].requiredLaneMask();
             orders = Math.addExact(orders, batchStorage.plans[index].orderCount());
         }
@@ -801,8 +735,6 @@ public final class TradeSettlement implements
 
     /**
      * 由 Matcher 管线保存已有传输上下文的释放回调与分片，避免每命令另建回调；同代不重复登记，发布后不能修改。
-     * @param route 复用已有 Matcher 传输上下文的占用释放回调
-     * @param matcherShard 本代结果或释放回调对应的 Matcher 分片编号
      */
     public void matcherCompletionRoute(MatcherCompletionRoute route, int matcherShard) {
         if (state.batchPlanCount == 0 || directPublished || state.matcherCompletionRoute != null || matcherShard < 0) {
@@ -816,7 +748,6 @@ public final class TradeSettlement implements
      * 先把释放回调及分片移到局部值并清除事件引用，再通知传输上下文释放占用，后续 Lane 投递仍受发布租约保护。
      */
     private void releaseMatcherCompletionBeforeSignal() {
-        // 从事件移到局部的原 Matcher 提交占用释放回调。
         MatcherCompletionRoute route = state.matcherCompletionRoute;
         // 与本次传输释放回调一起取出的 Matcher 分片编号。
         int shard = state.matcherCompletionShard;
@@ -892,8 +823,6 @@ public final class TradeSettlement implements
     }
     /**
      * 直接读取本代命令 UUID 的高低位进行比较，调用方须在有效事件代次内使用。
-     * @param most 命令 UUID 高六十四位
-     * @param least 命令 UUID 低六十四位
      */
     @Override public boolean nativeMatches(long most, long least) {
         return state.directCommandId == null ? most == 0 && least == 0
@@ -923,7 +852,6 @@ public final class TradeSettlement implements
 
     /**
      * 校验普通下单准入 Lane，并为活动事件设置一次需要准入回执的边界。
-     * @param laneId 当前操作的账户 Lane 编号
      */
     public void admissionRoute(int laneId) {
         if (state.batchPlanCount == 0 || state.admissionRequired || laneId < 0) {
@@ -992,9 +920,7 @@ public final class TradeSettlement implements
      */
     public void execute(AccountPartition lane) {
         requireDirectResult();
-        // 当前执行或检查的账户 Lane 编号。
         int laneId = lane.laneId();
-        // 当前执行账户 Lane 的单个位图。
         long laneMask = 1L << laneId;
         if ((requiredLaneMask & laneMask) == 0) {
             if ((routedLaneMask & laneMask) != 0) {
@@ -1015,10 +941,9 @@ public final class TradeSettlement implements
         }
         runtime.enterMatcherSettlementScope(lane, changes());
         try {
-            // 当前账户独占的财务差额，或清理及合并过程中借用的财务槽。
             RuntimeTreasuryDelta delta = !treasuryTrades
                     ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
-            for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; index < state.batchPlanCount; index++) {
+            for (int index = 0; index < state.batchPlanCount; index++) {
                 // 本代有效前缀中当前需要由所属 Lane 应用的计划。
                 TradeSettlement.Plan batchPlan = batchStorage.plans[index];
                 if ((batchPlan.requiredLaneMask() & laneMask) == 0) continue;
@@ -1054,12 +979,10 @@ public final class TradeSettlement implements
      * @param lane 当前线程持有并执行账户工作的所属 Lane
      */
     private void publishCompletion(AccountPartition lane) {
-        // 当前执行或检查的账户 Lane 编号。
         int laneId = lane.laneId();
         // 发布完成前提前保存的运行时通知目标，完成位发布后只使用此局部引用。
         TradingAccountRuntime completionRuntime = runtime;
         lane.recordSettlementOperation();
-        // 该账户完成标记在间隔数组中的实际下标。
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");
@@ -1071,12 +994,6 @@ public final class TradeSettlement implements
     /**
      * 所属 Lane 先处理直接撤单或改单，再核对本地订单、应用已接受前置撤单、拒单或产品成交；完成待结算预留及准入值发布，最后写本 Lane 负责的触发终态。
      * @param lane 当前线程持有并执行账户工作的所属 Lane
-     * @param laneId 当前操作的账户 Lane 编号
-     * @param value 当前账户要应用的结算计划
-     * @param valueInstrument 本计划对应的规范币对对象
-     * @param valueBaseAssetId 本计划对应的基础资产编号
-     * @param valueQuoteAssetId 本计划对应的计价资产编号
-     * @param valueSettleAssetId 本计划对应的结算资产编号
      * @param delta 本 Lane 独占的系统财务差额槽，无成交时使用只读空值
      * @param admissionVersion 命令保存的准入订单值，可为空；最终权威后值从所属 Lane 读取
      */
@@ -1095,10 +1012,8 @@ public final class TradeSettlement implements
             if (!accepted()) return;
         }
         value.validateDirectLane(lane, runtime, identities, valueInstrument);
-        for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; state.replacement == null && index < value.preCancellationCount(); index++) {
-            // 当前授权、取消或发布最终值的原语订单编号。
+        for (int index = 0; state.replacement == null && index < value.preCancellationCount(); index++) {
             long orderId = value.preCancellationOrderId(index);
-            // 当前前置撤单编号在本 Lane 中的权威订单，仅开放时应用取消。
             Order order = lane.order(orderId);
             if (order != null && order.status() == CoreOrderStatus.OPEN) {
                 runtime.cancelOrderInLane(lane, order.userId(), order, -1, -1);
@@ -1124,7 +1039,6 @@ public final class TradeSettlement implements
     /**
      * 把本代准入用户、订单及预留的 Lane 最终值加入同一变化缓冲，包括没有成交的挂单；只在用户所属 Lane 执行，已有变化键按缓冲规则合并。
      * @param lane 当前线程持有并执行账户工作的所属 Lane
-     * @param value 当前账户要应用的结算计划
      * @param admissionVersion 命令保存的准入订单值，可为空；最终权威后值从所属 Lane 读取
      */
     private void publishAdmittedState(
@@ -1133,10 +1047,8 @@ public final class TradeSettlement implements
         Order admitted = admissionVersion == null ? value.admittedTaker() : admissionVersion;
         // 本事件是否持有已经接受的普通下单不可变准入输入。
         boolean eventAdmission = state.admissionRequired && state.admissionAccepted && state.admissionOrder != null;
-        // 当前要发布准入最终值或应用改单的用户编号。
         long userId = admitted != null ? admitted.userId()
                 : eventAdmission ? state.admissionUserId : value.activeUserId();
-        // 当前授权、取消或发布最终值的原语订单编号。
         long orderId = admitted != null ? admitted.orderId()
                 : eventAdmission ? state.admissionOrderId : value.takerOrderId();
         if ((admitted == null && !eventAdmission)
@@ -1149,11 +1061,9 @@ public final class TradeSettlement implements
     /**
      * 只在改单用户所属 Lane 核对原订单及用户版本，先执行已经接受的前置撤单；新单接受后准备客户身份、捕获余额前后值并放置新订单和预留，拒绝的新单不落账户。
      * @param lane 当前线程持有并执行账户工作的所属 Lane
-     * @param value 当前账户要应用的结算计划
      */
     private void applyReplacement(AccountPartition lane, TradeSettlement.Plan value) {
         if (lane.laneId() != runtime.accountLaneId(state.replacement.userId())) return;
-        // 当前要发布准入最终值或应用改单的用户编号。
         long userId = state.replacement.userId();
         // 改单原订单的 Lane 权威值，版本必须仍等于准入时记录。
         Order original = lane.order(state.replacement.originalOrderId());
@@ -1165,7 +1075,7 @@ public final class TradeSettlement implements
                     + (original == null ? "missing" : original.revision()) + '/'
                     + state.replacement.originalOrderRevision() + " user="
                     + (user == null ? "missing" : user.revision()) + '/' + state.replacement.userRevision());
-        for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; index < value.preCancellationCount(); index++)
+        for (int index = 0; index < value.preCancellationCount(); index++)
             runtime.cancelOrderInLane(lane, userId, value.preCancellationOrderId(index),
                     state.commitTimestamp, state.commitClusterPosition);
         if (!accepted()) return;
@@ -1173,7 +1083,6 @@ public final class TradeSettlement implements
         Order prepared = batchStorage.admittedOrders[0];
         if (lane.order(state.replacement.originalOrderId()).status() != CoreOrderStatus.CANCELED)
             throw new IllegalStateException("accepted replacement did not cancel original order");
-        // 在所属 Lane 准备得到的新订单客户身份原语键。
         long clientKey = RuntimeIdentityRegistry.clientKeyValue(
                 identities.prepareClientKeyInLane(lane, userId, prepared.clientOrderId()));
         runtime.accountRollback().captureBalanceBefore(lane, userId, state.replacementAssetId);
@@ -1188,36 +1097,31 @@ public final class TradeSettlement implements
 
     /**
      * 按实际参与 Lane 的紧凑顺序保留财务差额槽，容量不足才扩展；每次真实结果确定后清空所有保留槽，无成交复用也清空旧金额。
-     * @param laneMask 准备时已知的账户 Lane 路由位图
-     * @param trades 本代实际计划中是否存在成交
      */
     private void prepareTreasuryDeltas(long laneMask, boolean trades) {
         if (trades) {
             // 本代实际业务 Lane 数量，决定紧凑财务槽的有效前缀。
             int touchedLaneCount = Long.bitCount(laneMask);
-            // 当前事件已经保留的财务差额槽数组容量。
             int capacity = touchedLaneTreasuryDeltas == null ? 0 : touchedLaneTreasuryDeltas.length;
             if (capacity < touchedLaneCount) {
                 touchedLaneTreasuryDeltas = capacity == 0
                         ? new RuntimeTreasuryDelta[touchedLaneCount]
                         : java.util.Arrays.copyOf(touchedLaneTreasuryDeltas, touchedLaneCount);
-                for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = capacity; index < touchedLaneCount; index++) {
+                for (int index = capacity; index < touchedLaneCount; index++) {
                     touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
                 }
             }
         }
         // 实际事实确定后每代清空一次，包括上一代有成交而本代无成交的复用。
         if (touchedLaneTreasuryDeltas != null)
-            for (RuntimeTreasuryDelta /* 当前账户独占的财务差额，或清理及合并过程中借用的财务槽。 */ delta : touchedLaneTreasuryDeltas) delta.clear();
+            for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
     }
 
     /**
      * 只遍历本代有效计划前缀，任一项有成交则返回 true，不读取保留容量中的旧尾部。
-     * @param plans 本事件保留的结算计划数组，仅遍历有效前缀
-     * @param planCount 本代有效计划项数
      */
     private static boolean hasTrade(TradeSettlement.Plan[] plans, int planCount) {
-        for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; index < planCount; index++) if (plans[index].tradeCount() != 0) return true;
+        for (int index = 0; index < planCount; index++) if (plans[index].tradeCount() != 0) return true;
         return false;
     }
 
@@ -1226,12 +1130,9 @@ public final class TradeSettlement implements
      */
     public long completedLaneMask() {
         if (!ready()) return 0;
-        // 本次尚未观察、检查或内联执行的路由 Lane 位图。
         long remaining = routedLaneMask() & ~state.observedCompletedLaneMask;
         while (remaining != 0) {
-            // 当前执行或检查的账户 Lane 编号。
             int laneId = Long.numberOfTrailingZeros(remaining);
-            // 当前账户 Lane 在位图中的单个位。
             long bit = 1L << laneId;
             remaining &= ~bit;
             if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) != 0)
@@ -1245,10 +1146,8 @@ public final class TradeSettlement implements
      */
     public void ensureLanesExecuted() {
         if (!ready() || runtime == null || runtime.accountLanesStarted() || !state.dispatched) return;
-        // 本次尚未观察、检查或内联执行的路由 Lane 位图。
         long remaining = routedLaneMask() & ~completedLaneMask();
         while (remaining != 0) {
-            // 当前执行或检查的账户 Lane 编号。
             int laneId = Long.numberOfTrailingZeros(remaining);
             remaining &= remaining - 1;
             if ((state.queuedLaneMask & (1L << laneId)) == 0) {
@@ -1280,7 +1179,6 @@ public final class TradeSettlement implements
     public int planCount() { return state.batchPlanCount; }
     /**
      * 校验下标位于本代有效项前缀后借用对应计划，不暴露旧容量尾部。
-     * @param index 本代有效计划或原生成交结果槽的下标
      */
     public TradeSettlement.Plan plan(int index) {
         if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
@@ -1321,12 +1219,10 @@ public final class TradeSettlement implements
      */
     private RuntimeTreasuryDelta mergeTreasuryDeltas() {
         if (!treasuryTrades) return EMPTY_TREASURY_DELTA;
-        // 用于原位归集本代 Lane 财务差额的首个参与槽，没有新建资金镜像。
         RuntimeTreasuryDelta aggregate = null;
         // 本代实际业务 Lane 数量，决定紧凑财务槽的有效前缀。
         int touchedLaneCount = Long.bitCount(requiredLaneMask);
-        for (/* 当前准备、应用、清理或合并的有效计划、结果或财务槽下标。 */ int index = 0; index < touchedLaneCount; index++) {
-            // 当前账户独占的财务差额，或清理及合并过程中借用的财务槽。
+        for (int index = 0; index < touchedLaneCount; index++) {
             RuntimeTreasuryDelta delta = touchedLaneTreasuryDeltas[index];
             if (aggregate == null) aggregate = delta;
             else aggregate.merge(delta);
@@ -1390,10 +1286,8 @@ public final class TradeSettlement implements
 
     /**
      * 把实际业务 Lane 编号转换为按参与位从低到高紧凑排列的财务槽下标，非参与 Lane 拒绝。
-     * @param laneId 当前操作的账户 Lane 编号
      */
     private int laneSlot(int laneId) {
-        // 当前需要映射到紧凑财务槽的账户 Lane 单个位。
         long laneBit = 1L << laneId;
         if ((requiredLaneMask & laneBit) == 0) {
             throw new IllegalStateException("matcher fact has no treasury slot for lane " + laneId);
@@ -1404,17 +1298,15 @@ public final class TradeSettlement implements
 
     /**
      * 清空 Owner 观察缓存和完成缓存，按 Lane 数准备带间隔的完成数组；容量相同时只重置各 Lane 的有效完成位置。
-     * @param laneCount 运行时拓扑中的账户 Lane 数量
      */
     private void resetCompletions(int laneCount) {
         state.observedCompletedLaneMask = 0;
         state.ownerObservedComplete = false;
-        // 按账户 Lane 数乘完成位间隔得到的数组长度，使用精确乘法检查。
         int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
         if (completedLanes == null || completedLanes.length != length) {
             completedLanes = new long[length];
         } else {
-            for (/* 当前执行或检查的账户 Lane 编号。 */ int laneId = 0; laneId < laneCount; laneId++) {
+            for (int laneId = 0; laneId < laneCount; laneId++) {
                 completedLanes[laneId * CACHE_LINE_LONGS] = 0L;
             }
         }
@@ -1431,7 +1323,6 @@ public static final class Plan {
     private boolean rejectedTaker;
     /**
      * 保存撮合拒单标记并返回本计划；已有成交时禁止标记拒绝，防止用拒单覆盖已发生的成交事实。
-     * @param rejected 是否要求本计划按 taker 拒绝处理
      */
     public Plan rejectTaker(boolean rejected) {
         if (rejected && tradeCount != 0) throw new IllegalArgumentException("rejected taker cannot contain trades");
@@ -1516,11 +1407,8 @@ public static final class Plan {
 
     /**
      * 由已准入运行时订单及原生 MatcherResult 构建直达计划，按订单剩余量校验成交；命令序号等外层证据由事件边界核对。
-     * @param sequence 当前事实的 Core 序号
      * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
      * @param instrument 当前事实的规范币对对象，必须与订单输入一致
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     void buildDirectNative(long sequence, Order taker, CoreInstrument instrument,
                            exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
@@ -1532,12 +1420,8 @@ public static final class Plan {
 
     /**
      * 由普通下单不可变准入值构建原生事实，使用完整准入数量，保留无需跨线程读取账户的校验字段。
-     * @param sequence 当前事实的 Core 序号
-     * @param userId 当前主动、撤单或持仓身份所属用户
      * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
      * @param instrument 当前事实的规范币对对象，必须与订单输入一致
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     void buildDirectNative(long sequence, long userId, OrderCommand.ResolvedPlaceOrder taker, CoreInstrument instrument,
                            exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
@@ -1550,16 +1434,8 @@ public static final class Plan {
 
     /**
      * 按原生成交事件构建当前计划；零事件只记 taker 和接受标记，至多四个事件用线性去重，更多事件借用集合并按需建立 Lane 索引，始终校验 taker 累计成交不超量。
-     * @param sequence 当前事实的 Core 序号
-     * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param side 主动订单或待核对订单的预期买卖方向
-     * @param symbolId 主动订单的币对稠密编号
-     * @param takerInstrument 主动订单输入中保存的规范币对对象
      * @param remainingQuantity 本代主动订单可供累计成交的数量上限
      * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     private void buildDirectNative(long sequence, long orderId, long userId,
                                    com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
@@ -1585,12 +1461,10 @@ public static final class Plan {
         if (orderIds.length < capacity) orderIds = new long[Math.max(capacity, orderIds.length * 2)];
         if (eventCount <= 4) {
             orderIds[0] = takerOrderId;
-            // 本轮筛选或线性去重后保留的有效项数。
             int count = 1;
             // 主动订单按已遍历成交逐项扣减后的待成交数量。
             long remaining = remainingQuantity;
-            for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < eventCount; index++) {
-                // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
+            for (int index = 0; index < eventCount; index++) {
                 MatcherEvent event = matcherEvents.get(index);
                 if (event == null) throw new IllegalArgumentException("missing matcher event");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
@@ -1613,8 +1487,7 @@ public static final class Plan {
             orderCount = addUnique(keys, orderIds, 0, takerOrderId);
             // 主动订单按已遍历成交逐项扣减后的待成交数量。
             long remaining = remainingQuantity;
-            for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < eventCount; index++) {
-                // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
+            for (int index = 0; index < eventCount; index++) {
                 MatcherEvent event = matcherEvents.get(index);
                 if (event == null) throw new IllegalArgumentException("missing matcher event");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
@@ -1635,11 +1508,9 @@ public static final class Plan {
     /**
      * 在短原语前缀中线性查重，新编号追加到末尾并返回新有效长度；调用方预先保证容量。
      * @param values 预先保证容量的原语订单编号数组
-     * @param size 数组当前有效编号数量
-     * @param value 要附加的订单编号，或对应入口的触发单终态值
      */
     private static int addUniqueLinear(long[] values, int size, long value) {
-        for (/* 线性检查短订单前缀的当前下标。 */ int i = 0; i < size; i++) {
+        for (int i = 0; i < size; i++) {
             if (values[i] == value) return size;
         }
         values[size] = value;
@@ -1648,10 +1519,7 @@ public static final class Plan {
 
     /**
      * 借用给定集合检查编号是否首次出现，新编号追加到原语有效前缀，容量由构建方保证。
-     * @param unique 当前构建边界独占的原语订单去重集合
      * @param values 预先保证容量的原语订单编号数组
-     * @param size 数组当前有效编号数量
-     * @param value 要附加的订单编号，或对应入口的触发单终态值
      */
     private static int addUnique(LongHashSet unique, long[] values, int size, long value) {
         if (!unique.add(value)) return size;
@@ -1661,18 +1529,12 @@ public static final class Plan {
 
     /**
      * 检查原生撤单不夹带成交，重置并保存目标用户路由和接受标记；接受时记录一个订单身份，拒绝时有效身份数为零。
-     * @param sequence 当前事实的 Core 序号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     void buildDirectNativeCancellation(long sequence, long userId, long orderId,
                                        exchange.core2.core.common.MatcherResult result,
                                        TradingAccountRuntime runtime) {
         if (orderId <= 0 || result == null) throw new IllegalArgumentException("invalid direct cancellation fact");
-        for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < result.events().size(); index++) {
-            // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
+        for (int index = 0; index < result.events().size(); index++) {
             MatcherEvent event = result.events().get(index);
             if (event == null || event.eventType() == MatcherEventType.TRADE)
                 throw new IllegalStateException("cancel result contains a trade");
@@ -1690,7 +1552,6 @@ public static final class Plan {
 
     /**
      * 仅把原生 SUCCESS 或 ACCEPTED 视为 Matcher 接受。
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
      */
     private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
         return result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
@@ -1699,10 +1560,6 @@ public static final class Plan {
 
     /**
      * 为没有原生结果的准入拒绝只保留身份与路由，让已登记的账户路径能够交回完成回执。
-     * @param sequence 当前事实的 Core 序号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
-     * @param laneMask 本拒绝事实仍需交回完成位的账户 Lane 位图
      */
     void prepareRejectedDirect(long sequence, long userId, long orderId, long laneMask) {
         if (sequence <= 0 || userId <= 0 || orderId <= 0 || laneMask == 0)
@@ -1720,9 +1577,8 @@ public static final class Plan {
      * 原地移除本计划编号前缀中的未成功下出的 taker，保留其他已发生变化的订单编号及原有顺序。
      */
     void omitUnplacedOrder() {
-        // 本轮筛选或线性去重后保留的有效项数。
         int count = 0;
-        for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < orderCount; index++)
+        for (int index = 0; index < orderCount; index++)
             if (orderIds[index] != takerOrderId) orderIds[count++] = orderIds[index];
         orderCount = count;
     }
@@ -1730,8 +1586,6 @@ public static final class Plan {
     /**
      * 所属 Lane 以当前权威订单校验直达成交身份及 maker 单次剩余量，必要时保留持仓身份；深度成交的非 taker Lane 只沿自己的 maker 链遍历，不跨线程读其他账户。
      * @param lane 当前线程持有的所属账户 Lane
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
      * @param instrument 当前事实的规范币对对象，必须与订单输入一致
      */
     void validateDirectLane(AccountPartition lane, TradingAccountRuntime runtime,
@@ -1745,14 +1599,12 @@ public static final class Plan {
         }
         // 深度成交计划已经按 maker 所属 Lane 建好事件链，非 taker Lane 只校验自己的 maker。
         // taker Lane 仍按原事件顺序读取，因为它也可能同时持有本 Lane 的 maker。
-        for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = firstMatcherEvent(lane.laneId()); index >= 0;
+        for (int index = firstMatcherEvent(lane.laneId()); index >= 0;
                 index = nextMatcherEvent(index, lane.laneId())) {
-            // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
             MatcherEvent event = matcherEvents.get(index);
             if (event.eventType() != MatcherEventType.TRADE
                     || !matcherEventTouchesLane(index, lane.laneId(), runtime)
                     || runtime.topology().accountLaneId(event.matchedOrderUid()) != lane.laneId()) continue;
-            // 当前成交在允许读取边界内取得的对手订单引用。
             Order maker = lane.order(event.matchedOrderId());
             requireDirectOrder(maker, event.matchedOrderUid(), directTakerSide
                     == com.surprising.aeron.protocol.CoreOrderSide.BUY
@@ -1766,9 +1618,6 @@ public static final class Plan {
 
     /**
      * 要求 Lane 当前订单为开放状态，且用户、方向、币对编号及规范币对对象都与直达输入一致。
-     * @param order 当前需校验或准备持仓身份的订单引用
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param side 主动订单或待核对订单的预期买卖方向
      */
     private void requireDirectOrder(Order order, long userId,
                                     com.surprising.aeron.protocol.CoreOrderSide side) {
@@ -1784,7 +1633,6 @@ public static final class Plan {
 
     /**
      * 把触发终态附到同一结算事实：用户必须匹配，拒单要求失败状态且无子订单，非拒单要求子订单编号匹配；同代只允许设置一次。
-     * @param value 与当前用户及子订单结果对应的触发单终态，只允许设置一次
      */
     public Plan completeTrigger(com.surprising.aeron.model.CoreTriggerOrderState value) {
         if (value == null || value.userId() != activeUserId || (rejectedTaker
@@ -1798,7 +1646,6 @@ public static final class Plan {
 
     /**
      * 直接读取原语订单编号；调用方保证下标在 orderCount 内，本方法不另检查业务有效前缀。
-     * @param index 当前代有效订单、事件或前置撤单下标
      */
     public long orderId(int index) { return orderIds[index]; }
     /**
@@ -1807,12 +1654,10 @@ public static final class Plan {
     public int matcherEventCount() { return matcherEvents.size(); }
     /**
      * 按列表下标读取本代原始 Matcher 事件引用。
-     * @param index 当前代有效订单、事件或前置撤单下标
      */
     public MatcherEvent matcherEvent(int index) { return matcherEvents.get(index); }
     /**
      * 将已经接受的替换原单撤单保存为唯一前置撤单项；之后可追加普通前置撤单。
-     * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
      */
     void acceptedReplacementCancellation(long orderId) {
         if (orderId <= 0) throw new IllegalArgumentException("replacement cancellation is required");
@@ -1824,8 +1669,6 @@ public static final class Plan {
 
     /**
      * 把调用方已经确认成功的撤单前缀追加到现有自有缓冲，不覆盖已有替换撤单；数量为零保持原状态。
-     * @param orderIds 受影响订单编号数组，复制或接管方式以具体入口为准
-     * @param count 输入数组中已经确认接受的撤单前缀数量
      */
     void acceptedPreCancellations(long[] orderIds, int count) {
         if (count < 0 || count != 0 && (orderIds == null || count > orderIds.length))
@@ -1856,12 +1699,10 @@ public static final class Plan {
     public int preCancellationCount() { return preCancellationSize; }
     /**
      * 读取前置撤单原语编号，调用方保证下标小于有效项数。
-     * @param index 当前代有效订单、事件或前置撤单下标
      */
     long preCancellationOrderId(int index) { return preCancellationOrderIds[index]; }
     /**
      * 事件至少八个且涉及多个 Lane 时，逆序串出各 maker Lane 的事件链，保持原成交顺序；taker Lane 继续顺序读取全部原事件。
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     private Plan indexLaneEvents(TradingAccountRuntime runtime) {
         // 少量事件不建索引；深度成交时各 maker Lane 只沿自己的事件链读取，
@@ -1874,11 +1715,9 @@ public static final class Plan {
         if (makerLaneNext == null || makerLaneNext.length < matcherEvents.size())
             makerLaneNext = new int[matcherEvents.size()];
         java.util.Arrays.fill(makerLaneHeads, -1);
-        for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = matcherEvents.size() - 1; index >= 0; index--) {
-            // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
+        for (int index = matcherEvents.size() - 1; index >= 0; index--) {
             MatcherEvent event = matcherEvents.get(index);
             if (event.eventType() != MatcherEventType.TRADE) continue;
-            // 当前 maker 所属账户 Lane，用于链接其事件索引。
             int lane = runtime.topology().accountLaneId(event.matchedOrderUid());
             makerLaneNext[index] = makerLaneHeads[lane];
             makerLaneHeads[lane] = index;
@@ -1888,7 +1727,6 @@ public static final class Plan {
 
     /**
      * 返回当前 Lane 应开始读取的事件下标；非 taker 的深度索引路径读链头，其他情况从原事件首项开始，负一表示结束。
-     * @param laneId 当前要遍历或判断的账户 Lane 编号
      */
     int firstMatcherEvent(int laneId) {
         if (laneEventsIndexed && laneId != takerLaneId) return makerLaneHeads[laneId];
@@ -1897,8 +1735,6 @@ public static final class Plan {
 
     /**
      * 沿当前 Lane 的 maker 链或原事件顺序取得下一项，负一表示本 Lane 遍历结束。
-     * @param index 当前代有效订单、事件或前置撤单下标
-     * @param laneId 当前要遍历或判断的账户 Lane 编号
      */
     int nextMatcherEvent(int index, int laneId) {
         if (laneEventsIndexed && laneId != takerLaneId) return makerLaneNext[index];
@@ -1907,15 +1743,11 @@ public static final class Plan {
 
     /**
      * 判断当前成交是否涉及指定 Lane；启用深度索引时非 taker 调用方须沿本 Lane 事件链传入下标，该前提成立即可直接返回 true。
-     * @param index 当前代有效订单、事件或前置撤单下标
-     * @param laneId 当前要遍历或判断的账户 Lane 编号
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     public boolean matcherEventTouchesLane(int index, int laneId, TradingAccountRuntime runtime) {
         // 启用深度索引时，非 taker 调用方已经沿当前 maker Lane 的事件链传入下标，
         // 因此可直接判定相关；其他遍历方式仍按账户拓扑判断。
         if (laneEventsIndexed && laneId != takerLaneId) return true;
-        // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
         MatcherEvent event = matcherEvents.get(index);
         return takerLaneId == laneId
                 || runtime.topology().accountLaneId(event.matchedOrderUid()) == laneId;
@@ -1942,7 +1774,6 @@ public static final class Changes {
      *  由外部环槽或对象池管理的占用标记，clear 不自行重置。
      * 返回外部池或环槽管理的占用标记。
      * 由池或环槽管理方更新占用标记，不在此等待消费者。
-     * @param inUse 本槽是否正在被当前事件占用
      */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -1956,7 +1787,6 @@ public static final class Changes {
      *  本代已登记参与的 Lane 位图，路由扩展时补充，清理时只处理这些 Lane。
      * 返回本代登记过的参与 Lane 位图。
      * 由持有租约的调用方直接设置参与位图；这里只保存位图，不分配各 Lane 缓冲。
-     * @param activeLaneMask 本代参与账户 Lane 的完整位图
      */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -1973,7 +1803,6 @@ public static final class Changes {
 
     /**
      * 按账户 Lane 数创建缓冲入口，默认不关联固定环槽。
-     * @param laneCount 运行时拓扑中的账户 Lane 数量
      */
     public Changes(int laneCount) {
         this(laneCount, -1);
@@ -1981,7 +1810,6 @@ public static final class Changes {
 
     /**
      * 保存环槽编号并创建各 Lane 的缓冲列，未参与的 Lane 先共用只读空哨兵，真正使用时再分配独立缓冲。
-     * @param laneCount 运行时拓扑中的账户 Lane 数量
      * @param ringIndex 固定环槽编号，独立缓冲使用负一
      */
     public Changes(int laneCount, int ringIndex) {
@@ -1998,7 +1826,6 @@ public static final class Changes {
 
     /**
      * 为位图内的 Lane 把空哨兵换成独立可写缓冲；本方法只准备存储，不自行登记 activeLaneMask。
-     * @param laneMask 需要准备或读取的账户 Lane 位图
      */
     public void ensureActiveLanes(long laneMask) {
         while (laneMask != 0) {
@@ -2014,9 +1841,6 @@ public static final class Changes {
 
     /**
      * 把用户在本代结算中的修订增量累加到所属 Lane 缓冲；用户权威修订号在收尾时统一应用。
-     * @param laneId 当前操作的账户 Lane 编号
-     * @param userId 需要累加修订的用户编号
-     * @param count 本次增加的用户修订次数
      */
     public void addUserRevision(int laneId, long userId, long count) {
         userRevisionDeltas[laneId].addToValue(userId, count);
@@ -2024,11 +1848,9 @@ public static final class Changes {
 
     /**
      * 在所属 Lane 应用已聚合的用户修订增量并写入发布变化；只有正常返回后才清空增量，失败时保留原缓冲。
-     * @param laneId 当前操作的账户 Lane 编号
      * @param lane 当前线程持有的对应账户 Lane
      */
     void applyUserRevisions(int laneId, AccountPartition lane) {
-        // 当前 Lane 本代尚未应用的用户修订增量。
         LongLongHashMap deltas = userRevisionDeltas[laneId];
         if (deltas.isEmpty()) return;
         lane.applyUserRevisions(deltas, laneDeltas[laneId]);
@@ -2037,8 +1859,6 @@ public static final class Changes {
 
     /**
      * 为指定 Lane 提前准备准入与终态槽容量；非正数请求不处理，参与位图仍由调用方登记。
-     * @param laneId 当前操作的账户 Lane 编号
-     * @param expectedOrders 预计要容纳的订单数量
      */
     public void ensureAdmissionCapacity(int laneId, int expectedOrders) {
         if (expectedOrders <= 0) return;
@@ -2049,8 +1869,6 @@ public static final class Changes {
 
     /**
      * 按本次实际路由登记参与 Lane，并为这些 Lane 提前准备订单及终态槽容量；非正数请求不处理。
-     * @param expectedOrders 预计要容纳的订单数量
-     * @param laneMask 需要准备或读取的账户 Lane 位图
      */
     public void ensureOrderCapacity(int expectedOrders, long laneMask) {
         if (expectedOrders <= 0) return;
@@ -2067,18 +1885,15 @@ public static final class Changes {
 
     /**
      * 下单步骤 4.4 的账户收尾：应用修订、记录终态，预留耗尽后移除可退休订单并释放客户身份；拒单保留查询记录。零持仓同时取消同合约、方向及保证金模式的待触发单，最后准备持仓退休、发布值和余额资金增量。
-     * @param laneId 当前操作的账户 Lane 编号
-     * @param identities 解析合约名称及释放客户订单身份的运行时字典
      * @param lane 当前线程持有的对应账户 Lane
      * @param sequence 本代 Core 序号，用于设置订单再次复用前必须越过的退休边界
      */
     public void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountPartition lane, long sequence) {
         applyUserRevisions(laneId, lane);
-        // 当前 Lane 的实体、终态及发布变化缓冲。
         AccountPartitionCommit.Delta changes = laneDeltas[laneId];
         // Owner 收齐回执后按序提交；这里保存终态身份供有限保留窗口使用，
         // 订单和预留金额计数仍以 Lane 中的权威值为准。
-        for (/* 当前遍历的订单变化下标。 */ int index = 0; index < changes.orders().size(); index++) {
+        for (int index = 0; index < changes.orders().size(); index++) {
             // 本项变化的原语订单编号。
             long orderId = changes.orders().keyAt(index);
             // 当前变更槽中的订单值，空值或非终态跳过。
@@ -2096,7 +1911,6 @@ public static final class Changes {
             // 原生拒单保留已有的 REJECTED 查询记录，但不再持有冻结或 reservation。
             if (order.status() == CoreOrderStatus.REJECTED) continue;
             lane.retireAlgoChild(identities, order, changes);
-            // 从 Lane 订单表实际移除的权威订单，用于登记延后复用。
             Order removed = lane.removeOrder(orderId);
             if (removed != null) {
                 changes.removeOrderRoute(orderId);
@@ -2105,11 +1919,10 @@ public static final class Changes {
             lane.releaseOrderClientIdentities(identities, orderId, order.userId());
             lane.removeClientOrdersForOrder(order.userId(), orderId);
         }
-        for (/* 当前遍历的持仓变化下标。 */ int positionIndex = 0; positionIndex < changes.positions().size(); positionIndex++) {
+        for (int positionIndex = 0; positionIndex < changes.positions().size(); positionIndex++) {
             // 本项变化后的持仓值，数量归零时需要清理相关待触发单。
             Position position = changes.positions().valueAt(positionIndex);
             if (position != null && position.signedQuantitySteps() == 0) {
-                // 该持仓用户在本 Lane 的触发单编号集合。
                 LongHashSet ids = lane.triggerIds(position.userId());
                 if (ids != null && !ids.isEmpty()) {
                     // 零持仓对应的业务合约名称，用于筛选相关触发单。
@@ -2117,9 +1930,7 @@ public static final class Changes {
                     // 逐项读取该用户触发单编号的原语迭代器。
                     var iterator = ids.longIterator();
                     while (iterator.hasNext()) {
-                        // 当前检查的触发单编号。
                         long id = iterator.next();
-                        // 当前编号对应的权威触发单。
                         CoreTriggerOrderState trigger = lane.triggerOrder(id);
                         if (trigger == null || trigger.status() != CoreTriggerOrderStatus.PENDING
                                 || trigger.positionSide() != position.positionSide()
@@ -2141,7 +1952,6 @@ public static final class Changes {
 
     /**
      * 从指定 Lane 已捕获的余额前后值准备准入资金增量，不在这里执行完整订单终态清理。
-     * @param laneId 当前操作的账户 Lane 编号
      */
     public void prepareAdmissionLane(int laneId) {
         TradingAccountRuntime.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
@@ -2149,11 +1959,10 @@ public static final class Changes {
 
     /**
      * 遍历全部已经分配的余额缓冲，把前值合并到目标；跳过空哨兵，不只遍历 activeLaneMask。
-     * @param target 接收余额原始前值的非空目标缓冲
      */
     public void copyBalanceBeforeTo(AccountTransactionRollback.BalancePatches target) {
         if (target == null) throw new IllegalArgumentException("balance capture target is required");
-        for (/* 位图或数组遍历中当前操作的账户 Lane 编号。 */ int laneId = 0; laneId < balancePatches.length; laneId++) {
+        for (int laneId = 0; laneId < balancePatches.length; laneId++) {
             // 已分配的某 Lane 余额前后值缓冲，空哨兵直接跳过。
             AccountTransactionRollback.BalancePatches source = balancePatches[laneId];
             if (source == EMPTY_BALANCE_PATCHES) continue;
@@ -2163,12 +1972,9 @@ public static final class Changes {
 
     /**
      * 按调用方给出的 Lane 位图，把各 Lane 已准备的资金增量加入目标累加器，不清空源。
-     * @param laneMask 需要准备或读取的账户 Lane 位图
-     * @param target 接收所选 Lane 资金增量的非空累加器
      */
     public void appendFundsDelta(long laneMask, RuntimeFundsAccumulator target) {
         if (target == null) throw new IllegalArgumentException("funds accumulator is required");
-        // 本次尚未遍历的 Lane 位图，每次移除最低有效位。
         long lanes = laneMask;
         while (lanes != 0) {
             // 位图或数组遍历中当前操作的账户 Lane 编号。
@@ -2180,10 +1986,8 @@ public static final class Changes {
 
     /**
      * 把参与 Lane 的待退休订单交回对应账户的回收缓存；对象能否再次初始化仍受退休序号约束。
-     * @param runtime 用于把退休订单交回各账户 Lane 的所属运行时
      */
     public void returnRetiredOrders(TradingAccountRuntime runtime) {
-        // 本次尚未遍历的 Lane 位图，每次移除最低有效位。
         long lanes = activeLaneMask;
         while (lanes != 0) {
             // 位图或数组遍历中当前操作的账户 Lane 编号。
@@ -2197,10 +2001,8 @@ public static final class Changes {
      */
     public void clear() {
         directPositionIdentities = false;
-        // 本次尚未遍历的 Lane 位图，每次移除最低有效位。
         long lanes = activeLaneMask;
         while (lanes != 0) {
-            // 当前需要清空的 Lane 数组下标。
             int lane = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
             userRevisionDeltas[lane].clear();
             laneDeltas[lane].clear();
@@ -2212,13 +2014,11 @@ public static final class Changes {
 
     /**
      * 借用指定 Lane 的实体与终态变化缓冲，不复制内容。
-     * @param index 所借用缓冲对应的 Lane 数组下标
      */
     public AccountPartitionCommit.Delta laneDelta(int index) { return laneDeltas[index]; }
 
     /**
      * 借用指定 Lane 的余额前后值缓冲，不复制内容。
-     * @param index 所借用缓冲对应的 Lane 数组下标
      */
     public AccountTransactionRollback.BalancePatches balancePatch(int index) { return balancePatches[index]; }
     /**

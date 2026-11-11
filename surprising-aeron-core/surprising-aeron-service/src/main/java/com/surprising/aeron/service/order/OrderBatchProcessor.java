@@ -73,18 +73,14 @@ public final class OrderBatchProcessor {
     int pendingBatchCount() { return batchCount; }
     /**
      * 按完整 Core 序号从已有命令环取得批次，不另建序号到批次的索引。
-     * @param sequence 整批共用的完整 Core 序号
      */
     public OrderBatchProcessor.PendingBatch batch(long sequence) {
-        // 按原序号取得或随当前项更新的命令槽
         OrderCommand pending = owner.pendingMatching().get(sequence);
         return pending == null ? null : pending.orderBatch;
     }
 
     /**
      * 核对命令槽、批次序号和未占用链接，要求序号递增，再把批次连到尾部并绑定原槽。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
      */
     void registerBatch(OrderCommand pending, OrderBatchProcessor.PendingBatch batch) {
         if (pending.orderBatch != null || pending.sequence() != batch.sequence
@@ -102,8 +98,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 核对原登记关系，摘除前后链接并解除命令槽绑定，更新首尾及数量；对象清理和归池另行完成。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
      */
     void unregisterBatch(OrderCommand pending, OrderBatchProcessor.PendingBatch batch) {
         if (pending.orderBatch != batch || batchCount == 0
@@ -139,11 +133,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 解码并检查整批订单身份，已知业务错误释放预备批次并拒绝；其他输入错误按原撮合顺序记拒绝。成功分配整批序号并登记依赖，尝试流水或队首激活，尚未完成则释放 Owner 账户访问权并返回待处理状态。
-     * @param message 当前整批原始 Core 命令
-     * @param clusterTimestamp 整批固定使用的 Cluster 业务时间
-     * @param clusterPosition 整批固定使用的复制日志位置
-     * @param sourceKey 原命令来源类型与实例标识
-     * @param fingerprint 整批原命令的完整指纹
      */
     public CoreResponse beginOrderBatchMatching(CoreMessage message, long clusterTimestamp,
                                                   long clusterPosition, TradingCoreRuntime.SourceKey sourceKey,
@@ -167,7 +156,6 @@ public final class OrderBatchProcessor {
         }
         // 本批新占用的 Core 序号
         long sequence = owner.nextAppliedSequence();
-        // 按原序号取得或随当前项更新的命令槽
         OrderCommand pending = owner.admissions().newPendingMatching(sequence, batch.operation(), message, fingerprint, decodedCommand);
         batch.sequence = sequence;
         owner.matchingFlow.putPendingMatching(pending);
@@ -187,9 +175,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 首次建立本批提交上下文，否则恢复原上下文，再标记激活；能整批准入就派发并挂起，其他批次从当前项开始，未完成时保留本批进度。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
-     * @param deferCompletion 后台激活时是否把整批终态留给有序提交读取
      */
     public CoreResponse activateOrderBatch(OrderBatchProcessor.PendingBatch batch, OrderCommand pending,
                                              boolean deferCompletion) {
@@ -207,7 +192,6 @@ public final class OrderBatchProcessor {
             owner.suspendMatchingCommitContext(pending);
             return null;
         }
-        // 本轮已完成时返回的整批终态
         CoreResponse response = startOrderBatchItem(batch, pending, batch.clusterTimestamp,
                 batch.clusterPosition, deferCompletion);
         if (response == null) owner.clearFactContext();
@@ -216,8 +200,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 独立批量撤单可先尝试提交；PLACE 还要没有更早同用户命令并满足既有依赖检查，再准备整批准入。条件不符返回假，交现有逐项路径推进。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
      */
     boolean tryActivatePipelinedOrderBatch(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
         if (pending.clusterIndependent && batch.kind == OrderBatchProcessor.Kind.CANCEL && !batch.sequentialAdmission) {
@@ -242,15 +224,12 @@ public final class OrderBatchProcessor {
 
     /**
      * 首次登记本批各品种的最新批次引用并计数，独立模式沿用入口已经核对的依赖；违背所有权约束抛错，已写入的前缀不在此回滚。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
      */
     void registerPipelinedBatchSymbols(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
         if (batch.pipelineRegistered()) return;
-        for (String /* 当前品种名称，可能来自输入、活动路由或较早成功项 */ instrumentId : batch.preparedSymbols) {
+        for (String instrumentId : batch.preparedSymbols) {
             // 品种依赖表保留最新批次，前序会按有序完成先移除。
             // Cluster 窗口已经核对了账户及撮合依赖。
-            // 当前品种原先登记的批次、较早成功项或其品种，具体类型见声明
             OrderBatchProcessor.PendingBatch previous = pipelinedBatchBySymbol.put(instrumentId, batch);
             if (previous != null && previous != batch && !pending.clusterIndependent) {
                 throw new IllegalStateException("pipelined instrumentId ownership conflict");
@@ -262,11 +241,10 @@ public final class OrderBatchProcessor {
 
     /**
      * 只移除仍指向本批的品种条目，清登记位并递减活动数，计数为负时抛错。
-     * @param batch 本条批量命令的复用上下文
      */
     void unregisterPipelinedBatchSymbols(OrderBatchProcessor.PendingBatch batch) {
         if (!batch.pipelineRegistered()) return;
-        for (String /* 当前品种名称，可能来自输入、活动路由或较早成功项 */ instrumentId : batch.preparedSymbols) {
+        for (String instrumentId : batch.preparedSymbols) {
             pipelinedBatchBySymbol.remove(instrumentId, batch);
         }
         batch.pipelineRegistered(false);
@@ -278,8 +256,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 检查本批能否整批准入：必须 PLACE、全部同 Matcher 分片、没有只减仓项及需要逐项 OI 判断的产品，并校验订单身份；按品种准备共享配置。已知不适用或输入失败清判断缓存，返回假。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
      */
     boolean preparePipelinedPlaceBatch(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
         if (batch.sequentialAdmission || batch.kind != OrderBatchProcessor.Kind.PLACE) {
@@ -291,12 +267,9 @@ public final class OrderBatchProcessor {
             // 已选整批唯一分片，负一表示尚未遇到第一项
             int batchMatcherShard = -1;
             batch.clearPreparedDecisionCache();
-            for (/* 当前批内项或变更用户的遍历下标 */ int index = 0; index < batch.items.size(); index++) {
-                // 当前准备、撮合、收集或编码的批内项
+            for (int index = 0; index < batch.items.size(); index++) {
                 BatchItem item = batch.items.get(index);
-                // 按当前种类取出的单项或整批解码请求，具体类型见声明
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
-                // 当前项品种路由到的 Matcher 分片，用于检查整批是否同分片
                 int itemMatcherShard = batch.decodedCommand == null
                         ? owner.matchingAdapter().matcherShardId(command.instrumentId())
                         : batch.decodedCommand.matcherShard(owner.matchingAdapter(), command.instrumentId());
@@ -322,12 +295,9 @@ public final class OrderBatchProcessor {
 
     /**
      * 确定本批唯一分片，把整批输入列、客户键列、订单回执列和原日志元数据交所属账户做整批准入。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
      */
     void dispatchPipelinedPlaceBatchAdmission(
             OrderCommand pending, OrderBatchProcessor.PendingBatch batch) {
-        // 本次任务固定使用的 Matcher 分片
         int shard = batch.decodedCommand == null
                 ? owner.matchingAdapter().matcherShardId(batch.preparedSymbols.getFirst())
                 : batch.decodedCommand.matcherShard(owner.matchingAdapter(), batch.preparedSymbols.getFirst());
@@ -341,14 +311,11 @@ public final class OrderBatchProcessor {
 
     /**
      * 固定提交边界并准备整批直达事件，绑定固定 Matcher 任务后提交；更新调度进度、预派发阶段和在途观测计数，不在此等待整批完成。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
      */
     void submitPipelinedPlaceBatch(OrderCommand pending, OrderBatchProcessor.PendingBatch batch) {
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
         // 整批命令请求用户
         long userId = pending.command().header().userId();
-        // 本次任务固定使用的 Matcher 分片
         int shard = owner.matchingAdapter().matcherShardId(batch.preparedSymbols.getFirst());
         batch.settlementEvent = owner.runtimeState().prepareDirectMatcherSettlement(
                 pending.sequence(), owner.commits.validAccountLaneMask(),
@@ -369,10 +336,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 在 Matcher 按批内顺序执行各已准入下单并写同一直达事件，保留本项事件和状态、累计成交数；整批事实保存在事件中，返回首个原生结果供管线交接。运行异常保留到批次后继续抛出。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
-     * @param userId 本批请求用户，账户按该用户路由
-     * @param shard 当前已确定的 Matcher 分片
      */
     Object submitPreparedPipelinedPlaceBatch(
             OrderCommand pending, OrderBatchProcessor.PendingBatch batch, long userId, int shard) {
@@ -380,21 +343,18 @@ public final class OrderBatchProcessor {
             // 本任务第一个原生 Matcher 结果，后续完整事实仍在直达事件
             exchange.core2.core.common.MatcherResult firstNative = null;
             java.util.Objects.requireNonNull(batch.settlementEvent, "direct batch settlement");
-            for (/* 当前批内项或变更用户的遍历下标 */ int index = 0; index < batch.items.size(); index++) {
-                // 当前准备、撮合、收集或编码的批内项
+            for (int index = 0; index < batch.items.size(); index++) {
                 BatchItem item = batch.items.get(index);
                 // 本项原始下单输入局部引用，实际撮合使用 preparedOrders，后续不读取此引用
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 // 账户已经完成准入的本项解析订单输入
                 OrderCommand.ResolvedPlaceOrder matchingOrder = batch.preparedOrders[index];
-                // 当前项原生 Matcher 执行结果
                 var result = owner.matchingAdapter().placeDirectBatchItem(
                         shard, index, pending.sequence(), pending.command().header().commandId(),
                         pending.command().header().submittedAtEpochMillis(), userId, matchingOrder,
                         batch.settlementEvent);
                 if (firstNative == null) firstNative = result;
                 item.realtimeTakerOrder = item.admittedOrder;
-                // 当前项复制的成交事件数量
                 int trades = item.captureExecutions(result.events());
                 item.executionTakerUserId = userId;
                 if (trades != 0) {
@@ -417,20 +377,13 @@ public final class OrderBatchProcessor {
 
     /**
      * 从当前游标逐项准入，账户或改单回执未齐就挂起。已知单项错误保存该项拒绝后继续；账户已处理并回滚的准入失败不拿全局修订作无变化判断。成功项交 Matcher 后让出 Owner，全部无原生动作的后台激活也保留到有序提交发布终态。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
-     * @param clusterTimestamp 整批固定使用的 Cluster 业务时间
-     * @param clusterPosition 整批固定使用的复制日志位置
-     * @param deferCompletion 后台激活时是否把整批终态留给有序提交读取
      */
     CoreResponse startOrderBatchItem(OrderBatchProcessor.PendingBatch batch, OrderCommand pending,
                                              long clusterTimestamp, long clusterPosition,
                                              boolean deferCompletion) {
         batch.sequentialAdmission = true;
         while (batch.nextIndex < batch.items.size()) {
-            // 当前准备、撮合、收集或编码的批内项
             BatchItem item = batch.items.get(batch.nextIndex);
-            // 当前项是否已经派发下单预留或改单准入，决定是否重用原修订和输入
             boolean admissionPending = batch.itemAdmission != null || batch.replacementAdmissionEvent != null;
             // 本项首次准入前保存的全局修订，跨轮询沿用
             long runtimeRevisionBefore = !admissionPending
@@ -501,17 +454,12 @@ public final class OrderBatchProcessor {
 
     /**
      * 本批同品种复用已捕获的只读配置、标记价和资产编号；首次使用才解析并保存，账户资金及 OI 判断仍由每项准入完成。
-     * @param batch 本条批量命令的复用上下文
-     * @param instrumentId 本项准入对应的品种名称
      */
     OrderBatchProcessor.PendingBatch.Decision prepareBatchDecision(
             OrderBatchProcessor.PendingBatch batch, String instrumentId) {
-        // 当前批内项或变更用户的遍历下标
         int index = batch.preparedSymbols.indexOf(instrumentId);
         if (index >= 0) return batch.preparedContextDecisions[index];
-        // 按整批业务时间捕获的品种配置、价格与产品判断上下文
         var context = OrderAdmissionService.context(owner.runtimeState(), owner.identities(), instrumentId, batch.clusterTimestamp);
-        // 该上下文中的品种配置
         var instrument = context.instrument();
         // 品种基础资产名称
         String baseAsset = instrument.baseAsset();
@@ -537,10 +485,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 用本批品种判断输入准备固定账户预留工作，绑定当前 Core 序号和项下标，返回同一工作供 Owner 轮询。
-     * @param batch 本条批量命令的复用上下文
-     * @param userId 本批请求用户，账户按该用户路由
-     * @param command 当前单项下单输入
-     * @param commandId 整批原命令 UUID
      */
     private java.util.function.BooleanSupplier beginBatchReservation(OrderBatchProcessor.PendingBatch batch, long userId,
                                                                     PlaceOrderCommand command, UUID commandId) {
@@ -555,7 +499,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 收集已经完成的账户预留，绑定本项账户冻结副本；保存先撤列表，再请求发布。
-     * @param batch 本条批量命令的复用上下文
      */
     private void collectBatchPlaceReservation(OrderBatchProcessor.PendingBatch batch) {
         // 本批复用的顺序下单账户预留工作
@@ -571,10 +514,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 临时切到整批原时间和日志位置；PLACE 检查身份并准备预留，CANCEL 检查活动原单归属，AMEND 找原合约并派发替换准入。finally 恢复原 Owner 时间位置，账户工作仍由所属 Lane 完成。
-     * @param batch 本条批量命令的复用上下文
-     * @param item 本批当前单项输入与结果槽
-     * @param userId 本批请求用户，账户按该用户路由
-     * @param commandId 整批原命令 UUID
      */
     void prepareOrderBatchItem(OrderBatchProcessor.PendingBatch batch, BatchItem item, long userId,
                                        UUID commandId) {
@@ -587,7 +526,6 @@ public final class OrderBatchProcessor {
         try {
             switch (batch.kind) {
                 case PLACE -> {
-                    // 按当前种类取出的单项或整批解码请求，具体类型见声明
                     PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                     owner.requireOrderIdentityAvailable(userId, command);
                     if (owner.activeOrderIndex().activeOrderRoute(command.orderId()) != null)
@@ -597,11 +535,9 @@ public final class OrderBatchProcessor {
                 }
                 case CANCEL -> {
                     batch.currentPreMatchingCancellationOrderIds = List.of();
-                    // 按当前种类取出的单项或整批解码请求，具体类型见声明
                     CancelOrderCommand command = (CancelOrderCommand) item.command;
                     // Owner 已有活动订单索引给出的可空稳定路由
                     var route = owner.activeOrderIndex().activeOrderRoute(command.orderId());
-                    // 当前用于校验撤单归属的同一活动路由引用
                     var order = route;
                     if (order == null)
                         throw new CoreStateRejectedException("ORDER_NOT_FOUND", "active order does not exist");
@@ -610,13 +546,11 @@ public final class OrderBatchProcessor {
                     }
                 }
                 case AMEND -> {
-                    // 按当前种类取出的单项或整批解码请求，具体类型见声明
                     AmendOrderCommand command = (AmendOrderCommand) item.command;
                     // Owner 已有活动订单索引给出的可空稳定路由
                     var route = owner.activeOrderIndex().activeOrderRoute(command.originalOrderId());
                     if (route != null && route.userId() != userId)
                         throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
-                    // 当前品种名称，可能来自输入、活动路由或较早成功项
                     String instrumentId = route == null
                             ? previousBatchOrderInstrument(batch, command.originalOrderId()) : route.instrumentId();
                     if (instrumentId == null)
@@ -638,12 +572,9 @@ public final class OrderBatchProcessor {
 
     /**
      * 只查当前游标之前已成功且保有准入订单的项，用其订单编号找品种；找不到返回空，供批内后续改单识别原合约。
-     * @param batch 本条批量命令的复用上下文
-     * @param orderId 需要找本批较早准入记录的订单编号
      */
     private String previousBatchOrderInstrument(OrderBatchProcessor.PendingBatch batch, long orderId) {
-        for (/* 当前批内项或变更用户的遍历下标 */ int index = 0; index < batch.nextIndex; index++) {
-            // 当前品种原先登记的批次、较早成功项或其品种，具体类型见声明
+        for (int index = 0; index < batch.nextIndex; index++) {
             BatchItem previous = batch.items.get(index);
             if (previous.orderId() == orderId && previous.status == ResponseStatus.APPLIED
                     && previous.admittedOrder != null)
@@ -654,11 +585,8 @@ public final class OrderBatchProcessor {
 
     /**
      * 事件未完成检查 Lane 健康后返回假；完成则抛出已有拒绝，再用 Owner 路由索引核对全局订单号和客户身份，保存替换准入及先撤列表。
-     * @param batch 本条批量命令的复用上下文
-     * @param userId 本批请求用户，账户按该用户路由
      */
     private boolean collectBatchAmendAdmission(OrderBatchProcessor.PendingBatch batch, long userId) {
-        // 当前改单准入或撤单直达事件，类型见声明
         var event = batch.replacementAdmissionEvent;
         if (!event.complete()) { owner.runtimeState().assertAccountLanesHealthy(); return false; }
         if (event.rejection() != null) throw event.rejection();
@@ -676,7 +604,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 若有改单准入事件就归还并清事件及解析准入引用；调用方保证已经满足释放条件。
-     * @param batch 本条批量命令的复用上下文
      */
     private void releaseBatchAmendAdmission(OrderBatchProcessor.PendingBatch batch) {
         if (batch.replacementAdmissionEvent == null) return;
@@ -687,7 +614,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 撤单交连续同分片片段路径；顺序下单或改单用当前已准入项预先借直达事件，再把固定任务交 Matcher。账户结算事件在撮合前已存在，Owner 后续只收集它。
-     * @param pending 本批仍占用的命令槽
      */
     void submitOrderBatchMatching(OrderCommand pending) {
         // 新借、查询或当前正在处理的批次上下文
@@ -700,14 +626,10 @@ public final class OrderBatchProcessor {
                 pending.matchingSubmitted();
             return;
         }
-        // 本次任务固定使用的 Matcher 分片
         int shard = orderBatchMatcherShard(batch);
-        // 当前任务预先借用的直达结算事件
         com.surprising.aeron.service.settlement.TradeSettlement direct = null;
         // 顺序批次各项依赖上一项账户准入，不能提前准备全批聚合结算。
-        // 当前项已准入，先借好它的直达事件交 Matcher 发布给账户；Owner 只保留原有序终态边界。
         if (batch.kind == OrderBatchProcessor.Kind.PLACE) {
-            // 当前准备、撮合、收集或编码的批内项
             BatchItem item = batch.items.get(batch.nextIndex);
             // 账户已经冻结并交给本项的订单副本
             Order admitted = item.admittedOrder;
@@ -741,26 +663,20 @@ public final class OrderBatchProcessor {
 
     /**
      * 从当前项起合并连续且路由存在的同分片撤单，保留原项顺序；没有可提交项则退回队首逐项拒绝路径。判断剩余后缀有无活动订单，据此让最后实际片段携带最终账户水位，再准备事件及固定任务提交。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
      */
     void submitCancelBatchChunk(OrderCommand pending, OrderBatchProcessor.PendingBatch batch) {
         batch.lastMatchingResult = null;
-        // 本次任务固定使用的 Matcher 分片
         int shard = orderBatchMatcherShard(batch);
-        // 本次撤单片段包含起点
         int start = batch.nextIndex;
         // 逐项探查后确定的片段排他终点
         int end = start;
         // 只合并连续同分片的独立撤单，缺失订单留给 Owner 拒绝路径；跨分片仍保持原项顺序。
         while (end < batch.items.size()) {
-            // 当前准备、撮合、收集或编码的批内项
             BatchItem item = batch.items.get(end);
             // 入口已校验过该订单身份；此处从已有活动路由取得当前品种，准备固定同分片片段。
             // Owner 已有活动订单索引给出的可空稳定路由
             var route = owner.activeOrderIndex().activeOrderRoute(item.orderId);
             if (route == null) break;
-            // 当前品种名称，可能来自输入、活动路由或较早成功项
             String instrumentId = route.instrumentId();
             if (owner.matchingAdapter().matcherShardId(instrumentId) != shard) break;
             batch.preparedCancellationOrderIds[end - start] = item.orderId;
@@ -780,16 +696,14 @@ public final class OrderBatchProcessor {
         int chunkEnd = end;
         // 后缀缺失订单不会产生资金或订单变化。
         // 最后一个实际撤单片段可直接推进请求用户 Lane 的最终序号，无需额外空任务。
-        // 当前片段后是否已无仍有活动路由的订单，决定最终账户水位
         boolean finalChunk = true;
-        for (/* 当前批内项或变更用户的遍历下标 */ int index = end; index < batch.items.size(); index++) {
+        for (int index = end; index < batch.items.size(); index++) {
             if (owner.activeOrderIndex().activeOrderRoute(batch.items.get(index).orderId) != null) {
                 finalChunk = false;
                 break;
             }
         }
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-        // 当前任务预先借用的直达结算事件
         var direct = owner.runtimeState().prepareDirectCancelBatch(
                 pending.sequence(), finalChunk, pending.command().header().userId(),
                 batch.preparedCancellationOrderIds, end - start, pending.command().header().commandId(), shard,
@@ -802,21 +716,15 @@ public final class OrderBatchProcessor {
 
     /**
      * 要求已有槽、批次及 Matcher 事实，不能协调的结果进入故障恢复。流水批次要求自身直达事件；撤单收片段账户结果后逐项推进，其余应用当前项事实，再收已完成账户事件或挂起等待。
-     * @param sequence 整批共用的完整 Core 序号
-     * @param matchingResult 当前已有的 Matcher 证据或直达事件
-     * @param clusterTimestamp 整批固定使用的 Cluster 业务时间
-     * @param clusterPosition 整批固定使用的复制日志位置
      */
     public CoreResponse completeOrderBatchMatching(long sequence,
                                                     OrderMatchingResult matchingResult,
                                                     long clusterTimestamp, long clusterPosition) {
-        // 按原序号取得或随当前项更新的命令槽
         OrderCommand pending = owner.pendingMatching().get(sequence);
         // 新借、查询或当前正在处理的批次上下文
         OrderBatchProcessor.PendingBatch batch = batch(sequence);
         if (pending == null || batch == null || matchingResult == null) return null;
         if (owner.commits.matchingResultNeedsRecovery(pending, matchingResult)) {
-            // 当前故障对应的可空批次上下文
             OrderBatchProcessor.PendingBatch failedBatch = batch(sequence);
             // 当前 Matcher、账户结算或实时捕获运行异常，按所在方法保存、报告恢复或标记实时失败
             Throwable failure = failedBatch == null ? null : failedBatch.pipelinedMatchingFailure;
@@ -831,7 +739,7 @@ public final class OrderBatchProcessor {
             return finishOrderBatch(batch, pending, clusterTimestamp, clusterPosition);
         }
         if (batch.kind == OrderBatchProcessor.Kind.CANCEL) {
-            if (matchingResult instanceof com.surprising.aeron.service.settlement.TradeSettlement /* 当前改单准入或撤单直达事件，类型见声明 */ event
+            if (matchingResult instanceof com.surprising.aeron.service.settlement.TradeSettlement event
                     && event == batch.itemSettlementEvent && event.hasDirectNativeResult()) {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
                 batch.observedSettlementLaneMask |= event.requiredLaneMask();
@@ -841,13 +749,11 @@ public final class OrderBatchProcessor {
                 owner.runtimeState().releaseMatcherSettlement(event);
                 batch.itemSettlementEvent = null;
                 batch.lastMatchingResult = null;
-                // 当前片段尚未完成最终账户水位时是否继续登记最终变化身份
                 boolean trackChanges = !batch.laneCommitCompleted();
                 if (trackChanges) {
                     batch.changedUserIds.add(pending.command().header().userId());
                 }
                 while (batch.nextIndex < batch.cancellationChunkEnd) {
-                    // 当前准备、撮合、收集或编码的批内项
                     BatchItem item = batch.items.get(batch.nextIndex);
                     if (trackChanges && item.status == ResponseStatus.APPLIED)
                         batch.runtimeChangedOrderIds.add(item.orderId());
@@ -878,15 +784,10 @@ public final class OrderBatchProcessor {
 
     /**
      * 收当前项已完成财务验证的账户结算；成功改单保留既有修订计数，现货还计原单撤销。随后完成项结果、回收事件并开始下一项，运行异常转为批次恢复故障。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
-     * @param timestamp 继续当前批次使用的业务时间
-     * @param position 继续当前批次使用的日志位置
      */
     public CoreResponse completeOrderBatchItemSettlement(OrderBatchProcessor.PendingBatch batch, OrderCommand pending,
                                                  long timestamp, long position) {
         try {
-            // 当前已就绪并待收集的单项结算事件
             var settledEvent = batch.itemSettlementEvent;
             owner.runtimeState().collectOrderBatchMatcherSettlement(settledEvent, owner.terminalRetention());
             if (batch.kind == OrderBatchProcessor.Kind.AMEND && batch.lastMatchingResult.accepted()) {
@@ -906,14 +807,10 @@ public final class OrderBatchProcessor {
 
     /**
      * 保存当前项 Matcher 事实并校验直达事件、收集执行明细；账户或准入仍待完成则返回，否则结束该项。应用失败按撮合与 Core 分歧处理。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
-     * @param matchingResult 当前已有的 Matcher 证据或直达事件
      */
     void applyCompletedOrderBatchItem(OrderBatchProcessor.PendingBatch batch, OrderCommand pending,
                                       OrderMatchingResult matchingResult) {
         batch.lastMatchingResult = matchingResult;
-        // 当前准备、撮合、收集或编码的批内项
         BatchItem item = batch.items.get(batch.nextIndex);
         try {
             applyOrderBatchMatcherResult(batch, item, pending, matchingResult);
@@ -926,13 +823,9 @@ public final class OrderBatchProcessor {
 
     /**
      * 从 Matcher 接受与否决定该项状态，收变化身份并保存非撤单项结果，释放改单准入后推进游标；撮合已发生后的异常必须恢复，不能伪装普通拒单或重试同一修改。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
-     * @param matchingResult 当前已有的 Matcher 证据或直达事件
      */
     private void finishOrderBatchItem(OrderBatchProcessor.PendingBatch batch, OrderCommand pending,
                                       OrderMatchingResult matchingResult) {
-        // 当前准备、撮合、收集或编码的批内项
         BatchItem item = batch.items.get(batch.nextIndex);
         // 由当前项 Matcher 接受与否决定的状态
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
@@ -952,8 +845,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 标记 Matcher 故障，清未登记触发子单并停止仍占用槽的撮合续步，结束批次账户作用域，再交原运行时生成致命恢复异常。调用方抛出该异常，不能继续当普通项拒绝处理。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
      * @param detail 需要恢复的故障说明
      * @param cause 可空原始失败原因
      */
@@ -964,7 +855,7 @@ public final class OrderBatchProcessor {
         owner.matchingAdapter().poisonFromOwner("fatal order batch divergence sequence=" + batch.sequence
                 + " detail=" + detail);
         owner.admissions().clearQueuedMatching();
-        owner.pendingMatching().forEach(/* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value -> {
+        owner.pendingMatching().forEach(value -> {
             if (value.claimed) {
                 value.resetMatchingContinuation();
             }
@@ -975,10 +866,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 要求 PLACE 有准入副本，必要时绑定实时身份并复制非撤单项执行明细；PLACE 和 AMEND 必须使用当前项的直达事件，账户资金事实仍由事件执行，撤单变化由片段收集入口处理。
-     * @param batch 本条批量命令的复用上下文
-     * @param item 本批当前单项输入与结果槽
-     * @param pending 本批仍占用的命令槽
-     * @param matchingResult 当前已有的 Matcher 证据或直达事件
      */
     void applyOrderBatchMatcherResult(
             OrderBatchProcessor.PendingBatch batch, BatchItem item, OrderCommand pending,
@@ -989,7 +876,6 @@ public final class OrderBatchProcessor {
                 && owner.realtimeCapture().active()) item.realtimeTakerOrder = item.admittedOrder;
 
         if (batch.kind != OrderBatchProcessor.Kind.CANCEL) {
-            // 当前项复制的成交事件数量
             int trades = item.captureExecutions(matchingResult.matcherEvents());
             item.executionTakerUserId = pending.command().header().userId();
             if (trades != 0) {
@@ -1016,9 +902,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 只把已经决定的状态和结果码写入该项，不编码整批或重新执行账户业务。
-     * @param item 本批当前单项输入与结果槽
-     * @param status 本项已经决定的响应状态
-     * @param resultCode 本项已经决定的结果码
      */
     void appendOrderBatchResult(BatchItem item,
                                 ResponseStatus status, CoreResultCode resultCode) {
@@ -1028,10 +911,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 开始整批收尾并建立账户位图，收整批账户及财务结算结果，必要时等待最终账户盖戳和响应编码；核对参与 Lane、资金及终态响应后发布、保存整批 APPLIED 终态。再摘排序和品种依赖、退休命令并归池，各项成功与否仍保存在响应内。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
-     * @param clusterTimestamp 整批固定使用的 Cluster 业务时间
-     * @param clusterPosition 整批固定使用的复制日志位置
      */
     public CoreResponse finishOrderBatch(OrderBatchProcessor.PendingBatch batch, OrderCommand pending,
                                           long clusterTimestamp, long clusterPosition) {
@@ -1125,7 +1004,6 @@ public final class OrderBatchProcessor {
         unregisterPipelinedBatchSymbols(batch);
         owner.matchingProgress.batchCompleted();
         owner.matchingProgress.submitDeferredMatchingAfterBatch();
-        // 本轮已完成时返回的整批终态
         CoreResponse response = responseCommand.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, batch.sequence,
                 responseData, 0, responseLength);
@@ -1135,17 +1013,14 @@ public final class OrderBatchProcessor {
 
     /**
      * 只初始化一次，从已观察结算位、整批事件和变化用户汇总实际参与账户；没有原生动作则绑定复用占位事实。登记到命令槽后按既有最终账户提交情况补完成位。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
      */
     void initializeOrderBatchLaneContext(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
         if (batch.laneContextInitialized()) return;
-        // 从本批已有结算事实与变化用户汇总的账户位图
         long expectedLaneMask = batch.observedSettlementLaneMask;
         if (batch.settlementEvent != null) {
             expectedLaneMask |= batch.settlementEvent.requiredLaneMask();
         }
-        for (/* 当前批内项或变更用户的遍历下标 */ int index = 0; index < batch.changedUserIds.size(); index++) {
+        for (int index = 0; index < batch.changedUserIds.size(); index++) {
             expectedLaneMask |= owner.matchingAdapter().topology().accountLaneMask(
                     batch.changedUserIds.valueAt(index));
         }
@@ -1162,7 +1037,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 要求当前批次及项游标有效，返回当前项需要的 Matcher 分片。
-     * @param batch 本条批量命令的复用上下文
      */
     int orderBatchMatcherShard(OrderBatchProcessor.PendingBatch batch) {
         if (batch == null || batch.nextIndex < 0 || batch.nextIndex >= batch.items.size()) {
@@ -1173,7 +1047,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 汇总尚未提交项还会用到的分片，已提交的流水整批直接为空；当前直达子项或撤单片段不重复计入，撤改单路由已消失的项跳过。
-     * @param batch 本条批量命令的复用上下文
      */
     long remainingMatcherShardMask(OrderBatchProcessor.PendingBatch batch) {
         // 尚未提交后缀仍可能访问的 Matcher 分片位图
@@ -1186,7 +1059,7 @@ public final class OrderBatchProcessor {
             firstUnsubmitted = batch.kind == OrderBatchProcessor.Kind.CANCEL
                     ? batch.cancellationChunkEnd : batch.nextIndex + 1;
         }
-        for (/* 当前批内项或变更用户的遍历下标 */ int index = firstUnsubmitted; index < batch.items.size(); index++) {
+        for (int index = firstUnsubmitted; index < batch.items.size(); index++) {
             if (batch.kind != OrderBatchProcessor.Kind.PLACE && owner.activeOrderIndex().activeOrderRoute(
                     batch.kind == OrderBatchProcessor.Kind.CANCEL ? batch.items.get(index).orderId()
                             : batch.items.get(index).originalOrderId()) == null) continue;
@@ -1197,11 +1070,8 @@ public final class OrderBatchProcessor {
 
     /**
      * PLACE 取输入品种，撤改单取现有路由；改单原单不在路由时查本批较早成功项。空品种按既有规则走零分片，其余使用解码缓存或原路由器。
-     * @param batch 本条批量命令的复用上下文
-     * @param item 本批当前单项输入与结果槽
      */
     private int matcherShardForBatchItem(OrderBatchProcessor.PendingBatch batch, BatchItem item) {
-        // 当前品种名称，可能来自输入、活动路由或较早成功项
         String instrumentId = switch (batch.kind) {
             case PLACE -> ((PlaceOrderCommand) item.command).instrumentId();
             case CANCEL -> {
@@ -1212,7 +1082,6 @@ public final class OrderBatchProcessor {
             case AMEND -> {
                 // Owner 已有活动订单索引给出的可空稳定路由
                 var route = owner.activeOrderIndex().activeOrderRoute(((AmendOrderCommand) item.command).originalOrderId());
-                // 当前品种原先登记的批次、较早成功项或其品种，具体类型见声明
                 String previous = previousBatchOrderInstrument(batch, item.originalOrderId());
                 yield route == null ? previous == null ? "" : previous : route.instrumentId();
             }
@@ -1224,8 +1093,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 开启原命令事实及批次变更作用域，取得整批提交权并开始发布积累。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
      */
     void beginOrderBatchCommitContext(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
         owner.activateFactContext(pending.command(), pending.fingerprint());
@@ -1237,13 +1104,10 @@ public final class OrderBatchProcessor {
 
     /**
      * 独立预备撤单可直接建上下文；其他流水批次要求 Owner 已登记准入且事件成功完成，再收集释放整批准入并请求发布。
-     * @param batch 本条批量命令的复用上下文
-     * @param pending 本批仍占用的命令槽
      */
     public void beginPipelinedOrderBatchCommit(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
         // 事件已经解析的改单准入，后续仍需 Owner 核对全局订单身份
         OrderBatchProcessor.PlaceBatchAdmissionEvent admission = batch.placeBatchAdmissionEvent;
-        // 当前是否为可直接建立提交上下文的独立预备批量撤单
         boolean preparedCancel = pending.clusterIndependent && batch.kind == OrderBatchProcessor.Kind.CANCEL;
         if (!preparedCancel && (!batch.admissionCollected() || admission == null || !admission.complete()
                 || admission.rejection() != null)) {
@@ -1260,11 +1124,10 @@ public final class OrderBatchProcessor {
 
     /**
      * 只有前面各批均已登记流水品种且候选全部品种不重叠时返回假；否则按既有依赖规则认为冲突。
-     * @param candidate 待判断能否与前批次并行的下单批次
      */
     boolean conflictsWithEarlierPipelinedBatch(OrderBatchProcessor.PendingBatch candidate) {
         if (activePipelinedOrderBatches != pendingBatchCount() - 1) return true;
-        for (BatchItem /* 当前准备、撮合、收集或编码的批内项 */ item : candidate.items) {
+        for (BatchItem item : candidate.items) {
             if (pipelinedBatchBySymbol.containsKey(((PlaceOrderCommand) item.command).instrumentId())) return true;
         }
         return false;
@@ -1272,22 +1135,18 @@ public final class OrderBatchProcessor {
 
     /**
      * 仅在当前批有序提交范围内读取保留的主动单及成交事件，逐项写实时捕获并解除本项身份引用；捕获异常标记实时失败，不重复执行成交。
-     * @param batch 本条批量命令的复用上下文
      */
     private void captureCommittedBatchTrades(OrderBatchProcessor.PendingBatch batch) {
         if (owner.realtimeCapture() == null) return;
-        for (/* 当前整理实时成交的批内下标 */ int itemIndex = 0; itemIndex < batch.items.size(); itemIndex++) {
-            // 当前准备、撮合、收集或编码的批内项
+        for (int itemIndex = 0; itemIndex < batch.items.size(); itemIndex++) {
             BatchItem item = batch.items.get(itemIndex);
             // 本项保留到提交时的主动订单身份
             var taker = item.realtimeTakerOrder;
             item.realtimeTakerOrder = null;
             if (taker == null || owner.realtimeCapture() == null || !owner.realtimeCapture().active()) continue;
             try {
-                // 当前项实时成交的从零递增编号
                 int fill = 0;
-                for (/* 当前项 Matcher 事件下标 */ int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
-                    // 当前改单准入或撤单直达事件，类型见声明
+                for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
                     MatcherEvent event = item.executionEvents.get(eventIndex);
                     if (event.eventType() == MatcherEventType.TRADE)
                         owner.realtimeCapture().trade(taker, batch.sequence, fill++, event.price(), event.size(),
@@ -1299,17 +1158,12 @@ public final class OrderBatchProcessor {
 
     /**
      * 按 PLACE、CANCEL 或 AMEND 已解码批次借上下文并逐项保存输入；改单项结果编号使用新单编号，整批时间和操作一并绑定，其他消息类型抛错。
-     * @param message 当前整批原始 Core 命令
-     * @param decodedCommand 已经按消息类型解码的整批输入
-     * @param clusterTimestamp 整批固定使用的 Cluster 业务时间
-     * @param clusterPosition 整批固定使用的复制日志位置
      */
     OrderBatchProcessor.PendingBatch decodeOrderBatch(CoreMessage message, OrderCommand.Decoded decodedCommand,
                                                long clusterTimestamp, long clusterPosition) {
         // 整批原消息的类型
         CoreMessageType type = message.header().messageType();
         if (type == CoreMessageType.PLACE_ORDER_BATCH) {
-            // 按当前种类取出的单项或整批解码请求，具体类型见声明
             PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
             List<PlaceOrderCommand> orders = command.orders();
             int count = orders.size();
@@ -1324,7 +1178,6 @@ public final class OrderBatchProcessor {
             return batch;
         }
         if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
-            // 按当前种类取出的单项或整批解码请求，具体类型见声明
             CancelOrderBatchCommand command = decodedCommand.cancelOrderBatch();
             List<CancelOrderCommand> orders = command.orders();
             int count = orders.size();
@@ -1339,7 +1192,6 @@ public final class OrderBatchProcessor {
             return batch;
         }
         if (type == CoreMessageType.AMEND_ORDER_BATCH) {
-            // 按当前种类取出的单项或整批解码请求，具体类型见声明
             AmendOrderBatchCommand command = decodedCommand.amendOrderBatch();
             List<AmendOrderCommand> orders = command.orders();
             int count = orders.size();
@@ -1359,14 +1211,9 @@ public final class OrderBatchProcessor {
 
     /**
      * 从 Owner 池中取第一个容量足够的上下文并移出池，没有则按项数创建，再绑定本批种类和原日志元数据。
-     * @param kind 待借批次的下单、撤单或改单类别
-     * @param itemCount 本批需要容纳的项数量
-     * @param clusterTimestamp 整批固定使用的 Cluster 业务时间
-     * @param clusterPosition 整批固定使用的复制日志位置
      */
     OrderBatchProcessor.PendingBatch acquireOrderBatchPending(
             OrderBatchProcessor.Kind kind, int itemCount, long clusterTimestamp, long clusterPosition) {
-        // 本次从池中取出的可空批次上下文
         OrderBatchProcessor.PendingBatch selected = null;
         // Owner 批次复用池迭代器，选中足够容量的对象后移出
         Iterator<OrderBatchProcessor.PendingBatch> iterator = orderBatchPendingPool.iterator();
@@ -1384,7 +1231,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 空批次直接返回；否则解除品种登记及改单事件，清理对象后在池未满时归池。排序链接和所有异步借用由调用方提前处理。
-     * @param batch 本条批量命令的复用上下文
      */
     void releaseOrderBatchPending(OrderBatchProcessor.PendingBatch batch) {
         if (batch == null) return;
@@ -1396,12 +1242,10 @@ public final class OrderBatchProcessor {
 
     /**
      * PLACE 留到实际准入检查；撤改单只用 Owner 稳定路由核对已有原单归属，缺失订单留到各项准入判定，不跨线程读账户订单表。
-     * @param batch 本条批量命令的复用上下文
-     * @param userId 本批请求用户，账户按该用户路由
      */
     void validateOrderBatchIdentity(OrderBatchProcessor.PendingBatch batch, long userId) {
         if (batch.kind == OrderBatchProcessor.Kind.PLACE) return;
-        for (BatchItem /* 当前准备、撮合、收集或编码的批内项 */ item : batch.items) {
+        for (BatchItem item : batch.items) {
             // 撤单或改单本次需要检查归属的原订单编号
             long orderId = batch.kind == OrderBatchProcessor.Kind.CANCEL ? item.orderId : item.originalOrderId;
             // Owner 只用已有路由索引核对稳定订单身份。
@@ -1417,8 +1261,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 对尚未交账户处理的拒绝项检查全局修订未变；若已经变化则结束批次作用域并报告恢复故障。
-     * @param pending 本批仍占用的命令槽
-     * @param runtimeRevisionBefore 本项尚未交账户处理前保存的全局修订
      * @param exception 本项业务拒绝或输入异常，用作恢复故障原因
      */
     void requireUnchangedRejectedBatchItem(OrderCommand pending,
@@ -1432,11 +1274,6 @@ public final class OrderBatchProcessor {
 
     /**
      * 要求当前项已有直达事件，保存原先撤路由，再按下单准入副本或改单解析准入准备槽内固定 Matcher 任务。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
-     * @param item 本批当前单项输入与结果槽
-     * @param shard 当前已确定的 Matcher 分片
-     * @param direct 当前项已准备的直达结算事件
      */
     java.util.function.Supplier<?> prepareOrderBatchMatchingCommand(
             OrderCommand pending, OrderBatchProcessor.PendingBatch batch, BatchItem item, int shard,
@@ -1475,11 +1312,6 @@ public final class OrderBatchProcessor {
 
         /**
          * 把已固定的执行器、槽、批次、用户和分片放进本批复用任务，供 Matcher 之后调用。
-         * @param executor 当前固定任务使用的批次执行器
-         * @param pending 本批仍占用的命令槽
-         * @param batch 本条批量命令的复用上下文
-         * @param userId 本批请求用户，账户按该用户路由
-         * @param shard 当前已确定的 Matcher 分片
          */
         void prepare(OrderBatchProcessor executor, OrderCommand pending, OrderBatchProcessor.PendingBatch batch, long userId, int shard) {
             this.executor = executor;
@@ -1531,13 +1363,6 @@ public final class OrderBatchProcessor {
 
         /**
          * 保存本次同分片撤单片段的起止游标、命令槽及直达事件，供 Matcher 顺序执行。
-         * @param executor 当前固定任务使用的批次执行器
-         * @param pending 本批仍占用的命令槽
-         * @param batch 本条批量命令的复用上下文
-         * @param shard 当前已确定的 Matcher 分片
-         * @param start 撤单片段包含起点
-         * @param chunkEnd 撤单片段排他终点
-         * @param direct 当前项已准备的直达结算事件
          */
         void prepare(OrderBatchProcessor executor, OrderCommand pending, OrderBatchProcessor.PendingBatch batch, int shard,
                      int start, int chunkEnd, com.surprising.aeron.service.settlement.TradeSettlement direct) {
@@ -1570,10 +1395,8 @@ public final class OrderBatchProcessor {
         public Object get() {
             // 本任务第一个原生 Matcher 结果，后续完整事实仍在直达事件
             exchange.core2.core.common.MatcherResult firstNative = null;
-            for (/* 当前批内项或变更用户的遍历下标 */ int index = start; index < chunkEnd; index++) {
-                // 当前准备、撮合、收集或编码的批内项
+            for (int index = start; index < chunkEnd; index++) {
                 BatchItem item = batch.items.get(index);
-                // 当前项原生 Matcher 执行结果
                 var result = executor.owner.matchingAdapter().cancelDirectBatchItem(
                         shard, index - start, pending.sequence(), pending.command().header().commandId(), item.orderId,
                         pending.command().header().submittedAtEpochMillis(),
@@ -1601,14 +1424,12 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
             long openInterestSteps, int baseAssetId, int quoteAssetId, int settleAssetId) { }
     /**
      * 按批内下标读取 PLACE 输入；仅在下单批次和有效下标范围使用。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public com.surprising.aeron.protocol.PlaceOrderCommand intent(int index) {
         return (com.surprising.aeron.protocol.PlaceOrderCommand) items.get(index).command;
     }
     /**
      * 借用该项已经准备的产品判断输入，账户准入前由 Owner 填写。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public Decision decision(int index) { return preparedDecisions[index]; }
     /** 每项引用的产品判断输入，可指向同品种共享上下文。 */
@@ -1617,7 +1438,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     /**
      * 按有效下标取得本项可复用的解析订单槽，首次使用才创建；调用方遵守当前阶段的独占写权限。
      * 直接复用 preparedOrders 数组，消除冗余并行数组与双重清空。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public OrderCommand.ResolvedPlaceOrder resolvedOrderSlot(int index) {
         var slot = preparedOrders[index];
@@ -1627,8 +1447,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
 
     /**
      * 把账户准入订单捕获到对应项的固定副本，返回该份可借用回执，整批退休前保留。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
-     * @param order 当前由账户提供的可空准入或结果订单
      */
     public Order captureAdmittedOrder(int index, Order order) {
         BatchItem item = items.get(index);
@@ -1641,22 +1459,16 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     public int resultCount() { return items.size(); }
     /**
      * 返回指定项的结果订单编号。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public long resultOrderId(int index) { return items.get(index).orderId(); }
     /**
      * 返回指定项的改单原订单编号。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public long resultOriginalOrderId(int index) { return items.get(index).originalOrderId(); }
     /**
      * 捕获本项可空的写后订单并保存品种名称，最后标记该项结果已准备；空订单同样是有效结果。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
-     * @param order 当前由账户提供的可空准入或结果订单
-     * @param instrumentId 结果订单对应的品种名称
      */
     public void resultOrder(int index, Order order, String instrumentId) {
-        // 当前被捕获、检查、编码或清理的批内项
         var item = items.get(index);
         item.captureResultOrder(order);
         item.resultOrderSymbol = instrumentId;
@@ -1672,20 +1484,15 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     }
     /**
      * 返回指定项是否已经取得所属 Lane 的结果。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     @Override public boolean resultPrepared(int index) {
         return items.get(index).laneResultPrepared;
     }
     /**
      * 按 Matcher 接受与否填写单项状态；撤单片段的局部下标先加当前片段起点，映射到整批项。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
-     * @param accepted Matcher 是否接受当前项
      */
     @Override public void matcherResult(int index, boolean accepted) {
-        // 当前片段局部下标换算后的整批下标
         int itemIndex = kind == OrderBatchProcessor.Kind.CANCEL ? cancellationChunkStart + index : index;
-        // 当前被捕获、检查、编码或清理的批内项
         BatchItem item = items.get(itemIndex);
         item.status = accepted ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         item.resultCode = accepted ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
@@ -1758,27 +1565,22 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     public int size() { return items.size(); }
     /**
      * 返回指定项的结果订单编号，改单为新编号。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public long orderId(int index) { return items.get(index).orderId; }
     /**
      * 返回指定项的原单编号，非改单通常为零。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public long originalOrderId(int index) { return items.get(index).originalOrderId; }
     /**
      * 返回指定项的替换后编号，非改单通常为零。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public long replacementOrderId(int index) { return items.get(index).replacementOrderId; }
     /**
      * 返回指定项已决定的响应状态。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public ResponseStatus status(int index) { return items.get(index).status; }
     /**
      * 返回指定项的确定性结果码。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public CoreResultCode resultCode(int index) { return items.get(index).resultCode; }
     /** 批次编码期间复用的订单适配器，编码结束和命令回收时释放借用。 */
@@ -1792,19 +1594,14 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
 
     /**
      * 返回指定项已统计的成交事件数，编码器用它计算所需长度。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public int executionCount(int index) { return items.get(index).executionCount; }
     /**
      * 只编码指定项中的成交事件，按主动单、被动单、双方用户、价格和数量的固定顺序写入；其他 Matcher 事件跳过。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
-     * @param output 已按批量结果长度准备好的目标字节缓冲
      */
     public void writeExecutions(int index, java.nio.ByteBuffer output) {
-        // 当前被捕获、检查、编码或清理的批内项
         BatchItem item = items.get(index);
-        for (/* 当前编码的本项 Matcher 事件下标 */ int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
-            // 当前 Matcher 事件，只对成交写执行明细
+        for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
             MatcherEvent event = item.executionEvents.get(eventIndex);
             if (event.eventType() != MatcherEventType.TRADE) continue;
             output.putLong(item.orderId).putLong(event.matchedOrderId())
@@ -1844,7 +1641,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     /**
      *  下一条要准入或处理的批内项下标。
      * 保存调用方推进后的批内项游标，不在此验证范围或完成账户工作。
-     * @param nextIndex 调用方推进后的批内下标
      */
     @Accessors(fluent = true, chain = false)
     @Setter
@@ -1939,7 +1735,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
      *  当前最近已保存的撮合事实，供账户结算续步使用。
      * 借用最近已经保存的 Matcher 事实，可用于当前子项结算续步。
      * 保存或清除当前事实引用，不重复核验证据。
-     * @param lastMatchingResult 要保存或清除的可空 Matcher 事实
      */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -1991,13 +1786,10 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
 
     /**
      * 检查生命周期位图是否包含给定标记，不推进实际业务。
-     * @param bit 要读取或更新的生命周期位
      */
     private boolean has(int bit) { return (lifecycleFlags & bit) != 0; }
     /**
      * 按布尔值设置或清除给定生命周期位，只操作本地位图。
-     * @param bit 要读取或更新的生命周期位
-     * @param value 调用方决定的生命周期条件是否成立
      */
     private void set(int bit, boolean value) {
         if (value) lifecycleFlags |= bit; else lifecycleFlags &= ~bit;
@@ -2008,7 +1800,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     boolean admissionCollected() { return has(ADMISSION_COLLECTED); }
     /**
      * 只更新生命周期位，记录Owner 是否已经登记整批准入的身份分配；实际工作由调用方推进。
-     * @param value 调用方决定的生命周期条件是否成立
      */
     void admissionCollected(boolean value) { set(ADMISSION_COLLECTED, value); }
     /**
@@ -2017,7 +1808,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     public boolean matchingApplied() { return has(MATCHING_APPLIED); }
     /**
      * 只更新生命周期位，记录当前批次全部撮合输入是否已经应用；实际工作由调用方推进。
-     * @param value 调用方决定的生命周期条件是否成立
      */
     public void matchingApplied(boolean value) { set(MATCHING_APPLIED, value); }
     /**
@@ -2026,7 +1816,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     boolean pipelineRegistered() { return has(PIPELINE_REGISTERED); }
     /**
      * 只更新生命周期位，记录是否已在品种依赖表登记本批；实际工作由调用方推进。
-     * @param value 调用方决定的生命周期条件是否成立
      */
     void pipelineRegistered(boolean value) { set(PIPELINE_REGISTERED, value); }
     /**
@@ -2035,7 +1824,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     boolean laneCommitCompleted() { return has(LANE_COMMIT_COMPLETED); }
     /**
      * 只更新生命周期位，记录本批最终账户提交水位是否已经完成；实际工作由调用方推进。
-     * @param value 调用方决定的生命周期条件是否成立
      */
     void laneCommitCompleted(boolean value) { set(LANE_COMMIT_COMPLETED, value); }
     /**
@@ -2044,7 +1832,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     boolean settlementsCollected() { return has(SETTLEMENTS_COLLECTED); }
     /**
      * 只更新生命周期位，记录整批结算事件是否已经收集；实际工作由调用方推进。
-     * @param value 调用方决定的生命周期条件是否成立
      */
     void settlementsCollected(boolean value) { set(SETTLEMENTS_COLLECTED, value); }
     /**
@@ -2053,7 +1840,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     boolean finishing() { return has(FINISHING); }
     /**
      * 只更新生命周期位，记录是否已进入整批最终收尾；实际工作由调用方推进。
-     * @param value 调用方决定的生命周期条件是否成立
      */
     void finishing(boolean value) { set(FINISHING, value); }
     /**
@@ -2062,7 +1848,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     boolean laneContextInitialized() { return has(LANE_CONTEXT_INITIALIZED); }
     /**
      * 只更新生命周期位，记录是否已经为最终提交建立完整账户完成位图；实际工作由调用方推进。
-     * @param value 调用方决定的生命周期条件是否成立
      */
     void laneContextInitialized(boolean value) { set(LANE_CONTEXT_INITIALIZED, value); }
     /**
@@ -2071,14 +1856,12 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     public boolean activated() { return has(ACTIVATED); }
     /**
      * 只更新生命周期位，记录是否已经取得本批执行上下文；实际工作由调用方推进。
-     * @param value 调用方决定的生命周期条件是否成立
      */
     public void activated(boolean value) { set(ACTIVATED, value); }
 
     /**
      * 容量至少取一，要求显式响应分配器，分配本批各列和项槽；后续按有效项数复用，不自动扩展这些数组。
      * @param requestedCapacity 请求的项容量，至少分配一项
-     * @param responseArena 非空响应槽分配器
      */
     public PendingBatch(int requestedCapacity, ResponseArena responseArena) {
         // 至少为一的本批预分配项容量
@@ -2100,9 +1883,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
 
     /**
      * 绑定非空批次种类及原日志时间位置；其他旧结果须由上一轮 clear 清掉。
-     * @param kind 本批业务种类
-     * @param clusterTimestamp 固定业务时间
-     * @param clusterPosition 固定复制日志位置
      */
     PendingBatch initialize(OrderBatchProcessor.Kind kind, long clusterTimestamp,
                                          long clusterPosition) {
@@ -2129,15 +1909,11 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
 
     /**
      * 使用当前项数作为下标，首次创建或复用该位置项槽，再追加到列表；容量由调用方预先保证，旧项必须已清理。
-     * @param orderId 本项结果订单编号
      * @param originalOrderId 改单原订单编号，非改单为零
      * @param replacementOrderId 改单替换后编号，非改单为零
-     * @param command 本项已解码业务输入
      */
     public void addItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
-        // 当前项槽、预备身份或 Matcher 事实的遍历下标
         int index = items.size();
-        // 当前被捕获、检查、编码或清理的批内项
         BatchItem item = itemSlots[index];
         if (item == null) itemSlots[index] = item = new BatchItem(orderId, originalOrderId, replacementOrderId, command);
         else item.initialize(orderId, originalOrderId, replacementOrderId, command);
@@ -2150,7 +1926,7 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     void clear() {
         // 清批前记录的有效项数，只清对应数组前缀
         int preparedCount = items.size();
-        for (BatchItem /* 当前被捕获、检查、编码或清理的批内项 */ item : items) item.clear();
+        for (BatchItem item : items) item.clear();
         items.clear();
         decodedCommand = null;
         changedUserIds.clear();
@@ -2219,9 +1995,6 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
 
     /**
      * 登记主动用户及成交 maker；PLACE 或成功项记录相关订单，成功的前置撤单始终记录。保持原语去重缓冲，留到最终提交统一盖戳。
-     * @param item 当前完成的批内项
-     * @param takerUserId 当前项主动方用户编号
-     * @param matchingResult 该项已有 Matcher 事实
      */
     void collectChangedOrderIds(
             BatchItem item,
@@ -2235,20 +2008,16 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
             if (item.originalOrderId() > 0) runtimeChangedOrderIds.add(item.originalOrderId());
             if (item.replacementOrderId() > 0) runtimeChangedOrderIds.add(item.replacementOrderId());
         }
-        // 当前结果的全部 Matcher 事件
         var matcherEvents = matchingResult.matcherEvents();
-        for (/* 当前项槽、预备身份或 Matcher 事实的遍历下标 */ int index = 0; index < matcherEvents.size(); index++) {
-            // 当前 Matcher 事件，只对成交写执行明细
+        for (int index = 0; index < matcherEvents.size(); index++) {
             MatcherEvent event = matcherEvents.get(index);
             if (event.eventType() == MatcherEventType.TRADE) {
                 changedUserIds.add(event.matchedOrderUid());
                 if (recordOrders) runtimeChangedOrderIds.add(event.matchedOrderId());
             }
         }
-        // 当前结果的前置撤单事实列表
         var cancellations = matchingResult.cancellations();
-        for (/* 当前项槽、预备身份或 Matcher 事实的遍历下标 */ int index = 0; index < cancellations.size(); index++) {
-            // 当前撤单事实，成功才登记其变化订单
+        for (int index = 0; index < cancellations.size(); index++) {
             OrderCancelResult cancellation = cancellations.get(index);
             if (cancellation.accepted()) {
                 runtimeChangedOrderIds.add(cancellation.orderId());
@@ -2409,7 +2178,6 @@ static final class BatchItem {
 
     /**
      * 把准入订单复制到本项可复用槽，传空只解除当前结果引用；Matcher 和实时输出借同一份副本，不再次读取活跃账户订单。
-     * @param order 当前要捕获的可空订单，非空时复制进本项槽
      */
     void captureAdmittedOrder(com.surprising.aeron.service.order.Order order) {
         admittedOrder = order == null ? null : (admissionCopy = order.copyIntoCommandSlot(admissionCopy));
@@ -2417,7 +2185,6 @@ static final class BatchItem {
 
     /**
      * 把结算后订单复制到本项结果槽，空输入表示响应没有这张订单视图；副本容量保留供后续批次复用。
-     * @param order 当前要捕获的可空订单，非空时复制进本项槽
      */
     void captureResultOrder(com.surprising.aeron.service.order.Order order) {
         resultOrder = order == null ? null : (resultCopy = order.copyIntoCommandSlot(resultCopy));
@@ -2437,7 +2204,7 @@ static final class BatchItem {
         executionEvents = executionSlot.events();
         // 复制事件中实际 TRADE 事件数量，不包含拒单或其他事件
         int trades = 0;
-        for (/* 正在统计的本项事件下标 */ int index = 0; index < executionEvents.size(); index++) {
+        for (int index = 0; index < executionEvents.size(); index++) {
             if (executionEvents.get(index).eventType() == MatcherEventType.TRADE) trades++;
         }
         return trades;
@@ -2461,10 +2228,8 @@ static final class BatchItem {
 
     /**
      * 保存本项订单身份及输入；其他结果初始为空，后续复用前须先 clear。
-     * @param orderId 本项结果订单编号
      * @param originalOrderId 改单原订单编号，非改单为零
      * @param replacementOrderId 改单替换后编号，非改单为零
-     * @param command 本项已解码的业务输入
      */
     BatchItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
         initialize(orderId, originalOrderId, replacementOrderId, command);
@@ -2472,10 +2237,8 @@ static final class BatchItem {
 
     /**
      * 仅重新绑定订单身份与输入，不重置旧结果；调用方须在上一批所有借用结束并 clear 后使用。
-     * @param orderId 本项结果订单编号
      * @param originalOrderId 改单原订单编号，非改单为零
      * @param replacementOrderId 改单替换后编号，非改单为零
-     * @param command 本项已解码的业务输入
      */
     void initialize(long orderId, long originalOrderId, long replacementOrderId, Object command) {
         this.orderId = orderId;
@@ -2562,21 +2325,11 @@ public static final class PlaceBatchAdmissionEvent implements SettlementLaneWork
 
     /**
      * 校验有效项数、借用数组、命令和拓扑范围，绑定本批稳定输入及原变更缓冲，重置成功前缀和结果标记。
-     * @param coreSequence 整批下单沿用的 Core 命令序号
-     * @param userId 本批唯一所属用户编号，所有项由同一账户 Lane 准入
-     * @param commandId 本批业务命令 UUID，各项订单和冻结沿用该命令归属
-     * @param orders 调用方借出的逐项解析结果数组，Lane 按下标写入已决策订单输入
      * @param clientKeys 与批项对齐的实际客户身份键，失败回退后逐项清零
      * @param admittedOrders 原批次槽保存的逐项获准订单租约数组，后续撮合继续使用
-     * @param itemCount 本批本次有效项数量，只处理借用数组的这一前缀
      * @param laneId 本批唯一账户 Lane 编号，必须与用户拓扑一致
-     * @param matcherShard 本批固定的 Matcher 分片，账户准入完成后通知该分片的续步
-     * @param runtime 提供原账户写入、批次回退和通知入口的所属运行时
-     * @param changes 本批原有结算变更缓冲，结果消费时转交一次，不复制第二份账户变化
      * @param identities 当前产品身份表，客户键在所属 Lane 准备并在失败时回退
      * @param source Owner 交接的稳定批次输入及原命令槽入口，Lane 完成前不得复用
-     * @param timestamp 整批订单写入使用的集群业务时间
-     * @param position 整批命令的集群日志位置
      */
     public OrderBatchProcessor.PlaceBatchAdmissionEvent prepare(
             long coreSequence, long userId, UUID commandId, OrderCommand.ResolvedPlaceOrder[] orders,
@@ -2629,14 +2382,12 @@ public static final class PlaceBatchAdmissionEvent implements SettlementLaneWork
             runtime.enterMatcherSettlementScope(lane, changes);
             lane.admissionIndexCapacity(Math.max(2, itemCount));
             try {
-                for (/* 当前处理的批次项下标，所有输入、客户键和获准订单数组按同一下标对齐。 */ int index = 0; index < itemCount; index++) {
-                    // 当前项已准备的币对市场输入、OI 和资产路由。
+                for (int index = 0; index < itemCount; index++) {
                     var decision = source.decision(index);
                     // 写入该项原命令槽的解析订单，后续检查和冻结都使用同一输入。
                     OrderCommand.ResolvedPlaceOrder order = OrderAdmissionService.resolveInto(
                             source.resolvedOrderSlot(index), decision.context(), userId, source.intent(index));
                     orders[index] = order;
-                    // 当前项币对的运行时稠密编号。
                     int symbolId = order.symbolId();
                     // 衍生品结算资产或现货买卖方向对应的报价、基础资产编号。
                     int assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
@@ -2646,11 +2397,9 @@ public static final class PlaceBatchAdmissionEvent implements SettlementLaneWork
                     long key = RuntimeIdentityRegistry.clientKeyValue(
                             identities.prepareClientKeyInLane(lane, userId, order.clientOrderId()));
                     clientKeys[index] = key;
-                    // 当前用户、币对和持仓腿的已有持仓身份。
                     long positionKey = identities.findPositionKeyValueInLane(
                             lane, userId, order.instrument(), order.positionSide());
                     if (runtime.productLine().isDerivative() && positionKey != 0) {
-                        // 当前项对应已有持仓，逆向订单可能与已有只减仓委托争用平仓容量。
                         var position = lane.position(positionKey);
                         if (position != null && position.signedQuantitySteps() != 0
                                 && (position.signedQuantitySteps() > 0) != (order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
@@ -2662,7 +2411,6 @@ public static final class PlaceBatchAdmissionEvent implements SettlementLaneWork
                                 throw new CoreStateRejectedException("CLOSE_CAPACITY_REQUIRES_ORDERED_ADMISSION", "close commitments require ordered cancellation");
                         }
                     }
-                    // 当前项通过统一账户准入后算出的所需冻结金额。
                     long requiredReservation = OrderAdmissionService.requiredReservationPrepared(
                             runtime, lane, userId, order, decision.openInterestSteps(),
                             key, positionKey,
@@ -2680,7 +2428,7 @@ public static final class PlaceBatchAdmissionEvent implements SettlementLaneWork
                 lane.admissionIndexCapacity(2);
                 runtime.exitMatcherSettlementScope(lane, changes);
             }
-        } catch (/* 本批出现的业务拒绝、溢出或非法参数，先回退已成功前缀及身份再保存。 */ CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
+        } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             runtime.rollbackPlaceBatchAdmissionInLane(
                     lane, userId, coreSequence, orders, clientKeys, admittedCount, userBefore);
             for (/* 失败回退时遍历所有已准备客户身份的项下标，回退后清零对应键。 */ int i = 0; i < itemCount; i++) {
@@ -2740,12 +2488,10 @@ public static final class PlaceBatchAdmissionEvent implements SettlementLaneWork
     }
     /**
      * 按有效项下标读取该项获准订单租约，不新建订单副本。
-     * @param index 本批有效前缀内的零起始项下标
      */
     Order admittedOrder(int index) { return admittedOrders[index]; }
     /**
      * 按有效项下标读取 Lane 已解析的订单决策输入，引用仍受原批次生命周期约束。
-     * @param index 本批有效前缀内的零起始项下标
      */
     OrderCommand.ResolvedPlaceOrder order(int index) { return orders[index]; }
     /**
@@ -2755,7 +2501,6 @@ public static final class PlaceBatchAdmissionEvent implements SettlementLaneWork
         if (!complete() || changes == null) {
             throw new IllegalStateException("place batch admission changes are unavailable");
         }
-        // 本次转交给调用方的原变更缓冲，事件随后不再拥有该引用。
         TradeSettlement.Changes value = changes;
         changes = null;
         return value;
@@ -2763,7 +2508,6 @@ public static final class PlaceBatchAdmissionEvent implements SettlementLaneWork
 
     /**
      * 在事件完成且仍持有变更缓冲时，把本批余额前值交给指定原有补丁缓冲，供后续正确回退使用。
-     * @param target 接收本批余额前值的原 AccountTransactionRollback.BalancePatches 缓冲
      */
     public void copyBalanceBeforeTo(AccountTransactionRollback.BalancePatches target) {
         if (!complete() || changes == null || target == null) {
