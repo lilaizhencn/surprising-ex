@@ -1,6 +1,6 @@
 # Instrument and Product Contracts
 
-Shared product identity, permanent instrument IDs, configuration snapshots, risk brackets, source definitions, and contract mathematics. `com.surprising.product.api` is part of this module; there is no separate `surprising-product-api` reactor module.
+Shared product identity, permanent instrument IDs, configuration snapshots, risk brackets, source definitions, and contract mathematics. Product identity lives in this module under `com.surprising.product.api`.
 
 | Package | Responsibility |
 | --- | --- |

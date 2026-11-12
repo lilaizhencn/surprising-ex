@@ -31,7 +31,7 @@ External bank/payment transfers are not automatically verified by screenshots or
 
 ## Delivery scope and evidence
 
-The initial 2026-10-20 scope covered exact quoting, funds intent/escrow, order/payment/release/cancel/timeout/appeal backend paths, PostgreSQL concurrency/security/unknown outcomes, and real SPOT FUSED funds checks. It did not establish all merchant/payment, message/evidence, advanced market, relationship, alert, or three-client UI flows. Two existing protocol fingerprint vector failures were reproduced on the earlier protocol source and were not changed to manufacture passing results.
+The initial 2026-10-20 scope covered exact quoting, funds intent/escrow, order/payment/release/cancel/timeout/appeal backend paths, PostgreSQL concurrency/security/unknown outcomes, and real SPOT funds checks. It did not establish all merchant/payment, message/evidence, advanced market, relationship, alert, or three-client UI flows. Two existing protocol fingerprint vector failures were reproduced on the earlier protocol source and were not changed to manufacture passing results.
 
 The later 2026-10-21 work added actual merchant staking, original-amount unstaking, and primary three-client trading operations with local Core validation. Do not interpret the earlier checklist as the latest delivery state, or expand the later scope to every advanced page.
 

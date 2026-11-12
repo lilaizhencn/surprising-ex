@@ -4,7 +4,7 @@ Shared order RPC contracts, DTOs, command/event models, and trading calculations
 
 ## Processing boundary
 
-`OrderService` normalizes requests and validates instrument rules. `AeronOrderCommandService` encodes the final request; `OrderAeronGateway` sends it to Core. Normal placement submits one authoritative `PLACE_ORDER`, not a separate preflight followed by placement. Explicit test/dry-run endpoints may preflight, but the result is not an authorization or cached reservation.
+`OrderService` normalizes requests, validates instrument rules, and encodes the final request with `StableOrderIdentity` and `TradingCommandCodec`. `OrderAeronGateway` sends it to Core. Normal placement submits one authoritative `PLACE_ORDER`, not a separate preflight followed by placement. Explicit test/dry-run endpoints may preflight, but the result is not an authorization or cached reservation.
 
 Core owns idempotency, reservation, matching, fees, and positions. Current order/account queries use Realtime read views and committed history where supported; an unavailable view does not silently fall back to Core.
 
@@ -25,7 +25,7 @@ Keep four price concepts distinct: client limit price, actual fragment execution
 
 Ordinary non-reduce-only orders reserve the full possible opening quantity at the reservation boundary plus the worst positive fee. Visible depth or predicted fill rate cannot reduce this reservation. Core releases unused amounts only through actual fill/cancel/reject/IOC/FOK transitions. Missing, negative, or overflowing reservations fail closed.
 
-`PositionCloseCapacity` is Core's exclusive commitment keyed by user, instrument, margin mode, position side, and position revision. A long closes with SELL; a short closes with BUY. Active reduce-only orders cannot promise the same position quantity twice. Conflicts converge deterministically newest-first by Core sequence, then larger order ID; resolve affected commitments before submitting them to Matcher. A reduce-only flag skips new opening margin, not direction, ownership, product, asset, or capacity checks.
+`Position.CloseCapacity` commits close quantity for one user, instrument, and position side. A long closes with SELL; a short closes with BUY. Open close orders share that position quantity. When the incoming quantity would exceed it, reduce-only candidates are released newest-first by creation time, then larger order ID, before Matcher submission. A reduce-only flag skips new opening margin, not direction, ownership, product, asset, or capacity checks.
 
 ## Fees and amendments
 

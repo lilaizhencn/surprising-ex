@@ -16,7 +16,7 @@ Funds postings retain immutable operation identities and explicit owner/asset/ac
 
 ## Transfers and idempotency
 
-`ProductTransferCoordinator` persists cross-product workflow progress. Product account commands use stable IDs through transfer-out, transfer-in, and completion. Unknown network outcomes resume with the same identity; a new ID must not replace unresolved work. Reconciliation advances persisted intent only after confirming the corresponding Core result.
+`ProductTransferService` persists cross-product workflow progress. Product account commands use stable IDs through transfer-out, transfer-in, and completion. Unknown network outcomes resume with the same identity; a new ID must not replace unresolved work. Reconciliation advances persisted intent only after confirming the corresponding Core result.
 
 Recent command results and durable funds identities serve different retention needs. Durable funds identity capacity exhaustion fails explicitly. Source-sequence progress alone cannot replace funds identity verification. Core snapshots and log recovery preserve those identities.
 

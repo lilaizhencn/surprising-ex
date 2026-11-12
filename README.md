@@ -77,22 +77,22 @@ The parent POM and the root reactor are build structures, not runtime services. 
 | Realtime transport | Publications, subscriptions, and copied frames | Transport ownership only; no trading-state mutation |
 | Application processes | Configuration, orchestration, durable projections, and user-facing queries | Application-specific transactions and checkpoints |
 
-`PIPELINED` execution uses Matcher and Account Lane workers. `FUSED` executes matching and account calculation inline. Treasury work remains on Owner; there is no separate authoritative ledger thread.
+`OrderBookRouter` runs Matcher shard threads. `SettlementLaneWorker` runs Account Lane threads. Treasury work remains on Owner; there is no separate authoritative ledger thread.
 
 ```mermaid
 flowchart LR
     Ingress[OwnerIngressRing] --> Owner[TradingCoreOwner]
-    Owner --> Window[ClusterCommandWindow]
-    Window --> Admission[Account Lane admission]
-    Admission --> Matcher[MatcherCommandPipeline]
+    Owner --> Window[OrderCommandQueue.IngressWindow]
+    Window --> Admission[OrderAdmissionService]
+    Admission --> Matcher[OrderBookRouter]
     Matcher --> Settlement[SettlementLaneWorker]
-    Settlement --> Commit[OrderedCommitCoordinator]
-    Commit --> Treasury[Treasury / funds checks on Owner]
-    Treasury --> Publish[CommitPublication]
-    Publish --> Response[Response / committed realtime output]
+    Settlement --> Commit[OrderCommitService]
+    Commit --> Treasury[TreasuryRuntime on Owner]
+    Treasury --> Publish[OrderCommitService.Publication]
+    Publish --> Response[ResponseSlotPool / committed realtime output]
 ```
 
-The command window is a bounded FIFO of admitted, unretired commands. It retains input leases and routing metadata and tracks dependencies on the same user or referenced order. It is not an order book. The client in-flight limit is a different bound on outstanding requests. The current Core window accepts powers of two from 64 to 4096; 256 is the documented local qualification baseline, not a proven physical capacity limit.
+`OrderCommandQueue.IngressWindow` is a bounded FIFO of admitted, unretired commands. It retains input leases and routing metadata and tracks dependencies on the same user or referenced order. It is not an order book. The client in-flight limit is a different bound on outstanding requests. The current Core window accepts powers of two from 64 to 4096; 256 is the documented local qualification baseline, not a proven physical capacity limit.
 
 ## Source navigation
 
@@ -103,13 +103,13 @@ Core classes below are under [the Aeron service source tree](surprising-aeron-co
 | Node lifecycle | `bootstrap.SurprisingCoreApplication`, `config`, `bootstrap.AeronCoreLifecycle` |
 | Replicated-log callback | `controller.AeronTradingClusterService` |
 | Scheduling and dispatch | `service.core.TradingCoreOwner`, [TradingCoreRuntime](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java), `support.ingress.OwnerIngressRing` |
-| Order dispatch and slots | `service.order.MatchingCommandAdmission`, [CoreMatchingFlow](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java), [CommandSlot](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlot.java), [OrderBatchExecutor](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderBatchExecutor.java) |
-| Account admission | `service.order.admission.RuntimeOrderAdmission`, `service.account.AccountLaneState` |
-| Matching | `service.matcher.DeterministicExchangeCoreAdapter`, `service.matcher.pipeline.MatcherCommandPipeline` |
-| Settlement | `bootstrap.account.SettlementLaneWorker`, `service.settlement.RuntimeSpotMatchProcessor`, [RuntimeDerivativeMatchProcessor](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java) |
-| Ordered publication | `service.order.commit.OrderedCommitCoordinator`, [CommitPublication](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/CommitPublication.java) |
-| Identity and retention | `service.result.CommandResultLedger`, [FundsCommandIndex](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/FundsCommandIndex.java), `service.retention` |
-| Risk and lifecycle | `service.risk`, `service.liquidation`, `service.funding`, `service.insurance`, `service.adl`, `service.settlement.lifecycle` |
+| Order dispatch | `service.order.OrderAdmissionService`, [OrderCommand](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommand.java), [OrderCommandQueue](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommandQueue.java), [OrderMatchingFlow](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderMatchingFlow.java), [OrderBatchProcessor](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderBatchProcessor.java) |
+| Account admission | `service.order.OrderAdmissionService`, `service.account.AccountPartition` |
+| Matching | `service.matcher.OrderBookEngine`, `service.matcher.OrderBookRouter` |
+| Settlement | `bootstrap.account.SettlementLaneWorker`, `service.settlement.TradeSettlement`, [SpotTradeSettlementService](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/SpotTradeSettlementService.java), [DerivativeTradeSettlementService](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/DerivativeTradeSettlementService.java) |
+| Ordered publication | `service.order.OrderCommitService`, [OrderCommitService.Publication](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommitService.java) |
+| Identity and retention | `service.result.CommandResultLedger`, [FundsCommandIndex](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/FundsCommandIndex.java), `service.retention.TerminalStateRetention` |
+| Risk and lifecycle | `service.risk`, `service.liquidation`, `service.funding`, `service.insurance`, `service.adl`, [ContractExpirySettlementService](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/ContractExpirySettlementService.java) |
 | Snapshot and recovery | `service.snapshot.CoreSnapshotLifecycle`, [SectionedCoreSnapshotRecovery](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotRecovery.java) |
 
 ## Trading flows by business operation
@@ -120,8 +120,7 @@ Core classes below are under [the Aeron service source tree](surprising-aeron-co
 flowchart LR
     HTTP[OrderInternalController / request handlers] --> OS[OrderService]
     OS --> Rules[Normalize request / resolve BBO / validate product and order rules]
-    Rules --> ACS[AeronOrderCommandService]
-    ACS --> ID[StableOrderIdentity + TradingCommandCodec]
+    Rules --> ID[StableOrderIdentity + TradingCommandCodec]
     ID --> OAG[OrderAeronGateway]
     OAG --> Pool[AeronClientPool]
     Pool --> Session[SurprisingAeronClient]
@@ -138,20 +137,20 @@ Gateway performs request validation and encoding. Core makes the authoritative r
 
 ```mermaid
 flowchart TB
-    Runtime[TradingCoreRuntime] --> Admission[MatchingCommandAdmission.beginMatching]
-    Admission --> Slot[CommandSlot]
-    Slot --> Flow[CoreMatchingFlow]
-    Flow --> Lane[RuntimeOrderAdmission on Account Lane]
+    Runtime[TradingCoreRuntime] --> Admission[OrderAdmissionService.beginMatching]
+    Admission --> Slot[OrderCommand]
+    Slot --> Flow[OrderMatchingFlow]
+    Flow --> Lane[OrderAdmissionService on AccountPartition]
     Lane --> Check[Validate funds / margin / limits; reserve required amounts]
-    Check --> Continuation[CommandSlot.OrderMatchingContinuation]
-    Continuation --> Pipeline[MatcherCommandPipeline]
-    Pipeline --> Adapter[DeterministicExchangeCoreAdapter]
+    Check --> Continuation[OrderMatchingContinuation]
+    Continuation --> Pipeline[OrderBookRouter]
+    Pipeline --> Adapter[OrderBookEngine]
     Adapter --> Native[exchange-core order book]
-    Native --> Event[MatcherSettlementEvent]
+    Native --> Event[OrderMatchingResult / TradeSettlement]
     Event --> Worker[SettlementLaneWorker]
-    Worker --> Spot[RuntimeSpotMatchProcessor]
-    Worker --> Derivative[RuntimeDerivativeMatchProcessor]
-    Spot --> Commit[Shared ordered commit flow]
+    Worker --> Spot[SpotTradeSettlementService]
+    Worker --> Derivative[DerivativeTradeSettlementService]
+    Spot --> Commit[OrderCommitService]
     Derivative --> Commit
 ```
 
@@ -161,17 +160,17 @@ Matcher owns book mutations. Account Lanes own the resulting user accounting. A 
 
 ```mermaid
 flowchart TB
-    Service[OrderService] --> Encode[AeronOrderCommandService]
+    Service[OrderService] --> Encode[StableOrderIdentity + TradingCommandCodec]
     Encode --> Transport[OrderAeronGateway / AeronClientPool]
-    Transport --> Owner[TradingCoreOwner / ClusterCommandWindow]
+    Transport --> Owner[TradingCoreOwner / OrderCommandQueue.IngressWindow]
     Owner --> Dependency[Wait for referenced order and user dependencies]
-    Dependency --> Admission[MatchingCommandAdmission]
-    Admission --> Slot[CommandSlot.OrderMatchingContinuation]
-    Slot --> Matching[CoreMatchingFlow / MatcherCommandPipeline]
-    Matching --> Adapter[DeterministicExchangeCoreAdapter]
+    Dependency --> Admission[OrderAdmissionService]
+    Admission --> Slot[OrderMatchingContinuation]
+    Slot --> Matching[OrderMatchingFlow / OrderBookRouter]
+    Matching --> Adapter[OrderBookEngine]
     Adapter --> Book[Cancel or replace in native book]
     Book --> Lane[Account Lane order updates / hold release / replacement accounting]
-    Lane --> Commit[OrderedCommitCoordinator]
+    Lane --> Commit[OrderCommitService]
     Commit --> Result[Terminal command result]
 ```
 
@@ -181,37 +180,37 @@ Replace/amend carries both the original and replacement identities. Decode the r
 
 ```mermaid
 flowchart LR
-    OS[OrderService: validate batch] --> ACS[AeronOrderCommandService]
-    ACS --> Codec[TradingOrderBatchCodec]
-    Codec --> Owner[TradingCoreOwner / TradingCoreRuntime]
-    Owner --> Batch[OrderBatchExecutor]
+    OS[OrderService: validate batch] --> Codec[TradingOrderBatchCodec]
+    Codec --> Gateway[OrderAeronGateway]
+    Gateway --> Owner[TradingCoreOwner / TradingCoreRuntime]
+    Owner --> Batch[OrderBatchProcessor]
     Batch --> Slots[Admission and matching work for batch items]
-    Slots --> Matching[CoreMatchingFlow / MatcherCommandPipeline]
+    Slots --> Matching[OrderMatchingFlow / OrderBookRouter]
     Matching --> Lanes[Account Lane settlement]
-    Lanes --> Commit[OrderedCommitCoordinator]
+    Lanes --> Commit[OrderCommitService]
     Commit --> Response[CoreOrderBatchResult / per-item outcomes]
 ```
 
-Gateway validates the batch before submission. Core retains per-item outcomes and the original command identity. A batch message, an order item, and a matched trade are different counting units. Borrowed batch response slices must be copied before their arena lease ends if they need to outlive that lease.
+Gateway validates the batch before submission. Core retains per-item outcomes and the original command identity. A batch message, an order item, and a matched trade are different counting units. Borrowed batch response slices must be copied before their `ResponseSlotPool` lease ends if they need to outlive that lease.
 
 ### 5. Ordered commit, funds audit, and response
 
 ```mermaid
 flowchart TB
-    Matching[Matcher result / CommandSlot] --> OCC[OrderedCommitCoordinator]
+    Matching[Matcher result / OrderCommand] --> OCC[OrderCommitService]
     OCC --> Account[TradingAccountRuntime / Account Lane commit work]
     Account --> ACK[Collect required Lane acknowledgements]
     ACK --> Owner[TreasuryRuntime / Owner funds verification]
     Owner --> Indices[Committed order / position / identity indices]
-    Indices --> Publication[CommitPublication]
-    Publication --> Ledger[CommandResultLedger / terminal retention]
+    Indices --> Publication[OrderCommitService.Publication]
+    Publication --> Ledger[CommandResultLedger / TerminalStateRetention]
     Publication --> Live[Committed realtime changes]
     Ledger --> Retirement[TradingCoreOwner: retire FIFO head]
     Retirement --> Egress[Cluster response egress]
     Egress --> Client[AeronClientPool response correlation]
 ```
 
-Results become terminal only after the required business work and ordered commit. Slots, decoded inputs, and response arenas retain explicit lifetimes. Business rejection and runtime failure are different paths; funds-validation failures propagate instead of becoming successful responses.
+Results become terminal only after the required business work and ordered commit. `OrderCommand` slots, decoded inputs, and `ResponseSlotPool` buffers retain explicit lifetimes. Business rejection and runtime failure are different paths; funds-validation failures propagate instead of becoming successful responses.
 
 ### 6. Trigger and algorithmic orders
 
@@ -225,9 +224,9 @@ flowchart TB
     Core --> AlgoState[AlgoOrderIndex / committed algorithm state]
     Maintenance[TriggerOrderMaintenanceTask / maintenance commands] --> Core
     Core --> Candidates[Evaluate eligible candidates under ordered command state]
-    Candidates --> Admission[MatchingCommandAdmission queued matching]
-    Admission --> Common[CoreMatchingFlow / Matcher / Account Lanes]
-    Common --> Commit[OrderedCommitCoordinator / committed projections]
+    Candidates --> Admission[OrderAdmissionService queued matching]
+    Admission --> Common[OrderMatchingFlow / OrderBookEngine / Account Lanes]
+    Common --> Commit[OrderCommitService / committed projections]
 ```
 
 The scheduling and index stages select work; generated orders still use the real matching and accounting path. Client order identity checks read the owning Account Lane's authoritative state. Read models do not independently trigger execution.
@@ -242,7 +241,7 @@ flowchart TB
     Inputs --> Funding[FundingService.publishRates / settleDueRates]
     Funding --> FG[FundingAeronGateway / DerivativesAeronClient]
     FG --> Core[TradingCoreRuntime]
-    Core --> FP[RuntimePerpetualFundingProcessor]
+    Core --> FP[FundingSettlementService]
     FP --> Lanes[Account Lane accounting]
     Lanes --> Commit[Owner funds validation and ordered commit]
 ```
@@ -256,14 +255,14 @@ flowchart TB
     Task[DerivativesLifecycleMaintenanceTask] --> Services[RiskService / LiquidationService / InsuranceService / AdlService]
     Services --> Client[DerivativesAeronClient]
     Client --> Runtime[TradingCoreRuntime]
-    Runtime --> Risk[RiskScanCoordinator / RuntimeDerivativeRiskProcessor]
-    Risk --> Liquidation[RuntimeDerivativeLiquidationProcessor]
-    Liquidation --> Cancellation[CoreMatchingFlow: cancel affected orders]
-    Cancellation --> Matching[Matcher / Account Lane settlement]
-    Matching --> Resolution[RuntimeLiquidationResolution / Treasury / insurance / ADL]
-    Runtime --> Expiry[RuntimeLifecycleSettlement / RuntimeLifecycleSettlementContinuation]
+    Runtime --> Risk[RiskScanner / RiskMarginCalculator]
+    Risk --> Liquidation[LiquidationService]
+    Liquidation --> Cancellation[OrderMatchingFlow: cancel affected orders]
+    Cancellation --> Matching[OrderBookEngine / Account Lane settlement]
+    Matching --> Resolution[LiquidationService / TreasuryRuntime / InsuranceFundCommands / AdlService]
+    Runtime --> Expiry[ContractExpirySettlementService]
     Expiry --> Accounts[Account Lane delivery or option settlement]
-    Resolution --> Commit[OrderedCommitCoordinator]
+    Resolution --> Commit[OrderCommitService]
     Accounts --> Commit
 ```
 
@@ -273,7 +272,7 @@ These are related command families, not one unconditional sequence. Insurance an
 
 ```mermaid
 flowchart LR
-    Coordinator[ProductTransferCoordinator] --> Product[ProductTransferInternalController / product account services]
+    Transfer[ProductTransferService] --> Product[ProductTransferInternalController / product account services]
     Product --> Client[Aeron account command client]
     Client --> Core[TradingCoreOwner / TradingCoreRuntime]
     Core --> Identity[FundsCommandIndex / fingerprint and source checks]
@@ -329,8 +328,8 @@ Recovery restores Core authority from its snapshot and following cluster log, no
 ```mermaid
 flowchart TB
     Runtime[TradingCoreRuntime] --> Dispatch[DirectCommandDispatcher]
-    Dispatch --> Control[DirectCommandSlot]
-    Control --> Lane[ControlLaneDispatcher / Account Lane]
+    Dispatch --> Control[OrderCommand.Direct]
+    Control --> Lane[AccountCommandService / Account Lane]
     Lane --> Account[Balance / transfer / leverage / position mode / margin change]
     Dispatch --> Instrument[InstrumentConfigurationCommands]
     Instrument --> Config[Canonical instrument / maintenance state]
@@ -338,22 +337,22 @@ flowchart TB
     Account --> Commit[Owner completion and funds audit]
     Config --> Commit
     Fee --> Commit
-    Commit --> Publication[CommitPublication / result identity / response]
+    Commit --> Publication[OrderCommitService.Publication / result identity / response]
 ```
 
-Dispatch success only means a branch was selected. [DirectCommandSlot](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/DirectCommandSlot.java) can retain asynchronous work until the owning Lane and financial scope finish. TRANSFER_IN validates both the recipient and target product before applying funds. Fee-policy publication does not rewrite rates already frozen on existing orders.
+Dispatch success only means a branch was selected. [OrderCommand.Direct](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommand.java) can retain asynchronous work until the owning Lane and financial scope finish. TRANSFER_IN validates both the recipient and target product before applying funds. Fee-policy publication does not rewrite rates already frozen on existing orders.
 
 | Command family | Dispatch and business classes |
 | --- | --- |
-| Balance / transfer out / transfer in / complete transfer | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [DirectCommandSlot](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/DirectCommandSlot.java) → account control work |
-| Position mode / leverage / position margin | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [DirectCommandSlot](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/DirectCommandSlot.java) → owning Account Lane |
+| Balance / transfer out / transfer in / complete transfer | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [OrderCommand.Direct](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommand.java) → [AccountCommandService](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/AccountCommandService.java) |
+| Position mode / leverage / position margin | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [OrderCommand.Direct](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommand.java) → [AccountCommandService](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/AccountCommandService.java) |
 | Instrument registration / maintenance | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [InstrumentConfigurationCommands](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/command/InstrumentConfigurationCommands.java) |
-| Fee policy | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → Lane 0 application → commit publication |
-| Mark price | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [RuntimeDerivativeRiskProcessor](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java) → trigger scan initialization |
-| Risk continuation | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [RiskScanCoordinator](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java) + remaining trigger budget |
-| Funding | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [RuntimePerpetualFundingProcessor](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java) |
+| Fee policy | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → Lane 0 application → [OrderCommitService.Publication](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderCommitService.java) |
+| Mark price | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [RiskMarginCalculator](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskMarginCalculator.java) → trigger scan initialization |
+| Risk continuation | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [RiskScanner](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanner.java) + remaining trigger budget |
+| Funding | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [FundingSettlementService](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/FundingSettlementService.java) |
 | Insurance adjustment | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [InsuranceFundCommands](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/insurance/command/InsuranceFundCommands.java) |
-| Liquidation resolution / ADL | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [RuntimeLiquidationResolution](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java) / [RuntimeAdlExecution](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java) |
+| Liquidation resolution / ADL | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [LiquidationService](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/LiquidationService.java) / [AdlService](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/AdlService.java) |
 | Algorithm, cancel-all deadline, OCO, trigger claim/retry/expiry/execution | [DirectCommandDispatcher](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [TriggerOrderCommands](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java) |
 
 ### 13. Rejection, unknown outcome, and runtime fault

@@ -9,15 +9,15 @@ This is the authoritative trading node for one product line. Startup, commands, 
 | Startup and shutdown | `config`, `bootstrap.AeronCoreLifecycle`, `SurprisingCoreApplication` |
 | Cluster callback | `controller.AeronTradingClusterService` |
 | Input scheduling | `service.core.TradingCoreOwner`, `TradingCoreRuntime`, `support.ingress.OwnerIngressRing` |
-| Order admission | `service.order.MatchingCommandAdmission`, `CoreMatchingFlow`, `CommandSlot`, `OrderBatchExecutor` |
-| Account ownership | `service.account.AccountLaneState`, `service.order.admission.RuntimeOrderAdmission` |
-| Matching | `service.matcher.DeterministicExchangeCoreAdapter`, `service.matcher.pipeline` |
-| Settlement | `service.settlement.MatcherSettlementEvent`, product-specific match processors |
+| Order admission | `service.order.OrderAdmissionService`, `OrderCommand`, `OrderCommandQueue`, `OrderMatchingFlow`, `OrderBatchProcessor` |
+| Account ownership | `service.account.AccountPartition`, `service.order.OrderAdmissionService` |
+| Matching | `service.matcher.OrderBookEngine`, `service.matcher.OrderBookRouter` |
+| Settlement | `service.settlement.TradeSettlement`, `SpotTradeSettlementService`, `DerivativeTradeSettlementService` |
 | Treasury and funding | `service.treasury`, `service.funding`, `service.insurance` |
 | Risk and resolution | `service.risk`, `service.liquidation`, `service.adl` |
 | Triggers and algorithms | `service.trigger`, `service.core.index` |
-| Delivery and exercise | `service.settlement.lifecycle` |
-| Commit and retention | `service.order.commit`, `service.result`, `service.retention` |
+| Delivery and exercise | `service.settlement.ContractExpirySettlementService` |
+| Commit and retention | `service.order.OrderCommitService`, `service.result`, `service.retention.TerminalStateRetention` |
 | Queries and output | `service.query`, `service.realtime`, `support.egress` |
 | Snapshots | `service.snapshot`, `service.snapshot.state` |
 
@@ -27,17 +27,17 @@ This is the authoritative trading node for one product line. Startup, commands, 
 flowchart LR
     Callback[AeronTradingClusterService] --> Owner[TradingCoreOwner]
     Owner --> Runtime[TradingCoreRuntime]
-    Runtime --> Admission[MatchingCommandAdmission]
-    Admission --> Flow[CoreMatchingFlow / CommandSlot]
-    Flow --> Matcher[MatcherCommandPipeline]
+    Runtime --> Admission[OrderAdmissionService]
+    Admission --> Flow[OrderMatchingFlow / OrderCommand]
+    Flow --> Matcher[OrderBookRouter]
     Matcher --> Lanes[SettlementLaneWorker / Account Lanes]
-    Lanes --> Commit[OrderedCommitCoordinator]
-    Commit --> Output[CommitPublication / terminal response]
+    Lanes --> Commit[OrderCommitService]
+    Commit --> Output[OrderCommitService.Publication / terminal response]
 ```
 
 The callback preserves original log time, position, and input leases. Owner checks identity, source progress, dependencies, and capacity. Lanes perform authoritative admission; Matcher publishes actual matching facts; Lanes settle affected users. Owner collects acknowledgements, applies Treasury work, validates funds, and publishes in order. A business rejection is not a runtime fault. A failed funds audit propagates and leaves the runtime fault visible.
 
-Same-user assets and cross-margin state belong to one Account Lane. Matcher ownership is by instrument. Full cold state is materialized only at query, snapshot, or controlled recovery boundaries. `CommandSlot.OrderMatchingContinuation` is reused across place/cancel/replace operations and cannot be overwritten before matching completion and retirement.
+Same-user assets and cross-margin state belong to one Account Lane. Matcher ownership is by instrument. Full cold state is materialized only at query, snapshot, or controlled recovery boundaries. `OrderMatchingContinuation` is reused across place, cancel, and replace and cannot be overwritten before matching completion and retirement.
 
 ## Commit details
 

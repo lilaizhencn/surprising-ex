@@ -24,9 +24,9 @@ Prefer the [single-node launcher](../deployment/test-single-node/README.md) for 
 
 ## Ownership and execution
 
-Owner schedules commands and retires them in original log order. Matcher shards own native books. Account Lanes own user balances, holds, reservations, orders, positions, and risk. Treasury and control funds verification run on Owner. `PIPELINED` uses worker handoffs; `FUSED` performs matching/account calculation inline.
+Owner schedules commands and retires them in original log order. Matcher shards own native books. Account Lanes own user balances, holds, reservations, orders, positions, and risk. Treasury and control funds verification run on Owner. `OrderBookRouter` runs Matcher shard threads. `SettlementLaneWorker` runs Account Lane threads.
 
-`ClusterCommandWindow` retains command leases, decoded slots, dependency indices, and response metadata. Account commits route frozen after-values to the relevant Lanes. Order metadata uses captured command changes before consulting active indices; terminal orders must not depend on still being active. Matcher and Account Lane progress use padded slots with explicit publication semantics.
+`OrderCommandQueue.IngressWindow` retains command leases, decoded slots, dependency indices, and response metadata. Account commits route frozen after-values to the relevant Lanes. Order metadata uses captured command changes before consulting active indices; terminal orders must not depend on still being active. Matcher and Account Lane progress use padded slots with explicit publication semantics.
 
 ## Snapshots and recovery
 

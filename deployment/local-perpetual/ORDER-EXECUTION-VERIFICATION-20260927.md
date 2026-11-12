@@ -2,9 +2,9 @@
 
 ## 业务变化
 
-- 成交入口 `RuntimeDerivativeFillCalculator` / `RuntimeSpotMatchProcessor` 使用真实成交 ticks × steps 累计订单成交值。Account Lane 拥有两个 primitive 字段，`OrderChangeBuffer` 发布绝对值；查询、实时 ORDER 和快照恢复传播同一数据。128 位整数避免合法价格/数量乘积超过 signed long，十进制转换只在查询展示边界执行。
-- `OrderRuntime` 和 `CoreOrderState.withCommitMetadata` 保留首次创建时间；成交、撤单更新更新时间。`OrderResponse` / `CoreOrderStateView` 提供 `executedValueTicks`、`averagePriceTicks`、`cumulativeFeeUnits`。
-- `CoreStateQueryCodec` v6 / `TradingStateSnapshotCodec` v35 不兼容旧格式。用户明确授权清空本地测试数据后，停止六服务及本地依赖，删除本运行目录的交易状态、缓存、Kafka 和本地数据库，重新初始化 20 币对、做市账户、原测试账号。没有清理其他环境或用户代码。
+- 成交入口 `SpotTradeSettlementService` / `DerivativeTradeSettlementService` 按成交 price ticks × quantity steps 累加 `Order` 的 `executedValueHigh` / `executedValueLow`。查询、实时 ORDER 和快照恢复传播同一成交值。128 位整数避免合法价格/数量乘积超过 signed long，十进制转换只在查询展示边界执行。
+- `Order.withCommitMetadata` 保留首次创建时间；成交、撤单更新更新时间。`OrderResponse` 提供 `executedValueTicks`、`averagePriceTicks`、`cumulativeFeeUnits`。`CoreOrderState` 与 `CoreOrderStateView` 携带 `executedValueHigh`、`executedValueLow`、`cumulativeFeeUnits`。
+- `CoreStateQueryCodec` 版本 6，`TradingStateSnapshotCodec` 版本 56。用户明确授权清空本地测试数据后，停止六服务及本地依赖，清理本运行目录的交易状态、缓存、Kafka 和本地数据库，重新初始化 20 币对、做市账户、原测试账号。没有清理其他环境或用户代码。
 - 本地初始化风险扫描预算 4096，保留开关与 25ms 间隔。此次真实持仓的风险推送 priceSequence 390、391、392 连续前进，浮盈亏同步变化。
 - 前端订单表展示实际成交均价、成交/委托金额；最近订单动态有明确“本页面打开期间、最近 100 条”的范围说明。完整历史订单持久化接口目前未接通，前端不再请求空 SQL 投影并把它冒充完整历史。
 - 浏览器标签标题复用当前行情状态，显示价格、币对、产品线；切换币对更新，离开交易页恢复标题。不新增轮询、订阅或价格历史缓存。
