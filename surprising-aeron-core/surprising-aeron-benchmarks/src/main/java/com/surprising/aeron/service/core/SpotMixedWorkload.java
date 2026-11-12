@@ -345,7 +345,7 @@ public final class SpotMixedWorkload {
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId))));
     }
 
-    private static long[] completedLaneOperations(TradingCoreRuntime state) {
+    private static long[] completedLaneOperations(TradingCore state) {
         long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
         long[] completed = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics()).accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
@@ -359,14 +359,14 @@ public final class SpotMixedWorkload {
         for (String asset : assets) {
             long total = 0;
             for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
-            CoreTreasuryState treasury = state.treasuryState();
-            total = addLedger(total, treasury.feeBalances(), asset);
-            total = addLedger(total, treasury.insuranceBalances(), asset);
-            total = addLedger(total, treasury.liquidationFeeBalances(), asset);
-            total = addLedger(total, treasury.fundingResidualBalances(), asset);
-            total = addLedger(total, treasury.roundingResidualBalances(), asset);
-            total = addLedger(total, treasury.clearingPnlBalances(), asset);
-            total = Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(asset, 0L));
+            CoreTreasuryState systemFunds = state.treasuryState();
+            total = addLedger(total, systemFunds.feeBalances(), asset);
+            total = addLedger(total, systemFunds.insuranceBalances(), asset);
+            total = addLedger(total, systemFunds.liquidationFeeBalances(), asset);
+            total = addLedger(total, systemFunds.fundingResidualBalances(), asset);
+            total = addLedger(total, systemFunds.roundingResidualBalances(), asset);
+            total = addLedger(total, systemFunds.clearingPnlBalances(), asset);
+            total = Math.subtractExact(total, systemFunds.insuranceDeficits().getOrDefault(asset, 0L));
             totals.put(asset, total);
         }
         return Map.copyOf(totals);

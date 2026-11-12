@@ -47,7 +47,7 @@ public final class AccountLaneTestAccess {
      * 返回实际用户活跃订单成员索引，供测试断言容器生命周期。
      * @param lane 测试已经受控取得的账户 Lane 状态
      */
-    public static LongObjectHashMap<org.agrona.collections.LongHashSet> activeOrderIdsByUser(AccountPartition lane) { return lane.admissionOrderIndex.activeOrderIdsByUser; }
+    public static LongObjectHashMap<org.agrona.collections.LongHashSet> activeOrderIdsByUser(AccountPartition lane) { return lane.orderCheckOrderIndex.activeOrderIdsByUser; }
     /**
      * 只检查指定 Lane 的订单前值缓冲是否为空，不代表其他种类回滚缓冲也为空。
      * @param rollback 要检查订单前值缓冲的回滚实例

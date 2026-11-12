@@ -21,12 +21,12 @@ import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountTransactionRollback;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.TradingCore;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.matcher.OrderCancelResult;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;
-import com.surprising.aeron.service.result.OrderRuntimeSource;
+import com.surprising.aeron.service.result.OrderSource;
 import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
@@ -49,7 +49,7 @@ import lombok.experimental.Accessors;
 @RequiredArgsConstructor
 public final class OrderBatchProcessor {
     /** 唯一所属交易 Owner，共用原有账户及提交状态。 */
-    final TradingCoreRuntime owner;
+    final TradingCore owner;
 
     private OrderBatchProcessor.PendingBatch firstBatch, lastBatch;
     private int batchCount;
@@ -112,7 +112,7 @@ public final class OrderBatchProcessor {
 
     /** 解码并检查整批订单身份，已知业务错误释放预备批次并拒绝。其他输入错误按原撮合顺序记拒绝。成功分配整批序号并登记依赖，尝试流水或队首激活，尚未完成则释放 Owner 账户访问权并返回待处理状态。 */
     public CoreResponse beginOrderBatchMatching(CoreMessage message, long clusterTimestamp,
-                                                  long clusterPosition, TradingCoreRuntime.SourceKey sourceKey,
+                                                  long clusterPosition, TradingCore.SourceKey sourceKey,
                                                   CommandFingerprint fingerprint) {
         OrderBatchProcessor.PendingBatch batch = null;
         OrderCommand.Decoded decodedCommand;
@@ -130,10 +130,10 @@ public final class OrderBatchProcessor {
                             ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
         long sequence = owner.nextAppliedSequence();
-        OrderCommand pending = owner.admissions().newPendingMatching(sequence, batch.operation(), message, fingerprint, decodedCommand);
+        OrderCommand pending = owner.orderChecks().newPendingMatching(sequence, batch.operation(), message, fingerprint, decodedCommand);
         batch.sequence = sequence;
         owner.matchingFlow.putPendingMatching(pending);
-        owner.admissions().registerPendingLifecycle(pending);
+        owner.orderChecks().registerPendingLifecycle(pending);
         registerBatch(pending, batch);
         owner.pendingMatching().registerSubmission(sequence, orderBatchMatcherShard(batch));
         owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
@@ -142,7 +142,7 @@ public final class OrderBatchProcessor {
                 : !pending.clusterIndependent && owner.pendingMatching().firstSequence() == sequence
                 ? activateOrderBatch(batch, pending, false) : null;
         if (completed != null) return completed;
-        owner.runtimeState().releaseOwnerLaneAccess();
+        owner.accountBook().releaseOwnerLaneAccess();
         return message.matchingPendingResponse(com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
@@ -157,8 +157,8 @@ public final class OrderBatchProcessor {
         batch.activated(true);
         if (preparePipelinedPlaceBatch(batch, pending)) {
             registerPipelinedBatchSymbols(batch, pending);
-            dispatchPipelinedPlaceBatchAdmission(pending, batch);
-            owner.runtimeState().releaseOwnerLaneAccess();
+            dispatchPipelinedPlaceBatchOrderCheck(pending, batch);
+            owner.accountBook().releaseOwnerLaneAccess();
             owner.suspendMatchingCommitContext(pending);
             return null;
         }
@@ -170,12 +170,12 @@ public final class OrderBatchProcessor {
 
     /** 独立批量撤单可先尝试提交。 */
     boolean tryActivatePipelinedOrderBatch(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
-        if (pending.clusterIndependent && batch.kind == OrderBatchProcessor.Kind.CANCEL && !batch.sequentialAdmission) {
+        if (pending.clusterIndependent && batch.kind == OrderBatchProcessor.Kind.CANCEL && !batch.sequentialOrderCheck) {
             batch.activated(true);
             owner.matchingFlow.submitMatching(pending);
             return true;
         }
-        if (batch.sequentialAdmission || batch.kind != OrderBatchProcessor.Kind.PLACE
+        if (batch.sequentialOrderCheck || batch.kind != OrderBatchProcessor.Kind.PLACE
                 || owner.pendingMatching().hasEarlierUser(batch.sequence, pending.command().header().userId())
                 || !pending.clusterIndependent && conflictsWithEarlierPipelinedBatch(batch)) {
             return false;
@@ -186,7 +186,7 @@ public final class OrderBatchProcessor {
             return false;
         }
         registerPipelinedBatchSymbols(batch, pending);
-        dispatchPipelinedPlaceBatchAdmission(pending, batch);
+        dispatchPipelinedPlaceBatchOrderCheck(pending, batch);
         return true;
     }
 
@@ -218,7 +218,7 @@ public final class OrderBatchProcessor {
 
     /** 检查本批能否整批准入：必须 PLACE、全部同 Matcher 分片、没有只减仓项及需要逐项 OI 判断的产品，并校验订单身份。 */
     boolean preparePipelinedPlaceBatch(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
-        if (batch.sequentialAdmission || batch.kind != OrderBatchProcessor.Kind.PLACE) {
+        if (batch.sequentialOrderCheck || batch.kind != OrderBatchProcessor.Kind.PLACE) {
             return false;
         }
         long userId = pending.command().header().userId();
@@ -232,18 +232,18 @@ public final class OrderBatchProcessor {
                         ? owner.matchingAdapter().matcherShardId(command.instrumentId())
                         : batch.decodedCommand.matcherShard(owner.matchingAdapter(), command.instrumentId());
                 if (batchMatcherShard == -1) batchMatcherShard = itemMatcherShard;
-                else if (batchMatcherShard != itemMatcherShard) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
-                if (command.reduceOnly()) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
+                else if (batchMatcherShard != itemMatcherShard) throw new TradingCore.PipelinedBatchNotApplicable();
+                if (command.reduceOnly()) throw new TradingCore.PipelinedBatchNotApplicable();
                 owner.requireOrderIdentityAvailable(userId, command);
                 var decision = prepareBatchDecision(batch, command.instrumentId());
                 if (decision.context().instrument().usesOpenInterestForUserLimit())
-                    throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
+                    throw new TradingCore.PipelinedBatchNotApplicable();
                 batch.preparedDecisions[index] = decision;
             }
             batch.pipelined = true;
             return true;
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException
-                 | TradingCoreRuntime.PipelinedBatchNotApplicable exception) {
+                 | TradingCore.PipelinedBatchNotApplicable exception) {
             batch.currentPreMatchingCancellationOrderIds = List.of();
             batch.clearPreparedDecisionCache();
             return false;
@@ -251,12 +251,12 @@ public final class OrderBatchProcessor {
     }
 
     /** 确定本批唯一分片，把整批输入列、客户键列、订单回执列和原日志元数据交所属账户做整批准入。 */
-    void dispatchPipelinedPlaceBatchAdmission(
+    void dispatchPipelinedPlaceBatchOrderCheck(
             OrderCommand pending, OrderBatchProcessor.PendingBatch batch) {
         int shard = batch.decodedCommand == null
                 ? owner.matchingAdapter().matcherShardId(batch.preparedSymbols.getFirst())
                 : batch.decodedCommand.matcherShard(owner.matchingAdapter(), batch.preparedSymbols.getFirst());
-        batch.placeBatchAdmissionEvent = owner.runtimeState().dispatchPlaceBatchAdmission(
+        batch.placeBatchOrderCheckEvent = owner.accountBook().dispatchPlaceBatchOrderCheck(
                 pending.sequence(), pending.command().header().userId(), pending.command().header().commandId(),
                 batch.preparedOrders, batch.preparedClientKeyValues,
                 batch.preparedAdmittedOrders,
@@ -269,7 +269,7 @@ public final class OrderBatchProcessor {
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
         long userId = pending.command().header().userId();
         int shard = owner.matchingAdapter().matcherShardId(batch.preparedSymbols.getFirst());
-        batch.settlementEvent = owner.runtimeState().prepareDirectMatcherSettlement(
+        batch.settlementEvent = owner.accountBook().prepareDirectMatcherSettlement(
                 pending.sequence(), owner.commits.validAccountLaneMask(),
                 null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
                 shard, owner.identities(), pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
@@ -325,33 +325,33 @@ public final class OrderBatchProcessor {
     CoreResponse startOrderBatchItem(OrderBatchProcessor.PendingBatch batch, OrderCommand pending,
                                              long clusterTimestamp, long clusterPosition,
                                              boolean deferCompletion) {
-        batch.sequentialAdmission = true;
+        batch.sequentialOrderCheck = true;
         while (batch.nextIndex < batch.items.size()) {
             BatchItem item = batch.items.get(batch.nextIndex);
-            boolean admissionPending = batch.itemAdmission != null || batch.replacementAdmissionEvent != null;
-            long runtimeRevisionBefore = !admissionPending
-                    ? owner.runtimeState().revision() : batch.itemAdmissionRevision;
+            boolean orderCheckPending = batch.itemOrderCheck != null || batch.replacementOrderCheckEvent != null;
+            long runtimeRevisionBefore = !orderCheckPending
+                    ? owner.accountBook().revision() : batch.itemOrderCheckRevision;
             try {
-                if (!admissionPending) {
-                    batch.itemAdmissionRevision = runtimeRevisionBefore;
+                if (!orderCheckPending) {
+                    batch.itemOrderCheckRevision = runtimeRevisionBefore;
                     prepareOrderBatchItem(batch, item, pending.command().header().userId(),
                             pending.command().header().commandId());
                 }
-                if (batch.replacementAdmissionEvent != null && !collectBatchAmendAdmission(batch, pending.command().header().userId())) {
-                    batch.sequentialAdmission = true;
+                if (batch.replacementOrderCheckEvent != null && !collectBatchAmendOrderCheck(batch, pending.command().header().userId())) {
+                    batch.sequentialOrderCheck = true;
                     batch.activated(false);
                     owner.suspendMatchingCommitContext(pending);
                     return null;
                 }
-                if (batch.itemAdmission != null) {
-                    if (!batch.itemAdmission.getAsBoolean()) {
-                        batch.sequentialAdmission = true;
+                if (batch.itemOrderCheck != null) {
+                    if (!batch.itemOrderCheck.getAsBoolean()) {
+                        batch.sequentialOrderCheck = true;
                         batch.activated(false);
                         owner.suspendMatchingCommitContext(pending);
                         return null;
                     }
                     collectBatchPlaceReservation(batch);
-                    batch.itemAdmission = null;
+                    batch.itemOrderCheck = null;
                 }
                 pending = pending.withPreMatchingCancellations(batch.currentPreMatchingCancellationOrderIds);
                 owner.pendingMatching().put(pending);
@@ -360,19 +360,19 @@ public final class OrderBatchProcessor {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             } catch (CoreStateRejectedException exception) {
-                boolean laneAdmissionFailure = batch.itemAdmission != null || batch.replacementAdmissionEvent != null;
-                releaseBatchAmendAdmission(batch);
-                batch.itemAdmission = null;
-                if (!laneAdmissionFailure)
+                boolean laneOrderCheckFailure = batch.itemOrderCheck != null || batch.replacementOrderCheckEvent != null;
+                releaseBatchAmendOrderCheck(batch);
+                batch.itemOrderCheck = null;
+                if (!laneOrderCheckFailure)
                     requireUnchangedRejectedBatchItem(pending, runtimeRevisionBefore, exception);
                 appendOrderBatchResult(item, ResponseStatus.REJECTED,
                         CoreResultCode.fromRejectionCode(exception.code()));
                 batch.nextIndex++;
             } catch (ArithmeticException | IllegalArgumentException exception) {
-                boolean laneAdmissionFailure = batch.itemAdmission != null || batch.replacementAdmissionEvent != null;
-                releaseBatchAmendAdmission(batch);
-                batch.itemAdmission = null;
-                if (!laneAdmissionFailure)
+                boolean laneOrderCheckFailure = batch.itemOrderCheck != null || batch.replacementOrderCheckEvent != null;
+                releaseBatchAmendOrderCheck(batch);
+                batch.itemOrderCheck = null;
+                if (!laneOrderCheckFailure)
                     requireUnchangedRejectedBatchItem(pending, runtimeRevisionBefore, exception);
                 appendOrderBatchResult(item, ResponseStatus.REJECTED,
                         exception instanceof ArithmeticException
@@ -394,7 +394,7 @@ public final class OrderBatchProcessor {
             OrderBatchProcessor.PendingBatch batch, String instrumentId) {
         int index = batch.preparedSymbols.indexOf(instrumentId);
         if (index >= 0) return batch.preparedContextDecisions[index];
-        var context = OrderAdmissionService.context(owner.runtimeState(), owner.identities(), instrumentId, batch.clusterTimestamp);
+        var context = OrderCheckService.context(owner.accountBook(), owner.identities(), instrumentId, batch.clusterTimestamp);
         var instrument = context.instrument();
         String baseAsset = instrument.baseAsset();
         String quoteAsset = instrument.quoteAsset();
@@ -416,7 +416,7 @@ public final class OrderBatchProcessor {
                                                                     PlaceOrderCommand command, UUID commandId) {
         var decision = prepareBatchDecision(batch, command.instrumentId());
         var work = batch.placeReservation;
-        work.prepare(owner.runtimeState(), owner.identities(), batch.sequence, userId, commandId,
+        work.prepare(owner.accountBook(), owner.identities(), batch.sequence, userId, commandId,
                 command, decision, batch, batch.nextIndex);
         return work;
     }
@@ -424,7 +424,7 @@ public final class OrderBatchProcessor {
     private void collectBatchPlaceReservation(OrderBatchProcessor.PendingBatch batch) {
         var work = batch.placeReservation;
         Order admitted = work.admittedOrder();
-        owner.runtimeState().pendingReservations().collectControlReservation(admitted, batch.sequence);
+        owner.accountBook().pendingReservations().collectControlReservation(admitted, batch.sequence);
         // 所属账户已经准备好本项持有的固定副本，Owner 只绑定其引用。
         batch.items.get(batch.nextIndex).admittedOrder = admitted;
         batch.currentPreMatchingCancellationOrderIds = work.closeCapacityCancellations();
@@ -446,7 +446,7 @@ public final class OrderBatchProcessor {
                     if (owner.activeOrderIndex().activeOrderRoute(command.orderId()) != null)
                         throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "order already exists");
                     batch.currentPreMatchingCancellationOrderIds = List.of();
-                    batch.itemAdmission = beginBatchReservation(batch, userId, command, commandId);
+                    batch.itemOrderCheck = beginBatchReservation(batch, userId, command, commandId);
                 }
                 case CANCEL -> {
                     batch.currentPreMatchingCancellationOrderIds = List.of();
@@ -471,7 +471,7 @@ public final class OrderBatchProcessor {
                     if (command.replacementOrderId() == command.originalOrderId())
                         throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
                     var decision = prepareBatchDecision(batch, instrumentId).context();
-                    batch.replacementAdmissionEvent = owner.runtimeState().dispatchReplacementAdmission(
+                    batch.replacementOrderCheckEvent = owner.accountBook().dispatchReplaceOrderCheck(
                             batch.sequence, userId, command.originalOrderId(), command, null, decision,
                             owner.matchingAdapter().matcherShardId(instrumentId), owner.identities());
                 }
@@ -493,25 +493,25 @@ public final class OrderBatchProcessor {
     }
 
     /** 完成则抛出已有拒绝，再用 Owner 路由索引核对全局订单号和客户身份，保存替换准入及先撤列表。 */
-    private boolean collectBatchAmendAdmission(OrderBatchProcessor.PendingBatch batch, long userId) {
-        var event = batch.replacementAdmissionEvent;
-        if (!event.complete()) { owner.runtimeState().assertAccountLanesHealthy(); return false; }
+    private boolean collectBatchAmendOrderCheck(OrderBatchProcessor.PendingBatch batch, long userId) {
+        var event = batch.replacementOrderCheckEvent;
+        if (!event.complete()) { owner.accountBook().assertAccountLanesHealthy(); return false; }
         if (event.rejection() != null) throw event.rejection();
-        var admission = event.admission();
+        var orderCheck = event.orderCheck();
         // Owner 用已有活动路由索引再检查其他 Lane 是否已有同编号订单。
-        if (owner.activeOrderIndex().activeOrderRoute(admission.command().orderId()) != null)
+        if (owner.activeOrderIndex().activeOrderRoute(orderCheck.command().orderId()) != null)
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
-        owner.requireOrderIdentityAvailable(userId, admission.command());
-        batch.replacementAdmission = admission;
+        owner.requireOrderIdentityAvailable(userId, orderCheck.command());
+        batch.replacementOrderCheck = orderCheck;
         batch.currentPreMatchingCancellationOrderIds = event.closeCapacityCancellations();
         return true;
     }
 
-    private void releaseBatchAmendAdmission(OrderBatchProcessor.PendingBatch batch) {
-        if (batch.replacementAdmissionEvent == null) return;
-        owner.runtimeState().releaseReplacementAdmission(batch.replacementAdmissionEvent);
-        batch.replacementAdmissionEvent = null;
-        batch.replacementAdmission = null;
+    private void releaseBatchAmendOrderCheck(OrderBatchProcessor.PendingBatch batch) {
+        if (batch.replacementOrderCheckEvent == null) return;
+        owner.accountBook().releaseReplaceOrderCheck(batch.replacementOrderCheckEvent);
+        batch.replacementOrderCheckEvent = null;
+        batch.replacementOrderCheck = null;
     }
 
     /** 撤单交连续同分片片段路径。顺序下单或改单用当前已准入项预先借直达事件，再把固定任务交 Matcher。账户结算事件在撮合前已存在，Owner 后续只收集它。 */
@@ -533,7 +533,7 @@ public final class OrderBatchProcessor {
             Order admitted = item.admittedOrder;
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = owner.runtimeState().prepareDirectMatcherSettlement(
+            direct = owner.accountBook().prepareDirectMatcherSettlement(
                     pending.sequence(), 0, owner.commits.validAccountLaneMask(), admitted, null, 1,
                     pending.command().header().commandId(), shard, owner.identities(),
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
@@ -543,9 +543,9 @@ public final class OrderBatchProcessor {
         }
         if (batch.kind == OrderBatchProcessor.Kind.AMEND) {
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = owner.runtimeState().prepareDirectReplacement(
+            direct = owner.accountBook().prepareDirectReplacement(
                     pending.sequence(), 0, owner.commits.validAccountLaneMask(),
-                    java.util.Objects.requireNonNull(batch.replacementAdmission),
+                    java.util.Objects.requireNonNull(batch.replacementOrderCheck),
                     pending.command().header().commandId(), shard, owner.identities(),
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), null);
@@ -579,7 +579,7 @@ public final class OrderBatchProcessor {
         }
         if (end == start) {
             // 让批次回到有序队首，由单项准入拒绝缺失订单，避免无效账户修改或撮合提交。
-            batch.sequentialAdmission = true;
+            batch.sequentialOrderCheck = true;
             batch.activated(false);
             return;
         }
@@ -594,7 +594,7 @@ public final class OrderBatchProcessor {
             }
         }
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-        var direct = owner.runtimeState().prepareDirectCancelBatch(
+        var direct = owner.accountBook().prepareDirectCancelBatch(
                 pending.sequence(), finalChunk, pending.command().header().userId(),
                 batch.preparedCancellationOrderIds, end - start, pending.command().header().commandId(), shard,
                 owner.identities(), pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
@@ -628,10 +628,10 @@ public final class OrderBatchProcessor {
                     && event == batch.itemSettlementEvent && event.hasDirectNativeResult()) {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
                 batch.observedSettlementLaneMask |= event.requiredLaneMask();
-                owner.runtimeState().collectOrderBatchMatcherSettlement(event, owner.terminalRetention());
+                owner.accountBook().collectOrderBatchMatcherSettlement(event, owner.completedOrderArchive());
                 owner.commits.publication.request();
                 if (event.commitSequence() != 0) batch.laneCommitCompleted(true);
-                owner.runtimeState().releaseMatcherSettlement(event);
+                owner.accountBook().releaseMatcherSettlement(event);
                 batch.itemSettlementEvent = null;
                 batch.lastMatchingResult = null;
                 boolean trackChanges = !batch.laneCommitCompleted();
@@ -660,7 +660,7 @@ public final class OrderBatchProcessor {
             owner.suspendMatchingCommitContext(pending);
             return null;
         }
-        if (batch.itemAdmission != null) {
+        if (batch.itemOrderCheck != null) {
             owner.suspendMatchingCommitContext(pending);
             return null;
         }
@@ -672,13 +672,13 @@ public final class OrderBatchProcessor {
                                                  long timestamp, long position) {
         try {
             var settledEvent = batch.itemSettlementEvent;
-            owner.runtimeState().collectOrderBatchMatcherSettlement(settledEvent, owner.terminalRetention());
+            owner.accountBook().collectOrderBatchMatcherSettlement(settledEvent, owner.completedOrderArchive());
             if (batch.kind == OrderBatchProcessor.Kind.AMEND && batch.lastMatchingResult.accepted()) {
-                owner.runtimeState().setMetadata(owner.productLine(), Math.addExact(owner.runtimeState().revision(),
+                owner.accountBook().setMetadata(owner.productLine(), Math.addExact(owner.accountBook().revision(),
                         owner.productLine() == ProductLine.SPOT ? 2 : 1));
             }
             if (batch.kind != OrderBatchProcessor.Kind.CANCEL) finishOrderBatchItem(batch, pending, batch.lastMatchingResult);
-            owner.runtimeState().releaseMatcherSettlement(settledEvent);
+            owner.accountBook().releaseMatcherSettlement(settledEvent);
             batch.itemSettlementEvent = null;
             batch.lastMatchingResult = null;
             return startOrderBatchItem(batch, pending, timestamp, position, false);
@@ -694,7 +694,7 @@ public final class OrderBatchProcessor {
         BatchItem item = batch.items.get(batch.nextIndex);
         try {
             applyOrderBatchMatcherResult(batch, item, pending, matchingResult);
-            if (batch.itemSettlementEvent != null || batch.itemAdmission != null) return;
+            if (batch.itemSettlementEvent != null || batch.itemOrderCheck != null) return;
             finishOrderBatchItem(batch, pending, matchingResult);
         } catch (RuntimeException exception) {
             throw failOrderBatch(batch, pending, "Core and matcher state diverged", exception);
@@ -710,7 +710,7 @@ public final class OrderBatchProcessor {
         try {
             batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
             if (batch.kind != OrderBatchProcessor.Kind.CANCEL) appendOrderBatchResult(item, status, resultCode);
-            releaseBatchAmendAdmission(batch);
+            releaseBatchAmendOrderCheck(batch);
             item.cancelSymbol = null;
             batch.nextIndex++;
         } catch (RuntimeException exception) {
@@ -727,13 +727,13 @@ public final class OrderBatchProcessor {
         // 标记故障并停止续步，将原命令交恢复边界处理，不能继续当成普通拒单。
         owner.matchingAdapter().poisonFromOwner("fatal order batch divergence sequence=" + batch.sequence
                 + " detail=" + detail);
-        owner.admissions().clearQueuedMatching();
+        owner.orderChecks().clearQueuedMatching();
         owner.pendingMatching().forEach(value -> {
             if (value.claimed) {
                 value.resetMatchingContinuation();
             }
         });
-        owner.runtimeState().endOrderBatchMutationScope();
+        owner.accountBook().endOrderBatchMutationScope();
         return owner.failMatching(pending, detail, cause);
     }
 
@@ -789,12 +789,12 @@ public final class OrderBatchProcessor {
         if (batch.settlementEvent != null && !batch.settlementsCollected()) {
             long settlementLaneMask = batch.settlementEvent.requiredLaneMask();
             boolean finalLaneCommit = batch.settlementEvent.commitSequence() != 0;
-            if (!owner.runtimeState().collectMatcherSettlement(
-                    batch.settlementEvent, owner.terminalRetention(), null, null)) {
+            if (!owner.accountBook().collectMatcherSettlement(
+                    batch.settlementEvent, owner.completedOrderArchive(), null, null)) {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             }
-            owner.runtimeState().releaseMatcherSettlement(batch.settlementEvent);
+            owner.accountBook().releaseMatcherSettlement(batch.settlementEvent);
             batch.settlementsCollected(true);
             if (finalLaneCommit) {
                 pending.completeLanes(settlementLaneMask);
@@ -802,22 +802,22 @@ public final class OrderBatchProcessor {
             }
             owner.commits.publication.request();
         }
-        owner.runtimeState().pendingReservations().completePendingReservations(batch.sequence);
+        owner.accountBook().pendingReservations().completePendingReservations(batch.sequence);
         if (!batch.laneCommitCompleted() || batch.preparedResponse == null) {
             if (batch.laneCommitEvent == null) {
-                owner.runtimeState().releaseOwnerLaneAccess();
-                batch.laneCommitEvent = owner.runtimeState().dispatchBatchCommit(batch.sequence,
+                owner.accountBook().releaseOwnerLaneAccess();
+                batch.laneCommitEvent = owner.accountBook().dispatchBatchCommit(batch.sequence,
                         batch.laneCommitCompleted() ? List.of() : batch.changedUserIds,
-                        batch.laneCommitCompleted() ? null : owner.runtimeState().metadataOrderUsers(batch.runtimeChangedOrderIds),
+                        batch.laneCommitCompleted() ? null : owner.accountBook().metadataOrderUsers(batch.runtimeChangedOrderIds),
                         clusterTimestamp, clusterPosition, pending.command().header().userId(), batch, owner.identities());
             }
             if (batch.laneCommitEvent != null) {
-                if (!owner.runtimeState().laneCommitComplete(batch.laneCommitEvent)) {
+                if (!owner.accountBook().laneCommitComplete(batch.laneCommitEvent)) {
                     owner.suspendMatchingCommitContext(pending);
                     return null;
                 }
                 pending.completeLanes(batch.laneCommitEvent.committedLaneMask());
-                owner.runtimeState().releaseLaneCommit(batch.laneCommitEvent);
+                owner.accountBook().releaseLaneCommit(batch.laneCommitEvent);
                 batch.laneCommitEvent = null;
                 owner.commits.publication.request();
             }
@@ -830,8 +830,8 @@ public final class OrderBatchProcessor {
             throw failOrderBatch(batch, pending, "order batch account lane mask mismatch", null);
         }
         try {
-            owner.runtimeState().setMetadata(owner.productLine(),
-                    Math.incrementExact(owner.runtimeState().revision()));
+            owner.accountBook().setMetadata(owner.productLine(),
+                    Math.incrementExact(owner.accountBook().revision()));
             if (pending.completedLaneMask() != pending.expectedLaneMask()) {
                 throw new IllegalStateException("order batch account lane mask mismatch");
             }
@@ -848,12 +848,12 @@ public final class OrderBatchProcessor {
         int responseLength = batch.preparedResponseLength;
         owner.terminalTradeCount(Math.addExact(owner.terminalTradeCount(), batch.tradeCount));
         owner.matchingFlow.commitMatchingSequence(batch.sequence);
-        owner.resultLedger().storeOwnedResult(pending.command().header().commandIdMsb(),
+        owner.commandResultLog().storeOwnedResult(pending.command().header().commandIdMsb(),
                 pending.command().header().commandIdLsb(),
                 pending.fingerprint(), ResponseStatus.APPLIED, CoreResultCode.NONE,
                 batch.sequence, responseData, 0, responseLength);
         if (batch.hasPreparedResponseSlot()) batch.transferPreparedResponseOwnership();
-        owner.runtimeState().endOrderBatchMutationScope();
+        owner.accountBook().endOrderBatchMutationScope();
         if (pending.takePipelinedSettlementCounted()) {
             owner.commits.dispatchedSettlementInFlight(owner.commits.dispatchedSettlementInFlight() - 1);
             if (owner.commits.dispatchedSettlementInFlight() < 0) {
@@ -943,24 +943,24 @@ public final class OrderBatchProcessor {
     void beginOrderBatchCommitContext(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.resultBuilder.beginCommand();
-        owner.runtimeState().beginOrderBatchMutationScope();
+        owner.accountBook().beginOrderBatchMutationScope();
         batch.beginCommit();
         owner.commits.publication.begin();
     }
 
     /** 独立预备撤单可直接建上下文。其他流水批次要求 Owner 已登记准入且事件成功完成，再收集释放整批准入并请求发布。 */
     public void beginPipelinedOrderBatchCommit(OrderBatchProcessor.PendingBatch batch, OrderCommand pending) {
-        OrderBatchProcessor.PlaceBatchAdmissionEvent admission = batch.placeBatchAdmissionEvent;
+        OrderBatchProcessor.PlaceBatchCheckEvent orderCheck = batch.placeBatchOrderCheckEvent;
         boolean preparedCancel = pending.clusterIndependent && batch.kind == OrderBatchProcessor.Kind.CANCEL;
-        if (!preparedCancel && (!batch.admissionCollected() || admission == null || !admission.complete()
-                || admission.rejection() != null)) {
+        if (!preparedCancel && (!batch.orderCheckCollected() || orderCheck == null || !orderCheck.complete()
+                || orderCheck.rejection() != null)) {
             throw new IllegalStateException("pipelined order batch admission is not ready to commit");
         }
         beginOrderBatchCommitContext(batch, pending);
         if (!preparedCancel) {
-            owner.runtimeState().collectPlaceBatchAdmission(admission);
-            owner.runtimeState().releasePlaceBatchAdmission(admission);
-            batch.placeBatchAdmissionEvent = null;
+            owner.accountBook().collectPlaceBatchOrderCheck(orderCheck);
+            owner.accountBook().releasePlaceBatchOrderCheck(orderCheck);
+            batch.placeBatchOrderCheckEvent = null;
             owner.commits.publication.request();
         }
     }
@@ -1060,7 +1060,7 @@ public final class OrderBatchProcessor {
     void releaseOrderBatchPending(OrderBatchProcessor.PendingBatch batch) {
         if (batch == null) return;
         unregisterPipelinedBatchSymbols(batch);
-        releaseBatchAmendAdmission(batch);
+        releaseBatchAmendOrderCheck(batch);
         batch.clear();
         if (orderBatchPendingPool.size() < owner.configuration().maxPendingMatching()) orderBatchPendingPool.addFirst(batch);
     }
@@ -1082,8 +1082,8 @@ public final class OrderBatchProcessor {
     void requireUnchangedRejectedBatchItem(OrderCommand pending,
                                            long runtimeRevisionBefore,
                                            RuntimeException exception) {
-        if (owner.runtimeState().revision() != runtimeRevisionBefore) {
-            owner.runtimeState().endOrderBatchMutationScope();
+        if (owner.accountBook().revision() != runtimeRevisionBefore) {
+            owner.accountBook().endOrderBatchMutationScope();
             throw owner.failMatching(pending, "order batch item mutated before rejection", exception);
         }
     }
@@ -1099,9 +1099,9 @@ public final class OrderBatchProcessor {
             case PLACE -> pending.prepareAdmittedPlaceMatching(owner, shard, userId,
                     java.util.Objects.requireNonNull(item.admittedOrder, "batch admission receipt"), direct);
             case AMEND -> {
-                var admission = java.util.Objects.requireNonNull(batch.replacementAdmission, "batch amend admission");
-                yield pending.prepareReplaceMatching(owner, shard, admission.resolved().orderId(), userId,
-                        admission.originalOrderId(), admission.command().instrumentId(), admission.resolved(), direct);
+                var orderCheck = java.util.Objects.requireNonNull(batch.replacementOrderCheck, "batch amend admission");
+                yield pending.prepareReplaceMatching(owner, shard, orderCheck.resolved().orderId(), userId,
+                        orderCheck.originalOrderId(), orderCheck.command().instrumentId(), orderCheck.resolved(), direct);
             }
             default -> throw new IllegalStateException("unsupported order batch kind");
         };
@@ -1202,7 +1202,7 @@ public enum Kind {
 }
 
 public static final class PendingBatch implements OrderCommand.ResultTarget, TradingOrderBatchCodec.ResultSource {
-    public record Decision(com.surprising.aeron.service.order.OrderAdmissionService.Context context,
+    public record Decision(com.surprising.aeron.service.order.OrderCheckService.Context context,
             long openInterestSteps, int baseAssetId, int quoteAssetId, int settleAssetId) { }
     /** 按批内下标读取 PLACE 输入。 */
     public com.surprising.aeron.protocol.PlaceOrderCommand intent(int index) {
@@ -1313,7 +1313,7 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     public ResponseStatus status(int index) { return items.get(index).status; }
     /** 返回指定项的确定性结果码。 */
     public CoreResultCode resultCode(int index) { return items.get(index).resultCode; }
-    private final OrderRuntimeSource responseOrder = new OrderRuntimeSource();
+    private final OrderSource responseOrder = new OrderSource();
 
     public com.surprising.aeron.protocol.CoreOrderStateSource order(int index) {
         BatchItem item = items.get(index);
@@ -1380,7 +1380,7 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     @Getter
     boolean pipelined;
     /** 本批是否必须按项串行准入，以保留资金及订单依赖。 */
-    boolean sequentialAdmission;
+    boolean sequentialOrderCheck;
     /** Matcher 执行流水批次时保存的失败，交 Owner 决定恢复处理。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -1391,7 +1391,7 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     /** 整批下单账户准入事件，Owner 收集后回收。借用整批账户准入事件，Owner 收集回收后为空。 */
     @Accessors(fluent = true, chain = false)
     @Getter
-    OrderBatchProcessor.PlaceBatchAdmissionEvent placeBatchAdmissionEvent;
+    OrderBatchProcessor.PlaceBatchCheckEvent placeBatchOrderCheckEvent;
     /** 本批有效项的解析下单输入列，派发后不能提前清理。 */
     final OrderCommand.ResolvedPlaceOrder[] preparedOrders;
     final long[] preparedClientKeyValues;
@@ -1410,14 +1410,14 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
     /** 当前顺序改单已经收集的解析准入。借用当前顺序改单的可空解析准入。 */
     @Accessors(fluent = true, chain = false)
     @Getter
-    com.surprising.aeron.service.order.OrderCommand.ReplacementAdmission replacementAdmission;
+    com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheck replacementOrderCheck;
     /** 当前顺序改单仍需保留的账户准入事件。 */
-    com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent replacementAdmissionEvent;
+    com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent replacementOrderCheckEvent;
     /** 当前顺序下单的账户预留续步。借用当前顺序下单的可空账户预留续步。 */
     @Accessors(fluent = true, chain = false)
     @Getter
-    java.util.function.BooleanSupplier itemAdmission;
-    long itemAdmissionRevision;
+    java.util.function.BooleanSupplier itemOrderCheck;
+    long itemOrderCheckRevision;
     @Accessors(fluent = true, chain = false)
     @Getter
     com.surprising.aeron.service.core.change.AccountPartitionCommit laneCommitEvent;
@@ -1460,9 +1460,9 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
         if (value) lifecycleFlags |= bit; else lifecycleFlags &= ~bit;
     }
     /** 读取生命周期位，说明Owner 是否已经登记整批准入的身份分配。 */
-    boolean admissionCollected() { return has(ADMISSION_COLLECTED); }
+    boolean orderCheckCollected() { return has(ADMISSION_COLLECTED); }
     /** 只更新生命周期位，记录Owner 是否已经登记整批准入的身份分配。 */
-    void admissionCollected(boolean value) { set(ADMISSION_COLLECTED, value); }
+    void orderCheckCollected(boolean value) { set(ADMISSION_COLLECTED, value); }
     /** 读取生命周期位，说明当前批次全部撮合输入是否已经应用。 */
     public boolean matchingApplied() { return has(MATCHING_APPLIED); }
     /** 只更新生命周期位，记录当前批次全部撮合输入是否已经应用。 */
@@ -1560,10 +1560,10 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
         currentPreMatchingCancellationOrderIds = List.of();
         commitState = COMMIT_WAITING;
         pipelined = false;
-        sequentialAdmission = false;
+        sequentialOrderCheck = false;
         pipelinedMatchingFailure = null;
         settlementEvent = null;
-        placeBatchAdmissionEvent = null;
+        placeBatchOrderCheckEvent = null;
         for (int index = 0; index < preparedCount; index++) {
             if (preparedOrders[index] != null) preparedOrders[index].clear();
         }
@@ -1578,10 +1578,10 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
         lastMatchingResult = null;
         noNativeCommandResult.clearCoreSequence();
         itemSettlementEvent = null;
-        replacementAdmission = null;
-        replacementAdmissionEvent = null;
-        itemAdmission = null;
-        itemAdmissionRevision = 0;
+        replacementOrderCheck = null;
+        replacementOrderCheckEvent = null;
+        itemOrderCheck = null;
+        itemOrderCheckRevision = 0;
         laneCommitEvent = null;
         placeReservation.clear();
         pipelinedPlaceBatchSubmission.clear();
@@ -1639,8 +1639,8 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
 
     /** 顺序批量下单中一个当前项的准入和冻结任务。Owner 只推进原账本及控制邮箱，Lane 计算并冻结，订单租约保留在原批次槽。任务可复用，但必须等 Lane 释放并由控制调度器发布结果。 */
     public static final class BatchPlaceReservation extends OrderCommand.ResolvedPlaceOrder implements IntFunction<Object>, BooleanSupplier {
-        private com.surprising.aeron.service.core.TradingAccountRuntime runtime;
-        private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
+        private com.surprising.aeron.service.core.AccountBook accountBook;
+        private com.surprising.aeron.service.core.identity.IdIndex identities;
         private Decision decision;
         private long sequence, userId, openInterestSteps;
         private UUID commandId;
@@ -1653,28 +1653,28 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
         private volatile boolean completed = true;
         private boolean accountDispatched;
 
-        public void prepare(com.surprising.aeron.service.core.TradingAccountRuntime runtime,
-                com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities,
+        public void prepare(com.surprising.aeron.service.core.AccountBook accountBook,
+                com.surprising.aeron.service.core.identity.IdIndex identities,
                 long sequence, long userId, UUID commandId, com.surprising.aeron.protocol.PlaceOrderCommand command,
                 Decision decision,
                 PendingBatch source, int sourceIndex) {
-            if (runtime == null || identities == null || sequence <= 0 || userId <= 0
+            if (accountBook == null || identities == null || sequence <= 0 || userId <= 0
                     || commandId == null || command == null || decision == null || source == null || sourceIndex < 0)
                 throw new IllegalArgumentException("invalid batch place reservation");
-            runtime.assertOwner();
+            accountBook.assertOwner();
             if (!completed) throw new IllegalStateException("Account Lane still owns this batch reservation");
             clear();
             this.decision = decision;
             this.source = source;
             this.sourceIndex = sourceIndex;
             initializeOrderIntent(command, decision.context().instrument(), decision.context().symbolId());
-            this.runtime = runtime;
+            this.accountBook = accountBook;
             this.identities = identities;
             this.sequence = sequence;
             this.userId = userId;
             this.commandId = commandId;
             if (decision.context().instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()) {
-                this.openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.context().instrument().instrumentId());
+                this.openInterestSteps = accountBook.ledgerOrderCheckOpenInterest(decision.context().instrument().instrumentId());
             } else {
                 this.openInterestSteps = 0;
             }
@@ -1682,30 +1682,30 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
             completed = false;
         }
 
-        @Override public boolean getAsBoolean() { return pollAdmission(); }
+        @Override public boolean getAsBoolean() { return pollOrderCheck(); }
 
-        public boolean pollAdmission() {
-            runtime.assertOwner();
+        public boolean pollOrderCheck() {
+            accountBook.assertOwner();
             if (!accountDispatched) {
-                runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+                accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), this);
                 accountDispatched = true;
             }
-            return runtime.pollControlLanes();
+            return accountBook.pollControlLanes();
         }
 
         @Override public Object apply(int laneId) {
-            com.surprising.aeron.service.account.AccountPartition lane = runtime.currentLaneCommandScope();
-            if (lane == null || lane.laneId() != laneId || laneId != runtime.topology().accountLaneId(userId))
+            com.surprising.aeron.service.account.AccountPartition lane = accountBook.currentLaneCommandScope();
+            if (lane == null || lane.laneId() != laneId || laneId != accountBook.topology().accountLaneId(userId))
                 throw new IllegalStateException("batch place reservation requires its Account Lane");
             long identity = 0;
             try {
-                com.surprising.aeron.service.order.OrderAdmissionService.resolveInto(this, decision.context(), userId, intent());
-                int assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
+                com.surprising.aeron.service.order.OrderCheckService.resolveInto(this, decision.context(), userId, intent());
+                int assetId = accountBook.productLine().isDerivative() ? decision.settleAssetId()
                         : side() == com.surprising.aeron.protocol.CoreOrderSide.BUY ? decision.quoteAssetId() : decision.baseAssetId();
                 identity = identities.prepareClientKeyInLane(lane, userId, clientOrderId());
-                long clientKey = com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.clientKeyValue(identity);
+                long clientKey = com.surprising.aeron.service.core.identity.IdIndex.clientKeyValue(identity);
                 long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
-                long required = com.surprising.aeron.service.order.OrderAdmissionService.requiredReservationPrepared(runtime, lane, userId, this,
+                long required = com.surprising.aeron.service.order.OrderCheckService.requiredReservationPrepared(accountBook, lane, userId, this,
                         openInterestSteps, clientKey, positionKey,
                         decision.context().lifecycleSettled(), decision.context().fundingInProgress());
                 com.surprising.aeron.service.position.Position position = positionKey == 0 ? null : lane.position(positionKey);
@@ -1715,10 +1715,10 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
                     closeCapacityCancellations = com.surprising.aeron.service.position.Position.CloseCapacity.conflictsFor(lane, userId, symbolId(),
                             positionKey, positionSide(), side(), orderId(), quantitySteps());
                 }
-                runtime.placePreparedOrder(userId, this, commandId,
+                accountBook.placePreparedOrder(userId, this, commandId,
                         required, clientKey, symbolId(), assetId);
                 lane.markPendingReservation(orderId(), sequence);
-                Order admitted = runtime.laneDelta(laneId).orders().get(orderId());
+                Order admitted = accountBook.laneDelta(laneId).orders().get(orderId());
                 if (admitted == null) throw new IllegalStateException("batch admission order is missing");
                 admittedOrder = source.captureAdmittedOrder(sourceIndex, admitted);
                 return null;
@@ -1738,7 +1738,7 @@ public static final class PendingBatch implements OrderCommand.ResultTarget, Tra
         public void clear() {
             if (!completed) return;
             clearResolvedOrder();
-            runtime = null;
+            accountBook = null;
             identities = null;
             decision = null;
             commandId = null;
@@ -1768,12 +1768,12 @@ static final class BatchItem {
     List<MatcherEvent> executionEvents = List.of();
     private exchange.core2.core.common.MatcherResult executionSlot;
     /** 本项持有的准入订单可复用副本，不能当作活跃账户订单修改。 */
-    private com.surprising.aeron.service.order.Order admissionCopy;
+    private com.surprising.aeron.service.order.Order orderCheckCopy;
     private com.surprising.aeron.service.order.Order resultCopy;
 
     /** 把准入订单复制到本项可复用槽，传空只解除当前结果引用。 */
     void captureAdmittedOrder(com.surprising.aeron.service.order.Order order) {
-        admittedOrder = order == null ? null : (admissionCopy = order.copyIntoCommandSlot(admissionCopy));
+        admittedOrder = order == null ? null : (orderCheckCopy = order.copyIntoCommandSlot(orderCheckCopy));
     }
 
     /** 把结算后订单复制到本项结果槽，空输入表示响应没有这张订单视图。 */
@@ -1835,14 +1835,14 @@ static final class BatchItem {
         laneResultPrepared = false;
         realtimeTakerOrder = null;
         admittedOrder = null;
-        if (admissionCopy != null) admissionCopy.clearCommandSlot();
+        if (orderCheckCopy != null) orderCheckCopy.clearCommandSlot();
         if (resultCopy != null) resultCopy.clearCommandSlot();
         cancelSymbol = null;
     }
 
 }
 
-public static final class PlaceBatchAdmissionEvent implements AccountLaneCommand {
+public static final class PlaceBatchCheckEvent implements AccountLaneCommand {
     @Accessors(fluent = true, chain = false)
     @Getter
     private long coreSequence;
@@ -1866,9 +1866,9 @@ public static final class PlaceBatchAdmissionEvent implements AccountLaneCommand
     /** 本批唯一账户 Lane 编号，必须与用户拓扑一致。 */
     private int laneId;
     private int matcherShard;
-    private TradingAccountRuntime runtime;
+    private AccountBook accountBook;
     private TradeSettlement.Changes changes;
-    private RuntimeIdentityRegistry identities;
+    private IdIndex identities;
     private UserAccount userBefore;
     private UserAccount userBeforeSlot;
     private RuntimeException rejection;
@@ -1876,18 +1876,18 @@ public static final class PlaceBatchAdmissionEvent implements AccountLaneCommand
     private volatile boolean completed;
 
     /** 校验有效项数、借用数组、命令和拓扑范围，绑定本批稳定输入及原变更缓冲，重置成功前缀和结果标记。 */
-    public OrderBatchProcessor.PlaceBatchAdmissionEvent prepare(
+    public OrderBatchProcessor.PlaceBatchCheckEvent prepare(
             long coreSequence, long userId, UUID commandId, OrderCommand.ResolvedPlaceOrder[] orders,
             long[] clientKeys,
             Order[] admittedOrders,
             int itemCount, int laneId, int matcherShard,
-            TradingAccountRuntime runtime, TradeSettlement.Changes changes, RuntimeIdentityRegistry identities, OrderBatchProcessor.PendingBatch source, long timestamp, long position) {
+            AccountBook accountBook, TradeSettlement.Changes changes, IdIndex identities, OrderBatchProcessor.PendingBatch source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || source == null || identities == null || clientKeys == null || admittedOrders == null || itemCount <= 0
                 || itemCount > orders.length || itemCount > clientKeys.length
                 || itemCount > admittedOrders.length
                 || laneId < 0 || matcherShard < 0
-                || runtime == null || matcherShard >= runtime.topology().matchingEngineCount() || changes == null) {
+                || accountBook == null || matcherShard >= accountBook.topology().matchingEngineCount() || changes == null) {
             throw new IllegalArgumentException("invalid place batch admission event");
         }
         this.coreSequence = coreSequence;
@@ -1902,7 +1902,7 @@ public static final class PlaceBatchAdmissionEvent implements AccountLaneCommand
         this.itemCount = itemCount;
         this.laneId = laneId;
         this.matcherShard = matcherShard;
-        this.runtime = runtime;
+        this.accountBook = accountBook;
         this.changes = changes;
         this.identities = identities;
         admittedCount = 0;
@@ -1913,59 +1913,59 @@ public static final class PlaceBatchAdmissionEvent implements AccountLaneCommand
 
     /** 在唯一所属 Lane 捕获用户前值，按项解析决策、准备身份、检查风险及容量并冻结。 */
     public void execute(AccountPartition lane) {
-        if (lane.laneId() != laneId || laneId != runtime.topology().accountLaneId(userId)) {
+        if (lane.laneId() != laneId || laneId != accountBook.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place batch admission reached the wrong Account Lane");
         }
         UserAccount currentUser = lane.user(userId);
         userBefore = currentUser == null ? null
                 : (userBeforeSlot = currentUser.copyIntoCommandSlot(userBeforeSlot));
         try {
-            runtime.enterMatcherSettlementScope(lane, changes);
-            lane.admissionIndexCapacity(Math.max(2, itemCount));
+            accountBook.enterMatcherSettlementScope(lane, changes);
+            lane.orderCheckIndexCapacity(Math.max(2, itemCount));
             try {
                 for (int index = 0; index < itemCount; index++) {
                     var decision = source.decision(index);
-                    OrderCommand.ResolvedPlaceOrder order = OrderAdmissionService.resolveInto(
+                    OrderCommand.ResolvedPlaceOrder order = OrderCheckService.resolveInto(
                             source.resolvedOrderSlot(index), decision.context(), userId, source.intent(index));
                     orders[index] = order;
                     int symbolId = order.symbolId();
-                    int assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
+                    int assetId = accountBook.productLine().isDerivative() ? decision.settleAssetId()
                             : order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
                             ? decision.quoteAssetId() : decision.baseAssetId();
-                    long key = RuntimeIdentityRegistry.clientKeyValue(
+                    long key = IdIndex.clientKeyValue(
                             identities.prepareClientKeyInLane(lane, userId, order.clientOrderId()));
                     clientKeys[index] = key;
                     long positionKey = identities.findPositionKeyValueInLane(
                             lane, userId, order.instrument(), order.positionSide());
-                    if (runtime.productLine().isDerivative() && positionKey != 0) {
+                    if (accountBook.productLine().isDerivative() && positionKey != 0) {
                         var position = lane.position(positionKey);
                         if (position != null && position.signedQuantitySteps() != 0
                                 && (position.signedQuantitySteps() > 0) != (order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-                            var summary = lane.admissionSummary(symbolId, userId,
+                            var summary = lane.orderCheckSummary(symbolId, userId,
                                     order.positionSide(), order.side(), order.marginMode());
                             if (summary.reduceOnlyQuantity() > 0 && Math.addExact(Math.addExact(summary.pendingQuantity(), summary.reduceOnlyQuantity()), order.quantitySteps())
                                     > Math.absExact(position.signedQuantitySteps()))
                                 throw new CoreStateRejectedException("CLOSE_CAPACITY_REQUIRES_ORDERED_ADMISSION", "close commitments require ordered cancellation");
                         }
                     }
-                    long requiredReservation = OrderAdmissionService.requiredReservationPrepared(
-                            runtime, lane, userId, order, decision.openInterestSteps(),
+                    long requiredReservation = OrderCheckService.requiredReservationPrepared(
+                            accountBook, lane, userId, order, decision.openInterestSteps(),
                             key, positionKey,
                             decision.context().lifecycleSettled(), decision.context().fundingInProgress());
-                    runtime.placeOrderInLane(lane, userId, order, commandId,
+                    accountBook.placeOrderInLane(lane, userId, order, commandId,
                             requiredReservation, clientKeys[index], symbolId, assetId,
                             coreSequence, null, timestamp, position);
                     Order live = lane.order(order.orderId());
                     admittedOrders[index] = source.captureAdmittedOrder(index, live);
                     admittedCount++;
                 }
-                changes.prepareAdmissionLane(laneId);
+                changes.prepareOrderCheckLane(laneId);
             } finally {
-                lane.admissionIndexCapacity(2);
-                runtime.exitMatcherSettlementScope(lane, changes);
+                lane.orderCheckIndexCapacity(2);
+                accountBook.exitMatcherSettlementScope(lane, changes);
             }
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
-            runtime.rollbackPlaceBatchAdmissionInLane(
+            accountBook.rollbackPlaceBatchOrderCheckInLane(
                     lane, userId, coreSequence, orders, clientKeys, admittedCount, userBefore);
             for (int i = 0; i < itemCount; i++) {
                 if (clientKeys[i] != 0 && orders[i] != null && orders[i].hasIntent()) {
@@ -1976,10 +1976,10 @@ public static final class PlaceBatchAdmissionEvent implements AccountLaneCommand
             admittedCount = 0;
             rejection = failure;
         }
-        TradingAccountRuntime completionRuntime = runtime;
+        AccountBook completionRuntime = accountBook;
         lane.recordCommandOperation();
         completed = true;
-        completionRuntime.publishAccountAdmissionReadyShard(matcherShard);
+        completionRuntime.publishAccountOrderCheckReadyShard(matcherShard);
     }
 
     /** 要求 Lane 已完成且变更缓冲已交出，清理借用数组和结果引用，清空但保留用户前值槽以便后续复用。 */
@@ -1993,7 +1993,7 @@ public static final class PlaceBatchAdmissionEvent implements AccountLaneCommand
         admittedOrders = null;
         userBefore = null;
         if (userBeforeSlot != null) userBeforeSlot.clearCommandSlot();
-        runtime = null;
+        accountBook = null;
         identities = null;
         rejection = null;
         itemCount = 0;

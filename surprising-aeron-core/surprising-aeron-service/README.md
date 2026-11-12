@@ -1,6 +1,6 @@
 # Aeron Core Service
 
-This is the authoritative trading node for one product line. Startup, commands, queries, and recovery share `TradingCoreRuntime`. Paths below are relative to `src/main/java/com/surprising/aeron/`.
+This is the authoritative trading node for one product line. Startup, commands, queries, and recovery share `TradingCore`. Paths below are relative to `src/main/java/com/surprising/aeron/`.
 
 ## Source map
 
@@ -8,16 +8,16 @@ This is the authoritative trading node for one product line. Startup, commands, 
 | --- | --- |
 | Startup and shutdown | `config`, `bootstrap.AeronCoreLifecycle`, `SurprisingCoreApplication` |
 | Cluster callback | `controller.AeronTradingClusterService` |
-| Input scheduling | `service.core.TradingCoreOwner`, `TradingCoreRuntime`, `support.ingress.OwnerIngressRing` |
-| Order admission | `service.order.OrderAdmissionService`, `OrderCommand`, `OrderCommandQueue`, `OrderMatchingFlow`, `OrderBatchProcessor` |
-| Account ownership | `service.account.AccountPartition`, `service.order.OrderAdmissionService` |
+| Input scheduling | `service.core.TradingCoreOwner`, `TradingCore`, `support.ingress.OwnerIngressRing` |
+| Order admission | `service.order.OrderCheckService`, `OrderCommand`, `OrderCommandQueue`, `OrderMatchingFlow`, `OrderBatchProcessor` |
+| Account ownership | `service.account.AccountPartition`, `service.order.OrderCheckService` |
 | Matching | `service.matcher.OrderBookEngine`, `service.matcher.OrderBookRouter` |
 | Settlement | `service.settlement.TradeSettlement`, `SpotTradeSettlementService`, `DerivativeTradeSettlementService` |
 | Treasury and funding | `service.treasury`, `service.funding`, `service.insurance` |
 | Risk and resolution | `service.risk`, `service.liquidation`, `service.adl` |
 | Triggers and algorithms | `service.trigger`, `service.core.index` |
 | Delivery and exercise | `service.settlement.ContractExpirySettlementService` |
-| Commit and retention | `service.order.OrderCommitService`, `service.result`, `service.retention.TerminalStateRetention` |
+| Commit and retention | `service.order.OrderCommitService`, `service.result`, `service.retention.CompletedOrderArchive` |
 | Queries and output | `service.query.CoreQueryService`, `StateQueries`, `RiskQueries`, `OperationalQueries`, `LiquidationQueries`, `service.realtime`, `support.egress` |
 | Snapshots | `service.snapshot`, `service.snapshot.state` |
 
@@ -26,8 +26,8 @@ This is the authoritative trading node for one product line. Startup, commands, 
 ```mermaid
 flowchart LR
     Callback[AeronTradingClusterService] --> Owner[TradingCoreOwner]
-    Owner --> Runtime[TradingCoreRuntime]
-    Runtime --> Admission[OrderAdmissionService]
+    Owner --> Runtime[TradingCore]
+    Runtime --> Admission[OrderCheckService]
     Admission --> Flow[OrderMatchingFlow / OrderCommand]
     Flow --> Matcher[OrderBookRouter]
     Matcher --> Lanes[SettlementLaneWorker / Account Lanes]
@@ -37,15 +37,15 @@ flowchart LR
 
 The callback preserves original log time, position, and input leases. Owner checks identity, source progress, dependencies, and capacity. Lanes perform authoritative admission; Matcher publishes actual matching facts; Lanes settle affected users. Owner collects acknowledgements, applies Treasury work, validates funds, and publishes in order. A business rejection is not a runtime fault. A failed funds audit propagates and leaves the runtime fault visible.
 
-Same-user assets and cross-margin state belong to one Account Lane. Matcher ownership is by instrument. Full cold state is materialized only at query, snapshot, or controlled recovery boundaries. `OrderMatchingContinuation` is reused across place, cancel, and replace and cannot be overwritten before matching completion and retirement.
+Same-user assets and cross-margin state belong to one Account Lane. Matcher ownership is by instrument. Full cold state is materialized only at query, snapshot, or controlled recovery boundaries. `OrderMatchCallback` is reused across place, cancel, and replace and cannot be overwritten before matching completion and retirement.
 
 ## Commit details
 
-`TradingAccountRuntime` dispatches changed users/orders and original log metadata. Lane receipts retain prepared slots and leases until Owner consumes them. Published position identities are deterministic. Lane progress and dispatch watermarks enforce commit order; progress arrays are not copies of account state. Cross-shard cancellation advances serially after each receipt and reuses its progress object.
+`AccountBook` dispatches changed users/orders and original log metadata. Lane receipts retain prepared slots and leases until Owner consumes them. Published position identities are deterministic. Lane progress and dispatch watermarks enforce commit order; progress arrays are not copies of account state. Cross-shard cancellation advances serially after each receipt and reuses its progress object.
 
 ## Idempotency and recovery
 
-`CommandResultLedger` retains recent results. `FundsCommandIndex` retains durable funds identities and immutable fingerprints; Owner alone accesses it after activation. Funds identity checks precede source-sequence checks. Capacity exhaustion is a system fault. Snapshots preserve complete UUID/fingerprint identities and cluster-log replay restores later work.
+`CommandResultLog` retains recent results. `FundsCommandIndex` retains durable funds identities and immutable fingerprints; Owner alone accesses it after activation. Funds identity checks precede source-sequence checks. Capacity exhaustion is a system fault. Snapshots preserve complete UUID/fingerprint identities and cluster-log replay restores later work.
 
 `CoreSnapshotLifecycle` waits for real Lane and Matcher completion, freezes one consistent state, audits it, then encodes it. `SectionedCoreSnapshotRecovery` validates the envelope, sections, CRC, limits, product, topology, and business/funds hashes before activating candidate state.
 

@@ -6,7 +6,7 @@ import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 
-import static com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport.matcherSnapshot;
+import static com.surprising.aeron.service.core.TradingCoreRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;

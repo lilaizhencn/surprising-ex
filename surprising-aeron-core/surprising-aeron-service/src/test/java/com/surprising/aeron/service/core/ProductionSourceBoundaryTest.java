@@ -39,14 +39,14 @@ class ProductionSourceBoundaryTest {
      */
     @Test
     void d5CommandsUseTheConcreteRuntimeWithoutCapabilityInterfaces() throws Exception {
-        assertThat(TradingCoreRuntime.class.getInterfaces()).containsExactly(AutoCloseable.class);
+        assertThat(TradingCore.class.getInterfaces()).containsExactly(AutoCloseable.class);
         for (Class<?> /* 当前要求直接依赖实际运行时的业务命令类型 */ handler : java.util.List.of(
                 com.surprising.aeron.service.trigger.command.TriggerOrderCommands.class)) {
-            assertThat(handler.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
-            assertThat(handler.getConstructor(TradingCoreRuntime.class)).isNotNull();
+            assertThat(handler.getDeclaredField("owner").getType()).isEqualTo(TradingCore.class);
+            assertThat(handler.getConstructor(TradingCore.class)).isNotNull();
         }
         assertThat(com.surprising.aeron.service.core.command.DirectCommandDispatcher.class
-                .getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
+                .getDeclaredField("owner").getType()).isEqualTo(TradingCore.class);
         for (Class<?> processor : java.util.List.of(
                 com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands.class,
                 com.surprising.aeron.service.insurance.command.InsuranceFundCommands.class,
@@ -54,7 +54,7 @@ class ProductionSourceBoundaryTest {
             assertThat(java.util.Arrays.stream(processor.getDeclaredFields()).map(java.lang.reflect.Field::getName))
                     .doesNotContain("owner");
         }
-        assertThat(OrderCommand.Direct.class.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
+        assertThat(OrderCommand.Direct.class.getDeclaredField("owner").getType()).isEqualTo(TradingCore.class);
         // 从当前目录向上找到的交易仓库根，找不到即测试失败
         Path root = Path.of("").toAbsolutePath();
         while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {
@@ -102,7 +102,7 @@ class ProductionSourceBoundaryTest {
                 "executeWithEvidence", "executeWithEvidenceSync", "executeControlWithEvidenceSync",
                 "executeShardWithEvidenceSync", "executeAfterCancellations", "executeAfterCancellationsSync",
                 "cancelBatchOrderedAsync", "prepareOrderRoutesAsync");
-        assertThat(java.util.Arrays.stream(TradingCoreRuntime.class.getDeclaredMethods())
+        assertThat(java.util.Arrays.stream(TradingCore.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("applyMatchesOnAccountLanes", "matchingOrder");
         assertThat(java.util.Arrays.stream(OrderCommitService.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("initialMatcherSettlementPlan",
@@ -130,7 +130,7 @@ class ProductionSourceBoundaryTest {
      */
     @Test
     void d2HasNoOwnerDirectDispatchScanCallbackOrOptionalLaneResponse() throws Exception {
-        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.core.TradingAccountRuntime.class
+        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.core.AccountBook.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName))
                 .doesNotContain("dispatchOwnerControlledSettlement");
         assertThat(java.util.Arrays.stream(OrderCommandQueue.IngressWindow.class.getDeclaredMethods())
@@ -196,7 +196,7 @@ class ProductionSourceBoundaryTest {
         var source = fullSource.substring(fullSource.indexOf("public final class StateQueries"));
         assertThat(source).doesNotContain("currentLaneCommandScope", "accountLaneForUser", "onLane(");
         // 在账户查询正文中匹配指定 runtime 读取调用及首参的正则游标
-        var reads = Pattern.compile("runtime\\.(?:user|order|reservation|position|balancesForUser|"
+        var reads = Pattern.compile("accountBook\\.(?:user|order|reservation|position|balancesForUser|"
                 + "reservationCountForUser|positionCountForUser|leverageKeysForUser|reservationIdsForUser|"
                 + "positionKeysForUser|leverage|orderIdByClientValue)\\(\\s*([^,)]*)").matcher(source);
         // 已检查的显式 Lane 读取调用数量，防止正则一个也没匹配
@@ -214,13 +214,13 @@ class ProductionSourceBoundaryTest {
     @Test
     void ownerRetainsNoPersistentLaneBusinessViews() {
         // 运行时声明字段流，供检查指定旧正文表名称不存在
-        var fields = java.util.Arrays.stream(com.surprising.aeron.service.core.TradingAccountRuntime.class.getDeclaredFields());
+        var fields = java.util.Arrays.stream(com.surprising.aeron.service.core.AccountBook.class.getDeclaredFields());
         assertThat(fields.map(java.lang.reflect.Field::getName)).doesNotContain(
                 "publishedOrders", "publishedUsers", "publishedAlgoOrders", "publishedTriggerOrders",
                 "publishedLiquidations", "publishedRiskSnapshots");
         // 不允许 Owner 持久表保存的四类账户正文类型名
         var businessTypes = java.util.Set.of("CoreAlgoOrderState", "CoreTriggerOrderState", "RiskScanner.LiquidationOrder", "RiskMarginCalculator.Snapshot");
-        for (var /* 当前待核对类型或字段名的反射字段 */ field : com.surprising.aeron.service.core.TradingAccountRuntime.class.getDeclaredFields()) {
+        for (var /* 当前待核对类型或字段名的反射字段 */ field : com.surprising.aeron.service.core.AccountBook.class.getDeclaredFields()) {
             if (!java.util.Map.class.isAssignableFrom(field.getType())
                     && !field.getType().getName().endsWith("LongObjectHashMap")) continue;
             assertThat(businessTypes.stream().anyMatch(/* 当前待反射或读取源文件的类型；业务泛型检查中为待排除的正文类型名 */ type -> field.getGenericType().getTypeName().contains(type)))
@@ -228,7 +228,7 @@ class ProductionSourceBoundaryTest {
         }
         assertThat(java.util.Arrays.stream(com.surprising.aeron.service.core.index.ActiveOrderIndex.IndexedOrder.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getName)).containsExactlyInAnyOrder("orderId", "userId", "instrumentId");
-        assertThat(java.util.Arrays.stream(TradingCoreRuntime.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
+        assertThat(java.util.Arrays.stream(TradingCore.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
                 .doesNotContain("commandFundsAccumulator");
     }
 

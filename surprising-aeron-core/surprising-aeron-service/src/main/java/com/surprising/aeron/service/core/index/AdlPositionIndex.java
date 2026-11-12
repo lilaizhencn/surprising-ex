@@ -4,7 +4,7 @@ import com.surprising.aeron.service.query.QueryTooLargeException;
 
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.position.Position;
 import java.util.Collections;
 import java.util.HashMap;
@@ -34,7 +34,7 @@ public final class AdlPositionIndex {
     private final LongObjectHashMap<IndexedPosition> positions = new LongObjectHashMap<>();
 
     /** 从业务状态的用户持仓重建资产候选成员及索引自有条目，使用同一身份表生成整数持仓键。 */
-    public AdlPositionIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
+    public AdlPositionIndex(TradingCoreState state, IdIndex identities) {
         state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
             long positionKey = identities.positionKey(user.userId(), key);
             apply(positionKey, null, user.userId(), position.instrumentId(), position.marginAsset(),

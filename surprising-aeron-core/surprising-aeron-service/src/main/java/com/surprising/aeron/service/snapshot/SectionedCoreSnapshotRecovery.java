@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.snapshot;
 
 import com.surprising.aeron.protocol.ProtocolException;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -89,17 +89,17 @@ public final class SectionedCoreSnapshotRecovery {
     }
 
     /** 要求字节完整并解析全部组件，随后恢复和激活指定产品线运行时。 */
-    public TradingCoreRuntime decode(ProductLine expectedProductLine) {
+    public TradingCore decode(ProductLine expectedProductLine) {
         return decode(expectedProductLine, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone());
     }
 
-    public TradingCoreRuntime decode(ProductLine expectedProductLine,
+    public TradingCore decode(ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
         return decode(expectedProductLine, configuration,
                 com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
     }
 
-    public TradingCoreRuntime decode(ProductLine expectedProductLine,
+    public TradingCore decode(ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
             com.surprising.aeron.config.LaneTopology deploymentTopology) {
         return components(expectedProductLine, configuration, deploymentTopology)
@@ -107,13 +107,13 @@ public final class SectionedCoreSnapshotRecovery {
     }
 
     /** 节点启动恢复只重建被动状态，外层 Owner 使用已绑定的 affinity 首次激活。 */
-    public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
+    public TradingCore decodePassive(ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
         return decodePassive(expectedProductLine, configuration,
                 com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
     }
 
-    public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
+    public TradingCore decodePassive(ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
             com.surprising.aeron.config.LaneTopology deploymentTopology) {
         return components(expectedProductLine, configuration, deploymentTopology)

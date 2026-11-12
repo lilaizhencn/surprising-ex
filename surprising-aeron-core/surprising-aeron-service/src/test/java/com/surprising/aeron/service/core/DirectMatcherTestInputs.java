@@ -13,7 +13,7 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.*;
 import com.surprising.aeron.service.matcher.OrderBookEngine;
@@ -77,13 +77,13 @@ public final class DirectMatcherTestInputs {
     public static TradeSettlement preparePlace(OrderBookEngine adapter,
             long sequence, UUID commandId, long timestamp, long userId, OrderCommand.ResolvedPlaceOrder order,
             List<Long> cancellations) {
-        try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var runtime = new TradingAccountRuntime()) {
+        try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var accountBook = new AccountBook()) {
             // 局部资产和标的身份表，供事件路由准备使用
-            var identities = new RuntimeIdentityRegistry();
+            var identities = new IdIndex();
             var instrument = order.instrument();
             var product = instrument.contractType().productLine();
-            runtime.setMetadata(product, 0);
-            runtime.registerInstrument(instrument);
+            accountBook.setMetadata(product, 0);
+            accountBook.registerInstrument(instrument);
             // 为事件准备的 OPEN 准入订单，数量、方向和订单类型沿用输入
             var admitted = new Order(order.orderId(), product, userId,
                     identities.symbolId(order.instrumentId()), instrument, order.side(),
@@ -92,10 +92,10 @@ public final class DirectMatcherTestInputs {
                     order.timeInForce() == CoreTimeInForce.GTX, "", commandId, 0, 0, 0,
                     timestamp, timestamp, 0, CoreOrderStatus.OPEN, 1);
             // 当前拓扑全部账户 Lane 的位图，六十四 Lane 时用负一表示所有位
-            long lanes = runtime.topology().accountLaneCount() == 64 ? -1L
-                    : (1L << runtime.topology().accountLaneCount()) - 1;
+            long lanes = accountBook.topology().accountLaneCount() == 64 ? -1L
+                    : (1L << accountBook.topology().accountLaneCount()) - 1;
             // 已保留 Matcher 发布租约的 Direct 事件，供适配器写入证据及订单簿结果
-            var target = runtime.prepareDirectMatcherSettlement(sequence, lanes, admitted, null, 1,
+            var target = accountBook.prepareDirectMatcherSettlement(sequence, lanes, admitted, null, 1,
                     commandId, adapter.matcherShardId(order.instrumentId()), identities, timestamp, 0, cancellations, null);
             target.reserveMatcherPublication();
             return target;
@@ -143,10 +143,10 @@ public final class DirectMatcherTestInputs {
      */
     public static TradeSettlement cancelDirect(OrderBookEngine adapter,
             long sequence, UUID commandId, long timestamp, long userId, long orderId, String instrumentId) {
-        try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var runtime = new TradingAccountRuntime()) {
+        try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var accountBook = new AccountBook()) {
             // 已保留 Matcher 发布租约的 Direct 事件，供适配器写入证据及订单簿结果
-            var target = runtime.prepareDirectCancellation(sequence, userId, orderId, commandId,
-                    adapter.matcherShardId(instrumentId), new RuntimeIdentityRegistry(), timestamp, 0);
+            var target = accountBook.prepareDirectCancellation(sequence, userId, orderId, commandId,
+                    adapter.matcherShardId(instrumentId), new IdIndex(), timestamp, 0);
             target.reserveMatcherPublication();
             adapter.cancelDirect(adapter.matcherShardId(instrumentId), sequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
                     timestamp, userId, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), target);

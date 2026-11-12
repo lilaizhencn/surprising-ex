@@ -1226,7 +1226,7 @@ class SixProductLineContractLiveTest {
         body.put("marginMode", "CROSS"); body.put("positionSide", "NET"); body.put("reduceOnly", reduceOnly); body.put("postOnly", false);
         String serialized = json.writeValueAsString(body);
         JsonNode receipt;
-        long admissionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+        long orderCheckDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
         for (;;) {
             receipt = request("POST", "/api/v1/gateway/trading", serialized, actor.token, null, 200, 503);
             // A negative offer proves this attempt was not admitted. Keep the original
@@ -1235,7 +1235,7 @@ class SixProductLineContractLiveTest {
                     || !Set.of("CLOSED", "NOT_CONNECTED").contains(receipt.path("code").asString())) break;
             System.out.printf("QA_ORDER_NOT_ADMITTED product=%s userId=%d commandId=%s unchanged=true%n",
                     line, actor.id, receipt.path("commandId").asString());
-            assertThat(System.nanoTime()).as("bounded negative-offer retry with original order identity").isLessThan(admissionDeadline);
+            assertThat(System.nanoTime()).as("bounded negative-offer retry with original order identity").isLessThan(orderCheckDeadline);
             Thread.sleep(100);
         }
         String resultUrl = receipt.path("commandResultUrl").asString();

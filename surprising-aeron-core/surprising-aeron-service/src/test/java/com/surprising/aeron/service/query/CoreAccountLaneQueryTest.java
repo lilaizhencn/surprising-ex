@@ -14,14 +14,14 @@ import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.OwnerAccountReadGuard;
 import com.surprising.aeron.service.core.PipelinedExecutionExtension;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.TradingCore;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.retention.TerminalStateRetention;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.retention.CompletedOrderArchive;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.LinkedHashMap;
@@ -52,16 +52,16 @@ class CoreAccountLaneQueryTest {
     void fiveAccountQueriesReadAndEncodeOnLaneAndMatchColdViews() throws Exception {
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = prepared()) {
             // 冷投影独立使用的身份映射，供用户及订单视图的参照查询使用。
-            var identities = new RuntimeIdentityRegistry();
-            try (/* 由当前已提交交易状态投影的冷运行时，在合法 Lane 参数下构造预期视图和哈希。 */ var expected = RuntimeStateProjector.project(core.tradingState(), identities)) {
+            var identities = new IdIndex();
+            try (/* 由当前已提交交易状态投影的冷运行时，在合法 Lane 参数下构造预期视图和哈希。 */ var expected = SnapshotLoader.loadSnapshot(core.tradingState(), identities)) {
                 // 冷运行时中用户 1 的完整查询结果，提供详情编码和状态哈希的参照。
                 var user = StateQueries.userState(expected, expected.accountLaneForUser(1), identities, 1, false);
                 // 冷运行时中用户 7 的订单 200 查询结果，详情、哈希和客户端查询均应与它一致。
                 var order = StateQueries.orderState(expected,
                         expected.accountLaneForUser(7), identities, 200, false);
                 // 查询开始前账户所有权交接计数，查询完成后必须不变。
-                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
-                try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook());
+                try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
                     assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 1, new byte[0]).data())
                             .isEqualTo(CoreStateQueryCodec.encodeUserState(user.view()));
                     assertThat(CoreStateQueryCodec.decodeStateHash(query(core, CoreMessageType.USER_STATE_HASH_QUERY,
@@ -75,7 +75,7 @@ class CoreAccountLaneQueryTest {
                             CoreStateQueryCodec.encodeClientOrderStateQuery("account-q-200")).data())
                             .isEqualTo(CoreStateQueryCodec.encodeOrderState(order.view()));
                 }
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook())).isEqualTo(handoff);
                 core.assertClusterCallbackComplete();
             }
         }
@@ -86,9 +86,9 @@ class CoreAccountLaneQueryTest {
      */
     @Test
     void openOrderPagesAreEncodedByTheirLanesAndKeepGlobalCursorOrder() throws Exception {
-        try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = prepared(); /* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+        try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = prepared(); /* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
             // 查询开始前账户所有权交接计数，查询完成后必须不变。
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook());
             // 不限定用户的币对 1 挂单页，应按订单编号降序包含 202 和 200。
             var all = query(core, CoreMessageType.USER_OPEN_ORDERS_QUERY, 0,
                     CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery("1", 0, 10)));
@@ -108,7 +108,7 @@ class CoreAccountLaneQueryTest {
             var empty = query(core, CoreMessageType.USER_OPEN_ORDERS_QUERY, 99,
                     CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery("1", 0, 10)));
             assertThat(CoreStateQueryCodec.decodeOpenOrders(empty.data()).orders()).isEmpty();
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook())).isEqualTo(handoff);
             core.assertClusterCallbackComplete();
         }
     }
@@ -134,7 +134,7 @@ class CoreAccountLaneQueryTest {
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = initial(state)) {
             core.activate();
             assertThat(core.activeOrderIndex().activeOrderRoute(991)).isNull();
-            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
                 // 只携带订单编号、不指定用户的终态订单查询响应。
                 var response = query(core, CoreMessageType.ORDER_STATE_QUERY, 0, TradingCommandCodec.encodeOrderStateQuery(991));
                 // 解码后的保留订单详情，核对编号 991、用户 7 和 CANCELED 终态。
@@ -152,7 +152,7 @@ class CoreAccountLaneQueryTest {
      */
     @Test
     void missingAndMalformedQueriesPreserveTheirCodesAndDoNotPoisonLane() throws Exception {
-        try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = prepared(); /* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+        try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = prepared(); /* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
             assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 99, new byte[0]).resultCode())
                     .isEqualTo(CoreResultCode.ENTITY_NOT_FOUND);
             assertThat(query(core, CoreMessageType.ORDER_STATE_QUERY, 0,
@@ -184,7 +184,7 @@ class CoreAccountLaneQueryTest {
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = initial(state)) {
             core.activate();
-            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
                 assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 1, new byte[0]).resultCode())
                         .isEqualTo(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
                 assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 7, new byte[0]).status()).isEqualTo(ResponseStatus.OK);
@@ -204,13 +204,13 @@ class CoreAccountLaneQueryTest {
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = prepared()) {
             // 证明阻塞任务已进入目标 Lane 的门闩，随后才发送受阻查询。
             var entered = new CountDownLatch(1);
-            assertThat(core.runtimeState().dispatchAccountQuery(core.runtimeState().topology().accountLaneMask(1), /* 用户 1 所属 Lane，在此回调里真实等待放行。 */ lane -> {
+            assertThat(core.accountBook().dispatchAccountQuery(core.accountBook().topology().accountLaneMask(1), /* 用户 1 所属 Lane，在此回调里真实等待放行。 */ lane -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("blocked Lane timeout"); }
                 catch (/* 阻塞 Lane 等待时收到的中断，转换为保留原因的断言失败。 */ InterruptedException failure) { throw new AssertionError(failure); }
             })).isTrue();
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
                 // 在目标 Lane 仍被阻塞时发出的用户 1 查询消息。
                 var request = message(CoreMessageType.USER_STATE_QUERY, 1, new byte[0]);
                 // Owner 立即返回的待完成响应，此时账户 Lane 尚未放行。
@@ -235,20 +235,20 @@ class CoreAccountLaneQueryTest {
     void readScopeDoesNotPrepareOrTouchUncollectedControlChanges() throws Exception {
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = prepared()) {
             // 用户 1 持仓对应的已注册合约配置，用于取得相同持仓身份。
-            var instrument = core.runtimeState().instrument("1");
+            var instrument = core.accountBook().instrument("1");
             // 用户 1 在合约 1 的净持仓键，本用例用它写入后移除风险快照控制变化。
             long key = core.identities().findPositionKeyValue(1, instrument, CorePositionSide.NET);
             // 合约 1 的运行时稠密编号，写入风险快照时与持仓身份一致。
             int symbolId = core.identities().findSymbolId("1");
             // 用户 1 所属账户 Lane 的位集合，控制写入和读取回调都投递到它。
-            long mask = core.runtimeState().topology().accountLaneMask(1);
+            long mask = core.accountBook().topology().accountLaneMask(1);
             // 从单 Lane 位集合取出的 Lane 编号，用于找到测试要监测的账户分区。
             int laneId = Long.numberOfTrailingZeros(mask);
             // 反射取得的账户 Lane 数组字段，仅用于测试安装读取监测。
-            var lanesField = TradingAccountRuntime.class.getDeclaredField("accountLanes");
+            var lanesField = AccountBook.class.getDeclaredField("accountLanes");
             lanesField.setAccessible(true);
             // 用户 1 的真实账户 Lane，反射安装守卫后仍由原线程消费任务。
-            var lane = ((AccountPartition[]) lanesField.get(core.runtimeState()))[laneId];
+            var lane = ((AccountPartition[]) lanesField.get(core.accountBook()))[laneId];
             // 账户 Lane 的权威持仓表字段，用于暂时替换成带 get 计数的测试 Map。
             var positionsField = AccountPartition.class.getDeclaredField("positions");
             positionsField.setAccessible(true);
@@ -272,21 +272,21 @@ class CoreAccountLaneQueryTest {
             };
             positionsField.set(lane, guarded);
             try {
-                assertThatThrownBy(() -> core.runtimeState().readAccountLane(lane, /* Owner 直接申请 Lane 只读范围的回调参数，所有权检查应在执行回调前拒绝。 */ ignored -> Boolean.TRUE))
+                assertThatThrownBy(() -> core.accountBook().readAccountLane(lane, /* Owner 直接申请 Lane 只读范围的回调参数，所有权检查应在执行回调前拒绝。 */ ignored -> Boolean.TRUE))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("owning Lane thread");
-                core.runtimeState().dispatchControlLanes(mask, /* 控制任务传入的 Lane 参数，实际通过运行时入口写入再移除风险快照，留下待收集变化。 */ ignored -> {
-                    core.runtimeState().putRiskSnapshot(key, new com.surprising.aeron.service.risk.RiskMarginCalculator.Snapshot(
+                core.accountBook().dispatchControlLanes(mask, /* 控制任务传入的 Lane 参数，实际通过运行时入口写入再移除风险快照，留下待收集变化。 */ ignored -> {
+                    core.accountBook().putRiskSnapshot(key, new com.surprising.aeron.service.risk.RiskMarginCalculator.Snapshot(
                             1, symbolId, CorePositionSide.NET, 1, 100, 0, 1, 1));
-                    com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(core.runtimeState(), key);
+                    com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(core.accountBook(), key);
                     return null;
                 });
                 // 目标 Lane 完成只读回调后发布的原子标记，测试线程据此等待后续断言。
                 var complete = new AtomicBoolean();
-                assertThat(core.runtimeState().dispatchAccountQuery(mask, /* 真正执行查询回调的 Lane，继续用它进入合法的账户只读范围。 */ actualLane -> {
+                assertThat(core.accountBook().dispatchAccountQuery(mask, /* 真正执行查询回调的 Lane，继续用它进入合法的账户只读范围。 */ actualLane -> {
                     reading.set(true);
                     try {
-                        core.runtimeState().readAccountLane(actualLane, /* 合法只读范围传入的 Lane 参数，回调只检查生产者限制，不需要读取实体。 */ ignored -> {
-                            assertThatThrownBy(() -> core.runtimeState().dispatchAccountQuery(mask, /* 若非法查询投递意外成功才会收到的 Lane 参数，空回调不承担业务工作。 */ unusedLane -> {}))
+                        core.accountBook().readAccountLane(actualLane, /* 合法只读范围传入的 Lane 参数，回调只检查生产者限制，不需要读取实体。 */ ignored -> {
+                            assertThatThrownBy(() -> core.accountBook().dispatchAccountQuery(mask, /* 若非法查询投递意外成功才会收到的 Lane 参数，空回调不承担业务工作。 */ unusedLane -> {}))
                                     .isInstanceOf(IllegalStateException.class).hasMessage("account query producer must be Owner");
                             return Boolean.TRUE;
                         });
@@ -302,8 +302,8 @@ class CoreAccountLaneQueryTest {
                     Thread.onSpinWait();
                 }
                 assertThat(proofReads).hasValue(0);
-                assertThat(core.runtimeState().pollControlLanes()).isTrue();
-                core.runtimeState().clearCommittedChanges(core.identities());
+                assertThat(core.accountBook().pollControlLanes()).isTrue();
+                core.accountBook().clearCommittedChanges(core.identities());
             } finally { positionsField.set(lane, original); }
         }
     }
@@ -327,17 +327,17 @@ class CoreAccountLaneQueryTest {
      * 从给定业务快照创建核心运行时，交给用例自行激活及关闭。
      * @param state 预先准备的用户、普通订单、币对、风险和财库业务状态
      */
-    private TradingCoreRuntime initial(TradingCoreState state) {
-        return new TradingCoreRuntime(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
-                new TerminalStateRetention(), null, 0, Map.of(), Map.of());
+    private TradingCore initial(TradingCoreState state) {
+        return new TradingCore(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
+                new CompletedOrderArchive(), null, 0, Map.of(), Map.of());
     }
 
     /**
      * 通过正式命令注册合约、应用标记价、给两个用户入金并制造一次部分成交和一笔未成交挂单；准备失败时立即关闭已创建的运行时。
      */
-    private TradingCoreRuntime prepared() {
+    private TradingCore prepared() {
         // 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。
-        var core = new TradingCoreRuntime(LINE);
+        var core = new TradingCore(LINE);
         try {
             command(core, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
                     new RegisterInstrumentCommand(
@@ -366,7 +366,7 @@ class CoreAccountLaneQueryTest {
      * @param price 限价单价格刻度
      * @param quantity 订单数量步数
      */
-    private void place(TradingCoreRuntime core, long user, long id, CoreOrderSide side, long price, long quantity) {
+    private void place(TradingCore core, long user, long id, CoreOrderSide side, long price, long quantity) {
         command(core, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(id,
                 "1", side, price, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "account-q-" + id)));
@@ -379,7 +379,7 @@ class CoreAccountLaneQueryTest {
      * @param user 命令头中的用户编号，币对或价格等非用户命令使用 0
      * @param payload 与消息类型对应的编码业务或查询载荷
      */
-    private void command(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private void command(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 本次消息新分配的来源序号，同时写入 UUID 和协议消息头。
         long next = ++sequence;
         // 本次下发的业务命令，辅助器会等待其最终应用状态。
@@ -395,7 +395,7 @@ class CoreAccountLaneQueryTest {
      * @param user 查询头中的用户筛选编号，0 的含义取决于查询类型，例如按订单编号查询或列举全部挂单
      * @param payload 与消息类型对应的编码业务或查询载荷
      */
-    private CoreResponse query(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private CoreResponse query(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 按查询类型、用户及载荷创建的请求，用于判断即时或异步返回。
         var request = message(type, user, payload);
         assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
@@ -411,7 +411,7 @@ class CoreAccountLaneQueryTest {
      * @param request 已经提交的查询消息，用它的命令 UUID 核对查询关联清理
      * @param id 本次账户异步查询的内部编号，要求非零且只消费一次
      */
-    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, java.util.UUID id) {
+    private CoreResponse await(TradingCore core, CoreMessage request, java.util.UUID id) {
         assertThat(core.bookQueries.hasPendingQuery(id)).isTrue();
         // 本次异步查询或只读回调的五秒单调时钟等待上限，不用于交易时间计算。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

@@ -24,8 +24,8 @@ public final class PipelineTestAccess {
      * @param admission 当前准入协作入口
      * @param count 要追加的空占位项数量，负值由 nCopies 拒绝
      */
-    public static void overflowQueuedMatching(OrderAdmissionService admission, int count) {
-        admission.queuedMatching.addAll(java.util.Collections.nCopies(count, null));
+    public static void overflowQueuedMatching(OrderCheckService orderCheck, int count) {
+        orderCheck.queuedMatching.addAll(java.util.Collections.nCopies(count, null));
     }
     public static java.util.function.BooleanSupplier controlWork(OrderCommand.Direct slot) {
         try {

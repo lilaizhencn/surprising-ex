@@ -4,11 +4,11 @@ import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -24,12 +24,12 @@ class OwnerPositionRetirementTest {
      */
     @Test
     void deletingRiskOnlyKeepsPositionIdentityThenActualPositionDeletionReleasesIt() throws Exception {
-        try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.runtime)) {
-            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.runtime, fixture.key); return null; });
-            fixture.runtime.clearCommittedChanges(fixture.identities);
+        try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.accountBook)) {
+            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.accountBook, fixture.key); return null; });
+            fixture.accountBook.clearCommittedChanges(fixture.identities);
             assertThat(fixture.identities.preparedPositionKey(7, "1")).isEqualTo(fixture.key);
-            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(fixture.runtime, fixture.key, 7); return null; });
-            fixture.runtime.clearCommittedChanges(fixture.identities);
+            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(fixture.accountBook, fixture.key, 7); return null; });
+            fixture.accountBook.clearCommittedChanges(fixture.identities);
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.identities.preparedPositionKey(7, "1"))
                     .isInstanceOf(IllegalStateException.class);
         }
@@ -40,12 +40,12 @@ class OwnerPositionRetirementTest {
      */
     @Test
     void riskDeletionReleasesIdentityWhenPositionWasDeletedInPreviousCommit() throws Exception {
-        try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.runtime)) {
-            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(fixture.runtime, fixture.key, 7); return null; });
-            fixture.runtime.clearCommittedChanges(fixture.identities);
+        try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.accountBook)) {
+            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(fixture.accountBook, fixture.key, 7); return null; });
+            fixture.accountBook.clearCommittedChanges(fixture.identities);
             assertThat(fixture.identities.preparedPositionKey(7, "1")).isEqualTo(fixture.key);
-            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.runtime, fixture.key); return null; });
-            fixture.runtime.clearCommittedChanges(fixture.identities);
+            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.accountBook, fixture.key); return null; });
+            fixture.accountBook.clearCommittedChanges(fixture.identities);
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.identities.preparedPositionKey(7, "1"))
                     .isInstanceOf(IllegalStateException.class);
         }
@@ -56,17 +56,17 @@ class OwnerPositionRetirementTest {
      */
     @Test
     void riskRemovalProofReflectsReopenedPositionAtLaneCompletion() throws Exception {
-        try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.runtime)) {
+        try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.accountBook)) {
             fixture.applyLane(() -> {
-                com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(fixture.runtime, fixture.key, 7);
-                com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.runtime, fixture.key);
-                fixture.runtime.putPosition(fixture.key, fixture.position);
+                com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(fixture.accountBook, fixture.key, 7);
+                com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.accountBook, fixture.key);
+                fixture.accountBook.putPosition(fixture.key, fixture.position);
                 return null;
             });
-            fixture.runtime.clearCommittedChanges(fixture.identities);
+            fixture.accountBook.clearCommittedChanges(fixture.identities);
             assertThat(fixture.identities.preparedPositionKey(7, "1")).isEqualTo(fixture.key);
-            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(fixture.runtime, fixture.key, 7); return null; });
-            fixture.runtime.clearCommittedChanges(fixture.identities);
+            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(fixture.accountBook, fixture.key, 7); return null; });
+            fixture.accountBook.clearCommittedChanges(fixture.identities);
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.identities.preparedPositionKey(7, "1"))
                     .isInstanceOf(IllegalStateException.class);
         }
@@ -77,9 +77,9 @@ class OwnerPositionRetirementTest {
      */
     private static final class Fixture implements AutoCloseable {
         /** Owner 持有的业务身份注册表。 */
-        final RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        final IdIndex identities = new IdIndex();
         /** 执行实际 Lane 操作的账户运行时。 */
-        final TradingAccountRuntime runtime;
+        final AccountBook accountBook;
         /** 本夹具持仓的规范身份键。 */
         final long key;
         /** 夹具初始及重新开仓时使用的持仓值。 */
@@ -101,18 +101,18 @@ class OwnerPositionRetirementTest {
             // 包含测试合约的初始业务状态
             var initial = new TradingCoreState(line, 0, Map.of(7L, new UserAccountSnapshot(line, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(),
                     Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
-            runtime = RuntimeStateProjector.project(initial, identities);
+            accountBook = SnapshotLoader.loadSnapshot(initial, identities);
             // 合约注册后的稠密符号编号
             // 结算资产对应的稠密资产编号
             int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
             key = identities.positionKey(7, instrument, CorePositionSide.NET);
             position = new Position(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
                     instrument, 2, 100, 200, 0, 0);
-            runtime.putPosition(key, position);
-            runtime.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(7, symbol, CorePositionSide.NET,
+            accountBook.putPosition(key, position);
+            accountBook.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(7, symbol, CorePositionSide.NET,
                     9, 1_000, 20, 100, 100_000));
-            runtime.clearChangedKeys();
-            runtime.startAccountLanes();
+            accountBook.clearChangedKeys();
+            accountBook.startAccountLanes();
         }
 
         /**
@@ -120,10 +120,10 @@ class OwnerPositionRetirementTest {
          * @param mutation 必须在所属 Lane 执行的测试状态变化
          */
         void applyLane(java.util.function.Supplier<Object> mutation) {
-            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(7), /* 控制任务传入的 Lane 编号，夹具闭包已经固定目标用户 */ ignored -> mutation.get());
+            accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(7), /* 控制任务传入的 Lane 编号，夹具闭包已经固定目标用户 */ ignored -> mutation.get());
             // 等待控制 Lane 完成的五秒单调截止时间
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-            while (!runtime.pollControlLanes()) {
+            while (!accountBook.pollControlLanes()) {
                 if (System.nanoTime() >= deadline) throw new AssertionError("Lane deletion timeout");
                 Thread.onSpinWait();
             }
@@ -132,6 +132,6 @@ class OwnerPositionRetirementTest {
         /**
          * 关闭夹具实际账户运行时和所属资源。
          */
-        @Override public void close() { runtime.close(); }
+        @Override public void close() { accountBook.close(); }
     }
 }

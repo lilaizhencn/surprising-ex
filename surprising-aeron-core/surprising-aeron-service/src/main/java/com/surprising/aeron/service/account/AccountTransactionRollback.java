@@ -3,7 +3,7 @@ package com.surprising.aeron.service.account;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreTriggerOrderState;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
@@ -17,7 +17,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 
 /** 按账户分片保存当前命令首次修改前的前值；回滚先由分片恢复权威数据，再由 Owner 恢复发布引用。 */
 public final class AccountTransactionRollback {
-    private final TradingAccountRuntime state;
+    private final AccountBook state;
     final StateChangeBuffer.Users[] patchUsersBeforeByLane;
     final BalancePatches[] patchBalancesBeforeByLane;
     final LongCaptures<PatchReservationBefore>[] patchReservationsBeforeByLane;
@@ -30,7 +30,7 @@ public final class AccountTransactionRollback {
 
     /** 按实际分片数量创建各类可复用捕获缓冲，不复制整份账户状态，也不启动工作线程。 */
     @SuppressWarnings("unchecked")
-    public AccountTransactionRollback(TradingAccountRuntime state, int laneCount) {
+    public AccountTransactionRollback(AccountBook state, int laneCount) {
         this.state = java.util.Objects.requireNonNull(state);
         patchUsersBeforeByLane = new StateChangeBuffer.Users[laneCount];
         patchBalancesBeforeByLane = new BalancePatches[laneCount];
@@ -63,7 +63,7 @@ public final class AccountTransactionRollback {
         if (!captured.containsKey(userId)) captured.captureBefore(userId, state.user(userId));
     }
 
-    public void captureBatchAdmissionBefore(long userId, UserAccount userBefore, Order[] admittedOrders,
+    public void captureBatchOrderCheckBefore(long userId, UserAccount userBefore, Order[] admittedOrders,
                                             int itemCount, int laneId) {
         if (userId <= 0 || admittedOrders == null || itemCount <= 0 || itemCount > admittedOrders.length
                 || laneId < 0 || laneId >= patchOrdersBeforeByLane.length) {
@@ -93,9 +93,9 @@ public final class AccountTransactionRollback {
         for (int index = 0; index < clients.size(); index++) {
             long userId = clients.userId(index);
             long clientKey = clients.clientKey(index);
-            TradingAccountRuntime.removeClientOrderIndex(lane, userId, clientKey);
+            AccountBook.removeClientOrderIndex(lane, userId, clientKey);
             Long before = clients.beforeOrderId(index);
-            if (before != null) TradingAccountRuntime.putClientOrderIndex(lane, userId, clientKey, before);
+            if (before != null) AccountBook.putClientOrderIndex(lane, userId, clientKey, before);
         }
         LongCaptures<PatchOrderBefore> orders = patchOrdersBeforeByLane[laneId];
         for (int index = 0; index < orders.size(); index++) {
@@ -128,11 +128,11 @@ public final class AccountTransactionRollback {
         for (int index = 0; index < positions.size(); index++) {
             long positionKey = positions.key(index);
             Position current = lane.positions.remove(positionKey);
-            if (current != null) TradingAccountRuntime.unindexPosition(lane, positionKey, current);
+            if (current != null) AccountBook.unindexPosition(lane, positionKey, current);
             Position before = positions.value(index);
             if (before != null) {
                 lane.positions.put(positionKey, before.laneValue());
-                TradingAccountRuntime.indexPosition(lane, positionKey, before);
+                AccountBook.indexPosition(lane, positionKey, before);
             }
         }
         BalancePatches balances = patchBalancesBeforeByLane[laneId];
@@ -164,8 +164,8 @@ public final class AccountTransactionRollback {
                 lane.users.remove(userId);
                 lane.removeUser(userId);
                 lane.clientIdentities.clientOrderIndex.remove(userId);
-                lane.admissionOrderIndex.reservationIdsByUser.remove(userId);
-                lane.admissionOrderIndex.activeOrderIdsByUser.remove(userId);
+                lane.orderCheckOrderIndex.reservationIdsByUser.remove(userId);
+                lane.orderCheckOrderIndex.activeOrderIdsByUser.remove(userId);
             } else {
                 UserAccount authority = users.hasPreparedAt(index) ? users.preparedAt(index) : lane.users.get(userId);
                 if (state.accountLanesStarted()) {
@@ -551,7 +551,7 @@ public final class AccountTransactionRollback {
             }
         }
 
-        public void publishAvailableAt(TradingAccountRuntime state, int index) {
+        public void publishAvailableAt(AccountBook state, int index) {
             if (index < 0 || index >= size || !capturedAfter[index]) {
                 throw new IllegalStateException("balance mutation did not publish its lane after-state");
             }

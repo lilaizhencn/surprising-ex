@@ -20,7 +20,7 @@ class FrozenMatcherInputTest {
     /**
      * 原权威订单直接作 Matcher 输入应拒绝；复制到命令槽后可使用，之后原订单部分成交不改变冻结输入的剩余量与已成交量。
      */
-    @Test void matcherRejectsTheLiveAuthorityAndAcceptsItsIndependentAdmissionValue() {
+    @Test void matcherRejectsTheLiveAuthorityAndAcceptsItsIndependentOrderCheckValue() {
         // 本用例账户侧的可变权威订单，可原地成交变更
         var authority = authority();
         assertThatThrownBy(() -> authority.requireFrozenMatcherInput(7)).isInstanceOf(IllegalArgumentException.class);

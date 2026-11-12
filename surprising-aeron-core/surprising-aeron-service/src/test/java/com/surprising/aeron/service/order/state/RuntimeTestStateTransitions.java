@@ -35,20 +35,20 @@ import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.retention.TerminalStateRetention;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.retention.CompletedOrderArchive;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.funding.FundingSettlementService;
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.OrderAdmissionService;
+import com.surprising.aeron.service.order.OrderCheckService;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchFixture;
 import com.surprising.aeron.service.settlement.RuntimeSpotMatchFixture;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import com.surprising.aeron.model.CoreLiquidationState;
@@ -186,9 +186,9 @@ public final class RuntimeTestStateTransitions {
         long decisionTimestamp = mark == null ? 1 : mark.generatedAtEpochMillis();
         UUID commandId = UUID.randomUUID();
         return mutate(before, (runtime, identities) -> {
-            OrderCommand.ResolvedPlaceOrder resolved = OrderAdmissionService.resolve(
+            OrderCommand.ResolvedPlaceOrder resolved = OrderCheckService.resolve(
                     runtime, identities, userId, command, decisionTimestamp);
-            long required = OrderAdmissionService.requiredReservation(runtime, identities, userId,
+            long required = OrderCheckService.requiredReservation(runtime, identities, userId,
                     resolved, 0);
             runtime.placePreparedOrder(userId, resolved, commandId, required,
                     identities.clientKey(userId, resolved.clientOrderId()),
@@ -205,7 +205,7 @@ public final class RuntimeTestStateTransitions {
     public TradingCoreState placeOrder(TradingCoreState before, long userId, OrderCommand.ResolvedPlaceOrder command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> {
             // 生产账户准入根据本单和原运行态挂单算出的应预留金额。
-            long required = OrderAdmissionService.requiredReservation(runtime, identities, userId,
+            long required = OrderCheckService.requiredReservation(runtime, identities, userId,
                     command, 0);
             runtime.placePreparedOrder(userId, command, UUID.randomUUID(), required,
                     identities.clientKey(userId, command.clientOrderId()),
@@ -300,11 +300,11 @@ public final class RuntimeTestStateTransitions {
     public FundingApplication applyFundingWithFacts(TradingCoreState before, ApplyFundingCommand command,
             Iterable<Long> userIds) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
+        IdIndex identities = new IdIndex();
+        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities)) {
             // 生产资金费处理返回的实际支付事实和分页进度，与物化后状态一起交给测试。
-            var result = RuntimeTestStateTransitions.applyFundingRuntime(before, command, userIds, runtime, identities);
-            return new FundingApplication(RuntimeStateMaterializer.materialize(runtime, identities),
+            var result = RuntimeTestStateTransitions.applyFundingRuntime(before, command, userIds, accountBook, identities);
+            return new FundingApplication(SnapshotWriter.writeSnapshot(accountBook, identities),
                     result.payments(), result.progress());
         }
     }
@@ -342,17 +342,17 @@ public final class RuntimeTestStateTransitions {
                                                         Iterable<Long> userIds,
                                                         ActiveOrderIndex activeOrders) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
+        IdIndex identities = new IdIndex();
+        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities)) {
             // 生产生命周期处理返回的确定分页进度。
             var progress = RuntimeTestStateTransitions.applyLifecycleSettlement(before,
                     command,
                     userIds,
                     activeOrders,
-                    runtime,
+                    accountBook,
                     identities);
-            runtime.clearChangedKeys();
-            return new SettlementApplication(RuntimeStateMaterializer.materialize(runtime, identities), progress);
+            accountBook.clearChangedKeys();
+            return new SettlementApplication(SnapshotWriter.writeSnapshot(accountBook, identities), progress);
         }
     }
 
@@ -496,9 +496,9 @@ public final class RuntimeTestStateTransitions {
 
     /** 从给定检查点启动隔离 Core，用原账本选路及账户查询续步取得独立响应字节，再关闭线程。 */
     private static byte[] queryState(TradingCoreState before, CoreMessageType type, long userId, byte[] payload) {
-        try (var core = new TradingCoreRuntime(before.productLine(),
+        try (var core = new TradingCore(before.productLine(),
                 0, new LinkedHashMap<>(), new LinkedHashMap<>(), before,
-                new TerminalStateRetention(), null, 0,
+                new CompletedOrderArchive(), null, 0,
                 Map.of(), Map.of())) {
             var request = new CoreMessage(CoreMessageHeader.query(type, UUID.randomUUID(), before.productLine(),
                     CommandSource.OPERATIONS, 0, 0, userId, 0, 0), payload);
@@ -523,11 +523,11 @@ public final class RuntimeTestStateTransitions {
      */
     private static TradingCoreState mutate(TradingCoreState before, Mutation mutation) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
-            mutation.apply(runtime, identities);
-            runtime.clearChangedKeys();
-            return RuntimeStateMaterializer.materialize(runtime, identities);
+        IdIndex identities = new IdIndex();
+        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities)) {
+            mutation.apply(accountBook, identities);
+            accountBook.clearChangedKeys();
+            return SnapshotWriter.writeSnapshot(accountBook, identities);
         }
     }
 
@@ -541,7 +541,7 @@ public final class RuntimeTestStateTransitions {
          * @param runtime 只属于本次操作的冷可变运行时，动作结束后由统一入口物化并关闭
          * @param identities 与本次投影运行时配套的身份映射，不跨多次操作复用
          */
-        public void apply(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities);
+        public void apply(AccountBook accountBook, IdIndex identities);
     }
 
     /**
@@ -563,130 +563,130 @@ public final class RuntimeTestStateTransitions {
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
-    public static void applySpotMatches(TradingCoreState before, long takerOrderId, List<MatcherEvent> matches, TradingAccountRuntime runtime,
-                             RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+    public static void applySpotMatches(TradingCoreState before, long takerOrderId, List<MatcherEvent> matches, AccountBook accountBook,
+                             IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid spot match apply");
         }
-        RuntimeSpotMatchFixture.applyRuntime(takerOrderId, matches, runtime, identities);
+        RuntimeSpotMatchFixture.applyRuntime(takerOrderId, matches, accountBook, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
-    public static TradingAccountRuntime applyDerivativeMatches(TradingCoreState before, long takerOrderId,
-                                            List<MatcherEvent> matches, TradingAccountRuntime runtime,
-                                            RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+    public static AccountBook applyDerivativeMatches(TradingCoreState before, long takerOrderId,
+                                            List<MatcherEvent> matches, AccountBook accountBook,
+                                            IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid perpetual match apply");
         }
-        return RuntimeDerivativeMatchFixture.applyRuntime(takerOrderId, matches, runtime, identities);
+        return RuntimeDerivativeMatchFixture.applyRuntime(takerOrderId, matches, accountBook, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
     public static CoreSettlementProgressView applyLifecycleSettlement(TradingCoreState before, SettleInstrumentCommand command,
                                                    Iterable<Long> indexedUserIds,
-                                                   ActiveOrderIndex activeOrderIndex, TradingAccountRuntime runtime,
-                                                   RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || runtime == null || identities == null) {
+                                                   ActiveOrderIndex activeOrderIndex, AccountBook accountBook,
+                                                   IdIndex identities) {
+        if (before == null || command == null || accountBook == null || identities == null) {
             throw new IllegalArgumentException("invalid runtime settlement");
         }
         // 本次使用的用户来源；未传索引时取旧状态用户集合。
         Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
         // 本次使用的活动订单索引；未传时从旧状态构建。
         ActiveOrderIndex orders = activeOrderIndex == null ? new ActiveOrderIndex(before) : activeOrderIndex;
-        return RuntimeLifecycleSettlementFixture.applyRuntime(command, users, orders, runtime, identities);
+        return RuntimeLifecycleSettlementFixture.applyRuntime(command, users, orders, accountBook, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
-    public static TradingAccountRuntime applyLiquidationResolution(TradingCoreState before,
+    public static AccountBook applyLiquidationResolution(TradingCoreState before,
                                             ResolveLiquidationCommand command,
-                                            TradingAccountRuntime runtime,
-                                            RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+                                            AccountBook accountBook,
+                                            IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
-        return RuntimeDerivativeLiquidationFixture.applyResolution(command, runtime, identities, before.riskState().liquidations().keySet());
+        return RuntimeDerivativeLiquidationFixture.applyResolution(command, accountBook, identities, before.riskState().liquidations().keySet());
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
-    public static TradingAccountRuntime applyLiquidationExecution(TradingCoreState before,
+    public static AccountBook applyLiquidationExecution(TradingCoreState before,
                                                      ExecuteLiquidationCommand command,
                                                      Collection<CancellationOrder> canceledOrders,
-                                                     TradingAccountRuntime runtime,
-                                                     RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+                                                     AccountBook accountBook,
+                                                     IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid perpetual liquidation apply");
         }
-        return RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(command, canceledOrders, runtime, identities);
+        return RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(command, canceledOrders, accountBook, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
-    public static TradingAccountRuntime applyLiquidationCancellationAdvance(TradingCoreState before,
+    public static AccountBook applyLiquidationCancellationAdvance(TradingCoreState before,
                                                                ExecuteLiquidationCommand command,
                                                                Collection<CancellationOrder> canceledOrders,
                                                                long nextCursorOrderId,
-                                                               TradingAccountRuntime runtime,
-                                                               RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+                                                               AccountBook accountBook,
+                                                               IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid liquidation cancellation apply");
         }
-        return RuntimeDerivativeLiquidationFixture.applyCancellationAdvanceRuntime(command, canceledOrders, nextCursorOrderId, runtime, identities);
+        return RuntimeDerivativeLiquidationFixture.applyCancellationAdvanceRuntime(command, canceledOrders, nextCursorOrderId, accountBook, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
-    public static TradingAccountRuntime applyAdlExecution(TradingCoreState before, ExecuteAdlCommand command,
-                                            TradingAccountRuntime runtime,
-                                            RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+    public static AccountBook applyAdlExecution(TradingCoreState before, ExecuteAdlCommand command,
+                                            AccountBook accountBook,
+                                            IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid ADL apply");
         }
-        return RuntimeDerivativeLiquidationFixture.applyAdl(command, runtime, identities);
+        return RuntimeDerivativeLiquidationFixture.applyAdl(command, accountBook, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
     public static void applyRiskMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
-                                      TradingAccountRuntime runtime,
-                                      RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+                                      AccountBook accountBook,
+                                      IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
-        RiskMarginCalculator.applyMarkPriceRuntime(command, runtime, identities);
-        if (runtime.riskScanControl().enabled()) {
+        RiskMarginCalculator.applyMarkPriceRuntime(command, accountBook, identities);
+        if (accountBook.riskScanControl().enabled()) {
             com.surprising.aeron.service.core.RuntimeDerivativeRiskFixture.continueRiskBudget(
-                    runtime.riskScanControl().scanBatchSize(),
-                    new com.surprising.aeron.service.core.index.PositionUserIndex(before, runtime.topology()), runtime, identities);
+                    accountBook.riskScanControl().scanBatchSize(),
+                    new com.surprising.aeron.service.core.index.PositionUserIndex(before, accountBook.topology()), accountBook, identities);
         }
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
     public static void applyRiskContinuation(TradingCoreState before, int maxWork,
-                                         TradingAccountRuntime runtime,
-                                         RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+                                         AccountBook accountBook,
+                                         IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid perpetual risk continuation apply");
         }
         com.surprising.aeron.service.core.RuntimeDerivativeRiskFixture.continueRiskBudget(maxWork,
-                new com.surprising.aeron.service.core.index.PositionUserIndex(before, runtime.topology()), runtime, identities);
+                new com.surprising.aeron.service.core.index.PositionUserIndex(before, accountBook.topology()), accountBook, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
     public static FundingSettlementService.FundingResult applyFundingRuntime(TradingCoreState before, ApplyFundingCommand command,
                                       Iterable<Long> indexedUserIds,
-                                      TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
+                                      AccountBook accountBook, IdIndex identities) {
+        if (before == null || accountBook == null || before.productLine() != accountBook.productLine()
+                || before.revision() != accountBook.revision()) {
             throw new IllegalArgumentException("invalid perpetual funding apply");
         }
         // 未传用户索引时使用旧状态用户集合，否则沿用调用方的索引。
         Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
-        return RuntimePerpetualFundingFixture.applyRuntime(command, users, runtime, identities);
+        return RuntimePerpetualFundingFixture.applyRuntime(command, users, accountBook, identities);
     }
 
     /** 冷状态强平使用的同一业务比较顺序，不使用集合遍历或线程完成顺序。 */

@@ -4,7 +4,7 @@ import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.result.ResponseArena;
@@ -65,13 +65,13 @@ public class AccountLaneCommitBenchmark {
         @Param("256")
         public int maxInFlight;
 
-        private TradingAccountRuntime runtime;
+        private AccountBook accountBook;
         private long[] users;
         private java.util.List<Long> metadataUsers;
         private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap metadataOrders;
         private AccountPartitionCommit[] commits;
         private OrderBatchProcessor.PendingBatch[] responses;
-        private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
+        private com.surprising.aeron.service.core.identity.IdIndex identities;
         private long sequence;
         private String previousAccountLanes;
 
@@ -81,11 +81,11 @@ public class AccountLaneCommitBenchmark {
             previousAccountLanes = System.getProperty("surprising.aeron.account-lanes");
             System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
             LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
-            runtime = new TradingAccountRuntime(topology);
+            accountBook = new AccountBook(topology);
             users = new long[accountLanes];
             commits = new AccountPartitionCommit[maxInFlight];
             responses = new OrderBatchProcessor.PendingBatch[maxInFlight];
-            identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
+            identities = new com.surprising.aeron.service.core.identity.IdIndex();
             int symbolId = identities.symbolId("1");
             var responseArena = new ResponseArena(maxInFlight, 4096);
             for (int index = 0; index < responses.length; index++) {
@@ -98,7 +98,7 @@ public class AccountLaneCommitBenchmark {
             }
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 users[laneId] = userForLane(topology, laneId);
-                runtime.putUser(new UserAccount(users[laneId]));
+                accountBook.putUser(new UserAccount(users[laneId]));
             }
             var userList = new java.util.ArrayList<Long>(accountLanes);
             var orderUsers = new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(accountLanes);
@@ -111,7 +111,7 @@ public class AccountLaneCommitBenchmark {
                             0, 0, 0, -1, 0));
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 long user = users[laneId];
-                runtime.putBalance(new com.surprising.aeron.service.account.AccountBalance(user, 3, 900, 100));
+                accountBook.putBalance(new com.surprising.aeron.service.account.AccountBalance(user, 3, 900, 100));
                 long orderId = 10000L + laneId;
                 var order = new Order(orderId, ProductLine.LINEAR_PERPETUAL, user, symbolId,
                         instrument, CoreOrderSide.BUY, 20_000 + laneId, false, CoreMarginMode.CROSS,
@@ -119,15 +119,15 @@ public class AccountLaneCommitBenchmark {
                         0, 0, 1, 0, 1, false);
                 var reservation = new OrderFundsReservation(orderId, user, symbolId,
                         ReservationKind.DERIVATIVE_MARGIN, 3, 100, 0, 0, 1);
-                runtime.putOrder(order);
-                runtime.putReservation(reservation);
+                accountBook.putOrder(order);
+                accountBook.putReservation(reservation);
                 userList.add(user);
                 orderUsers.put(orderId, user);
             }
             metadataUsers = java.util.List.copyOf(userList);
             metadataOrders = orderUsers;
-            runtime.clearChangedKeys();
-            runtime.startAccountLanes();
+            accountBook.clearChangedKeys();
+            accountBook.startAccountLanes();
 
         }
 
@@ -136,12 +136,12 @@ public class AccountLaneCommitBenchmark {
         long commitResponses() {
             for (int index = 0; index < commits.length; index++) {
                 long next = ++sequence;
-                commits[index] = runtime.dispatchBatchCommit(next, metadataUsers, metadataOrders,
+                commits[index] = accountBook.dispatchBatchCommit(next, metadataUsers, metadataOrders,
                         next, next, users[0], responses[index], identities);
             }
             for (int index = 0; index < commits.length; index++) {
-                while (!runtime.laneCommitComplete(commits[index])) Thread.onSpinWait();
-                runtime.releaseLaneCommit(commits[index]);
+                while (!accountBook.laneCommitComplete(commits[index])) Thread.onSpinWait();
+                accountBook.releaseLaneCommit(commits[index]);
                 commits[index] = null;
                 var response = responses[index];
                 if (response.preparedResponse == null || response.preparedResponseLength == 0
@@ -155,17 +155,17 @@ public class AccountLaneCommitBenchmark {
             for (int index = 0; index < commits.length; index++) {
                 long next = ++sequence;
                 commits[index] = metadata
-                        ? runtime.dispatchLaneMutation(next, metadataUsers, metadataOrders, null, next, next)
-                        : runtime.dispatchLaneMutation(next, metadataUsers, null, null, 0, 0);
+                        ? accountBook.dispatchLaneMutation(next, metadataUsers, metadataOrders, null, next, next)
+                        : accountBook.dispatchLaneMutation(next, metadataUsers, null, null, 0, 0);
             }
             for (int index = 0; index < commits.length; index++) {
                 AccountPartitionCommit commit = commits[index];
-                while (!runtime.laneCommitComplete(commit)) Thread.onSpinWait();
-                runtime.releaseLaneCommit(commit);
+                while (!accountBook.laneCommitComplete(commit)) Thread.onSpinWait();
+                accountBook.releaseLaneCommit(commit);
                 commits[index] = null;
             }
             if (metadata) metadataOrders.forEachKey(id -> {
-                if (runtime.changedOrderValue(id).clusterPosition() != sequence)
+                if (accountBook.changedOrderValue(id).clusterPosition() != sequence)
                     throw new IllegalStateException("Lane metadata publication is not at the last sequence");
             });
             return sequence;
@@ -175,18 +175,18 @@ public class AccountLaneCommitBenchmark {
         public void tearDown() {
             try {
 
-                runtime.acquireOwnerLaneAccess();
+                accountBook.acquireOwnerLaneAccess();
                 try {
                     for (long user : users) {
-                        var balance = runtime.balance(user, 3);
+                        var balance = accountBook.balance(user, 3);
                         if (balance.availableUnits() != 900 || balance.lockedUnits() != 100)
                             throw new IllegalStateException("metadata commit changed account funds");
                     }
                 } finally {
-                    runtime.releaseOwnerLaneAccess();
+                    accountBook.releaseOwnerLaneAccess();
                 }
             } finally {
-                try { runtime.close(); }
+                try { accountBook.close(); }
                 finally {
                     if (previousAccountLanes == null) System.clearProperty("surprising.aeron.account-lanes");
                     else System.setProperty("surprising.aeron.account-lanes", previousAccountLanes);

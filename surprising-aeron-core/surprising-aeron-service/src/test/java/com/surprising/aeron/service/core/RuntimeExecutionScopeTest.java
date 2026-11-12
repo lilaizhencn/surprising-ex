@@ -16,40 +16,40 @@ class RuntimeExecutionScopeTest {
      */
     @Test
     void ownerCompatibilityScopeCannotClearTheWorkersActiveScope() throws Exception {
-        try (/* 当前生产拓扑的测试运行时，用例退出时自动关闭 */ var runtime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
-            runtime.startAccountLanes();
+        try (/* 当前生产拓扑的测试运行时，用例退出时自动关闭 */ var accountBook = new AccountBook(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
+            accountBook.startAccountLanes();
             // 工作 Lane 进入自身命令作用域后通知 Owner 的门闩
             var entered = new java.util.concurrent.CountDownLatch(1);
             // Owner 临时作用域退出后放行工作线程的门闩
             var ownerFinished = new java.util.concurrent.CountDownLatch(1);
             try {
-                runtime.dispatchControlLanes(1, /* 当前控制 Lane 或试图进入的另一 Lane，本回调不读取业务正文 */ ignored -> {
+                accountBook.dispatchControlLanes(1, /* 当前控制 Lane 或试图进入的另一 Lane，本回调不读取业务正文 */ ignored -> {
                     // 工作线程进入时保存的实际账户作用域，Owner 操作后应仍为同一实例
-                    AccountPartition owned = runtime.currentLaneCommandScope();
+                    AccountPartition owned = accountBook.currentLaneCommandScope();
                     entered.countDown();
                     try {
                         if (!ownerFinished.await(5, TimeUnit.SECONDS)) throw new AssertionError("Owner scope did not finish");
                     } catch (/* 等待门闩或普通线程退出时的中断，转为测试失败 */ InterruptedException interrupted) { throw new AssertionError(interrupted); }
-                    assertThat(runtime.currentLaneCommandScope()).isSameAs(owned);
+                    assertThat(accountBook.currentLaneCommandScope()).isSameAs(owned);
                     return owned.laneId();
                 });
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 // 这里只验证线程执行作用域，不在临时 Owner 范围内读取账户业务状态。
-                AccountLaneTestAccess.ownerAccess(runtime, true);
+                AccountLaneTestAccess.ownerAccess(accountBook, true);
                 try {
-                    runtime.inLaneCommandScope(runtime.accountLanes[0], /* Owner 当前临时作用域所属 Lane，用于核对退出前没有被其他线程覆盖 */ lane -> null);
+                    accountBook.inLaneCommandScope(accountBook.accountLanes[0], /* Owner 当前临时作用域所属 Lane，用于核对退出前没有被其他线程覆盖 */ lane -> null);
                 } finally {
-                    AccountLaneTestAccess.ownerAccess(runtime, false);
+                    AccountLaneTestAccess.ownerAccess(accountBook, false);
                 }
             } finally { ownerFinished.countDown(); }
             // 轮询工作 Lane 完成的单调时钟截止值，最多五秒
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (!runtime.pollControlLanes()) {
+            while (!accountBook.pollControlLanes()) {
                 if (System.nanoTime() >= deadline) throw new AssertionError("worker scope did not finish");
                 Thread.onSpinWait();
             }
-            assertThat(runtime.controlLaneResult(0)).isEqualTo(0);
-            assertThat(runtime.currentLaneCommandScope()).isNull();
+            assertThat(accountBook.controlLaneResult(0)).isEqualTo(0);
+            assertThat(accountBook.currentLaneCommandScope()).isNull();
         }
     }
 
@@ -58,29 +58,29 @@ class RuntimeExecutionScopeTest {
      */
     @Test
     void unrelatedReaderCannotInheritAnActiveOwnerLaneScope() throws Exception {
-        try (/* 当前生产拓扑的测试运行时，用例退出时自动关闭 */ var runtime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
+        try (/* 当前生产拓扑的测试运行时，用例退出时自动关闭 */ var accountBook = new AccountBook(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
             // 把普通读取线程的断言异常带回 Owner 测试线程的原子槽
             var failure = new AtomicReference<Throwable>();
-            runtime.inLaneCommandScope(runtime.accountLanes[0], /* Owner 当前临时作用域所属 Lane，用于核对退出前没有被其他线程覆盖 */ lane -> {
+            accountBook.inLaneCommandScope(accountBook.accountLanes[0], /* Owner 当前临时作用域所属 Lane，用于核对退出前没有被其他线程覆盖 */ lane -> {
                 // 在 Owner 作用域仍活跃时创建的普通平台线程，不应继承任何业务权限
                 Thread reader = Thread.ofPlatform().start(() -> {
                     try {
-                        assertThat(runtime.currentLaneCommandScope()).isNull();
-                        assertThat(runtime.currentMatcherSettlementChangesScope()).isNull();
-                        assertThatThrownBy(runtime::assertOwner)
+                        assertThat(accountBook.currentLaneCommandScope()).isNull();
+                        assertThat(accountBook.currentMatcherSettlementChangesScope()).isNull();
+                        assertThatThrownBy(accountBook::assertOwner)
                                 .isInstanceOf(IllegalStateException.class);
-                        assertThatThrownBy(() -> runtime.inLaneCommandScope(runtime.accountLanes[1], /* 当前控制 Lane 或试图进入的另一 Lane，本回调不读取业务正文 */ ignored -> null))
+                        assertThatThrownBy(() -> accountBook.inLaneCommandScope(accountBook.accountLanes[1], /* 当前控制 Lane 或试图进入的另一 Lane，本回调不读取业务正文 */ ignored -> null))
                                 .isInstanceOf(IllegalStateException.class);
                     } catch (/* 普通读取线程捕获的断言或门禁异常，保存后让测试线程核对 */ Throwable thrown) { failure.set(thrown); }
                 });
                 try { reader.join(TimeUnit.SECONDS.toMillis(5)); }
                 catch (/* 等待门闩或普通线程退出时的中断，转为测试失败 */ InterruptedException interrupted) { throw new AssertionError(interrupted); }
                 assertThat(reader.isAlive()).isFalse();
-                assertThat(runtime.currentLaneCommandScope()).isSameAs(lane);
+                assertThat(accountBook.currentLaneCommandScope()).isSameAs(lane);
                 return null;
             });
             assertThat(failure.get()).isNull();
-            assertThat(runtime.currentLaneCommandScope()).isNull();
+            assertThat(accountBook.currentLaneCommandScope()).isNull();
         }
     }
 }

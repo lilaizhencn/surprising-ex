@@ -28,11 +28,11 @@ public final class SettlementLaneWorker implements AutoCloseable {
     /** 单 Owner 到本账户线程的普通控制任务引用邮箱。 */
     private final AccountLaneCommand[] commands;
     /** 独立的单 Owner 准入邮箱，避免被普通队首尚未就绪的撮合输入挡住。 */
-    private final AccountLaneCommand[] admissionCommands;
+    private final AccountLaneCommand[] orderCheckCommands;
     /** 每个 Matcher 分片独占生产的结算环，由本账户线程合并消费。 */
     private final MatcherSettlementRing[] matcherSettlementRings;
     private final int indexMask;
-    private final int admissionIndexMask;
+    private final int orderCheckIndexMask;
     /** 本工作线程唯一拥有的账户 Lane。 */
     private final AccountPartition lane;
     /** 构造时启动的实际 LaneThread，始终带有所属账户引用。借出实际账户工作线程引用，供生命周期及诊断使用。 */
@@ -44,9 +44,9 @@ public final class SettlementLaneWorker implements AutoCloseable {
     private final PaddedSequence consumerSequence = new PaddedSequence();
     private long cachedConsumerSequence;
     /** Owner 已发布准入任务的上界。 */
-    private final PaddedSequence admissionProducerSequence = new PaddedSequence();
-    private final PaddedSequence admissionConsumerSequence = new PaddedSequence();
-    private long cachedAdmissionConsumerSequence;
+    private final PaddedSequence orderCheckProducerSequence = new PaddedSequence();
+    private final PaddedSequence orderCheckConsumerSequence = new PaddedSequence();
+    private long cachedOrderCheckConsumerSequence;
     /** 线程已完成初始绑定或已发布启动故障的可见标记，供构造方等待。 */
     private volatile boolean started;
     private volatile boolean running = true;
@@ -85,12 +85,12 @@ public final class SettlementLaneWorker implements AutoCloseable {
         int capacity = 1;
         while (capacity < requestedCapacity) capacity = Math.multiplyExact(capacity, 2);
         commands = new AccountLaneCommand[capacity];
-        admissionCommands = new AccountLaneCommand[capacity];
+        orderCheckCommands = new AccountLaneCommand[capacity];
         matcherSettlementRings = new MatcherSettlementRing[matcherShardCount];
         for (int shard = 0; shard < matcherShardCount; shard++)
             matcherSettlementRings[shard] = new MatcherSettlementRing(capacity);
         indexMask = capacity - 1;
-        admissionIndexMask = capacity - 1;
+        orderCheckIndexMask = capacity - 1;
         this.lane = lane;
         thread = new LaneThread("core-" + role + "-lane-" + lane.laneId(), () -> run(affinity), lane);
         lane.bindWorker(thread);
@@ -138,19 +138,19 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     /** 单 Owner 向独立准入邮箱发布任务，只重新检查该物理邮箱容量。 */
-    public long submitAdmission(AccountLaneCommand command) {
+    public long submitOrderCheck(AccountLaneCommand command) {
         if (command == null) throw new IllegalArgumentException("admission command is required");
         assertHealthy();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
-        long next = admissionProducerSequence.value;
-        if (next - cachedAdmissionConsumerSequence >= admissionCommands.length) {
-            cachedAdmissionConsumerSequence = admissionConsumerSequence.value;
-            if (next - cachedAdmissionConsumerSequence >= admissionCommands.length) {
+        long next = orderCheckProducerSequence.value;
+        if (next - cachedOrderCheckConsumerSequence >= orderCheckCommands.length) {
+            cachedOrderCheckConsumerSequence = orderCheckConsumerSequence.value;
+            if (next - cachedOrderCheckConsumerSequence >= orderCheckCommands.length) {
                 throw new RejectedExecutionException("settlement lane admission queue is full");
             }
         }
-        admissionCommands[(int) next & admissionIndexMask] = command;
-        admissionProducerSequence.value = next + 1;
+        orderCheckCommands[(int) next & orderCheckIndexMask] = command;
+        orderCheckProducerSequence.value = next + 1;
         return next + 1;
     }
 
@@ -176,12 +176,12 @@ public final class SettlementLaneWorker implements AutoCloseable {
         long direct = 0;
         for (MatcherSettlementRing ring : matcherSettlementRings) direct += ring.depth();
         return Math.toIntExact((producerSequence.value - consumerSequence.value)
-                + (admissionProducerSequence.value - admissionConsumerSequence.value) + direct);
+                + (orderCheckProducerSequence.value - orderCheckConsumerSequence.value) + direct);
     }
 
     /** 汇总各物理邮箱容量供观测使用，不修改任一邮箱的接纳规则。 */
     public int metricsQueueCapacity() {
-        int capacity = Math.addExact(commands.length, admissionCommands.length);
+        int capacity = Math.addExact(commands.length, orderCheckCommands.length);
         for (MatcherSettlementRing ring : matcherSettlementRings) capacity = Math.addExact(capacity, ring.events.length);
         return capacity;
     }
@@ -195,15 +195,15 @@ public final class SettlementLaneWorker implements AutoCloseable {
     private void run(TradingCpuAffinity configuration) {
         long next = consumerSequence.value;
         long cachedProducerSeq = producerSequence.value;
-        long admissionNext = admissionConsumerSequence.value;
-        long cachedAdmissionProducerSeq = admissionProducerSequence.value;
+        long orderCheckNext = orderCheckConsumerSequence.value;
+        long cachedOrderCheckProducerSeq = orderCheckProducerSequence.value;
         try (var affinity = configuration.accountLane(lane.laneId())) {
             lane.assertOwner();
             started = true;
             long reboundHandoff = 0;
             int payloadWaitSpins = 0;
             while (running || next < (cachedProducerSeq = producerSequence.value)
-                    || admissionNext < (cachedAdmissionProducerSeq = admissionProducerSequence.value)
+                    || orderCheckNext < (cachedOrderCheckProducerSeq = orderCheckProducerSequence.value)
                     || hasMatcherSettlementWork()) {
                 if (completedHandoff > reboundHandoff) {
                     if (resumedHandoff < completedHandoff) {
@@ -215,18 +215,18 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     reboundHandoff = completedHandoff;
                 }
                 // 普通队首尚在等 Matcher 或账本输入时， 不能因此停止检查能够完成后续准入的消息。
-                if (admissionNext >= cachedAdmissionProducerSeq) {
-                    cachedAdmissionProducerSeq = admissionProducerSequence.value;
+                if (orderCheckNext >= cachedOrderCheckProducerSeq) {
+                    cachedOrderCheckProducerSeq = orderCheckProducerSequence.value;
                 }
-                if (admissionNext < cachedAdmissionProducerSeq) {
-                    int admissionIndex = (int) admissionNext & admissionIndexMask;
-                    AccountLaneCommand admission = admissionCommands[admissionIndex];
-                    if (admission == null) throw new IllegalStateException("admission publication gap");
-                    if (ready(admission)) {
-                        admissionCommands[admissionIndex] = null;
-                        admissionNext++;
-                        admissionConsumerSequence.value = admissionNext;
-                        execute(admission);
+                if (orderCheckNext < cachedOrderCheckProducerSeq) {
+                    int orderCheckIndex = (int) orderCheckNext & orderCheckIndexMask;
+                    AccountLaneCommand orderCheck = orderCheckCommands[orderCheckIndex];
+                    if (orderCheck == null) throw new IllegalStateException("admission publication gap");
+                    if (ready(orderCheck)) {
+                        orderCheckCommands[orderCheckIndex] = null;
+                        orderCheckNext++;
+                        orderCheckConsumerSequence.value = orderCheckNext;
+                        execute(orderCheck);
                         payloadWaitSpins = 0;
                         continue;
                     }
@@ -301,9 +301,9 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     /** 检查原故障后，只判断独立准入物理邮箱是否仍有位置，不检查总深度预算。 */
-    public boolean hasAdmissionCapacity() {
+    public boolean hasOrderCheckCapacity() {
         assertHealthy();
-        return running && admissionProducerSequence.value - admissionConsumerSequence.value < admissionCommands.length;
+        return running && orderCheckProducerSequence.value - orderCheckConsumerSequence.value < orderCheckCommands.length;
     }
 
     private TradeSettlement peekMatcherSettlement() {
@@ -350,9 +350,9 @@ public final class SettlementLaneWorker implements AutoCloseable {
         if (command instanceof TradeSettlement event) return event.coreSequence();
         if (command instanceof com.surprising.aeron.service.core.change.AccountPartitionCommit event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.order.OrderBatchProcessor.PlaceBatchAdmissionEvent event)
+        if (command instanceof com.surprising.aeron.service.order.OrderBatchProcessor.PlaceBatchCheckEvent event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent event)
+        if (command instanceof com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent event)
             return event.coreSequence();
         return 0;
     }

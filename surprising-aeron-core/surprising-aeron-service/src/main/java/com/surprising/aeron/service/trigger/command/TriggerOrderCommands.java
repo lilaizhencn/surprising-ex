@@ -9,7 +9,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
@@ -33,7 +33,7 @@ public final class TriggerOrderCommands {
     }
 
     /** 本产品线交易 Owner，串行推进本类命令并管理提交边界。 */
-    private final TradingCoreRuntime owner;
+    private final TradingCore owner;
 
     /** Owner 复用的已平仓关联触发 ID 缓冲，后续复制入既有提交事件，下一命令前可重用。借出 Owner 当前复用的清仓触发单 ID 缓冲，调用方在下次清空或重新选择前消费。 */
     @Accessors(fluent = true, chain = false)
@@ -53,22 +53,22 @@ public final class TriggerOrderCommands {
                 throw new ArithmeticException("trigger cancellation revision overflow");
             closingTriggerIds.add(id);
         });
-        Math.addExact(owner.runtimeState().revision(), closingTriggerIds.size());
+        Math.addExact(owner.accountBook().revision(), closingTriggerIds.size());
         return closingTriggerIds;
     }
 
     /** 保存非空交易 Owner，复用扫描与子单续步。本构造不启动任何工作线程。 */
-    public TriggerOrderCommands(TradingCoreRuntime owner) {
+    public TriggerOrderCommands(TradingCore owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
     /** 仅在现有风险扫描与本价格序列一致时，固定当前最大待触发 ID、标记价及报价时间，重置触发阶段和 OCO 续步。 */
     public void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
         Integer symbolId = owner.identities().findSymbolId(command.instrumentId());
-        RiskScanner.State scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
+        RiskScanner.State scan = symbolId == null ? null : owner.accountBook().riskScan(symbolId);
         if (scan == null || scan.priceSequence() != command.priceSequence()) return;
         long upperId = owner.triggerOrderIndex().maxPendingId(command.instrumentId());
-        owner.runtimeState().replaceRiskScan(
+        owner.accountBook().replaceRiskScan(
                 scan.withTriggerProgress(upperId == 0, TriggerOrderIndex.PHASE_GREATER_OR_EQUAL,
                 Long.MAX_VALUE, Long.MAX_VALUE, upperId, command.markPriceTicks(),
                 command.generatedAtEpochMillis()).withTriggerOcoProgress(0, 0));
@@ -77,7 +77,7 @@ public final class TriggerOrderCommands {
     /** 没有扫描或触发部分已完成时返回共享完成回调。否则准备一页可续步工作，页预算取请求与配置的较小者。 */
     public java.util.function.BooleanSupplier pendingTriggerScan(String instrumentId, int maxWork) {
         Integer symbolId = owner.identities().findSymbolId(instrumentId);
-        RiskScanner.State scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
+        RiskScanner.State scan = symbolId == null ? null : owner.accountBook().riskScan(symbolId);
         if (scan == null || scan.triggerComplete()) return COMPLETE;
         return reusableTriggerScan.prepare(instrumentId, scan,
                 Math.min(maxWork, owner.defaultTriggerScanBatchSize()));
@@ -85,7 +85,7 @@ public final class TriggerOrderCommands {
 
     /** 返回空新值时仍回退 Owner 已发布索引，本方法不单独区分删除与没有新值。 */
     private TriggerOrderIndex.TriggerRoute currentTriggerRoute(long id) {
-        var receipt = owner.runtimeState().changedTriggerOrder(id);
+        var receipt = owner.accountBook().changedTriggerOrder(id);
         return receipt == null ? owner.triggerOrderIndex().route(id) : TriggerOrderIndex.TriggerRoute.from(receipt);
     }
 
@@ -141,7 +141,7 @@ public final class TriggerOrderCommands {
                     if (remaining <= 0) return true;
                     int sourceIndex = scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE;
                     var source = com.surprising.aeron.protocol.CoreTriggerPriceSource.values()[sourceIndex];
-                    var mark = owner.runtimeState().markPrice(scan.symbolId());
+                    var mark = owner.accountBook().markPrice(scan.symbolId());
                     long sourcePrice = source == com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK
                             ? scan.triggerMarkPriceTicks()
                             : mark == null || mark.priceSequence() != scan.priceSequence() ? 0
@@ -173,7 +173,7 @@ public final class TriggerOrderCommands {
                 }
                 var source = com.surprising.aeron.protocol.CoreTriggerPriceSource.values()[
                         scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE];
-                var mark = owner.runtimeState().markPrice(scan.symbolId());
+                var mark = owner.accountBook().markPrice(scan.symbolId());
                 long price = source == com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK
                         ? scan.triggerMarkPriceTicks()
                         : source == com.surprising.aeron.protocol.CoreTriggerPriceSource.LAST
@@ -258,8 +258,8 @@ public final class TriggerOrderCommands {
         private void submitMutation(long userId) {
             reusableMutation.userId = userId;
             pending = reusableMutation;
-            owner.runtimeState().dispatchControlLanes(
-                    1L << owner.runtimeState().topology().accountLaneId(userId), reusableMutation);
+            owner.accountBook().dispatchControlLanes(
+                    1L << owner.accountBook().topology().accountLaneId(userId), reusableMutation);
         }
 
         /** 扫描页复用的账户任务：同一对象分别承担 Lane 操作和 Owner 完成轮询，使用前明确准备一种任务。 */
@@ -303,8 +303,8 @@ public final class TriggerOrderCommands {
 
             private Object applyMutation() {
                 return switch (kind) {
-                    case EXPIRE -> owner.runtimeState().triggerOrders().expireTriggerOrder(triggerId, arg1);
-                    case TRAILING -> owner.runtimeState().triggerOrders().updateTrailingTriggerOrder(triggerId,
+                    case EXPIRE -> owner.accountBook().triggerOrders().expireTriggerOrder(triggerId, arg1);
+                    case TRAILING -> owner.accountBook().triggerOrders().updateTrailingTriggerOrder(triggerId,
                             arg1, arg2, arg3);
                     case SIBLINGS -> {
                         boolean changed = false;
@@ -312,9 +312,9 @@ public final class TriggerOrderCommands {
                             long id = siblingIds.nextLong();
                             if (id == trigger.triggerOrderId() || id >= cursor) continue;
                             if (id < next) break;
-                            var sibling = owner.runtimeState().triggerOrder(id);
+                            var sibling = owner.accountBook().triggerOrder(id);
                             if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
-                                changed |= owner.runtimeState().triggerOrders().cancelTriggerOrder(
+                                changed |= owner.accountBook().triggerOrders().cancelTriggerOrder(
                                         trigger.userId(), id);
                         }
                         yield changed;
@@ -347,9 +347,9 @@ public final class TriggerOrderCommands {
 
             /** Owner 等待控制 Lane 结果，未齐返回假。 */
             @Override public boolean getAsBoolean() {
-                if (!owner.runtimeState().pollControlLanes()) return false;
-                Object result = owner.runtimeState().controlLaneResult(
-                        owner.runtimeState().topology().accountLaneId(userId));
+                if (!owner.accountBook().pollControlLanes()) return false;
+                Object result = owner.accountBook().controlLaneResult(
+                        owner.accountBook().topology().accountLaneId(userId));
                 if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
                 if (kind == SIBLINGS) finishSiblings();
                 return true;
@@ -359,7 +359,7 @@ public final class TriggerOrderCommands {
 
     /** 把触发扫描游标与 OCO 进度接回原风险状态转换，然后请求命令提交发布。 */
     void replaceRiskScan(RiskScanner.State scan) {
-        owner.runtimeState().replaceRiskScan(scan);
+        owner.accountBook().replaceRiskScan(scan);
         owner.requestCommitPublication();
     }
 
@@ -403,7 +403,7 @@ public final class TriggerOrderCommands {
             com.surprising.aeron.model.CoreTriggerOrderState trigger, long sequence, long price, Integer symbolId) {
         if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
         if (trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) return null;
-        var mark = symbolId == null ? null : owner.runtimeState().markPrice(symbolId);
+        var mark = symbolId == null ? null : owner.accountBook().markPrice(symbolId);
         long selectedPrice = mark == null ? 0 : switch (trigger.priceSource()) {
             case MARK -> mark.markPriceTicks();
             case LAST -> mark.lastPriceTicks();
@@ -466,7 +466,7 @@ public final class TriggerOrderCommands {
     /** 解码并用业务时间物化算法视图，异步路径另核用户并准备标的索引，交原控制槽，冷路径直接更新并请求发布。 */
     public void executeUpsertAlgoOrder(CoreMessage message, long clusterTimestamp) {
         var algo = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeCommand(message.payloadUnsafe());
-        var current = owner.runtimeState().algoRoute(algo.algoOrderId());
+        var current = owner.accountBook().algoRoute(algo.algoOrderId());
         long userId = message.header().userId();
         if (current != null && current.userId() != userId) {
             throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
@@ -480,7 +480,7 @@ public final class TriggerOrderCommands {
 
     /** 解码延时全撤控制并应用原用户状态转换，正常返回后请求发布。 */
     public void executeUpdateCancelAllAfter(CoreMessage message) {
-        owner.runtimeState().updateCancelAllAfter(message.header().userId(),
+        owner.accountBook().updateCancelAllAfter(message.header().userId(),
                 com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payloadUnsafe()));
         owner.requestCommitPublication();
     }
@@ -492,14 +492,14 @@ public final class TriggerOrderCommands {
         var first = views.get(0).materialize(message.header().productLine(), message.header().userId(), clusterTimestamp);
         var second = views.get(1).materialize(message.header().productLine(), message.header().userId(), clusterTimestamp);
         validateOcoPair(first, second);
-        var instrument = owner.runtimeState().instrument(first.instrumentId());
+        var instrument = owner.accountBook().instrument(first.instrumentId());
         if (instrument != null) {
             instrument.requireOrderEnabled(first.orderType(), first.timeInForce(), false, false);
             instrument.requireOrderEnabled(second.orderType(), second.timeInForce(), false, false);
         }
         int symbolId = owner.identities().symbolId(first.instrumentId());
         long positionKey = preparedTriggerPositionKey(message.header().userId(), first);
-        boolean settled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
+        boolean settled = owner.accountBook().systemFunds().lifecycleSettlement(symbolId) != 0;
         owner.directCommand.deferTriggerOcoPairControl(message.header().userId(), first, second, symbolId, positionKey, settled);
     }
 
@@ -507,13 +507,13 @@ public final class TriggerOrderCommands {
     public void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {
         var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodePlacement(message.payloadUnsafe())
                 .materialize(message.header().productLine(), message.header().userId(), clusterTimestamp);
-        var maintenanceInstrument = owner.runtimeState().instrument(trigger.instrumentId());
+        var maintenanceInstrument = owner.accountBook().instrument(trigger.instrumentId());
         if (maintenanceInstrument != null) {
             maintenanceInstrument.requireOrderEnabled(trigger.orderType(), trigger.timeInForce(), false, false);
         }
         int symbolId = owner.identities().symbolId(trigger.instrumentId());
         long positionKey = preparedTriggerPositionKey(message.header().userId(), trigger);
-        boolean instrumentSettled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
+        boolean instrumentSettled = owner.accountBook().systemFunds().lifecycleSettlement(symbolId) != 0;
         owner.directCommand.deferTriggerUpsertControl(message.header().userId(), trigger, symbolId, positionKey,
                 instrumentSettled);
     }
@@ -591,7 +591,7 @@ public final class TriggerOrderCommands {
         private int laneId;
         private int baseAssetId, quoteAssetId, settleAssetId;
         /** Owner 固定的订单决策上下文，账户 Lane 据此解析子单，交接完成后清引用。 */
-        private com.surprising.aeron.service.order.OrderAdmissionService.Context decision;
+        private com.surprising.aeron.service.order.OrderCheckService.Context decision;
         private long openInterest;
         /** 子单账户工作是否已派发，防止 Owner 轮询时重复派同一任务。 */
         private boolean accountDispatched;
@@ -606,13 +606,13 @@ public final class TriggerOrderCommands {
             trigger = null;
             this.triggerId = triggerId; this.triggerSequence = triggerSequence;
             this.price = price; this.triggeredAt = triggeredAt; this.commandId = commandId;
-            decision = com.surprising.aeron.service.order.OrderAdmissionService.context(
-                    owner.runtimeState(), owner.identities(), route.instrumentId(), owner.currentClusterTimestamp());
+            decision = com.surprising.aeron.service.order.OrderCheckService.context(
+                    owner.accountBook(), owner.identities(), route.instrumentId(), owner.currentClusterTimestamp());
             baseAssetId = owner.identities().assetId(decision.instrument().baseAsset());
             quoteAssetId = owner.identities().assetId(decision.instrument().quoteAsset());
             settleAssetId = owner.identities().assetId(decision.instrument().settleAsset());
             if (decision.instrument().usesOpenInterestForUserLimit()) {
-                openInterest = owner.runtimeState().ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
+                openInterest = owner.accountBook().ledgerOrderCheckOpenInterest(decision.instrument().instrumentId());
             } else {
                 openInterest = 0;
             }
@@ -620,18 +620,18 @@ public final class TriggerOrderCommands {
             childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
             siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblingsDescending(route)
                     : it.unimi.dsi.fastutil.longs.LongSortedSets.EMPTY_SET;
-            laneId = owner.runtimeState().topology().accountLaneId(route.userId());
+            laneId = owner.accountBook().topology().accountLaneId(route.userId());
             return this;
         }
 
         /** 账户 Lane 先用完整触发单复核行情及条件，解析子单准入。技术异常继续传播，不扩大为本方法回滚所有业务状态。 */
         @Override public Object apply(int ignoredLaneId) {
-            trigger = executableTrigger(owner.runtimeState().triggerOrder(triggerId), triggerSequence, price, decision.symbolId());
+            trigger = executableTrigger(owner.accountBook().triggerOrder(triggerId), triggerSequence, price, decision.symbolId());
             if (trigger == null) return null;
             com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder order = null;
             String failureReason = "";
             try {
-                order = com.surprising.aeron.service.order.OrderAdmissionService.resolve(
+                order = com.surprising.aeron.service.order.OrderCheckService.resolve(
                         decision, trigger.userId(), childOrder(trigger, price, trigger.instrument(), childOrderId));
             } catch (CoreStateRejectedException rejected) { failureReason = rejected.code(); }
             int assetId = order == null ? 0 : order.reservationAsset().equals(decision.instrument().baseAsset()) ? baseAssetId
@@ -639,28 +639,28 @@ public final class TriggerOrderCommands {
             for (var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
                 long siblingId = siblingIds.nextLong();
                 if (siblingId == triggerId) continue;
-                var sibling = owner.runtimeState().triggerOrder(siblingId);
+                var sibling = owner.accountBook().triggerOrder(siblingId);
                 if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
-                    owner.runtimeState().triggerOrders().cancelTriggerOrder(trigger.userId(), siblingId);
+                    owner.accountBook().triggerOrders().cancelTriggerOrder(trigger.userId(), siblingId);
             }
-            owner.runtimeState().triggerOrders().claimTriggerOrder(triggerId, triggerSequence, price, triggeredAt);
-            trigger = owner.runtimeState().triggerOrder(triggerId);
+            owner.accountBook().triggerOrders().claimTriggerOrder(triggerId, triggerSequence, price, triggeredAt);
+            trigger = owner.accountBook().triggerOrder(triggerId);
             if (!failureReason.isEmpty()) {
-                owner.runtimeState().triggerOrders().completeTriggerOrder(triggerId, false, 0,
+                owner.accountBook().triggerOrders().completeTriggerOrder(triggerId, false, 0,
                         failureReason, triggeredAt);
                 return null;
             }
             var key = owner.identities().prepareClientKeyInCurrentLane(trigger.userId(), order.clientOrderId());
             try {
-                var receipt = owner.runtimeState().placeTriggerChildInLane(trigger.userId(), order,
+                var receipt = owner.accountBook().placeTriggerChildInLane(trigger.userId(), order,
                         commandId, childSequence, openInterest, owner.identities(),
-                        com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.clientKeyValue(key), assetId,
+                        com.surprising.aeron.service.core.identity.IdIndex.clientKeyValue(key), assetId,
                         decision.lifecycleSettled(), decision.fundingInProgress());
                 return receipt;
             } catch (CoreStateRejectedException rejected) {
                 if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
                         order.clientOrderId(), key);
-                owner.runtimeState().triggerOrders().completeTriggerOrder(triggerId, false, 0,
+                owner.accountBook().triggerOrders().completeTriggerOrder(triggerId, false, 0,
                         rejected.code(), triggeredAt);
                 return null;
             } catch (RuntimeException | Error failure) {
@@ -673,15 +673,15 @@ public final class TriggerOrderCommands {
         /** Owner 派发一次账户工作。 */
         @Override public boolean getAsBoolean() {
             if (!accountDispatched) {
-                owner.runtimeState().dispatchControlLanes(1L << laneId, this);
+                owner.accountBook().dispatchControlLanes(1L << laneId, this);
                 accountDispatched = true;
             }
-            if (!owner.runtimeState().pollControlLanes()) return false;
-            var result = owner.runtimeState().controlLaneResult(laneId);
+            if (!owner.accountBook().pollControlLanes()) return false;
+            var result = owner.accountBook().controlLaneResult(laneId);
             owner.requestCommitPublication();
             if (result != null) {
                 var receipt = (com.surprising.aeron.service.order.Order) result;
-                owner.runtimeState().pendingReservations().collectControlReservation(receipt, childSequence);
+                owner.accountBook().pendingReservations().collectControlReservation(receipt, childSequence);
                 owner.resultBuilder.markUserChanged(trigger.userId());
                 owner.resultBuilder.markOrderChanged(receipt.orderId());
                 owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, receipt);
@@ -697,14 +697,14 @@ public final class TriggerOrderCommands {
     /** 从该用户 Owner 索引筛选相同标的、持仓方向及保证金模式的待触发单，交调用方消费。 */
     private void selectClosingTriggers(java.util.function.LongConsumer selected) {
         owner.seedChangeAccumulators();
-        if (!owner.runtimeState().hasChangedPositions()) return;
+        if (!owner.accountBook().hasChangedPositions()) return;
         org.eclipse.collections.api.iterator.LongIterator changedPositions =
-                owner.runtimeState().changedPositionIterator();
+                owner.accountBook().changedPositionIterator();
         while (changedPositions.hasNext()) {
             long positionKey = changedPositions.next();
-            var previous = owner.runtimeState().currentPatchPositionBefore(positionKey);
+            var previous = owner.accountBook().currentPatchPositionBefore(positionKey);
             if (previous == null || previous.signedQuantitySteps() == 0) continue;
-            var current = owner.runtimeState().changedPositionValue(positionKey);
+            var current = owner.accountBook().changedPositionValue(positionKey);
             if (current != null && current.signedQuantitySteps() != 0) continue;
             int instrumentId = previous.instrument().instrumentIdValue();
             var previousMarginMode = previous.marginMode();

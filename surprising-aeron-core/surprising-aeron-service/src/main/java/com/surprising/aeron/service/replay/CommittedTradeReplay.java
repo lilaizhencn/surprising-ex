@@ -4,7 +4,7 @@ import com.surprising.aeron.service.realtime.TradingRealtimeBoundary;
 
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
@@ -14,7 +14,7 @@ import lombok.experimental.Accessors;
 
 /** 独立导出工作进程使用的确定性交易回放副本。 */
 public final class CommittedTradeReplay implements AutoCloseable {
-    private final TradingCoreRuntime state;
+    private final TradingCore state;
     private final RealtimeOutbox outbox = new RealtimeOutbox(65536, 32 * 1024 * 1024);
     private final com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture capture;
     private com.surprising.aeron.service.funding.FundingSettlementService.FundingResult fundingResult;
@@ -43,8 +43,8 @@ public final class CommittedTradeReplay implements AutoCloseable {
     public CommittedTradeReplay(ProductLine product, byte[] snapshot) {
         state =
                 snapshot == null
-                        ? new TradingCoreRuntime(product)
-                        : TradingCoreRuntime.fromSnapshot(product, snapshot);
+                        ? new TradingCore(product)
+                        : TradingCore.fromSnapshot(product, snapshot);
         state.assertClusterCallbackComplete();
         capture = state.attachRealtime(outbox);
         capture.orderProjectionOnly(true);
@@ -99,7 +99,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
             state.assertClusterCallbackComplete();
             if (command.header().userId() > 0) {
                 var retained = response != null && response.resultCode() == CoreResultCode.IDEMPOTENCY_CONFLICT
-                        ? null : state.resultLedger().get(command.header().commandId());
+                        ? null : state.commandResultLog().get(command.header().commandId());
                 if (retained == null && response == null)
                     throw new IllegalStateException("committed replay has no command result");
                 var status = retained == null ? response.commandStatus() : retained.status();
@@ -163,7 +163,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                         response.resultCode().name(), fundingResult.payments());
                 fundingResult = null;
             }
-            var retainedDelivery = delivery == null ? null : state.resultLedger().get(command.header().commandId());
+            var retainedDelivery = delivery == null ? null : state.commandResultLog().get(command.header().commandId());
             var deliveryStatus = retainedDelivery == null ? response.commandStatus() : retainedDelivery.status();
             if (delivery != null && deliveryStatus == ResponseStatus.APPLIED) {
                 var flows = new ArrayList<DeliveryCashFlow>();
@@ -198,26 +198,26 @@ public final class CommittedTradeReplay implements AutoCloseable {
 
     /** Baseline existing retained orders once at exporter startup, before following new commands. */
     public List<CoreTradeFeeObservation> retainedTradeFeeBaselines() {
-        var runtime = state.runtimeState();
+        var accountBook = state.accountBook();
         boolean acquired = false;
         try {
-            if (runtime.accountLanesStarted() && !runtime.ownerLaneAccess()) {
+            if (accountBook.accountLanesStarted() && !accountBook.ownerLaneAccess()) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (!runtime.tryAcquireOwnerLaneAccess()) {
+                while (!accountBook.tryAcquireOwnerLaneAccess()) {
                     if (System.nanoTime() >= deadline) throw new IllegalStateException("fee baseline read timed out");
                     java.util.concurrent.locks.LockSupport.parkNanos(1000L);
                 }
                 acquired = true;
             }
             var result = new ArrayList<CoreTradeFeeObservation>();
-            for (var order : runtime.ordersForSnapshot().values()) {
+            for (var order : accountBook.ordersForSnapshot().values()) {
                 result.add(new CoreTradeFeeObservation(order.orderId(), order.userId(), order.instrument().instrumentId(),
                         state.productLine() == ProductLine.SPOT ? order.instrument().quoteAsset() : order.instrument().settleAsset(),
                         order.cumulativeFeeUnits(), order.clusterPosition(), order.updatedAtEpochMillis()));
             }
             return List.copyOf(result);
         } finally {
-            if (acquired) runtime.releaseOwnerLaneAccess();
+            if (acquired) accountBook.releaseOwnerLaneAccess();
         }
     }
 
@@ -233,7 +233,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
         }
         var result = new ArrayList<CoreTradeFeeObservation>();
         for (var order : latest.values()) {
-            var instrument = state.runtimeState().instrument(order.instrumentId());
+            var instrument = state.accountBook().instrument(order.instrumentId());
             if (instrument == null) throw new IllegalStateException("committed fee instrument missing");
             result.add(new CoreTradeFeeObservation(order.orderId(), order.userId(), order.instrumentId(),
                     (state.productLine() == ProductLine.SPOT ? instrument.quoteAsset() : instrument.settleAsset()), order.cumulativeFeeUnits(), order.clusterPosition(), order.updatedAtEpochMillis()));
@@ -266,25 +266,25 @@ public final class CommittedTradeReplay implements AutoCloseable {
     private java.math.BigInteger balanceUnits(long user, String asset) {
         Integer id = state.identities().findAssetId(asset);
         if (id == null) return java.math.BigInteger.ZERO;
-        var runtime = state.runtimeState();
-        boolean needsAccess = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
+        var accountBook = state.accountBook();
+        boolean needsAccess = accountBook.accountLanesStarted() && !accountBook.ownerLaneAccess();
         boolean acquired = false;
         try {
             if (needsAccess) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (!runtime.tryAcquireOwnerLaneAccess()) {
+                while (!accountBook.tryAcquireOwnerLaneAccess()) {
                     if (System.nanoTime() >= deadline)
                         throw new IllegalStateException("committed balance read timeout; checkpoint must not advance");
                     java.util.concurrent.locks.LockSupport.parkNanos(1_000L);
                 }
                 acquired = true;
             }
-            var balance = runtime.balance(user, id);
+            var balance = accountBook.balance(user, id);
             return balance == null ? java.math.BigInteger.ZERO
                     : java.math.BigInteger.valueOf(balance.availableUnits())
                             .add(java.math.BigInteger.valueOf(balance.lockedUnits()));
         } finally {
-            if (acquired) runtime.releaseOwnerLaneAccess();
+            if (acquired) accountBook.releaseOwnerLaneAccess();
         }
     }
 
@@ -386,8 +386,8 @@ public final class CommittedTradeReplay implements AutoCloseable {
     }
 
     private List<BeforeDeliveryBalance> deliveryBalances(SettleInstrumentCommand command, long timestamp, long position) {
-        var runtime = state.runtimeState();
-        var instrument = runtime.instrument(command.instrumentId());
+        var accountBook = state.accountBook();
+        var instrument = accountBook.instrument(command.instrumentId());
         if (instrument == null) return List.of();
         var balances = new ArrayList<BeforeDeliveryBalance>();
         long cursor = command.cursorUserId();
@@ -408,26 +408,26 @@ public final class CommittedTradeReplay implements AutoCloseable {
 
     /** 在本副本 Owner 读取边界直接读取结算资产，余额缺失或总额溢出时拒绝推进交割检查点。 */
     private long deliveryBalance(long user, String asset) {
-        var runtime = state.runtimeState();
+        var accountBook = state.accountBook();
         Integer assetId = state.identities().findAssetId(asset);
         boolean acquired = false;
         try {
-            if (runtime.accountLanesStarted() && !runtime.ownerLaneAccess()) {
+            if (accountBook.accountLanesStarted() && !accountBook.ownerLaneAccess()) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (!runtime.tryAcquireOwnerLaneAccess()) {
+                while (!accountBook.tryAcquireOwnerLaneAccess()) {
                     if (System.nanoTime() >= deadline)
                         throw new IllegalStateException("committed delivery balance read timeout; checkpoint must not advance");
                     java.util.concurrent.locks.LockSupport.parkNanos(1_000L);
                 }
                 acquired = true;
             }
-            if (runtime.productLine() != state.productLine() || runtime.user(user) == null)
+            if (accountBook.productLine() != state.productLine() || accountBook.user(user) == null)
                 throw new IllegalStateException("committed delivery account identity mismatch");
-            var balance = assetId == null ? null : runtime.balance(user, assetId);
+            var balance = assetId == null ? null : accountBook.balance(user, assetId);
             if (balance == null) throw new IllegalStateException("delivery position has no settlement balance");
             return Math.addExact(balance.availableUnits(), balance.lockedUnits());
         } finally {
-            if (acquired) runtime.releaseOwnerLaneAccess();
+            if (acquired) accountBook.releaseOwnerLaneAccess();
         }
     }
 
@@ -483,7 +483,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
     /** 要求副本回调工作已结束，再生成当前交易活动摘要。 */
     public com.surprising.aeron.service.query.CommittedTradingActivity currentTradingActivity(long now) {
         state.assertClusterCallbackComplete();
-        return com.surprising.aeron.service.query.CommittedTradingActivity.capture(state.runtimeState(), state.identities(), now);
+        return com.surprising.aeron.service.query.CommittedTradingActivity.capture(state.accountBook(), state.identities(), now);
     }
 
     /** 要求本副本回调工作已结束，再交真实快照入口编码恢复状态。 */

@@ -11,7 +11,7 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.Order;
 import java.util.List;
@@ -111,9 +111,9 @@ class ControlOrderMetadataLeaseTest {
     /**
      * 准备用户七及资产三可用一千的独立运行时，清空初始化变化，使测试命令捕获只覆盖本次业务。
      */
-    private static TradingAccountRuntime fundedRuntime() {
+    private static AccountBook fundedRuntime() {
         // 用户已入金的独立交易运行时，结束时自动关闭工作线程。
-        var state = new TradingAccountRuntime();
+        var state = new AccountBook();
         state.putUser(new UserAccount(7)); state.putBalance(new AccountBalance(7, 3, 1000, 0));
         state.clearChangedKeys();
         return state;
@@ -136,7 +136,7 @@ class ControlOrderMetadataLeaseTest {
      * @param state 用于检查账户工作线程健康的运行时
      * @param done 返回指定事件是否已经完成的推进条件
      */
-    private static void await(TradingAccountRuntime state, BooleanSupplier done) {
+    private static void await(AccountBook state, BooleanSupplier done) {
         // 等待指定租约或回执完成的三秒单调时钟截止时间。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!done.getAsBoolean()) {

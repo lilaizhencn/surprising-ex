@@ -6,11 +6,11 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.AccountBalance;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.treasury.SystemFundsChange;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
 import exchange.core2.core.common.MatcherEventType;
@@ -26,80 +26,80 @@ public final class SpotTradeSettlementService {
 
     /** 在线所属 Lane 入口，至多一笔成交直接应用，多笔复用现货累加器。 */
     static void applyLane(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
-                          TradingAccountRuntime runtime, CoreInstrument instrument,
-                          int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
+                          AccountBook accountBook, CoreInstrument instrument,
+                          int baseAssetId, int quoteAssetId, SystemFundsChange systemFundsChange,
                           long commitTimestamp, long commitPosition) {
-        if (plan == null || treasuryDelta == null || laneId < 0
-                || laneId >= runtime.topology().accountLaneCount()) {
+        if (plan == null || systemFundsChange == null || laneId < 0
+                || laneId >= accountBook.topology().accountLaneCount()) {
             throw new IllegalArgumentException("invalid spot matcher settlement plan");
         }
         Order localTaker = lane.order(takerOrderId);
         if (plan.tradeCount() <= 1) {
-            applyLaneDirect(takerOrderId, plan, lane, laneId, runtime, instrument, baseAssetId,
-                    quoteAssetId, treasuryDelta, commitTimestamp, commitPosition, localTaker);
+            applyLaneDirect(takerOrderId, plan, lane, laneId, accountBook, instrument, baseAssetId,
+                    quoteAssetId, systemFundsChange, commitTimestamp, commitPosition, localTaker);
         } else {
-            applyLaneAccumulated(takerOrderId, plan, lane, laneId, runtime, instrument, baseAssetId,
-                    quoteAssetId, treasuryDelta, commitTimestamp, commitPosition, localTaker);
+            applyLaneAccumulated(takerOrderId, plan, lane, laneId, accountBook, instrument, baseAssetId,
+                    quoteAssetId, systemFundsChange, commitTimestamp, commitPosition, localTaker);
         }
         localTaker = lane.order(takerOrderId);
         if (localTaker != null) {
             if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
                     || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-                runtime.updateOrderStatusInLane(lane, localTaker.orderId(), CoreOrderStatus.CANCELED,
+                accountBook.updateOrderStatusInLane(lane, localTaker.orderId(), CoreOrderStatus.CANCELED,
                         Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition);
             }
-            releaseTerminalReservation(runtime, lane, takerOrderId);
+            releaseTerminalReservation(accountBook, lane, takerOrderId);
         }
     }
 
     private static void applyLaneDirect(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
-                                        TradingAccountRuntime runtime, CoreInstrument instrument,
+                                        AccountBook accountBook, CoreInstrument instrument,
                                         int baseAssetId, int quoteAssetId,
-                                        RuntimeTreasuryDelta treasuryDelta,
+                                        SystemFundsChange systemFundsChange,
                                         long commitTimestamp, long commitPosition,
                                         Order localTaker) {
         for (int index = plan.firstMatcherEvent(laneId); index >= 0;
                 index = plan.nextMatcherEvent(index, laneId)) {
             MatcherEvent match = plan.matcherEvent(index);
             if (match.eventType() != MatcherEventType.TRADE
-                    || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
+                    || !plan.matcherEventTouchesLane(index, laneId, accountBook)) continue;
             if (localTaker != null) {
                 localTaker = TradeSettlement.requireOpen(lane, takerOrderId);
-                localTaker = applyFill(runtime, lane, instrument, localTaker, match.price(), match.size(), true,
-                        baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
+                localTaker = applyFill(accountBook, lane, instrument, localTaker, match.price(), match.size(), true,
+                        baseAssetId, quoteAssetId, systemFundsChange, commitTimestamp, commitPosition);
             }
             Order maker = lane.order(match.matchedOrderId());
             if (maker != null) {
                 maker = TradeSettlement.requireOpen(maker, maker.orderId());
                 boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
-                maker = applyFill(runtime, lane, instrument, maker, match.price(), match.size(),
-                        false, baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
-                if (makerTerminal) releaseTerminalReservation(runtime, lane, maker.orderId());
+                maker = applyFill(accountBook, lane, instrument, maker, match.price(), match.size(),
+                        false, baseAssetId, quoteAssetId, systemFundsChange, commitTimestamp, commitPosition);
+                if (makerTerminal) releaseTerminalReservation(accountBook, lane, maker.orderId());
             }
         }
     }
 
     /** 借用所属 Lane 的现货累加器，按原事件顺序计算本地各订单，先发布余额再发布订单和预留，finally 清理暂存。故障回滚仍由外层结算边界负责。 */
     private static void applyLaneAccumulated(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
-                                             TradingAccountRuntime runtime, CoreInstrument instrument,
+                                             AccountBook accountBook, CoreInstrument instrument,
                                              int baseAssetId, int quoteAssetId,
-                                             RuntimeTreasuryDelta treasuryDelta,
+                                             SystemFundsChange systemFundsChange,
                                              long commitTimestamp, long commitPosition,
                                              Order localTaker) {
         SpotSettlementAccumulator accumulator = lane.spotSettlementAccumulator();
-        accumulator.reset(runtime, lane, instrument, baseAssetId, quoteAssetId, commitTimestamp, commitPosition);
+        accumulator.reset(accountBook, lane, instrument, baseAssetId, quoteAssetId, commitTimestamp, commitPosition);
         try {
             for (int index = plan.firstMatcherEvent(laneId); index >= 0;
                     index = plan.nextMatcherEvent(index, laneId)) {
                 MatcherEvent match = plan.matcherEvent(index);
                 if (match.eventType() != MatcherEventType.TRADE
-                        || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
+                        || !plan.matcherEventTouchesLane(index, laneId, accountBook)) continue;
                 if (localTaker != null) {
-                    accumulator.apply(takerOrderId, true, match.price(), match.size(), treasuryDelta);
+                    accumulator.apply(takerOrderId, true, match.price(), match.size(), systemFundsChange);
                 }
                 Order maker = lane.order(match.matchedOrderId());
                 if (maker != null) {
-                    accumulator.apply(maker.orderId(), false, match.price(), match.size(), treasuryDelta);
+                    accumulator.apply(maker.orderId(), false, match.price(), match.size(), systemFundsChange);
                 }
             }
             accumulator.publish();
@@ -109,9 +109,9 @@ public final class SpotTradeSettlementService {
     }
 
     /** 核对订单预留及扣款资产，按买卖方向计算基础和计价余额、手续费、预留消耗及累计成交，写回所属 Lane 并记录系统费用。发生异常时不在此提供自动事务回滚。 */
-    static Order applyFill(TradingAccountRuntime runtime, AccountPartition lane, CoreInstrument instrument, Order order,
+    static Order applyFill(AccountBook accountBook, AccountPartition lane, CoreInstrument instrument, Order order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
-                                  int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
+                                  int baseAssetId, int quoteAssetId, SystemFundsChange systemFundsChange,
                                        long commitTimestamp, long commitPosition) {
         OrderFundsReservation reservation = lane.reservation(order.orderId());
         if (reservation == null || reservation.userId() != order.userId()) {
@@ -125,10 +125,10 @@ public final class SpotTradeSettlementService {
         if (reservation.assetId() != debitAssetId) {
             throw new IllegalStateException("spot fill debit asset does not match reservation");
         }
-        AccountBalance debit = runtime.balance(lane, order.userId(), debitAssetId);
+        AccountBalance debit = accountBook.balance(lane, order.userId(), debitAssetId);
         if (debit == null) throw new IllegalStateException("runtime spot debit balance is missing");
-        AccountBalance base = runtime.balance(lane, order.userId(), baseAssetId);
-        AccountBalance quote = runtime.balance(lane, order.userId(), quoteAssetId);
+        AccountBalance base = accountBook.balance(lane, order.userId(), baseAssetId);
+        AccountBalance quote = accountBook.balance(lane, order.userId(), quoteAssetId);
         long nextBaseAvailable = base == null ? 0 : base.availableUnits();
         long nextBaseLocked = base == null ? 0 : base.lockedUnits();
         long nextQuoteAvailable = quote == null ? 0 : quote.availableUnits();
@@ -153,16 +153,16 @@ public final class SpotTradeSettlementService {
         long nextRemaining = Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps);
         CoreOrderStatus nextStatus = nextRemaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
         long nextRevision = Math.incrementExact(order.revision());
-        replaceBalance(runtime, lane, order.userId(), baseAssetId, base, nextBaseAvailable, nextBaseLocked);
-        replaceBalance(runtime, lane, order.userId(), quoteAssetId, quote, nextQuoteAvailable, nextQuoteLocked);
+        replaceBalance(accountBook, lane, order.userId(), baseAssetId, base, nextBaseAvailable, nextBaseLocked);
+        replaceBalance(accountBook, lane, order.userId(), quoteAssetId, quote, nextQuoteAvailable, nextQuoteLocked);
         long valueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(order.executedValueHigh(), order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
         long valueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
-        runtime.updateReservationInLane(lane, order.orderId(),
+        accountBook.updateReservationInLane(lane, order.orderId(),
                 Math.addExact(reservation.consumedUnits(), reservationDebit), reservation.releasedUnits(), nextRemaining != 0);
-        Order nextOrder = runtime.updateOrderInLane(lane, order.orderId(), nextExecuted, nextRemaining,
+        Order nextOrder = accountBook.updateOrderInLane(lane, order.orderId(), nextExecuted, nextRemaining,
                 Math.negateExact(feeDelta), valueHigh, valueLow, nextStatus, nextRevision, commitTimestamp, commitPosition);
-        treasuryDelta.addFee(quoteAssetId, Math.negateExact(feeDelta));
-        runtime.advanceUserRevision(lane, order.userId());
+        systemFundsChange.addFee(quoteAssetId, Math.negateExact(feeDelta));
+        accountBook.advanceUserRevision(lane, order.userId());
         return nextOrder;
     }
 
@@ -176,7 +176,7 @@ public final class SpotTradeSettlementService {
         /** 本 Lane 保留的空闲单用户资产余额暂存对象池，避免每轮结算重新分配。 */
         private final java.util.ArrayDeque<SpotBalanceState> freeBalanceStates =
                 new java.util.ArrayDeque<>();
-        private TradingAccountRuntime runtime;
+        private AccountBook accountBook;
         private AccountPartition lane;
         private CoreInstrument instrument;
         private int baseAssetId;
@@ -185,9 +185,9 @@ public final class SpotTradeSettlementService {
         private long commitPosition;
 
         /** 保存本轮单币对、所属 Lane、资产及业务元数据，不清理上一轮活动项，调用方必须先完成 clear。 */
-        void reset(TradingAccountRuntime runtime, AccountPartition lane, CoreInstrument instrument,
+        void reset(AccountBook accountBook, AccountPartition lane, CoreInstrument instrument,
                    int baseAssetId, int quoteAssetId, long commitTimestamp, long commitPosition) {
-            this.runtime = runtime;
+            this.accountBook = accountBook;
             this.lane = lane;
             this.instrument = instrument;
             this.baseAssetId = baseAssetId;
@@ -197,7 +197,7 @@ public final class SpotTradeSettlementService {
         }
 
         /** 首次遇到订单时检查权威订单和预留，借用游标并关联同用户同资产共用的本轮余额状态。随后按原成交顺序累加本笔并记录财务差额。 */
-        void apply(long orderId, boolean taker, long price, long quantity, RuntimeTreasuryDelta treasury) {
+        void apply(long orderId, boolean taker, long price, long quantity, SystemFundsChange systemFunds) {
             SpotFillCursor cursor = cursors.get(orderId);
             if (cursor == null) {
                 Order order = TradeSettlement.requireOpen(lane, orderId);
@@ -211,15 +211,15 @@ public final class SpotTradeSettlementService {
                         balanceState(order.userId(), quoteAssetId));
                 cursors.put(orderId, cursor);
             }
-            cursor.apply(price, quantity, taker, treasury);
+            cursor.apply(price, quantity, taker, systemFunds);
         }
 
         /** 先把全部用户资产余额写回 Lane，再发布每个订单及预留。预留更新会捕获余额后值，不能颠倒此顺序。 */
         void publish() {
             balances.forEachKeyValue((userId, userBalances) ->
-                    userBalances.forEachKeyValue((assetId, balance) -> balance.publish(runtime, lane)));
+                    userBalances.forEachKeyValue((assetId, balance) -> balance.publish(accountBook, lane)));
             // 预留仍待结算时，更新预留会捕获余额后值， 因此必须先发布本轮余额，再发布订单及预留最终值。
-            cursors.forEachKeyValue((orderId, cursor) -> cursor.publish(runtime));
+            cursors.forEachKeyValue((orderId, cursor) -> cursor.publish(accountBook));
         }
 
         /** 释放游标引用并归还游标池，清空各用户资产 Map 后归还空 Map 池，解除本轮上下文。余额暂存值不跨轮保留，不自动发布或回滚。 */
@@ -235,7 +235,7 @@ public final class SpotTradeSettlementService {
                 freeBalanceMaps.addFirst(userBalances);
             });
             balances.clear();
-            runtime = null;
+            accountBook = null;
             lane = null;
             instrument = null;
         }
@@ -249,7 +249,7 @@ public final class SpotTradeSettlementService {
             }
             SpotBalanceState state = userBalances.get(assetId);
             if (state == null) {
-                AccountBalance current = runtime.balance(lane, userId, assetId);
+                AccountBalance current = accountBook.balance(lane, userId, assetId);
                 state = freeBalanceStates.pollFirst();
                 if (state == null) state = new SpotBalanceState();
                 state.reset(userId, assetId, current);
@@ -276,9 +276,9 @@ public final class SpotTradeSettlementService {
             }
 
             /** 按起点存在标记在所属 Lane 更新或创建余额，写入本轮聚合后的可用和冻结金额。 */
-            void publish(TradingAccountRuntime runtime, AccountPartition lane) {
-                if (exists) runtime.replaceBalance(lane, userId, assetId, available, locked);
-                else runtime.putBalance(lane, new AccountBalance(userId, assetId, available, locked));
+            void publish(AccountBook accountBook, AccountPartition lane) {
+                if (exists) accountBook.replaceBalance(lane, userId, assetId, available, locked);
+                else accountBook.putBalance(lane, new AccountBalance(userId, assetId, available, locked));
             }
         }
 
@@ -311,7 +311,7 @@ public final class SpotTradeSettlementService {
             }
 
             /** 核对正价正量及剩余量，按买卖方向更新共享余额暂存，校验预留累计不超额，累计订单数量、费用和成交价值。 */
-            void apply(long price, long quantity, boolean taker, RuntimeTreasuryDelta treasury) {
+            void apply(long price, long quantity, boolean taker, SystemFundsChange systemFunds) {
                 if (price <= 0 || quantity <= 0 || quantity > remaining) {
                     throw new IllegalArgumentException("invalid runtime spot fill");
                 }
@@ -349,11 +349,11 @@ public final class SpotTradeSettlementService {
                 executedValueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(executedValueHigh, executedValueLow, price, quantity);
                 executedValueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(executedValueLow, price, quantity);
                 fills = Math.incrementExact(fills);
-                treasury.addFee(quoteAssetId, Math.negateExact(feeDelta));
+                systemFunds.addFee(quoteAssetId, Math.negateExact(feeDelta));
             }
 
             /** 有成交才写回预留及订单累计值，按成交次数推进订单与用户修订。 */
-            void publish(TradingAccountRuntime state) {
+            void publish(AccountBook state) {
                 if (fills == 0) return;
                 CoreOrderStatus status = remaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
                 long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
@@ -379,15 +379,15 @@ public final class SpotTradeSettlementService {
         }
     }
 
-    private static void replaceBalance(TradingAccountRuntime runtime, AccountPartition lane, long userId, int assetId,
+    private static void replaceBalance(AccountBook accountBook, AccountPartition lane, long userId, int assetId,
                                        AccountBalance current, long available, long locked) {
-        if (current == null) runtime.putBalance(lane, new AccountBalance(userId, assetId, available, locked));
-        else runtime.replaceBalance(lane, userId, assetId, available, locked);
+        if (current == null) accountBook.putBalance(lane, new AccountBalance(userId, assetId, available, locked));
+        else accountBook.replaceBalance(lane, userId, assetId, available, locked);
     }
 
     /** 只在原 Matcher 结算作用域释放终态订单的剩余预留，实际释放金额为正才增加用户修订。 */
-    static void releaseTerminalReservation(TradingAccountRuntime runtime, AccountPartition lane, long orderId) {
-        TradeSettlement.releaseCanceledReservation(runtime, lane, lane.order(orderId));
+    static void releaseTerminalReservation(AccountBook accountBook, AccountPartition lane, long orderId) {
+        TradeSettlement.releaseCanceledReservation(accountBook, lane, lane.order(orderId));
     }
 
 }

@@ -27,7 +27,7 @@ class RiskBatchBudgetTest {
     @EnumSource(value=ProductLine.class, names={"LINEAR_PERPETUAL","INVERSE_PERPETUAL",
             "LINEAR_DELIVERY","INVERSE_DELIVERY","OPTION"})
     void heavySymbolCannotConsumeEverySliceOfSharedBudget(ProductLine line) throws Exception {
-        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
+        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCore(line)) {
             // 产品线对应的合约类型，用来设置反向金额精度、到期时间及期权行权信息。
             var type = ContractType.valueOf(line.contractTypeCode());
             // 本产品的测试结算资产，反向合约使用 BTC，其余使用 USDT。
@@ -58,7 +58,7 @@ class RiskBatchBudgetTest {
             long funds=com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(state.tradingState());
             // 风险工作预算为十六的第一批请求，用来验证轻币对不会被繁忙币对挤掉。
             var firstBatch = batch(line, work(state, line), 16);
-            try (/* 由执行前快照恢复的同步参照运行时，用来核对第一批响应及业务哈希。 */ var reference = TradingCoreRuntime.fromSnapshot(line, state.snapshot(400))) {
+            try (/* 由执行前快照恢复的同步参照运行时，用来核对第一批响应及业务哈希。 */ var reference = TradingCore.fromSnapshot(line, state.snapshot(400))) {
                 // 同步参照执行的最终响应，待撮合时在本地补完后再与异步结果比对。
                 var expected = reference.apply(firstBatch);
                 if (expected.resultCode() == CoreResultCode.MATCHING_PENDING)
@@ -69,16 +69,16 @@ class RiskBatchBudgetTest {
                 // 后续异步风险续步应由 Lane 完成，不能再进行第二次所有权交接。
                 // 准备阶段等待 Owner 账户访问权的单调时钟截止值，最多等待五秒。
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                while (!state.runtimeState.tryAcquireOwnerLaneAccess()) {
+                while (!state.accountBook.tryAcquireOwnerLaneAccess()) {
                     if (System.nanoTime() > deadline) throw new AssertionError("preparation handoff timeout");
                     Thread.onSpinWait();
                 }
                 // 运行时 Lane 所有权交接代次的反射字段，用来确认异步续步没有再次借用账户表。
                 // 准备阶段已取得访问权之后的交接代次，整批异步续步不应再次增加它。
-                long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState);
+                long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook);
                 // 原运行时本批执行的最终响应，需要与同步或恢复参照逐字节一致。
                 var actual = apply(state, firstBatch);
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState)).isEqualTo(handoffBefore);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook)).isEqualTo(handoffBefore);
                 assertThat(actual.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(actual.data()).isEqualTo(expected.data());
                 assertThat(state.tradingState().businessStateHash())
@@ -86,7 +86,7 @@ class RiskBatchBudgetTest {
             }
             assertThat(state.tradingState().riskState().scans().get("100").riskComplete()).isFalse();
             assertThat(state.tradingState().riskState().scans().get("101").lastScheduledRevision()).isPositive();
-            try(/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
+            try(/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored=TradingCore.fromSnapshot(line,state.snapshot(500))) {
                 for(/* 本次完成剩余扫描的批次数量，最多三十批以防继续游标不推进。 */ int i=0;i<30 && work(state,line).riskScanPending();i++) {
                     // 用最新工作令牌构造的下一批请求，两个运行时应用同一条消息。
                     var next=batch(line,work(state,line),64);
@@ -107,7 +107,7 @@ class RiskBatchBudgetTest {
     @EnumSource(value=ProductLine.class, names={"LINEAR_PERPETUAL","INVERSE_PERPETUAL",
             "LINEAR_DELIVERY","INVERSE_DELIVERY","OPTION"})
     void budgetSpansSymbolsIsBoundedAndRejectsStaleTokensAcrossRecovery(ProductLine line) {
-        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
+        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCore(line)) {
             // 产品线对应的合约类型，用来设置反向金额精度、到期时间及期权行权信息。
             var type = ContractType.valueOf(line.contractTypeCode());
             for (/* 注册币对、发送初始行情或推进后续有限批次的循环下标。 */ int i=0;i<5;i++) {
@@ -145,7 +145,7 @@ class RiskBatchBudgetTest {
             // 刷新旧币对后查询到的新工作令牌，应优先指向尚未扫描的其他币对。
             var next=work(state,line);
             assertThat(next.riskScanContinuation().instrumentId()).isNotEqualTo(first.riskScanContinuation().instrumentId());
-            try(/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
+            try(/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored=TradingCore.fromSnapshot(line,state.snapshot(500))) {
                 assertThat(work(restored,line).riskScanContinuation()).isEqualTo(next.riskScanContinuation());
                 // 用恢复后仍一致的新令牌构造的大预算完成请求。
                 var finish=batch(line,next,64);
@@ -164,7 +164,7 @@ class RiskBatchBudgetTest {
     void asynchronousRiskIdOverflowRollsBackAllLaneChangesAndFollowingCommandWorks() {
         // 本用例需要真实强平和亏空的线性永续产品线。
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
-        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
+        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCore(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -185,7 +185,7 @@ class RiskBatchBudgetTest {
             applied(state, command(line, CoreMessageType.ADJUST_BALANCE, 8,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", -90))));
             // 仅功能测试将编号放到边界；通过随后正常的行情命令提交为恢复基线。
-            state.runtimeState.setNextLiquidationId(Long.MAX_VALUE);
+            state.accountBook.setNextLiquidationId(Long.MAX_VALUE);
             applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 80, 2, TIME), line)));
             // 编号边界已经通过正常行情提交后的业务检查点，溢出拒绝应完整回滚到它。
@@ -199,7 +199,7 @@ class RiskBatchBudgetTest {
             assertThat(response.resultCode()).isEqualTo(CoreResultCode.ARITHMETIC_OVERFLOW);
             assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.tradingState().businessStateHash()).isEqualTo(before.businessStateHash());
-            try (/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored = TradingCoreRuntime.fromSnapshot(line, state.snapshot(600))) {
+            try (/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored = TradingCore.fromSnapshot(line, state.snapshot(600))) {
                 // 溢出回滚后能解除危险状态的新价格消息，原运行时与恢复运行时共同应用。
                 var normalPrice = mark(line, "1", 3);
                 applied(state, normalPrice); applied(restored, normalPrice);
@@ -223,7 +223,7 @@ class RiskBatchBudgetTest {
     void staleLiquidationActionDoesNotAbortBatchOrChangeFundsAfterRecovery(boolean asynchronous) {
         // 本用例需要真实强平和亏空的线性永续产品线。
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
-        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
+        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCore(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -263,7 +263,7 @@ class RiskBatchBudgetTest {
             var users=state.tradingState().users();
             // 包含旧动作的批执行消息，同步、异步及恢复路径使用同一份输入。
             var execute=command(line,CoreMessageType.EXECUTE_LIQUIDATION_BATCH,TradingCommandCodec.encodeExecuteLiquidationBatch(stale));
-            try(/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(601))) {
+            try(/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored=TradingCore.fromSnapshot(line,state.snapshot(601))) {
                 // 旧动作批次的最终响应，虽计失效动作，整条批命令仍应正常应用。
                 var result=executeLiquidation(state,execute,asynchronous);
                 assertThat(result.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
@@ -289,7 +289,7 @@ class RiskBatchBudgetTest {
     void liquidationBatchResumesAcrossAccountsAndSnapshotWithinCancellationBudget(boolean asynchronous) {
         // 本用例需要真实强平和亏空的线性永续产品线。
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
-        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
+        try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCore(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -331,7 +331,7 @@ class RiskBatchBudgetTest {
             var firstResult = CoreLiquidationBatchResultCodec.decode(executeLiquidation(state, first, asynchronous).data());
             assertThat(firstResult.processedOrders()).isEqualTo(1);
             assertThat(firstResult.pendingActions()).isEqualTo(2);
-            try (/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored = TradingCoreRuntime.fromSnapshot(line, state.snapshot(600))) {
+            try (/* 从当前检查点快照恢复的第二个运行时，应用完全相同的后续消息比对结果。 */ var restored = TradingCore.fromSnapshot(line, state.snapshot(600))) {
                 // 已经执行的撤单批次数，四笔挂单每批一笔，应恰好四批完成。
                 int pages = 1;
                 while (!work(state, line).actions().isEmpty()) {
@@ -376,12 +376,12 @@ class RiskBatchBudgetTest {
      * @param command 本次要执行的强平消息，包含消息头和已编码批次载荷
      * @param asynchronous true 使用真实异步完成路径，false 先借用 Owner 账户访问权再同步完成撮合
      */
-    private static CoreResponse executeLiquidation(TradingCoreRuntime state, CoreMessage command, boolean asynchronous) {
+    private static CoreResponse executeLiquidation(TradingCore state, CoreMessage command, boolean asynchronous) {
         if (asynchronous) return apply(state, command);
         state.activate();
         // 准备阶段等待 Owner 账户访问权的单调时钟截止值，最多等待五秒。
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-        while (!state.runtimeState.tryAcquireOwnerLaneAccess()) {
+        while (!state.accountBook.tryAcquireOwnerLaneAccess()) {
             if (System.nanoTime() > deadline) throw new AssertionError("borrowed ownership timeout");
             Thread.onSpinWait();
         }
@@ -391,7 +391,7 @@ class RiskBatchBudgetTest {
             response = CoreTestCompletion.completeMatchingSynchronously(state,
                     state.matchingSequence(command.header().commandId()), command.header().submittedAtEpochMillis(),
                     command.header().sourceSequence());
-        assertThat(state.runtimeState.ownerLaneAccess()).isFalse();
+        assertThat(state.accountBook.ownerLaneAccess()).isFalse();
         return response;
     }
 
@@ -399,7 +399,7 @@ class RiskBatchBudgetTest {
      * 汇总所有用户 USDT 可用及冻结余额，加保险余额和清算对手余额，再减保险亏空，作为强平前后的资金守恒检查量。
      * @param state 当前测试交易运行时，接受风险、强平命令并提供可恢复快照
      */
-    private static long liquidationFunds(TradingCoreRuntime state) {
+    private static long liquidationFunds(TradingCore state) {
         // 用于资金守恒汇总的当前业务状态快照。
         var core = state.tradingState();
         // 逐步汇总的用户余额及保险、清算对手项，最后扣减亏空。
@@ -420,7 +420,7 @@ class RiskBatchBudgetTest {
      * @param state 当前测试交易运行时，接受风险、强平命令并提供可恢复快照
      * @param line 当前参数化测试的产品线，所有配置、账户、命令和恢复状态必须保持一致
      */
-    private CoreLiquidationWorkView work(TradingCoreRuntime state,ProductLine line) {
+    private CoreLiquidationWorkView work(TradingCore state,ProductLine line) {
         // 本次命令的最终响应，溢出用例要求拒绝，普通辅助入口由调用方断言状态。
         var response=CoreTestCompletion.querySynchronously(state,command(line,CoreMessageType.LIQUIDATION_WORK_QUERY,
                 CoreLiquidationWorkCodec.encodeQuery(line,CoreLiquidationWorkView.Purpose.EXECUTION,0,1000,1_048_576)));
@@ -478,7 +478,7 @@ class RiskBatchBudgetTest {
      * @param state 当前测试交易运行时，接受风险、强平命令并提供可恢复快照
      * @param message 需要交异步完成辅助器处理的完整命令消息
      */
-    private static CoreResponse apply(TradingCoreRuntime state,CoreMessage message) {
+    private static CoreResponse apply(TradingCore state,CoreMessage message) {
         return CoreTestCompletion.applyAsynchronously(state, message);
     }
     /**
@@ -486,7 +486,7 @@ class RiskBatchBudgetTest {
      * @param state 当前测试交易运行时，接受风险、强平命令并提供可恢复快照
      * @param message 需要交异步完成辅助器处理的完整命令消息
      */
-    private static void applied(TradingCoreRuntime state,CoreMessage message) {
+    private static void applied(TradingCore state,CoreMessage message) {
         // 本次命令的最终响应，溢出用例要求拒绝，普通辅助入口由调用方断言状态。
         var response=apply(state,message);
         assertThat(response.commandStatus()).as("%s %s",message.header().messageType(),response.resultCode())

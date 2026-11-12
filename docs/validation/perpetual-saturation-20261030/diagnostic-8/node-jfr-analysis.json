@@ -301,17 +301,17 @@
       },
       {
         "thread": "core-account-lane-1",
-        "stack": "com/surprising/aeron/service/core/TradingAccountRuntime.placeOrderInLane:5780 | com/surprising/aeron/service/order/admission/PlaceBatchAdmissionEvent.execute:177 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.execute:397 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:322 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145",
+        "stack": "com/surprising/aeron/service/core/AccountBook.placeOrderInLane:5780 | com/surprising/aeron/service/order/admission/PlaceBatchCheckEvent.execute:177 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.execute:397 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:322 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145",
         "samples": 51
       },
       {
         "thread": "core-account-lane-0",
-        "stack": "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.resolveInto:475 | com/surprising/aeron/service/order/admission/PlaceBatchAdmissionEvent.execute:143 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.execute:397 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:322 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145",
+        "stack": "com/surprising/aeron/service/order/admission/RuntimeOrderCheck.resolveInto:475 | com/surprising/aeron/service/order/admission/PlaceBatchCheckEvent.execute:143 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.execute:397 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:322 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145",
         "samples": 48
       },
       {
         "thread": "core-account-lane-1",
-        "stack": "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.resolveInto:475 | com/surprising/aeron/service/order/admission/PlaceBatchAdmissionEvent.execute:143 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.execute:397 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:322 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145",
+        "stack": "com/surprising/aeron/service/order/admission/RuntimeOrderCheck.resolveInto:475 | com/surprising/aeron/service/order/admission/PlaceBatchCheckEvent.execute:143 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.execute:397 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:322 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145",
         "samples": 44
       },
       {
@@ -331,7 +331,7 @@
       },
       {
         "thread": "clustered-service-101-0",
-        "stack": "com/surprising/aeron/service/settlement/MatcherSettlementEvent$BatchStorage.clear:226 | com/surprising/aeron/service/settlement/MatcherSettlementEvent.clear:1005 | com/surprising/aeron/service/core/TradingAccountRuntime.releaseMatcherSettlement:6295 | com/surprising/aeron/service/order/OrderBatchExecutor.finishOrderBatch:1040 | com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.completeMatching:316",
+        "stack": "com/surprising/aeron/service/settlement/MatcherSettlementEvent$BatchStorage.clear:226 | com/surprising/aeron/service/settlement/MatcherSettlementEvent.clear:1005 | com/surprising/aeron/service/core/AccountBook.releaseMatcherSettlement:6295 | com/surprising/aeron/service/order/OrderBatchExecutor.finishOrderBatch:1040 | com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.completeMatching:316",
         "samples": 33
       },
       {
@@ -887,11 +887,11 @@
         40623504
       ],
       [
-        "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission$Context",
+        "com/surprising/aeron/service/order/admission/RuntimeOrderCheck$Context",
         29239776
       ],
       [
-        "com/surprising/aeron/service/order/admission/PlaceBatchAdmissionEvent$PlaceBatchIntentSource$Decision",
+        "com/surprising/aeron/service/order/admission/PlaceBatchCheckEvent$PlaceBatchIntentSource$Decision",
         28720512
       ],
       [

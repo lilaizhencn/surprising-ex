@@ -23,7 +23,7 @@ class RealtimeTerminalEmissionTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
     void committedOrdersEmitOncePerEntity(ProductLine line) {
-        try (/* 当前产品线和模式的原交易运行时，退出自动关闭 */ var state = new TradingCoreRuntime(line)) {
+        try (/* 当前产品线和模式的原交易运行时，退出自动关闭 */ var state = new TradingCore(line)) {
                 // 当前产品线对应合约类型
                 var type=ContractType.valueOf(line.contractTypeCode());
                 // 按币本位或其他类型选择的结算资产
@@ -79,7 +79,7 @@ class RealtimeTerminalEmissionTest {
      * @param outbox 捕获器对应的原输出缓存
      * @param label 当前业务轨迹标签，决定预期订单及成交数
      */
-    private static void place(TradingCoreRuntime state,ProductLine line,long user,long id,CoreOrderSide side,
+    private static void place(TradingCore state,ProductLine line,long user,long id,CoreOrderSide side,
                               TradingRealtimeBoundary.StateCapture capture,RealtimeOutbox outbox,String label) {
         send(state,line,CoreMessageType.PLACE_ORDER,user,TradingCommandCodec.encodePlaceOrder(
                 new PlaceOrderCommand(id,"1",side,100,2,false,CoreMarginMode.CROSS,
@@ -96,7 +96,7 @@ class RealtimeTerminalEmissionTest {
      * @param outbox 捕获器对应的原输出缓存
      * @param label 当前业务轨迹标签，决定预期订单及成交数
      */
-    private static void send(TradingCoreRuntime state,ProductLine line,CoreMessageType type,long user,byte[] payload,
+    private static void send(TradingCore state,ProductLine line,CoreMessageType type,long user,byte[] payload,
                              TradingRealtimeBoundary.StateCapture capture,RealtimeOutbox outbox,String label) {
         // 本条消息来源序号，同时作为模拟日志位置及 UUID 组成部分
         long seq=++sequence;

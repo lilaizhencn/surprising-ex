@@ -1,10 +1,10 @@
 package com.surprising.aeron.service.snapshot;
 
 import com.surprising.aeron.protocol.ProductLineWireCode;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.matcher.OrderBookSnapshotCodec;
-import com.surprising.aeron.service.result.CommandResultLedger;
+import com.surprising.aeron.service.result.CommandResultLog;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.aeron.service.snapshot.state.CoreFeePolicySnapshotCodec;
 import com.surprising.aeron.service.snapshot.state.CoreTransferSnapshotCodec;
@@ -24,7 +24,7 @@ public final class SectionedCoreSnapshotWriter {
 
     /** 复用同一栅栏物化的状态、费率及划转，审计完整业务哈希并计算资金哈希，核对 Matcher 清单、快照号、Core 水位及 Cluster 元数据。 */
     static CoreSnapshotImage capture(
-            TradingCoreRuntime state,
+            TradingCore state,
             OrderBookSnapshot matcherSnapshot,
             long snapshotId,
             long coreSequence,
@@ -49,9 +49,9 @@ public final class SectionedCoreSnapshotWriter {
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
                 state.lastSourceSequences(), state.commandResults(),
                 feePolicies, pendingTransfers,
-                state.terminalRetention().encode(),
+                state.completedOrderArchive().encode(),
                 state.accountLaneSnapshots(coreSequence, snapshotState));
-        if (TradingCoreRuntime.canonicalBusinessStateHash(
+        if (TradingCore.canonicalBusinessStateHash(
                 snapshotState.businessStateHash(), feePolicies, pendingTransfers) != businessStateHash) {
             throw new IllegalStateException("snapshot rolling hash differs from immutable state audit");
         }
@@ -79,7 +79,7 @@ public final class SectionedCoreSnapshotWriter {
         payloads.add(TradingStateSnapshotCodec.encode(snapshotState));
         payloads.add(CoreFeePolicySnapshotCodec.encode(image.feePolicies()));
         payloads.add(CoreTransferSnapshotCodec.encode(image.pendingTransfers()));
-        payloads.add(image.terminalRetention());
+        payloads.add(image.completedOrderArchive());
         for (AccountLaneSnapshot lane : image.accountLanes()) {
             payloads.add(accountLane(lane));
         }
@@ -154,7 +154,7 @@ public final class SectionedCoreSnapshotWriter {
     }
 
     /** 按来源 Map 当前迭代顺序写条目数、来源码、来源实例和消费水位。 */
-    private static byte[] sources(Map<TradingCoreRuntime.SourceKey, Long> sourceSequences) {
+    private static byte[] sources(Map<TradingCore.SourceKey, Long> sourceSequences) {
         int count = sourceSequences.size();
         int length = Math.toIntExact(Integer.BYTES + Math.multiplyExact(
                 (long) count, SectionedCoreSnapshotCodec.SOURCE_SEQUENCE_LENGTH));
@@ -168,9 +168,9 @@ public final class SectionedCoreSnapshotWriter {
     }
 
     /** 先精确累计所有命令结果条目长度并检查单段上限，再按 Map 当前迭代顺序写条目数与每条结果。 */
-    private static byte[] results(Map<UUID, CommandResultLedger.StoredResult> commandResults) {
+    private static byte[] results(Map<UUID, CommandResultLog.StoredResult> commandResults) {
         long length = Integer.BYTES;
-        for (CommandResultLedger.StoredResult result : commandResults.values()) {
+        for (CommandResultLog.StoredResult result : commandResults.values()) {
             length = Math.addExact(length, Math.addExact(Integer.BYTES, resultEntryLength(result)));
         }
         requireSectionLength(Math.toIntExact(length));
@@ -180,7 +180,7 @@ public final class SectionedCoreSnapshotWriter {
         return buffer.array();
     }
 
-    private static void putResult(ByteBuffer buffer, UUID commandId, CommandResultLedger.StoredResult result) {
+    private static void putResult(ByteBuffer buffer, UUID commandId, CommandResultLog.StoredResult result) {
         buffer.putInt(resultEntryLength(result));
         buffer.putLong(commandId.getMostSignificantBits());
         buffer.putLong(commandId.getLeastSignificantBits());
@@ -194,7 +194,7 @@ public final class SectionedCoreSnapshotWriter {
     }
 
     /** 返回固定七十六字节加响应数据长度，以精确加法防止条目大小溢出。 */
-    private static int resultEntryLength(CommandResultLedger.StoredResult result) {
+    private static int resultEntryLength(CommandResultLog.StoredResult result) {
         return Math.addExact(SectionedCoreSnapshotCodec.RESULT_FIXED_LENGTH, result.responseDataLength());
     }
 

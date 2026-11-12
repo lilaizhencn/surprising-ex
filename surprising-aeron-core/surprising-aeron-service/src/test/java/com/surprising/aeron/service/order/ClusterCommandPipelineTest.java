@@ -7,7 +7,7 @@ import com.surprising.aeron.service.core.AccountLaneQueryTestSupport;
 import com.surprising.aeron.service.core.CoreFaults;
 import com.surprising.aeron.service.core.OwnerAccountReadGuard;
 import com.surprising.aeron.service.core.PipelinedExecutionExtension;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.core.TradingOwnerTestSupport;
 import com.surprising.aeron.service.matcher.OrderBookRouter;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
@@ -41,7 +41,7 @@ class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
             "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
-    void proportionalOiAdmissionUsesTheCompletedGlobalAndSequentialBatchPrefix(ProductLine product) throws Exception {
+    void proportionalOiOrderCheckUsesTheCompletedGlobalAndSequentialBatchPrefix(ProductLine product) throws Exception {
         try (/* 接收交错或并发在途输入的测试 Fixture，退出资源作用域时关闭 */ Fixture live = new Fixture(product)) {
             // 当前产品对应的合约类型，决定资产、乘数和到期配置
             var type = ContractType.valueOf(product.contractTypeCode());
@@ -87,7 +87,7 @@ class ClusterCommandPipelineTest {
                                     CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prefix-105")))));
             // 按日志先后保存的原消息列表
             var commands = List.of(firstMaker, firstTaker, nextMaker, batch);
-            try (/* 可空 Owner 账户表读取守卫，存在时在作用域结束还原表 */ var guard = new OwnerAccountReadGuard(live.service.state().runtimeState())) {
+            try (/* 可空 Owner 账户表读取守卫，存在时在作用域结束还原表 */ var guard = new OwnerAccountReadGuard(live.service.state().accountBook())) {
                 for (var /* 当前输入、比较或续扫的原 Core 消息 */ command : commands) live.service.enqueueCommittedCommand(live.session, command,
                         command.header().submittedAtEpochMillis(), 0, null);
                 live.tick();
@@ -148,7 +148,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             // 按所属账户读取的源条件单实际状态
             var triggerOrder = AccountLaneQueryTestSupport.read(
-                    live.service.state().runtimeState(), user, () -> live.service.state().runtimeState().triggerOrder(id));
+                    live.service.state().accountBook(), user, () -> live.service.state().accountBook().triggerOrder(id));
             assertThat(triggerOrder.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
             // 成功触发后记录的原生子订单编号
             long child = triggerOrder.placedOrderId();
@@ -158,7 +158,7 @@ class ClusterCommandPipelineTest {
             assertThat(userState.positions()).singleElement()
                     .satisfies(/* 当前用户状态中被断言的持仓视图 */ position -> assertThat(position.signedQuantitySteps()).isEqualTo(6));
             assertThat(userState.reservations()).isEmpty();
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(999))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(999))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -249,7 +249,7 @@ class ClusterCommandPipelineTest {
                         .isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
                 assertThat(CoreTestCompletion.triggerState(live.service.state(), user, canceled).status())
                         .isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                if (recovery) try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                if (recovery) try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             }
@@ -336,7 +336,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.hash()).isEqualTo(serial.hash());
             assertThat(live.service.state().tradingState().users())
                     .isEqualTo(serial.service.state().tradingState().users());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
             assertThat(gate.join()).isTrue();
@@ -349,7 +349,7 @@ class ClusterCommandPipelineTest {
      */
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void restingOrdersKeepTheirAdmissionVersionThroughOrderedCommit(ProductLine product) throws Exception {
+    void restingOrdersKeepTheirOrderCheckVersionThroughOrderedCommit(ProductLine product) throws Exception {
         for (boolean /* 本轮是否使用二十项批次，否则检查普通下单 */ batch : new boolean[]{false, true}) {
             // 阻塞工作线程后用于放行的门闩或 Future，清理路径负责释放
             var release = new CountDownLatch(1);
@@ -383,7 +383,7 @@ class ClusterCommandPipelineTest {
                         // 等待原准入收据就绪；普通单观察 Owner 已收齐标记，随后读取原准入事件
                         boolean receiptReady = batch
                                 ? pending.orderBatch.preparedAdmittedOrders[0] != null
-                                : pending.placeAdmissionOwnerCollected();
+                                : pending.placeOrderCheckOwnerCollected();
                         return event != null && event.dispatched() && receiptReady;
                     });
                     // 仍在生命周期中的原命令槽
@@ -391,7 +391,7 @@ class ClusterCommandPipelineTest {
                     // 批次所属项保存的可空准入订单副本
                     var admitted = batch ? pending.orderBatch.preparedAdmittedOrders[0] : null;
                     // 普通下单已解析的准入输入，批次分支为空
-                    var resolved = batch ? null : pending.placeAdmission().resolvedOrder();
+                    var resolved = batch ? null : pending.placeOrderCheck().resolvedOrder();
                     assertThat(batch ? admitted : resolved).isNotNull();
                     // 普通准入时确定的订单编号，后续不能重新分配
                     long resolvedOrderId = batch ? 0 : resolved.orderId();
@@ -399,27 +399,27 @@ class ClusterCommandPipelineTest {
                     var resolvedInstrument = batch ? null : resolved.instrument();
                     if (batch) assertThat(admitted.createdAtEpochMillis())
                             .isEqualTo(command.header().submittedAtEpochMillis());
-                    assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.runtimeState().order(1000)))
+                    assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 11, () -> state.accountBook().order(1000)))
                             .as("admission stays Lane-owned until ordered settlement").isNull();
                     release.countDown();
                     live.tick();
                     assertThat(gate.join()).isTrue();
                     if (batch) {
                         // 在所属账户线程读到的正式订单，用于比较准入输入
-                        var actual = AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.runtimeState().order(1000));
+                        var actual = AccountLaneQueryTestSupport.read(state.accountBook(), 11, () -> state.accountBook().order(1000));
                         assertThat(actual.orderId()).isEqualTo(1000);
                         assertThat(actual.priceTicks()).isEqualTo(admitted.priceTicks());
                         assertThat(actual.remainingQuantitySteps()).isEqualTo(admitted.remainingQuantitySteps());
                     } else {
                         // 在所属账户线程读到的正式订单，用于比较准入输入
-                        var actual = AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.runtimeState().order(1000));
+                        var actual = AccountLaneQueryTestSupport.read(state.accountBook(), 11, () -> state.accountBook().order(1000));
                         assertThat(actual.orderId()).isEqualTo(resolvedOrderId);
                         assertThat(actual.instrument()).isSameAs(resolvedInstrument);
                     }
                     serial.apply(command);
                     assertThat(live.responses).hasSize(1);
                     assertThat(live.hash()).isEqualTo(serial.hash());
-                    try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                    try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                         assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                     }
                 } finally { release.countDown(); }
@@ -478,7 +478,7 @@ class ClusterCommandPipelineTest {
                     // 等待原准入收据就绪；普通单观察 Owner 已收齐标记，随后读取原准入事件
                     boolean receiptReady = batch
                             ? pending.orderBatch.preparedAdmittedOrders[0] != null
-                            : pending.placeAdmissionOwnerCollected();
+                            : pending.placeOrderCheckOwnerCollected();
                     return event != null && event.dispatched() && receiptReady;
                 });
                 // 仍在生命周期中的原命令槽
@@ -491,12 +491,12 @@ class ClusterCommandPipelineTest {
                 // 批量准入保存的订单副本，普通单分支为空
                 var admittedOrder = batch ? pending.orderBatch.preparedAdmittedOrders[0] : null;
                 // 普通单已解析的准入输入，批次分支为空
-                var resolvedOrder = batch ? null : pending.placeAdmission().resolvedOrder();
+                var resolvedOrder = batch ? null : pending.placeOrderCheck().resolvedOrder();
                 assertThat(batch ? admittedOrder : resolvedOrder).isNotNull();
                 // 撮合前保存的批量准入订单值，用于比较结算没有改写该回执
                 var orderBeforeSettlement = batch ? admittedOrder.snapshot() : null;
-                assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.runtimeState().order(1000))).isNull();
-                assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.runtimeState().reservation(1000))).isNull();
+                assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 11, () -> state.accountBook().order(1000))).isNull();
+                assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 11, () -> state.accountBook().reservation(1000))).isNull();
                 release.countDown();
                 // 此处不调用 Owner 推进或收集；Matcher 和账户必须自己完成后续交接。
                 // 当前有界等待的 nanoTime 截止点
@@ -507,8 +507,8 @@ class ClusterCommandPipelineTest {
                 else assertThat(event.admittedOrder())
                         .as("normal admission does not duplicate the Lane-owned runtime order")
                         .isNull();
-                assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.runtimeState().order(1000))).isNull();
-                assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.runtimeState().reservation(1000))).isNull();
+                assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 11, () -> state.accountBook().order(1000))).isNull();
+                assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 11, () -> state.accountBook().reservation(1000))).isNull();
                 if (batch) {
                     assertThat(pending.orderBatch.nextIndex).as("submission cursor belongs to Owner").isZero();
                     assertThat(state.batches().orderBatchMatcherShard(pending.orderBatch))
@@ -520,19 +520,19 @@ class ClusterCommandPipelineTest {
                 for (/* 当前需要核对客户身份已释放的子订单下标 */ int item = 0; item < (batch ? 20 : 1); item++) {
                     // 当前子订单由批次或普通前缀派生的客户号
                     String clientKey = (batch ? "batch-" : "order-") + (1000 + item);
-                    assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.identities().findClientKeyValue(11, clientKey)))
+                    assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 11, () -> state.identities().findClientKeyValue(11, clientKey)))
                             .as("Lane retires terminal client identity before Owner drains or publishes")
                             .isZero();
                 }
                 live.tick(); serial.apply(command);
                 assertThat(gate.join()).isTrue();
                 assertThat(live.responses).hasSize(1);
-                assertThat(state.terminalRetention().containsOrder(999_999, 11, (batch ? "batch-" : "order-") + 1000))
+                assertThat(state.completedOrderArchive().containsOrder(999_999, 11, (batch ? "batch-" : "order-") + 1000))
                         .as("ordered publication retains the client ID completed-order entry after Lane freed the identity")
                         .isTrue();
                 assertThat(live.hash()).isEqualTo(serial.hash());
                 assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
-                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(101))) {
+                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(101))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             } finally { release.countDown(); }
@@ -575,7 +575,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).hasSize(2);
             assertThat(live.hash()).isEqualTo(serial.hash());
             assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(881))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(881))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -650,7 +650,7 @@ class ClusterCommandPipelineTest {
             // 取消 A 的订单后 B 可以使用释放的资金；快照恢复也必须保留这份共享余额。
             var cancel = live.cancel(11, 1000);
             live.apply(cancel); serial.apply(cancel);
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 // 已释放资金或完成恢复后再次尝试的新订单消息
                 var retry = live.place(11, secondSymbol, 3000, 80, 1, CoreOrderSide.BUY);
                 live.apply(retry); serial.apply(retry);
@@ -710,8 +710,8 @@ class ClusterCommandPipelineTest {
             assertThat(live.service.state().tradingState().users().get(11L).reservations()).isEmpty();
             assertThat(live.service.state().pendingMatching().size()).isZero();
             // Owner 是否持有账户访问权的反射字段
-            assertThat(live.service.state().runtimeState().ownerLaneAccess()).isFalse();
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            assertThat(live.service.state().accountBook().ownerLaneAccess()).isFalse();
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 // 已释放资金或完成恢复后再次尝试的新订单消息
                 var retry = live.place(11, "1", 2000, 80, 1, CoreOrderSide.BUY);
@@ -775,7 +775,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.service.state().tradingState().users().get(11L).positions()).isEqualTo(before.positions());
             assertThat(live.hash()).isEqualTo(serial.hash());
             if (recovery) {
-                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             }
@@ -838,7 +838,7 @@ class ClusterCommandPipelineTest {
                         ? CoreResultCode.LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT : CoreResultCode.NONE);
             }
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -872,7 +872,7 @@ class ClusterCommandPipelineTest {
      * @param state 用于查询实际 Matcher 路由的当前 Core
      * @param firstSymbol 需要避开的原品种路由
      */
-    private static String differentMatcherSymbol(TradingCoreRuntime state, String firstSymbol) {
+    private static String differentMatcherSymbol(TradingCore state, String firstSymbol) {
         for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < 256; i++) {
             // 正在尝试路由的测试品种字符串
             String candidate = Integer.toString(1000+i);
@@ -911,7 +911,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.hash()).isEqualTo(serial.hash());
             assertThat(live.service.state().tradingState().users())
                     .isEqualTo(serial.service.state().tradingState().users());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.state().snapshot())) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.state().snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -923,7 +923,7 @@ class ClusterCommandPipelineTest {
      */
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void newAdmissionCanResumeRejectedBatchWithSuspendedCommit(ProductLine product) throws Exception {
+    void newOrderCheckCanResumeRejectedBatchWithSuspendedCommit(ProductLine product) throws Exception {
         try (/* 接收交错或并发在途输入的测试 Fixture，退出资源作用域时关闭 */ Fixture live = new Fixture(product); /* 接收相同原消息但逐条等完成的串行对照 Fixture */ Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());
             // 该产品准入或流动性准备使用的资产名称
@@ -951,10 +951,10 @@ class ClusterCommandPipelineTest {
                 if (!pending.hasCommitContext()) state.suspendMatchingCommitContext(pending);
                 // 当前有界等待的 nanoTime 截止点
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (batch.placeBatchAdmissionEvent != null && !batch.placeBatchAdmissionEvent.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
-                if (batch.placeBatchAdmissionEvent != null) {
-                    assertThat(batch.placeBatchAdmissionEvent.complete()).isTrue();
-                    assertThat(batch.placeBatchAdmissionEvent.rejection()).isNotNull();
+                while (batch.placeBatchOrderCheckEvent != null && !batch.placeBatchOrderCheckEvent.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
+                if (batch.placeBatchOrderCheckEvent != null) {
+                    assertThat(batch.placeBatchOrderCheckEvent.complete()).isTrue();
+                    assertThat(batch.placeBatchOrderCheckEvent.rejection()).isNotNull();
                 }
             }
             // 当前前缀之后继续登记的原命令
@@ -967,7 +967,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -1015,7 +1015,7 @@ class ClusterCommandPipelineTest {
                 serial.apply(first); serial.apply(next);
                 assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
                 assertThat(live.hash()).isEqualTo(serial.hash());
-                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             }
@@ -1037,7 +1037,7 @@ class ClusterCommandPipelineTest {
             var beforeBalances = state.tradingState().users().get(11L).balances();
             // 账户所有权交接代数的反射字段
             // 本轮交易动作开始前的账户交接代数
-            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook());
             live.apply(live.place(11, "1", 101, 80, 1, CoreOrderSide.BUY));
             live.apply(live.message(CoreMessageType.AMEND_ORDER, 11, TradingCommandCodec.encodeAmendOrder(
                     new AmendOrderCommand(101, 102, "amend-102", 90L, 1L, CoreTimeInForce.GTC, false))));
@@ -1054,9 +1054,9 @@ class ClusterCommandPipelineTest {
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(live.responses.getLast(), 20)).isEqualTo(-1);
             live.apply(live.cancel(11, 999_999));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(before);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook())).isEqualTo(before);
             assertThat(state.tradingState().users().get(11L).balances()).isEqualTo(beforeBalances);
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -1082,24 +1082,24 @@ class ClusterCommandPipelineTest {
             live.apply(live.place(maker, "1", 103, 100, 1, CoreOrderSide.SELL));
             // 账户所有权交接代数的反射字段
             // 本轮交易前记录的账户交接代数，动作完成后要求不增加
-            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState());
+            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().accountBook());
             live.responses.clear();
             live.apply(live.message(CoreMessageType.AMEND_ORDER, user, TradingCommandCodec.encodeAmendOrder(
                     new AmendOrderCommand(102, 104, "reject-104", 100L, 1L, CoreTimeInForce.GTX, true))));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState())).isEqualTo(handoffBefore);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().accountBook())).isEqualTo(handoffBefore);
             // 已拒绝改单响应解码出的订单结果，核对原单取消视图
             var result = CoreCommandResultCodec.decode(live.responses.getLast().data());
             assertThat(result.orders()).filteredOn(/* 从改单结果中筛选并检查取消状态的订单视图 */ order -> order.orderId() == 102)
                     .hasSize(1).allSatisfy(/* 从改单结果中筛选并检查取消状态的订单视图 */ order -> assertThat(order.status()).isEqualTo("CANCELED"));
             // 当前 Core 中所属账户及风险扫描的权威运行时
-            var runtime = live.service.state().runtimeState();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.order(101))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.reservation(101))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.order(102))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.order(104))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.reservation(102))).isNull();
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            var accountBook = live.service.state().accountBook();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, user, () -> accountBook.order(101))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, user, () -> accountBook.reservation(101))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, user, () -> accountBook.order(102))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, user, () -> accountBook.order(104))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, user, () -> accountBook.reservation(102))).isNull();
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -1111,7 +1111,7 @@ class ClusterCommandPipelineTest {
      */
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void placeAdmissionReturnsBorrowedOwnershipBeforeLaneWork(ProductLine product) throws Exception {
+    void placeOrderCheckReturnsBorrowedOwnershipBeforeLaneWork(ProductLine product) throws Exception {
         for (boolean /* 本轮是否用批次检验归还访问权，否则用普通单 */ batch : new boolean[]{false, true}) {
             try (/* 接收交错或并发在途输入的测试 Fixture，退出资源作用域时关闭 */ Fixture live = new Fixture(product); /* 接收相同原消息但逐条等完成的串行对照 Fixture */ Fixture serial = new Fixture(product)) {
                 serial.applyAll(live.setup());
@@ -1119,7 +1119,7 @@ class ClusterCommandPipelineTest {
                 var state = live.service.state();
                 // 当前有界等待的 nanoTime 截止点
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (!state.runtimeState().tryAcquireOwnerLaneAccess()) {
+                while (!state.accountBook().tryAcquireOwnerLaneAccess()) {
                     if (System.nanoTime() >= deadline) throw new AssertionError("ownership timeout");
                     Thread.yield();
                 }
@@ -1130,7 +1130,7 @@ class ClusterCommandPipelineTest {
                 long timestamp = command.header().submittedAtEpochMillis();
                 state.applyClusterCommand(command, timestamp, 0);
                 // Owner 是否持有账户访问权的反射字段
-                assertThat(state.runtimeState().ownerLaneAccess()).as("batch=%s", batch).isFalse();
+                assertThat(state.accountBook().ownerLaneAccess()).as("batch=%s", batch).isFalse();
                 // 当前原命令登记得到的完整 Core 序号
                 long sequence = state.matchingSequence(command.header().commandId());
                 assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus())
@@ -1138,7 +1138,7 @@ class ClusterCommandPipelineTest {
                 serial.apply(command);
                 assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
                 assertThat(live.hash()).isEqualTo(serial.hash());
-                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             }
@@ -1203,7 +1203,7 @@ class ClusterCommandPipelineTest {
                 assertThat(state.tradingState().users()).as("%s account parity", type)
                         .isEqualTo(serial.service.state().tradingState().users());
                 assertThat(live.hash()).as("%s hash parity", type).isEqualTo(serial.hash());
-                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             }
@@ -1225,13 +1225,13 @@ class ClusterCommandPipelineTest {
      */
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void triggerAdmissionAndMatchingNeverReadOwnerAccountTables(ProductLine product) throws Exception {
+    void triggerOrderCheckAndMatchingNeverReadOwnerAccountTables(ProductLine product) throws Exception {
         verifyTriggerChild(product, false);
     }
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void triggerChildUsesFeePolicyAtAdmissionAndKeepsItAcrossRecovery(ProductLine product) throws Exception {
+    void triggerChildUsesFeePolicyAtOrderCheckAndKeepsItAcrossRecovery(ProductLine product) throws Exception {
         try (Fixture live = new Fixture(product)) {
             live.setup();
             long maker = 11, user = disjointUser(maker);
@@ -1257,7 +1257,7 @@ class ClusterCommandPipelineTest {
             assertThat(child).isNotNull();
             assertThat(child.makerFeeRatePpm()).isEqualTo(-25);
             assertThat(child.takerFeeRatePpm()).isEqualTo(75);
-            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(CoreTestCompletion.orderState(restored, user, child.orderId())).isEqualTo(child);
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
@@ -1328,13 +1328,13 @@ class ClusterCommandPipelineTest {
                 live.responses.clear();
                 // 账户交接代数的反射字段，用来证明交易工作留在固定 Lane
                 // 执行触发命令之前记录的账户交接代数
-                long beforeHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState());
-                try (/* 可空 Owner 账户表读取守卫，存在时在作用域结束还原表 */ var guard = recovery ? null : new OwnerAccountReadGuard(live.service.state().runtimeState())) {
+                long beforeHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().accountBook());
+                try (/* 可空 Owner 账户表读取守卫，存在时在作用域结束还原表 */ var guard = recovery ? null : new OwnerAccountReadGuard(live.service.state().accountBook())) {
                     if (internalScan) scanTriggers(live, 1);
                     else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                             CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
                 }
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState()))
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().accountBook()))
                         .as("trigger claim/reserve/settle stays on permanent Account Lane")
                         .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r ->
@@ -1345,7 +1345,7 @@ class ClusterCommandPipelineTest {
                 assertThat(terminal.placedOrderId()).isEqualTo(recovery ? 18005 : 18007);
                 assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9002).status())
                         .isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                if (recovery) try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                if (recovery) try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
                 live.apply(live.cancel(user, 18003));
@@ -1429,11 +1429,11 @@ class ClusterCommandPipelineTest {
                 live.responses.clear();
                 // 账户交接代数的反射字段，用来证明交易工作留在固定 Lane
                 // 执行触发命令之前记录的账户交接代数
-                long beforeHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState());
+                long beforeHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().accountBook());
                 if (internalScan) scanTriggers(live, 1);
                 else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                         CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState()))
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().accountBook()))
                         .as("trigger claim/reserve/settle stays on permanent Account Lane")
                         .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r ->
@@ -1447,7 +1447,7 @@ class ClusterCommandPipelineTest {
                 assertThat(terminal.placedOrderId()).isZero();
                 assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9002).status())
                         .isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                if (recovery) try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                if (recovery) try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
                 live.apply(live.cancel(user, 18003));
@@ -1473,7 +1473,7 @@ class ClusterCommandPipelineTest {
      */
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void triggerAdmissionFailureWithoutSnapshot(boolean overflow) throws Exception {
+    void triggerOrderCheckFailureWithoutSnapshot(boolean overflow) throws Exception {
         verifyTriggerFailure(overflow, false);
     }
 
@@ -1507,16 +1507,16 @@ class ClusterCommandPipelineTest {
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
             // 当前 Core 中所属账户及风险扫描的权威运行时
-            var runtime = live.service.state().runtimeState();
+            var accountBook = live.service.state().accountBook();
             // 账户所有权交接代数的反射字段
             // 触发失败前导出的用户账户状态，用来检查资金没有残留变化
             var accountsBefore = live.service.state().tradingState().users();
             // 执行失败触发命令之前的账户交接代数
-            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(accountBook);
             live.responses.clear();
             live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, user,
                     CoreTriggerOrderCodec.encodeExecute(9101, 1, 100, TIME)));
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(accountBook)).isEqualTo(before);
             assertThat(live.responses.getLast().commandStatus())
                     .isEqualTo(overflow ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9101).status())
@@ -1526,12 +1526,12 @@ class ClusterCommandPipelineTest {
             assertThat(CoreTestCompletion.orderState(live.service.state(), user, 18203)).isNull();
             // 在所属账户线程查被拒子单客户键后回传的 Future
             var clientIdentity = new java.util.concurrent.CompletableFuture<Long>();
-            assertThat(runtime.dispatchAccountQuery(runtime.topology().accountLaneMask(user), /* 账户查询回调接收的所属 Lane，用于读取客户身份键 */ lane ->
+            assertThat(accountBook.dispatchAccountQuery(accountBook.topology().accountLaneMask(user), /* 账户查询回调接收的所属 Lane，用于读取客户身份键 */ lane ->
                     clientIdentity.complete(live.service.state().identities().findClientKeyValueInLane(
                             lane, user, "TRIGGER:9101")))).isTrue();
             assertThat(clientIdentity.get(3, TimeUnit.SECONDS)).isZero();
             assertThat(live.service.state().tradingState().users()).isEqualTo(accountsBefore);
-            if (recovery) try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, live.service.captureSnapshot(101))) {
+            if (recovery) try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT, live.service.captureSnapshot(101))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -1557,7 +1557,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).hasSize(2).allSatisfy(/* 当前完成回调或响应列表中的 Core 结果 */ response ->
                     assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -1594,13 +1594,13 @@ class ClusterCommandPipelineTest {
                 var batch = live.message(CoreMessageType.PLACE_ORDER_BATCH, 11,
                         TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(item))));
                 // 当前 Core 中所属账户及风险扫描的权威运行时
-                var runtime = live.service.state().runtimeState();
+                var accountBook = live.service.state().accountBook();
                 // 账户所有权交接代数的反射字段
                 // 单项批次开始前的账户交接代数
-                long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
+                long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(accountBook);
                 live.responses.clear();
                 live.apply(batch); serial.apply(batch);
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).as("single-item admission/settlement never takes Lane ownership")
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(accountBook)).as("single-item admission/settlement never takes Lane ownership")
                         .isEqualTo(before);
                 // 单项批次响应解码得到的一项结果列表
                 var result = TradingOrderBatchCodec.decodeResult(live.responses.getFirst().data()).items();
@@ -1609,7 +1609,7 @@ class ClusterCommandPipelineTest {
                         scenario == 2 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
                 assertThat(result.getFirst().executions()).hasSize(scenario == 1 ? 1 : 0);
                 assertThat(live.hash()).isEqualTo(serial.hash());
-                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             }
@@ -1704,7 +1704,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).hasSize(2).allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r ->
                     assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(live.hash()).isEqualTo(serial.hash()).isEqualTo(replay.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -1741,7 +1741,7 @@ class ClusterCommandPipelineTest {
             assertThat(receipt.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             serial.apply(command);
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -1837,7 +1837,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).hasSize(2)
                     .allSatisfy(/* 两条实际完成消息中的当前 Core 响应 */ result -> assertThat(result.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -1849,7 +1849,7 @@ class ClusterCommandPipelineTest {
      */
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void scopeRefreshAndAdmissionShareOneDecodedBatch(ProductLine product) throws Exception {
+    void scopeRefreshAndOrderCheckShareOneDecodedBatch(ProductLine product) throws Exception {
         try (/* 当前待初始化、重放或比对的测试 Fixture */ var fixture = new Fixture(product)) {
             fixture.setup();
             // 当前正在检查依赖或缓存解码对象的命令窗口
@@ -1948,7 +1948,7 @@ class ClusterCommandPipelineTest {
             var setup = live.setup(); serial.applyAll(setup); replay.applyAll(setup);
             // 两个独立批次都产生真实成交，后缀变化不能混入前缀命令的实时分组。
             // 当前用于选择账户 Lane 的拓扑
-            LaneTopology topology = live.service.state().runtimeState().topology();
+            LaneTopology topology = live.service.state().accountBook().topology();
             // 本场景已占用的账户 Lane 位图，后续选择 maker 时避开
             long used = topology.accountLaneMask(11) | topology.accountLaneMask(disjointUser(11));
             // 给两个品种 maker 订单分配不同编号的计数
@@ -2004,7 +2004,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).hasSize(3).allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(live.hash()).isEqualTo(serial.hash()).isEqualTo(replay.hash());
             assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(880))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(880))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -2022,7 +2022,7 @@ class ClusterCommandPipelineTest {
             // 第一条独立卖单所属用户编号
             long a = 11, b = disjointUser(a), shared = b + 1;
             // 当前用于选择账户 Lane 的拓扑
-            LaneTopology topology = live.service.state().runtimeState().topology();
+            LaneTopology topology = live.service.state().accountBook().topology();
             while ((topology.accountLaneMask(shared) & (topology.accountLaneMask(a) | topology.accountLaneMask(b))) != 0) shared++;
             // 准备对手流动性或测试账户的余额调整消息
             var deposit = live.message(CoreMessageType.ADJUST_BALANCE, shared,
@@ -2071,7 +2071,7 @@ class ClusterCommandPipelineTest {
             // 已有实时快照请求队列，等待 Owner 在提交边界消费
             var requests = f.service.snapshotRequests();
             // 固定未提交边界，直接检查命令与请求状态；后台进展计数也包含准入和派发。
-            var matcherField = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
+            var matcherField = TradingCore.class.getDeclaredField("matcherPipeline");
             matcherField.setAccessible(true);
             var matcher = (OrderBookRouter) matcherField.get(f.service.state());
             CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
@@ -2103,7 +2103,7 @@ class ClusterCommandPipelineTest {
             assertThat(f.service.commandWindowSize()).isOne();
             assertThat(requests.isEmpty()).as("continuous input must not starve a read at the preceding commit boundary").isTrue();
             // 运行时保存正在进行实时快照 Future 的反射字段
-            var pendingField = TradingCoreRuntime.class.getDeclaredField("pendingRealtimeSnapshot");
+            var pendingField = TradingCore.class.getDeclaredField("pendingRealtimeSnapshot");
             pendingField.setAccessible(true);
             // 运行时已接手的实时快照 Future，等待该次捕获完成
             var snapshot = (java.util.concurrent.CompletableFuture<?>) pendingField.get(f.service.state());
@@ -2155,7 +2155,7 @@ class ClusterCommandPipelineTest {
             // 阻塞工作线程后用于放行的门闩或 Future，清理路径负责释放
             CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
             // 运行时 Matcher 管线字段的反射句柄
-            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
+            var field = TradingCore.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
             // 实际 Matcher 管线组，用于安排精确执行栅栏
             var matcher = (OrderBookRouter) field.get(live.service.state());
             // 确认后缀仍未放行的 Matcher 栅栏 Future
@@ -2214,7 +2214,7 @@ class ClusterCommandPipelineTest {
             byte[] snapshot = live.service.captureSnapshot(100);
             serial.send(cancelA); serial.tick(); serial.send(cancelB); serial.tick();
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, snapshot)) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(product, snapshot)) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
             assertThat(live.service.commandWindowSize()).isZero();
@@ -2291,7 +2291,7 @@ class ClusterCommandPipelineTest {
             var next = live.placeBatch(disjointUser(11), disjointSymbol("1"), 20000);
             live.apply(next); serial.apply(next);
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -2337,7 +2337,7 @@ class ClusterCommandPipelineTest {
      */
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void cancellationBehindSlowIndependentPlaceAdmissionResumesInSubmissionOrder(ProductLine product) throws Exception {
+    void cancellationBehindSlowIndependentPlaceOrderCheckResumesInSubmissionOrder(ProductLine product) throws Exception {
         try (/* 当前测试 Fixture 的短引用，资源退出时关闭 */ Fixture f = new Fixture(product); /* 接收相同原消息但逐条等完成的串行对照 Fixture */ Fixture serial = new Fixture(product)) {
             serial.applyAll(f.setup());
             // 与原请求用户选择不同默认账户 Lane 的另一用户编号
@@ -2355,7 +2355,7 @@ class ClusterCommandPipelineTest {
             f.tick(); serial.apply(place); serial.apply(cancel);
             assertThat(f.hash()).isEqualTo(serial.hash());
             assertThat(f.responses).allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, f.service.captureSnapshot(700))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(product, f.service.captureSnapshot(700))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(f.hash());
             }
         }
@@ -2411,7 +2411,7 @@ class ClusterCommandPipelineTest {
             // 初始化原消息列表，复制给串行或 Follower Fixture
             var setup = live.setup(); serial.applyAll(setup);
             // 当前用于选择账户 Lane 的拓扑
-            LaneTopology topology = live.service.state().runtimeState().topology();
+            LaneTopology topology = live.service.state().accountBook().topology();
             assertThat(topology.accountLaneCount())
                     .as("independent buyers and makers require enough distinct Account Lanes")
                     .isGreaterThanOrEqualTo(collidingMakers ? 3 : 4);
@@ -2497,7 +2497,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.hash()).isEqualTo(serial.hash());
             assertThat(live.service.state().tradingState().orders().get(201L).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
             assertThat(live.service.state().tradingState().orders().get(202L).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -2591,7 +2591,7 @@ class ClusterCommandPipelineTest {
                 assertThat(live.hash()).isEqualTo(serial.hash());
                 assertThat(state.tradingState().orders().get(101L)).isNull();
                 if (rejected) assertThat(state.tradingState().orders().get(102L)).isNull();
-                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             }
@@ -2915,7 +2915,7 @@ class ClusterCommandPipelineTest {
             assertThat(matcherGate.join()).isOne();
             assertThat(live.responses).hasSize(2).allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r -> assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -2990,12 +2990,12 @@ class ClusterCommandPipelineTest {
                 }
             }
             // 当前 Core 中所属账户及风险扫描的权威运行时
-            var runtime = live.service.state().runtimeState();
+            var accountBook = live.service.state().accountBook();
             // 账户所有权交接代数的反射字段
             // 触发扫描前的资金状态哈希，扫描完成后必须相同
             long funds = com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(live.service.state().tradingState());
             // 当前分段开始前的账户交接代数，中途恢复快照后重新取基线
-            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(accountBook);
             live.sequence += 1000; // 后续命令时间越过条件单有效期及新标记价时间。
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
@@ -3003,15 +3003,15 @@ class ClusterCommandPipelineTest {
                             : new ApplyMarkPriceCommand("1", 100, 3, TIME + 1000), product)));
             // 是否已经实际遇到跨命令 OCO 续页，恢复分支还会在此边界重放
             boolean resumed = false;
-            for (/* 单用户预算触发续扫的次数下标，最多一百轮 */ int n = 0; n < 100 && runtime.firstIncompleteRiskScan() != null; n++) {
+            for (/* 单用户预算触发续扫的次数下标，最多一百轮 */ int n = 0; n < 100 && accountBook.firstIncompleteRiskScan() != null; n++) {
                 // 当前输入、比较或续扫的原 Core 消息
                 var command = live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                         TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(1)));
                 // 在未结束的 OCO 续页捕获相同快照；恢复后推进同一命令，应与在线账户执行得到相同状态。
                 // 当前品种风险及触发扫描游标，用它判断是否在 OCO 续页中
-                var scan = runtime.riskScan(live.service.state().identities().findSymbolId("1"));
+                var scan = accountBook.riskScan(live.service.state().identities().findSymbolId("1"));
                 if (recovery && !resumed && scan.triggerOcoOrderId() != 0) {
-                    try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(501))) {
+                    try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(product, live.service.captureSnapshot(501))) {
                         live.apply(command);
                         // 恢复 Core 上同一续扫命令的可空完成响应，控制工作未齐时继续轮询
                         var restoredResponse = restored.apply(command);
@@ -3023,16 +3023,16 @@ class ClusterCommandPipelineTest {
                         assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                     }
                     resumed = true;
-                    before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
+                    before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(accountBook);
                 } else {
                     resumed |= scan.triggerOcoOrderId() != 0;
                     live.apply(command);
                 }
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(accountBook)).isEqualTo(before);
             }
             assertThat(resumed).as("cross-command OCO continuation exercised").isTrue();
-            assertThat(runtime.firstIncompleteRiskScan()).isNull();
+            assertThat(accountBook.firstIncompleteRiskScan()).isNull();
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8990).status()).isEqualTo(CoreTriggerOrderStatus.EXPIRED);
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9001).status()).as("%s", CoreTestCompletion.triggerState(live.service.state(), user, 9001)).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
             for (/* 当前被登记或检查的条件单编号 */ long id = 9002; id <= 9005; id++)
@@ -3057,12 +3057,12 @@ class ClusterCommandPipelineTest {
                 TradingCommandCodec.encodeApplyMarkPrice(option
                         ? new ApplyMarkPriceCommand("1", 100, 100, 100, 2, TIME)
                         : new ApplyMarkPriceCommand("1", 100, 2, TIME), live.product)));
-        for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < 100 && live.service.state().runtimeState().firstIncompleteRiskScan() != null; i++) {
+        for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < 100 && live.service.state().accountBook().firstIncompleteRiskScan() != null; i++) {
             live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(budget))));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
         }
-        assertThat(live.service.state().runtimeState().firstIncompleteRiskScan()).isNull();
+        assertThat(live.service.state().accountBook().firstIncompleteRiskScan()).isNull();
     }
 
     /**
@@ -3126,7 +3126,7 @@ class ClusterCommandPipelineTest {
                     product == ProductLine.OPTION ? 80 : 0,
                     2, TIME, 120));
             // 当前 Core 中所属账户及风险扫描的权威运行时
-            var runtime = live.service.state().runtimeState();
+            var accountBook = live.service.state().accountBook();
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8100).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8101).status())
                     .as("%s", CoreTestCompletion.triggerState(live.service.state(), user, 8101).rejectReason()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
@@ -3136,7 +3136,7 @@ class ClusterCommandPipelineTest {
                     3, TIME, 0));
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8100).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8102).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
-            if (recovery) try (/* 从当前快照恢复出的 Core，用于检查状态及价格来源 */ var recovered = TradingCoreRuntime.fromSnapshot(product,
+            if (recovery) try (/* 从当前快照恢复出的 Core，用于检查状态及价格来源 */ var recovered = TradingCore.fromSnapshot(product,
                     live.service.captureSnapshot(999))) {
                 assertThat(recovered.tradingState().businessStateHash()).isEqualTo(live.hash());
                 assertThat(recovered.tradingState().triggerOrders().get(8101L).priceSource())
@@ -3153,13 +3153,13 @@ class ClusterCommandPipelineTest {
     private static void applyPriceAndFinishTriggerScan(Fixture live, ApplyMarkPriceCommand command) {
         live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(command, live.product)));
-        for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < 100 && live.service.state().runtimeState().firstIncompleteRiskScan() != null; i++) {
+        for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < 100 && live.service.state().accountBook().firstIncompleteRiskScan() != null; i++) {
             live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(1))));
             assertThat(live.responses.getLast().commandStatus())
                     .as("%s", live.responses.getLast().resultCode()).isEqualTo(ResponseStatus.APPLIED);
         }
-        assertThat(live.service.state().runtimeState().firstIncompleteRiskScan()).isNull();
+        assertThat(live.service.state().accountBook().firstIncompleteRiskScan()).isNull();
     }
 
     /**

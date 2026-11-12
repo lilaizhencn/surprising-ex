@@ -5,8 +5,8 @@ import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.core.identity.IdIndex;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
@@ -20,37 +20,37 @@ class TransferLaneCapacityTest {
      */
     @Test void fullRoutingCapacityRejectsBeforeDebitButAllowsIdenticalRetryAndCompletion() {
         // 本例冷投影与账户任务共用的身份表
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 先冷准备再启动账户线程的原运行时 */ var runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.SPOT), identities)) {
-            LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareBalanceAdjustment(runtime, identities, 7, "USDT", 100));
+        var identities = new IdIndex();
+        try (/* 先冷准备再启动账户线程的原运行时 */ var accountBook = SnapshotLoader.loadSnapshot(TradingCoreState.empty(ProductLine.SPOT), identities)) {
+            LedgerControlTestSupport.await(accountBook, new AccountCommandService().prepareBalanceAdjustment(accountBook, identities, 7, "USDT", 100));
             // 预填第一项与后续相同重试共用的划转参数
             var first = command(1);
             // 直接冷填有限容量状态，再启动账户线程；本例没有快照恢复。
-            for (/* 预填待完成记录的正值身份循环下标 */ int id = 1; id <= com.surprising.aeron.service.treasury.TreasuryRuntime.MAX_PENDING_TRANSFERS; id++)
-                runtime.putPendingTransfer(id == 1 ? first : command(id));
-            runtime.clearChangedKeys();
-            runtime.startAccountLanes();
-            assertThat(runtime.hasPendingTransferCapacity()).isFalse();
+            for (/* 预填待完成记录的正值身份循环下标 */ int id = 1; id <= com.surprising.aeron.service.treasury.SystemFunds.MAX_PENDING_TRANSFERS; id++)
+                accountBook.putPendingTransfer(id == 1 ? first : command(id));
+            accountBook.clearChangedKeys();
+            accountBook.startAccountLanes();
+            assertThat(accountBook.hasPendingTransferCapacity()).isFalse();
             // 超过初始容量的下一个新划转身份
-            var next = command(com.surprising.aeron.service.treasury.TreasuryRuntime.MAX_PENDING_TRANSFERS + 1L);
+            var next = command(com.surprising.aeron.service.treasury.SystemFunds.MAX_PENDING_TRANSFERS + 1L);
             // 复用的账户转出控制任务
             var task = new AccountCommandService();
-            assertThatThrownBy(() -> task.prepareTransferOut(runtime, identities, 7, next))
+            assertThatThrownBy(() -> task.prepareTransferOut(accountBook, identities, 7, next))
                     .hasMessageContaining("capacity is full");
-            task.prepareTransferOut(runtime, identities, 7, first);
-            LedgerControlTestSupport.await(runtime, task::getAsBoolean);
-            assertThat(runtime.pendingTransferUser(1)).isEqualTo(7);
+            task.prepareTransferOut(accountBook, identities, 7, first);
+            LedgerControlTestSupport.await(accountBook, task::getAsBoolean);
+            assertThat(accountBook.pendingTransferUser(1)).isEqualTo(7);
             // 释放第一条待转记录的完成续步
-            var completion = new AccountCommandService().prepareTransferCompletion(runtime, 7, 1);
-            LedgerControlTestSupport.await(runtime, completion);
-            assertThat(runtime.hasPendingTransferCapacity()).isTrue();
-            task.prepareTransferOut(runtime, identities, 7, next);
-            LedgerControlTestSupport.await(runtime, task::getAsBoolean);
-            assertThat(runtime.hasPendingTransferCapacity()).isFalse();
-            assertThat(runtime.pendingTransferUser(next.transferId())).isEqualTo(7);
+            var completion = new AccountCommandService().prepareTransferCompletion(accountBook, 7, 1);
+            LedgerControlTestSupport.await(accountBook, completion);
+            assertThat(accountBook.hasPendingTransferCapacity()).isTrue();
+            task.prepareTransferOut(accountBook, identities, 7, next);
+            LedgerControlTestSupport.await(accountBook, task::getAsBoolean);
+            assertThat(accountBook.hasPendingTransferCapacity()).isFalse();
+            assertThat(accountBook.pendingTransferUser(next.transferId())).isEqualTo(7);
             // USDT在本例身份表中的内部资产号
             int asset = identities.assetId("USDT");
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.balance(7, asset).availableUnits()))
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 7, () -> accountBook.balance(7, asset).availableUnits()))
                     .isEqualTo(99);
         }
     }

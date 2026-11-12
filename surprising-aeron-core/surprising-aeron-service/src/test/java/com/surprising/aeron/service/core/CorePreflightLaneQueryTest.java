@@ -3,13 +3,13 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.order.OrderAdmissionService;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.order.OrderCheckService;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -42,19 +42,19 @@ class CorePreflightLaneQueryTest {
             // 查询前持仓身份表检查点，预检不能分配新的持仓身份。
             long positionCheckpoint = core.identities.positionCheckpoint();
             // 查询前账户所有权交接计数，Lane 原位只读查询后不应增加。
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
             // 冷参照运行时独立使用的身份表，用于调用相同正式预留规则。
-            var identities = new RuntimeIdentityRegistry();
-            try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = RuntimeStateProjector.project(before, identities)) {
+            var identities = new IdIndex();
+            try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = SnapshotLoader.loadSnapshot(before, identities)) {
                 for (var /* 本轮六产品参数化测试中的买卖方向，分别计算各自冻结资产及金额。 */ side : CoreOrderSide.values()) {
                     // 尚未执行的预检下单意图，原单编号固定而买卖方向逐次变化。
                     var command = place(900, side, 95, 3, false, "preflight-900");
                     // 在冷运行时通过订单规则解析的确定输入，供预留公式作为参照。
-                    var resolved = OrderAdmissionService.resolve(cold, identities, 1, command, TIME);
+                    var resolved = OrderCheckService.resolve(cold, identities, 1, command, TIME);
                     // 冷运行时按产品规则算出的应预留金额，不在查询时真的冻结。
-                    long reserved = OrderAdmissionService.requiredReservation(cold, identities, 1, resolved,
+                    long reserved = OrderCheckService.requiredReservation(cold, identities, 1, resolved,
                             0);
-                    try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+                    try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                         // 当前产品和方向的最终预检响应，应与冷规则资产及金额编码完全一致。
                         var response = query(core, 1, command);
                         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
@@ -64,7 +64,7 @@ class CorePreflightLaneQueryTest {
                 }
             }
             assertThat(core.identities.positionCheckpoint()).isEqualTo(positionCheckpoint);
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(before);
             core.assertClusterCallbackComplete();
         }
@@ -82,7 +82,7 @@ class CorePreflightLaneQueryTest {
                     TradingCommandCodec.encodePlaceOrder(place(202, CoreOrderSide.BUY, 80, 1, false, "client-202")));
             // 预检前已经提交的完整业务状态，查询后必须保持相同。
             var before = core.tradingState();
-            try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 assertThat(query(core, 1, place(201, CoreOrderSide.BUY, 95, 1, false, "other-owner")).resultCode())
                         .isEqualTo(CoreResultCode.DUPLICATE_ORDER_ID);
                 assertThat(query(core, 1, place(203, CoreOrderSide.BUY, 95, 1, false, "client-202")).resultCode())
@@ -117,16 +117,16 @@ class CorePreflightLaneQueryTest {
             // 预检前已经提交的完整业务状态，查询后必须保持相同。
             var before = core.tradingState();
             // 冷参照运行时独立使用的身份表，用于调用相同正式预留规则。
-            var identities = new RuntimeIdentityRegistry();
-            try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = RuntimeStateProjector.project(before, identities)) {
+            var identities = new IdIndex();
+            try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = SnapshotLoader.loadSnapshot(before, identities)) {
                 // 已有十步持仓和八步平仓占用后，仍可容纳的两步只减仓意图。
                 var valid = place(305, CoreOrderSide.SELL, 110, 2, true, "close-valid");
                 // 在冷运行时通过订单规则解析的确定输入，供预留公式作为参照。
-                var resolved = OrderAdmissionService.resolve(cold, identities, 1, valid, TIME);
+                var resolved = OrderCheckService.resolve(cold, identities, 1, valid, TIME);
                 // 冷运行时结合实际 OI 和挂单汇总算出的两步只减仓预留金额。
-                long expected = OrderAdmissionService.requiredReservation(cold, identities, 1, resolved,
+                long expected = OrderCheckService.requiredReservation(cold, identities, 1, resolved,
                         new OpenInterestIndex(before).openInterestSteps("1"));
-                try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+                try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                     assertThat(query(core, 1, place(304, CoreOrderSide.SELL, 110, 3, true, "close-oversized")).resultCode())
                             .isEqualTo(CoreResultCode.REDUCE_ONLY_CAPACITY_EXCEEDED);
                     assertThat(query(core, 1, valid).data()).isEqualTo(CoreOrderPreflightCodec.encode(
@@ -150,28 +150,28 @@ class CorePreflightLaneQueryTest {
             // 慢 Lane 场景反复使用的同一下单意图，用来比较捕获前后配置的影响。
             var intent = place(400, CoreOrderSide.BUY, 95, 3, false, "frozen-preflight");
             // 慢 Lane 用例冷参照使用的独立身份表。
-            var ids = new RuntimeIdentityRegistry();
+            var ids = new IdIndex();
             // 配置和价格更新前算出的预检编码，已排队的查询必须仍匹配它。
             byte[] expected;
-            try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = RuntimeStateProjector.project(core.tradingState(), ids)) {
+            try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = SnapshotLoader.loadSnapshot(core.tradingState(), ids)) {
                 // 更新前冷配置解析的订单输入，用来计算旧预检编码。
-                var order = OrderAdmissionService.resolve(cold, ids, 1, intent, TIME);
+                var order = OrderCheckService.resolve(cold, ids, 1, intent, TIME);
                 expected = CoreOrderPreflightCodec.encode(new CoreOrderPreflightView(order.reservationAsset(),
-                        OrderAdmissionService.requiredReservation(cold, ids, 1, order, 0)));
+                        OrderCheckService.requiredReservation(cold, ids, 1, order, 0)));
             }
             // 确认阻塞任务已在用户所属 Lane 执行的门闩，避免尚未阻塞就发送查询。
             var entered = new CountDownLatch(1);
             // 用户 1 所属账户 Lane 的位集合，只阻塞目标消费者。
-            long mask = core.runtimeState.topology().accountLaneMask(1);
-            assertThat(core.runtimeState.dispatchAccountQuery(mask, /* 当前被真实阻塞的账户 Lane，等待门闩放行后才继续消费查询。 */ lane -> {
+            long mask = core.accountBook.topology().accountLaneMask(1);
+            assertThat(core.accountBook.dispatchAccountQuery(mask, /* 当前被真实阻塞的账户 Lane，等待门闩放行后才继续消费查询。 */ lane -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("blocked Lane timeout"); }
                 catch (/* 阻塞回调等待时收到的中断，转换为保留原因的断言失败。 */ InterruptedException failure) { throw new AssertionError(failure); }
             })).isTrue();
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             // 查询前账户所有权交接计数，Lane 原位只读查询后不应增加。
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
-            try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
+            try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 // Lane 尚被阻塞时提交的旧配置预检消息。
                 var request = message(core, 1, TradingCommandCodec.encodePlaceOrder(intent));
                 assertThat(core.apply(request).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
@@ -180,13 +180,13 @@ class CorePreflightLaneQueryTest {
                 assertThat(core.bookQueries.takeQueryResult(id)).isNull();
                 assertThat(release.getCount()).isOne();
                 // 测试直接更新的在线规范币对，与早先捕获的查询配置区分。
-                var instrument = core.runtimeState.instrument("1");
+                var instrument = core.accountBook.instrument("1");
                 instrument.updateConfiguration(CoreInstrument.from(core.productLine, instrument(core.productLine, 200_000)));
-                core.runtimeState.putMarkPrice(new MarkPrice(core.identities.findSymbolId("1"), instrument, 120, 2, TIME));
+                core.accountBook.putMarkPrice(new MarkPrice(core.identities.findSymbolId("1"), instrument, 120, 2, TIME));
                 release.countDown();
                 assertThat(await(core, request, id).data()).isEqualTo(expected);
                 assertThat(query(core, 1, intent).data()).isNotEqualTo(expected);
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
             }
             core.assertClusterCallbackComplete();
         } finally { release.countDown(); }
@@ -196,9 +196,9 @@ class CorePreflightLaneQueryTest {
      * 按产品注册相应合约，衍生品补标记价，给用户 1 和 7 准备反向 BTC 或其他产品 USDT 余额；准备失败先关闭核心再原样上抛。
      * @param line 本轮测试独立使用的产品线，决定合约、结算资产和预留公式
      */
-    private TradingCoreRuntime prepared(ProductLine line) {
+    private TradingCore prepared(ProductLine line) {
         // 本用例持有的核心运行时，通过原有异步入口预检，结束时关闭工作资源。
-        var core = new TradingCoreRuntime(line);
+        var core = new TradingCore(line);
         try {
             command(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(instrument(line, 100_000), line));
@@ -251,7 +251,7 @@ class CorePreflightLaneQueryTest {
      * @param user 消息头中的用户编号，非用户准备命令可为 0
      * @param payload 普通命令或预检查询已经编码的载荷
      */
-    private void command(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private void command(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 本次新分配的来源序号，同时参与命令 UUID 和消息头。
         long next = ++sequence;
         // 准备状态的正式业务命令，辅助器等待到最终应用成功。
@@ -266,7 +266,7 @@ class CorePreflightLaneQueryTest {
      * @param user 消息头中的用户编号，非用户准备命令可为 0
      * @param intent 需要做只读预检的原始下单意图
      */
-    private CoreResponse query(TradingCoreRuntime core, long user, PlaceOrderCommand intent) {
+    private CoreResponse query(TradingCore core, long user, PlaceOrderCommand intent) {
         // 为当前意图构造的只读预检消息，供即时返回或异步等待使用。
         var request = message(core, user, TradingCommandCodec.encodePlaceOrder(intent));
         assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
@@ -282,7 +282,7 @@ class CorePreflightLaneQueryTest {
      * @param request 已经提交的预检消息，用其命令 UUID 核对内部关联清理
      * @param id 本次预检内部异步编号，要求非零并只消费一次
      */
-    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, java.util.UUID id) {
+    private CoreResponse await(TradingCore core, CoreMessage request, java.util.UUID id) {
         assertThat(core.bookQueries.hasPendingQuery(id)).isTrue();
         // 异步预检的五秒单调时钟等待上限，不作为业务价格时间。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -304,7 +304,7 @@ class CorePreflightLaneQueryTest {
      * @param user 消息头中的用户编号，非用户准备命令可为 0
      * @param payload 普通命令或预检查询已经编码的载荷
      */
-    private CoreMessage message(TradingCoreRuntime core, long user, byte[] payload) {
+    private CoreMessage message(TradingCore core, long user, byte[] payload) {
         // 本次新分配的来源序号，同时参与命令 UUID 和消息头。
         long next = ++sequence;
         return new CoreMessage(CoreMessageHeader.query(CoreMessageType.ORDER_PREFLIGHT_QUERY, new UUID(981, next), core.productLine,

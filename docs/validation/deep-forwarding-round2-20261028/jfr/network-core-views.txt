@@ -9,7 +9,7 @@ Method                                                                          
 com.surprising.aeron.bootstrap.account.SettlementLaneWorker.run(TradingCpuAffinity)                                                              10,700  51.79%
 com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline.runMatching()                                                                5,836  28.25%
 com.surprising.aeron.bootstrap.account.SettlementLaneWorker.peekMatcherSettlement()                                                               1,341   6.49%
-com.surprising.aeron.service.order.AdmissionMatchingContinuation.get()                                                                              371   1.80%
+com.surprising.aeron.service.order.AfterCheckMatchCallback.get()                                                                              371   1.80%
 sun.security.provider.ByteArrayAccess.i2bBig(int[], int, byte[], int, int)                                                                           99   0.48%
 org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probe(long)                                                                     71   0.34%
 io.aeron.driver.IpcPublication.updatePublisherPositionAndLimit()                                                                                     69   0.33%
@@ -29,8 +29,8 @@ org.agrona.collections.Long2ObjectHashMap.put(long, Object)                     
 io.aeron.driver.buffer.MappedRawLog.preTouchPages(UnsafeBuffer[], int, int)                                                                          22   0.11%
 java.util.concurrent.ConcurrentHashMap.get(Object)                                                                                                   21   0.10%
 com.surprising.aeron.service.core.change.RuntimeChangeBuffer.put(long, Object)                                                                       21   0.10%
-com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto(...)                                                                  20   0.10%
-com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.hashUtf8(long, String)                                                            19   0.09%
+com.surprising.aeron.service.order.admission.RuntimeOrderCheck.resolveInto(...)                                                                  20   0.10%
+com.surprising.aeron.service.core.identity.IdIndex.hashUtf8(long, String)                                                            19   0.09%
 
 VIEW allocation-by-site
 

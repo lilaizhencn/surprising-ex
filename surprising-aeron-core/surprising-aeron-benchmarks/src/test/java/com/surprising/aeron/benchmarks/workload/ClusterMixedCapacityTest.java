@@ -97,9 +97,9 @@ class ClusterMixedCapacityTest {
                 .isNotEqualTo(topology.accountLaneId(users.get(1513+(i+1)%256)));
     }
 
-    @Test void financialAuditIncludesEveryTreasuryLedgerAndSubtractsDeficit() {
+    @Test void financialAuditIncludesEverySystemFundsLedgerAndSubtractsDeficit() {
         var t=new CoreTreasuryAssetView("USDT",2,3,5,7,11,13,17);
-        assertThat(ClusterMixedCapacityMain.treasuryFunds(t)).isEqualTo(48);
+        assertThat(ClusterMixedCapacityMain.systemFundsFunds(t)).isEqualTo(48);
         assertThat(ClusterMixedCapacityMain.expectedFunds()).isEqualTo(1_768_000_000_125L);
     }
 

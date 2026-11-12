@@ -28,13 +28,13 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.*;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -551,17 +551,17 @@ class RuntimeStateBusinessRulesTest {
                 product)).isEqualTo(removed);
 
         // 本次运行时投影独用的整数身份表
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(withPosition, identities)) {
+        var identities = new IdIndex();
+        try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var accountBook = SnapshotLoader.loadSnapshot(withPosition, identities)) {
             for (long /* 超过可用、超过持仓保证金或取 long 极小负数的故意非法调整金额 */ rejected : new long[] {9_001, -1_001, Long.MIN_VALUE}) {
-                assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountCommandService().preparePositionMarginAdjustment(runtime, identities, 101, new AdjustPositionMarginCommand("1", CorePositionSide.NET, rejected))))
+                assertThatThrownBy(() -> LedgerControlTestSupport.await(accountBook, new AccountCommandService().preparePositionMarginAdjustment(accountBook, identities, 101, new AdjustPositionMarginCommand("1", CorePositionSide.NET, rejected))))
                         .isInstanceOf(RuntimeException.class);
-                assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(withPosition);
+                assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(withPosition);
             }
-            runtime.startAccountLanes();
+            accountBook.startAccountLanes();
             for (long /* 账户 Lane 依次执行的合法逐仓保证金调整额，先加五百后减三百 */ amount : new long[] {500, -300}) {
                 // 本次逐仓保证金调整的可轮询账户控制任务
-                var work = new AccountCommandService().preparePositionMarginAdjustment(runtime, identities, 101,
+                var work = new AccountCommandService().preparePositionMarginAdjustment(accountBook, identities, 101,
                         new AdjustPositionMarginCommand("1", CorePositionSide.NET, amount));
                 // 本次控制任务轮询的单调时钟五秒期限
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
@@ -570,7 +570,7 @@ class RuntimeStateBusinessRulesTest {
                 while (!(done = work.getAsBoolean()) && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(done).isTrue();
             }
-            assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(removed);
+            assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(removed);
         }
     }
 
@@ -629,18 +629,18 @@ class RuntimeStateBusinessRulesTest {
         assertThat(reducer.updateLeverage(expected, 101, command)).isEqualTo(expected);
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(expected), line)).isEqualTo(expected);
         // 本次运行时投影独用的整数身份表
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(before, identities)) {
-            runtime.startAccountLanes();
+        var identities = new IdIndex();
+        try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var accountBook = SnapshotLoader.loadSnapshot(before, identities)) {
+            accountBook.startAccountLanes();
             // 本次降低全仓杠杆并补足保证金的可轮询账户控制任务
-            var work = new AccountCommandService().prepareLeverageChange(runtime, identities, 101, command);
+            var work = new AccountCommandService().prepareLeverageChange(accountBook, identities, 101, command);
             // 本次控制任务轮询的单调时钟五秒期限
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             // 账户控制任务是否完成，退出轮询后必须为真
             boolean done = false;
             while (!(done = work.getAsBoolean()) && System.nanoTime() < deadline) Thread.onSpinWait();
             assertThat(done).isTrue();
-            assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
+            assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(expected);
         }
     }
 
@@ -654,13 +654,13 @@ class RuntimeStateBusinessRulesTest {
         before = reducer.adjustBalance(before, 101, new BalanceAdjustmentCommand("USDT",
                 -before.users().get(101L).balances().get("USDT").availableUnits()));
         // 本次运行时投影独用的整数身份表
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(before, identities)) {
+        var identities = new IdIndex();
+        try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var accountBook = SnapshotLoader.loadSnapshot(before, identities)) {
             // 显式允许已有持仓重计的全仓两倍目标杠杆命令
             var command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000, true);
-            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareLeverageChange(runtime, identities, 101, command)))
+            assertThatThrownBy(() -> LedgerControlTestSupport.await(accountBook, new AccountCommandService().prepareLeverageChange(accountBook, identities, 101, command)))
                     .hasMessageContaining("insufficient available funds");
-            assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(before);
+            assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(before);
         }
         // 已有持仓上又挂新单的冷状态，必须先撤单才允许该杠杆重计
         TradingCoreState withOrder = reducer.placeOrder(leveragePosition(ProductLine.LINEAR_PERPETUAL), 101,

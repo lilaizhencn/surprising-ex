@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.account;
 
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.core.identity.IdIndex;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -19,18 +19,18 @@ class TerminalClientReleaseTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
     void sharedAndMultipleAliasesSurviveFailureThenReleaseExactlyOnce(ProductLine product) {
         // 本产品运行时真实绑定的客户身份字典。
-        var identities = new RuntimeIdentityRegistry();
+        var identities = new IdIndex();
         // 故意来自另一个运行时的字典，传入本 Lane 释放时应被拒绝。
-        var foreign = new RuntimeIdentityRegistry();
-        try (/* 当前产品由空状态投影的本运行时，字典在此绑定实际 Lane。 */ var runtime = RuntimeStateProjector.project(TradingCoreState.empty(product), identities);
-             /* 绑定外部字典的另一个运行时，用于验证跨运行时字典拒绝边界。 */ var other = RuntimeStateProjector.project(TradingCoreState.empty(product), foreign)) {
+        var foreign = new IdIndex();
+        try (/* 当前产品由空状态投影的本运行时，字典在此绑定实际 Lane。 */ var accountBook = SnapshotLoader.loadSnapshot(TradingCoreState.empty(product), identities);
+             /* 绑定外部字典的另一个运行时，用于验证跨运行时字典拒绝边界。 */ var other = SnapshotLoader.loadSnapshot(TradingCoreState.empty(product), foreign)) {
             // 本运行时中用户七实际所属的账户 Lane。
-            var lane = runtime.accountLaneForUser(7);
+            var lane = accountBook.accountLaneForUser(7);
             // 客户号 shared 的正数身份键，被两笔订单共同引用。
-            long first = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(lane, 7, "shared"));
+            long first = IdIndex.clientKeyValue(identities.prepareClientKeyInLane(lane, 7, "shared"));
             identities.prepareClientKeyInLane(lane, 7, "shared");
             // 客户号 other 的正数身份键，只由订单十二额外持有。
-            long second = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(lane, 7, "other"));
+            long second = IdIndex.clientKeyValue(identities.prepareClientKeyInLane(lane, 7, "other"));
             lane.clientKeysByOrderId().add(11, first);
             lane.clientKeysByOrderId().add(12, first);
             lane.clientKeysByOrderId().add(12, second);
@@ -53,7 +53,7 @@ class TerminalClientReleaseTest {
             assertThat(identities.clientIdentityCount()).isZero();
             assertThat(clientOrders.isEmpty()).isTrue();
             // 旧别名全部释放后新建客户号 next 的正数身份键。
-            long next = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(lane, 7, "next"));
+            long next = IdIndex.clientKeyValue(identities.prepareClientKeyInLane(lane, 7, "next"));
             lane.clientKeysByOrderId().add(13, next);
             assertThat(identities.clientOrderId(7, next)).isEqualTo("next");
             lane.releaseOrderClientIdentities(identities, 13, 7);

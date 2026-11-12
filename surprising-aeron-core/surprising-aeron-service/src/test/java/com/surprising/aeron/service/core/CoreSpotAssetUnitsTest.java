@@ -29,33 +29,33 @@ class CoreSpotAssetUnitsTest {
     void freezesSettlesAndReleasesConfiguredAssetUnits(boolean fragmented, boolean restoreBeforeFill,
             CoreOrderType type, CoreTimeInForce tif) {
         // 最初创建的现货运行时，finally 必须关闭
-        var original = new TradingCoreRuntime(ProductLine.SPOT);
+        var original = new TradingCore(ProductLine.SPOT);
         // 当前操作的运行时引用，恢复后与 original 不同并需分别关闭
-        TradingCoreRuntime runtime = original;
+        TradingCore tradingCore = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
             var registration = new RegisterInstrumentCommand(
                     "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
                     0b11, 0b1111, 100_000);
-            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
+            apply(tradingCore, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
             // 非单位数量步长必须按当前布局完整保存，恢复值不得静默降为单位步长。
-            byte[] encoded = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(runtime.tradingState());
+            byte[] encoded = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(tradingCore.tradingState());
             var restored = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.decode(encoded, ProductLine.SPOT);
             assertThat(restored.instruments().get(registration.instrumentId()).quantityStepUnits())
                     .isEqualTo(registration.quantityStepUnits());
-            fund(runtime, 101, "USDT", 100_000_000_000L);
-            fund(runtime, 202, "BTC", 1_000_000L);
-            place(runtime, 202, 1, CoreOrderSide.SELL, fragmented ? 1 : 5, 500_000, CoreTimeInForce.GTC);
-            if (fragmented) place(runtime, 202, 2, CoreOrderSide.SELL, 4, 500_000, CoreTimeInForce.GTC);
-            assertThat(runtime.tradingState().users().get(202L).balances().get("BTC").lockedUnits()).isEqualTo(500_000);
+            fund(tradingCore, 101, "USDT", 100_000_000_000L);
+            fund(tradingCore, 202, "BTC", 1_000_000L);
+            place(tradingCore, 202, 1, CoreOrderSide.SELL, fragmented ? 1 : 5, 500_000, CoreTimeInForce.GTC);
+            if (fragmented) place(tradingCore, 202, 2, CoreOrderSide.SELL, 4, 500_000, CoreTimeInForce.GTC);
+            assertThat(tradingCore.tradingState().users().get(202L).balances().get("BTC").lockedUnits()).isEqualTo(500_000);
 
-            if (restoreBeforeFill) runtime = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot(71));
-            assertThat(runtime.tradingState().instruments().get("1").quantityStepUnits()).isEqualTo(100_000);
+            if (restoreBeforeFill) tradingCore = TradingCore.fromSnapshot(ProductLine.SPOT, original.snapshot(71));
+            assertThat(tradingCore.tradingState().instruments().get("1").quantityStepUnits()).isEqualTo(100_000);
             // 买方三份原订单的最终协议视图，预期 FILLED 且无剩余
-            var filled = place(runtime, 101, 3, CoreOrderSide.BUY, 3, type == CoreOrderType.MARKET ? 500_050 : 500_000, tif, type);
+            var filled = place(tradingCore, 101, 3, CoreOrderSide.BUY, 3, type == CoreOrderType.MARKET ? 500_050 : 500_000, tif, type);
 
             // 当前现货运行时导出的已提交冷状态，供精确资金断言
-            var state = runtime.tradingState();
+            var state = tradingCore.tradingState();
             assertThat(filled.remainingQuantitySteps()).isZero();
             assertThat(filled.status()).isEqualTo("FILLED");
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "BTC")).isEqualTo(300_000);
@@ -68,29 +68,29 @@ class CoreSpotAssetUnitsTest {
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "BTC") + CoreStateTestFixtures.totalUnits(state.users().get(202L), "BTC")).isEqualTo(1_000_000);
             assertThat(state.users().get(202L).balances().get("BTC").lockedUnits()).isEqualTo(200_000);
 
-            apply(runtime, CoreMessageType.CANCEL_ORDER, 202,
+            apply(tradingCore, CoreMessageType.CANCEL_ORDER, 202,
                     TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(fragmented ? 2 : 1)));
-            assertThat(runtime.tradingState().users().get(202L).balances().get("BTC").lockedUnits()).isZero();
-            place(runtime, 101, 4, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
-            assertThat(runtime.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(8_004_000_000L);
-            apply(runtime, CoreMessageType.CANCEL_ORDER, 101, TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(4)));
-            assertThat(runtime.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(CoreStateTestFixtures.totalUnits(runtime.tradingState().users().get(101L), "USDT")).isEqualTo(84_992_500_000L);
+            assertThat(tradingCore.tradingState().users().get(202L).balances().get("BTC").lockedUnits()).isZero();
+            place(tradingCore, 101, 4, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
+            assertThat(tradingCore.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(8_004_000_000L);
+            apply(tradingCore, CoreMessageType.CANCEL_ORDER, 101, TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(4)));
+            assertThat(tradingCore.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(CoreStateTestFixtures.totalUnits(tradingCore.tradingState().users().get(101L), "USDT")).isEqualTo(84_992_500_000L);
             if (type == CoreOrderType.MARKET) {
-                place(runtime, 101, 5, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
+                place(tradingCore, 101, 5, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
                 // 可选反向市价卖出的最终协议订单视图
-                var sell = place(runtime, 202, 6, CoreOrderSide.SELL, 2, 399_960, tif, CoreOrderType.MARKET);
+                var sell = place(tradingCore, 202, 6, CoreOrderSide.SELL, 2, 399_960, tif, CoreOrderType.MARKET);
                 assertThat(sell.status()).isEqualTo("FILLED");
-                assertThat(CoreStateTestFixtures.totalUnits(runtime.tradingState().users().get(101L), "BTC")).isEqualTo(500_000);
-                assertThat(CoreStateTestFixtures.totalUnits(runtime.tradingState().users().get(202L), "BTC")).isEqualTo(500_000);
-                assertThat(CoreStateTestFixtures.totalUnits(runtime.tradingState().users().get(101L), "USDT")).isEqualTo(76_990_900_000L);
-                assertThat(CoreStateTestFixtures.totalUnits(runtime.tradingState().users().get(202L), "USDT")).isEqualTo(22_993_000_000L);
-                assertThat(runtime.tradingState().treasuryState().feeBalances().get("USDT")).isEqualTo(16_100_000L);
-                assertThat(runtime.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isZero();
-                assertThat(runtime.tradingState().users().get(202L).balances().get("BTC").lockedUnits()).isZero();
+                assertThat(CoreStateTestFixtures.totalUnits(tradingCore.tradingState().users().get(101L), "BTC")).isEqualTo(500_000);
+                assertThat(CoreStateTestFixtures.totalUnits(tradingCore.tradingState().users().get(202L), "BTC")).isEqualTo(500_000);
+                assertThat(CoreStateTestFixtures.totalUnits(tradingCore.tradingState().users().get(101L), "USDT")).isEqualTo(76_990_900_000L);
+                assertThat(CoreStateTestFixtures.totalUnits(tradingCore.tradingState().users().get(202L), "USDT")).isEqualTo(22_993_000_000L);
+                assertThat(tradingCore.tradingState().treasuryState().feeBalances().get("USDT")).isEqualTo(16_100_000L);
+                assertThat(tradingCore.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isZero();
+                assertThat(tradingCore.tradingState().users().get(202L).balances().get("BTC").lockedUnits()).isZero();
             }
         } finally {
-            if (runtime != original) runtime.close();
+            if (tradingCore != original) tradingCore.close();
             original.close();
         }
     }
@@ -103,43 +103,43 @@ class CoreSpotAssetUnitsTest {
     @ParameterizedTest @CsvSource({"false,false", "true,false", "false,true", "true,true"})
     void amendedSpotReserveSurvivesRestoreAndInsufficientFundsLeaveTheOriginalOpen(boolean restore, boolean partiallyFilled) {
         // 最初创建的现货运行时，finally 必须关闭
-        var original = new TradingCoreRuntime(ProductLine.SPOT);
+        var original = new TradingCore(ProductLine.SPOT);
         // 当前操作的运行时引用，恢复后与 original 不同并需分别关闭
-        TradingCoreRuntime runtime = original;
+        TradingCore tradingCore = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
             var registration = new RegisterInstrumentCommand(
                     "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
                     0b11, 0b1111, 100_000);
-            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
-            fund(runtime, 101, "USDT", 100_000_000_000L);
-            fund(runtime, 202, "BTC", 1_000_000L);
-            place(runtime, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
-            if (partiallyFilled) place(runtime, 202, 40, CoreOrderSide.SELL, 1, 400_000, CoreTimeInForce.IOC);
-            if (restore) runtime = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot(73));
+            apply(tradingCore, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
+            fund(tradingCore, 101, "USDT", 100_000_000_000L);
+            fund(tradingCore, 202, "BTC", 1_000_000L);
+            place(tradingCore, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
+            if (partiallyFilled) place(tradingCore, 202, 40, CoreOrderSide.SELL, 1, 400_000, CoreTimeInForce.IOC);
+            if (restore) tradingCore = TradingCore.fromSnapshot(ProductLine.SPOT, original.snapshot(73));
             // 撤改或撤单之前原预留仍保留未用费用缓冲：
             // 初始 8_004_000_000 减去实际 maker 成交消耗 4_000_800_000。
             // 改单尝试前原订单仍保留的冻结，部分成交后仍含未用费用缓冲
-            long originalReserve = runtime.tradingState().users().get(101L).balances().get("USDT").lockedUnits();
+            long originalReserve = tradingCore.tradingState().users().get(101L).balances().get("USDT").lockedUnits();
             assertThat(originalReserve).isEqualTo(partiallyFilled ? 4_003_200_000L : 8_004_000_000L);
             // 本次资金不足改单或跨用户批撤的原拒绝响应
-            var rejected = execute(runtime, CoreMessageType.AMEND_ORDER, 101,
+            var rejected = execute(tradingCore, CoreMessageType.AMEND_ORDER, 101,
                     TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(41, 42, "amend-rejected",
                             450_000L, 1000L, CoreTimeInForce.GTC, false)));
             assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-            assertThat(runtime.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(originalReserve);
+            assertThat(tradingCore.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(originalReserve);
             // 合法改单实际完成后的原响应，包含旧单取消与新单 OPEN
-            var amended = apply(runtime, CoreMessageType.AMEND_ORDER, 101,
+            var amended = apply(tradingCore, CoreMessageType.AMEND_ORDER, 101,
                     TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(41, 43, "amend-valid",
                             450_000L, 3L, CoreTimeInForce.GTC, false)));
             // 当前执行的原响应或解码出的订单视图列表，按所在方法类型使用
             var result = CoreCommandResultCodec.decode(amended.data()).orders();
             assertThat(result).anySatisfy(/* 从改单或下单结果中逐项核对身份与状态的协议订单视图 */ order -> { assertThat(order.orderId()).isEqualTo(41); assertThat(order.status()).isEqualTo("CANCELED"); });
             assertThat(result).anySatisfy(/* 从改单或下单结果中逐项核对身份与状态的协议订单视图 */ order -> { assertThat(order.orderId()).isEqualTo(43); assertThat(order.status()).isEqualTo("OPEN"); });
-            assertThat(runtime.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(13_506_750_000L);
-            place(runtime, 202, 44, CoreOrderSide.SELL, 3, 450_000, CoreTimeInForce.IOC);
+            assertThat(tradingCore.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(13_506_750_000L);
+            place(tradingCore, 202, 44, CoreOrderSide.SELL, 3, 450_000, CoreTimeInForce.IOC);
             // 当前现货运行时导出的已提交冷状态，供精确资金断言
-            var state = runtime.tradingState();
+            var state = tradingCore.tradingState();
             assertThat(state.users().get(101L).balances().get("USDT").lockedUnits()).isZero();
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "USDT")).isEqualTo(partiallyFilled ? 82_496_500_000L : 86_497_300_000L);
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(202L), "USDT")).isEqualTo(partiallyFilled ? 17_491_250_000L : 13_493_250_000L);
@@ -149,7 +149,7 @@ class CoreSpotAssetUnitsTest {
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "USDT") + CoreStateTestFixtures.totalUnits(state.users().get(202L), "USDT")
                     + state.treasuryState().feeBalances().get("USDT")).isEqualTo(100_000_000_000L);
         } finally {
-            if (runtime != original) runtime.close();
+            if (tradingCore != original) tradingCore.close();
             original.close();
         }
     }
@@ -161,31 +161,31 @@ class CoreSpotAssetUnitsTest {
     @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void cancelBatchReleasesOnlyOwnedOrdersAndPreservesMixedResultsAfterRestore(boolean restore) {
         // 最初创建的现货运行时，finally 必须关闭
-        var original = new TradingCoreRuntime(ProductLine.SPOT);
+        var original = new TradingCore(ProductLine.SPOT);
         // 当前操作的运行时引用，恢复后与 original 不同并需分别关闭
-        TradingCoreRuntime runtime = original;
+        TradingCore tradingCore = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
             var registration = new RegisterInstrumentCommand(
                     "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
                     0b11, 0b1111, 100_000);
-            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
-            fund(runtime, 101, "USDT", 100_000_000_000L); fund(runtime, 202, "BTC", 1_000_000L);
-            place(runtime, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
-            place(runtime, 101, 43, CoreOrderSide.BUY, 3, 410_000, CoreTimeInForce.GTC);
-            place(runtime, 202, 40, CoreOrderSide.SELL, 1, 410_000, CoreTimeInForce.IOC);
-            place(runtime, 202, 44, CoreOrderSide.SELL, 1, 500_000, CoreTimeInForce.GTC);
-            if (restore) runtime = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot(74));
+            apply(tradingCore, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
+            fund(tradingCore, 101, "USDT", 100_000_000_000L); fund(tradingCore, 202, "BTC", 1_000_000L);
+            place(tradingCore, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
+            place(tradingCore, 101, 43, CoreOrderSide.BUY, 3, 410_000, CoreTimeInForce.GTC);
+            place(tradingCore, 202, 40, CoreOrderSide.SELL, 1, 410_000, CoreTimeInForce.IOC);
+            place(tradingCore, 202, 44, CoreOrderSide.SELL, 1, 500_000, CoreTimeInForce.GTC);
+            if (restore) tradingCore = TradingCore.fromSnapshot(ProductLine.SPOT, original.snapshot(74));
             // 含他人订单批撤之前自己的冻结总额，整体拒绝不能改变它
-            long beforeRejected = runtime.tradingState().users().get(101L).balances().get("USDT").lockedUnits();
+            long beforeRejected = tradingCore.tradingState().users().get(101L).balances().get("USDT").lockedUnits();
             // 本次资金不足改单或跨用户批撤的原拒绝响应
-            var rejected = execute(runtime, CoreMessageType.CANCEL_ORDER_BATCH, 101,
+            var rejected = execute(tradingCore, CoreMessageType.CANCEL_ORDER_BATCH, 101,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
                             new CancelOrderCommand(41), new CancelOrderCommand(44)))));
             assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.ORDER_OWNER_MISMATCH);
-            assertThat(runtime.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(beforeRejected);
+            assertThat(tradingCore.tradingState().users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(beforeRejected);
             // 当前执行的原响应或解码出的订单视图列表，按所在方法类型使用
-            var result = apply(runtime, CoreMessageType.CANCEL_ORDER_BATCH, 101,
+            var result = apply(tradingCore, CoreMessageType.CANCEL_ORDER_BATCH, 101,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
                             new CancelOrderCommand(41), new CancelOrderCommand(43),
                             new CancelOrderCommand(999)))));
@@ -195,7 +195,7 @@ class CoreSpotAssetUnitsTest {
                     ResponseStatus.APPLIED, ResponseStatus.APPLIED, ResponseStatus.REJECTED);
             assertThat(items.get(2).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
             // 当前现货运行时导出的已提交冷状态，供精确资金断言
-            var state = runtime.tradingState();
+            var state = tradingCore.tradingState();
             assertThat(state.users().get(101L).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.users().get(202L).balances().get("BTC").lockedUnits()).isEqualTo(100_000);
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "BTC")).isEqualTo(100_000);
@@ -205,9 +205,9 @@ class CoreSpotAssetUnitsTest {
             assertThat(state.treasuryState().feeBalances().get("USDT")).isEqualTo(2_870_000L);
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "USDT") + CoreStateTestFixtures.totalUnits(state.users().get(202L), "USDT")
                     + state.treasuryState().feeBalances().get("USDT")).isEqualTo(100_000_000_000L);
-            apply(runtime, CoreMessageType.CANCEL_ORDER, 202, TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(44)));
-            assertThat(runtime.tradingState().users().get(202L).balances().get("BTC").lockedUnits()).isZero();
-        } finally { if (runtime != original) runtime.close(); original.close(); }
+            apply(tradingCore, CoreMessageType.CANCEL_ORDER, 202, TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(44)));
+            assertThat(tradingCore.tradingState().users().get(202L).balances().get("BTC").lockedUnits()).isZero();
+        } finally { if (tradingCore != original) tradingCore.close(); original.close(); }
     }
 
     /**
@@ -217,9 +217,9 @@ class CoreSpotAssetUnitsTest {
      * @param user 原命令所属用户
      * @param payload 原业务已编码载荷
      */
-    private CoreResponse apply(TradingCoreRuntime runtime, CoreMessageType type, long user, byte[] payload) {
+    private CoreResponse apply(TradingCore tradingCore, CoreMessageType type, long user, byte[] payload) {
         // 当前执行的原响应或解码出的订单视图列表，按所在方法类型使用
-        var result = execute(runtime, type, user, payload);
+        var result = execute(tradingCore, type, user, payload);
         assertThat(result.commandStatus()).as(type + " " + result.resultCode()).isEqualTo(ResponseStatus.APPLIED);
         return result;
     }
@@ -231,8 +231,8 @@ class CoreSpotAssetUnitsTest {
      * @param asset 要入账的原资产文本
      * @param units 要增加的原资产单位数
      */
-    private void fund(TradingCoreRuntime runtime, long user, String asset, long units) {
-        apply(runtime, CoreMessageType.ADJUST_BALANCE, user,
+    private void fund(TradingCore tradingCore, long user, String asset, long units) {
+        apply(tradingCore, CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units)));
     }
 
@@ -246,8 +246,8 @@ class CoreSpotAssetUnitsTest {
      * @param price 订单价格 tick 数，不是已乘资产精度的余额单位
      * @param tif 原下单有效期，参数场景覆盖 IOC 或 FOK，挂单使用 GTC
      */
-    private CoreOrderStateView place(TradingCoreRuntime runtime, long user, long id, CoreOrderSide side, long quantity, long price, CoreTimeInForce tif) {
-        return place(runtime, user, id, side, quantity, price, tif, CoreOrderType.LIMIT);
+    private CoreOrderStateView place(TradingCore tradingCore, long user, long id, CoreOrderSide side, long quantity, long price, CoreTimeInForce tif) {
+        return place(tradingCore, user, id, side, quantity, price, tif, CoreOrderType.LIMIT);
     }
 
     /**
@@ -261,10 +261,10 @@ class CoreSpotAssetUnitsTest {
      * @param tif 原下单有效期，参数场景覆盖 IOC 或 FOK，挂单使用 GTC
      * @param type 本条原下单类型，LIMIT 或 MARKET
      */
-    private CoreOrderStateView place(TradingCoreRuntime runtime, long user, long id, CoreOrderSide side,
+    private CoreOrderStateView place(TradingCore tradingCore, long user, long id, CoreOrderSide side,
             long quantity, long price, CoreTimeInForce tif, CoreOrderType type) {
         // 本次原下单的最终应用响应
-        var response = apply(runtime, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+        var response = apply(tradingCore, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
                 id, "1", side, price, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 type, tif, false, "spot-units-" + id)));
         return CoreCommandResultCodec.decode(response.data()).orders().stream()
@@ -278,26 +278,26 @@ class CoreSpotAssetUnitsTest {
      * @param user 原命令所属用户
      * @param payload 原业务已编码载荷
      */
-    private CoreResponse execute(TradingCoreRuntime runtime, CoreMessageType type, long user, byte[] payload) {
+    private CoreResponse execute(TradingCore tradingCore, CoreMessageType type, long user, byte[] payload) {
         // 为本条原消息递增的来源序号
         long seq = ++sequence;
         // 当前带现货、原用户、请求业务时间及来源的原消息
         var message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.SPOT,
                 CommandSource.OPERATIONS, 991, seq, user, 1_700_000_000_000L + seq, seq), payload);
         // 当前执行的原响应或解码出的订单视图列表，按所在方法类型使用
-        var result = runtime.apply(message);
+        var result = tradingCore.apply(message);
         // 本辅助轮询直接控制命令的五秒单调时钟截止值
         long directDeadline = System.nanoTime() + 5_000_000_000L;
-        while (result == null && runtime.directCommand.active() && System.nanoTime() < directDeadline) {
-            result = runtime.directCommand.poll();
+        while (result == null && tradingCore.directCommand.active() && System.nanoTime() < directDeadline) {
+            result = tradingCore.directCommand.poll();
             if (result == null) Thread.onSpinWait();
         }
-        if (result == null && runtime.directCommand.active()) {
+        if (result == null && tradingCore.directCommand.active()) {
             throw new AssertionError("Direct command timed out: " + type);
         }
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {
             result = com.surprising.aeron.service.order.CoreTestCompletion.completeMatchingSynchronously(
-                    runtime, runtime.matchingSequence(message.header().commandId()), 1_700_000_000_000L + seq, seq);
+                    tradingCore, tradingCore.matchingSequence(message.header().commandId()), 1_700_000_000_000L + seq, seq);
         }
         return result;
     }

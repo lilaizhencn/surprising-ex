@@ -24,7 +24,7 @@ class CoreAuditHashQueryTest {
      */
     @Test
     void explicitGlobalHashObservesCommittedFundsAndSurvivesSnapshot() {
-        try (/* 原现货交易运行时，资源退出时关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 原现货交易运行时，资源退出时关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 资金入账前显式查询得到的业务哈希
             long before = hash(state, CoreMessageType.BUSINESS_STATE_HASH_QUERY);
             // 给用户十一增加一百二十三 USDT 的原余额请求
@@ -36,7 +36,7 @@ class CoreAuditHashQueryTest {
             long after = hash(state, CoreMessageType.BUSINESS_STATE_HASH_QUERY);
             assertThat(after).isNotEqualTo(before).isEqualTo(state.tradingState().businessStateHash());
             assertThat(hash(state, CoreMessageType.STATE_HASH_QUERY)).isEqualTo(after);
-            try (/* 从提交后快照恢复的独立运行时 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot(100))) {
+            try (/* 从提交后快照恢复的独立运行时 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot(100))) {
                 assertThat(hash(restored, CoreMessageType.BUSINESS_STATE_HASH_QUERY)).isEqualTo(after);
                 assertThat(CoreTestCompletion.applyAsynchronously(restored, adjust).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(hash(restored, CoreMessageType.STATE_HASH_QUERY)).isEqualTo(after);
@@ -49,7 +49,7 @@ class CoreAuditHashQueryTest {
      * @param state 本用例已提交的现货交易运行时
      * @param type 本次使用的业务哈希或状态哈希查询消息类型
      */
-    private static long hash(TradingCoreRuntime state, CoreMessageType type) {
+    private static long hash(TradingCore state, CoreMessageType type) {
         // 指定哈希只读查询的响应，要求状态 OK
         var response = state.apply(new CoreMessage(CoreMessageHeader.query(type, UUID.randomUUID(),
                 ProductLine.SPOT, CommandSource.OPERATIONS, 77, 0, 0, 2, 2), new byte[0]));

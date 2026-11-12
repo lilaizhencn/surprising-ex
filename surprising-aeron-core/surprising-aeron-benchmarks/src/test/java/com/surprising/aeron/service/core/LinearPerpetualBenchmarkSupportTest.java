@@ -66,9 +66,9 @@ class LinearPerpetualBenchmarkSupportTest {
             assertThat(LinearPerpetualBenchmarkSupport.activeOrderCount(harness.state().activeOrderIndex())).isZero();
             assertThat(LinearPerpetualBenchmarkSupport.adlPositionCount(harness.state().adlPositionIndex())).isZero();
             assertThat(harness.state().triggerOrderIndex().ids().size()).isZero();
-            assertThat(harness.state().runtimeState().treasury().fundingProgress(
+            assertThat(harness.state().accountBook().systemFunds().fundingProgress(
                     harness.state().identities.symbolId("1"))).isNull();
-            assertThat(harness.state().runtimeState().incompleteRiskScanCount()).isZero();
+            assertThat(harness.state().accountBook().incompleteRiskScanCount()).isZero();
         }
     }
 

@@ -1,24 +1,24 @@
 package com.surprising.aeron.service.order;
 
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 
 /** 独立基准边界等待适配器，不进入生产服务包。 */
 public final class BenchmarkMatchingAwait {
     public static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatchingResult(
-            TradingCoreRuntime state, long sequence) {
-        return awaitMatchingResult(state, sequence, TradingCoreRuntime.Limits.MATCHING_AWAIT_TIMEOUT_NANOS);
+            TradingCore state, long sequence) {
+        return awaitMatchingResult(state, sequence, TradingCore.Limits.MATCHING_AWAIT_TIMEOUT_NANOS);
     }
 
     public static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatchingResult(
-            TradingCoreRuntime state, long sequence, long timeoutNanos) {
+            TradingCore state, long sequence, long timeoutNanos) {
         if (state.fatalFailure() != null) return null;
         if (timeoutNanos <= 0) return null;
         long deadline = System.nanoTime() + timeoutNanos;
         OrderCommand pending = state.pendingMatching().get(sequence);
-        while (pending != null && placeAdmissionOutstanding(pending)
+        while (pending != null && placeOrderCheckOutstanding(pending)
                 && !state.matchingFlow.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
-            state.matchingProgress.progressPlaceBatchAdmissions();
-            if (placeAdmissionOutstanding(pending)) Thread.onSpinWait();
+            state.matchingProgress.progressPlaceBatchOrderChecks();
+            if (placeOrderCheckOutstanding(pending)) Thread.onSpinWait();
         }
         if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         int idle = 0;
@@ -43,7 +43,7 @@ public final class BenchmarkMatchingAwait {
     }
     /** 读取现有槽内事实，供测试/基准等待使用；不执行结算或提交。 */
     public static com.surprising.aeron.service.matcher.OrderMatchingResult takeMatchingResult(
-            TradingCoreRuntime owner, long sequence) {
+            TradingCore owner, long sequence) {
         if (owner.fatalFailure() != null) return null;
         OrderCommand pending = owner.pendingMatching().get(sequence);
         if (pending == null) return null;
@@ -57,8 +57,8 @@ public final class BenchmarkMatchingAwait {
         return pending.takeMatchingCompletion();
     }
 
-    private static boolean placeAdmissionOutstanding(OrderCommand pending) {
+    private static boolean placeOrderCheckOutstanding(OrderCommand pending) {
         var batch = pending.orderBatch;
-        return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
+        return batch != null && batch.placeBatchOrderCheckEvent != null && !pending.isMatchingSubmitted();
     }
 }

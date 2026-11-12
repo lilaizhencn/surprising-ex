@@ -612,7 +612,7 @@ public final class LinearPerpetualBenchmarkSupport {
                 }
                 SnapshotTemplate completed = harness.snapshotTemplate(
                         harness.state().laneTopology().accountLaneCount());
-                try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(
+                try (TradingCore restored = TradingCore.fromSnapshot(
                         completed.productLine(), completed.bytes())) {
                     if (restored.tradingState().businessStateHash() != completed.businessStateHash()) {
                         throw new IllegalStateException("order continuation snapshot recovery mismatch");
@@ -930,7 +930,7 @@ public final class LinearPerpetualBenchmarkSupport {
 
     private static void verifySnapshot(Harness harness) {
         SnapshotTemplate snapshot = harness.snapshotTemplate(harness.state.laneTopology().accountLaneCount());
-        try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(snapshot.productLine(), snapshot.bytes())) {
+        try (TradingCore restored = TradingCore.fromSnapshot(snapshot.productLine(), snapshot.bytes())) {
             if (restored.tradingState().businessStateHash() != snapshot.businessStateHash()) {
                 throw new IllegalStateException("liquidation benchmark snapshot recovery mismatch");
             }
@@ -957,11 +957,11 @@ public final class LinearPerpetualBenchmarkSupport {
 
     public static Scenario snapshotRecovery(SnapshotTemplate template) {
         return new Scenario() {
-            private TradingCoreRuntime restored;
+            private TradingCore restored;
 
             @Override
             public long run() {
-                restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, template.bytes());
+                restored = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, template.bytes());
                 long actualHash = restored.tradingState().businessStateHash();
                 if (actualHash != template.businessStateHash()
                         || restored.laneTopology().accountLaneCount() != template.accountLanes()) {
@@ -1013,9 +1013,9 @@ public final class LinearPerpetualBenchmarkSupport {
                     balances = Math.addExact(balances,
                             Math.addExact(balance.availableUnits(), balance.lockedUnits()));
                 }
-                long treasury = state.treasuryState().insuranceBalances().getOrDefault(SETTLE_ASSET, 0L)
+                long systemFunds = state.treasuryState().insuranceBalances().getOrDefault(SETTLE_ASSET, 0L)
                         + state.treasuryState().feeBalances().getOrDefault(SETTLE_ASSET, 0L);
-                if (Math.addExact(balances, treasury) != Math.multiplyExact(SAFE_BALANCE, 2)
+                if (Math.addExact(balances, systemFunds) != Math.multiplyExact(SAFE_BALANCE, 2)
                         || harness.acceptedMessages() != harness.terminalMessages()
                         || harness.acceptedCoreMessages() != harness.terminalCoreMessages()
                         || LinearPerpetualBenchmarkSupport.activeOrderCount(harness.state().activeOrderIndex()) != (makerQuantity > filled ? 1 : 0))
@@ -1105,7 +1105,7 @@ public final class LinearPerpetualBenchmarkSupport {
 
     private static Harness base(int accountLanes) {
         configureAccountLanes(accountLanes);
-        Harness harness = new Harness(new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL), new Sequences());
+        Harness harness = new Harness(new TradingCore(ProductLine.LINEAR_PERPETUAL), new Sequences());
         if (harness.state.laneTopology().accountLaneCount() != accountLanes) {
             harness.close();
             throw new IllegalStateException("Core did not start with requested account lane count");
@@ -1154,7 +1154,7 @@ public final class LinearPerpetualBenchmarkSupport {
     }
 
     public static final class Harness implements AutoCloseable {
-        private final TradingCoreRuntime state;
+        private final TradingCore state;
         private final Sequences sequences;
         private long executedMessages;
         private long acceptedMessages;
@@ -1172,7 +1172,7 @@ public final class LinearPerpetualBenchmarkSupport {
         private int deferredBatchOperationWeight;
         private OpenLoopBusinessLatencyRecorder businessLatencies;
 
-        private Harness(TradingCoreRuntime state, Sequences sequences) {
+        private Harness(TradingCore state, Sequences sequences) {
             this.state = state;
             this.sequences = sequences;
         }
@@ -1183,7 +1183,7 @@ public final class LinearPerpetualBenchmarkSupport {
 
         public static Harness create(int accountLanes, ProductLine productLine) {
             configureAccountLanes(accountLanes);
-            Harness harness = new Harness(new TradingCoreRuntime(productLine), new Sequences());
+            Harness harness = new Harness(new TradingCore(productLine), new Sequences());
             if (harness.state.laneTopology().accountLaneCount() != accountLanes) {
                 harness.close();
                 throw new IllegalStateException("Core did not start with requested account lane count");
@@ -1197,7 +1197,7 @@ public final class LinearPerpetualBenchmarkSupport {
 
         public static Harness restore(SnapshotTemplate template, boolean deferBatchResponseValidation) {
             configureAccountLanes(template.accountLanes());
-            TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(template.productLine(), template.bytes());
+            TradingCore restored = TradingCore.fromSnapshot(template.productLine(), template.bytes());
             Harness harness = new Harness(restored, Sequences.after(
                     restored.appliedCommandCount(), template.nextClusterPosition()));
             harness.deferBatchResponseValidation = deferBatchResponseValidation;
@@ -1321,7 +1321,7 @@ public final class LinearPerpetualBenchmarkSupport {
             OrderCommandQueue.IngressWindow.Entry windowEntry = null;
             CoreResponse response;
             if (clusterMatchingPipeline
-                    && TradingCoreRuntime.isMatchingCommand(command.header().messageType())) {
+                    && TradingCore.isMatchingCommand(command.header().messageType())) {
                 if (!state.prepareClusterPipelineScope(command, clusterCommandWindow)
                         || clusterCommandWindow.conflictingPrefixSize() != 0) {
                     throw new IllegalStateException("saturation command is not independently pipelineable");
@@ -1618,7 +1618,7 @@ public final class LinearPerpetualBenchmarkSupport {
             return state.productLine();
         }
 
-        public TradingCoreRuntime state() {
+        public TradingCore state() {
             return state;
         }
 

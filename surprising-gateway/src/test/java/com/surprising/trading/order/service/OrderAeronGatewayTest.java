@@ -34,7 +34,7 @@ class OrderAeronGatewayTest {
     }
 
     @Test
-    void forwardsTypedCommandOutcomeWithoutConvertingAdmissionOrUnknown() {
+    void forwardsTypedCommandOutcomeWithoutConvertingOrderCheckOrUnknown() {
         AeronClientPool clients = mock(AeronClientPool.class);
         OrderAeronGateway gateway = new OrderAeronGateway(clients);
         UUID commandId = UUID.fromString("33333333-3333-3333-3333-333333333333");

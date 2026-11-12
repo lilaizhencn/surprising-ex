@@ -14,11 +14,11 @@ import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,21 +37,21 @@ class RuntimeStateTransitionsTest {
         // 当前用例变更前的完整状态，作为投影起点及未变断言基线
         var before = TradingCoreState.empty(ProductLine.SPOT);
         // 本次投影独用的整数身份表，与对应运行时成对使用
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 从变更前状态投影的冷运行时，供直接转换和结果物化使用 */ var runtime = RuntimeStateProjector.project(before, identities)) {
+        var identities = new IdIndex();
+        try (/* 从变更前状态投影的冷运行时，供直接转换和结果物化使用 */ var accountBook = SnapshotLoader.loadSnapshot(before, identities)) {
             // 只为分页用例构造的五条待转记录，恢复后保留全部事实
             var pending = new java.util.TreeMap<Long, com.surprising.aeron.protocol.TransferFundsCommand>();
             for (/* 当前生成的待转业务 ID，从一到五 */ long id = 1; id <= 5; id++) pending.put(id,
                     new TransferFundsCommand(id, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
                                     "SPOT", "USDT_PERPETUAL", "USDT", 1, "r" + id, "", 7L, 7L));
-            runtime.restorePendingTransfers(pending);
+            accountBook.restorePendingTransfers(pending);
             for (long[] expected : new long[][]{{1, 2}, {3, 4}, {5}, {1, 2}}) {
-                var page = runtime.pendingTransferRoutes(2);
+                var page = accountBook.pendingTransferRoutes(2);
                 assertThat(page.ids()).containsExactly(expected);
-                for (long id : page.ids()) assertThat(runtime.pendingTransfer(id)).isEqualTo(pending.get(id));
-                runtime.completePendingTransferPage(page);
+                for (long id : page.ids()) assertThat(accountBook.pendingTransfer(id)).isEqualTo(pending.get(id));
+                accountBook.completePendingTransferPage(page);
             }
-            assertThat(runtime.pendingTransfersSnapshot()).isEqualTo(pending);
+            assertThat(accountBook.pendingTransfersSnapshot()).isEqualTo(pending);
         }
     }
 
@@ -65,27 +65,27 @@ class RuntimeStateTransitionsTest {
                 TradingCoreState.empty(ProductLine.SPOT), 7,
                 new BalanceAdjustmentCommand("USDT", 1_000));
         // 本次投影独用的整数身份表，与对应运行时成对使用
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
         // 同一用户七从现货向正向永续划转二百五十的请求，目标或源用例分别执行相应一步
         TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
                 "transfer-91", "product allocation", 7L, 7L);
 
         var task = new AccountCommandService();
-        LedgerControlTestSupport.await(runtime, task.prepareTransferOut(runtime, identities, 7L, transfer));
+        LedgerControlTestSupport.await(accountBook, task.prepareTransferOut(accountBook, identities, 7L, transfer));
         assertThat(task.stateChanged()).isTrue();
-        assertThat(runtime.pendingTransfer(91L)).isNotNull();
-        assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
-        long beforeRetry = runtime.revision();
-        LedgerControlTestSupport.await(runtime, task.prepareTransferOut(runtime, identities, 7L, transfer));
-        assertThat(runtime.revision()).isEqualTo(beforeRetry);
-        assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
+        assertThat(accountBook.pendingTransfer(91L)).isNotNull();
+        assertThat(accountBook.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
+        long beforeRetry = accountBook.revision();
+        LedgerControlTestSupport.await(accountBook, task.prepareTransferOut(accountBook, identities, 7L, transfer));
+        assertThat(accountBook.revision()).isEqualTo(beforeRetry);
+        assertThat(accountBook.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
 
-        assertThat(AccountCommandService.completeTransfer(runtime, 7L, 91L)).isTrue();
-        assertThat(runtime.pendingTransfer(91L)).isNull();
-        assertThat(AccountCommandService.completeTransfer(runtime, 7L, 91L)).isFalse();
+        assertThat(AccountCommandService.completeTransfer(accountBook, 7L, 91L)).isTrue();
+        assertThat(accountBook.pendingTransfer(91L)).isNull();
+        assertThat(AccountCommandService.completeTransfer(accountBook, 7L, 91L)).isFalse();
     }
 
     /**
@@ -95,7 +95,7 @@ class RuntimeStateTransitionsTest {
     void transferInCreditsTargetRuntime() {
         var transfer = new TransferFundsCommand(91L, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
                 "SPOT", "USDT_PERPETUAL", "USDT", 250, "transfer-91", "product allocation", 7, 7);
-        try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (var core = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             var message = new com.surprising.aeron.protocol.CoreMessage(
                     com.surprising.aeron.protocol.CoreMessageHeader.command(
                             com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN, new java.util.UUID(91, 1),
@@ -124,13 +124,13 @@ class RuntimeStateTransitionsTest {
             // 冷转换辅助对同一输入生成的预期完整状态
             TradingCoreState expected = reference.adjustBalance(before, 7, command);
             // 本次投影独用的整数身份表，与对应运行时成对使用
-            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            IdIndex identities = new IdIndex();
             // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-            TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+            AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
 
-            LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareBalanceAdjustment(runtime, identities, 7, command.asset(), command.deltaUnits()));
+            LedgerControlTestSupport.await(accountBook, new AccountCommandService().prepareBalanceAdjustment(accountBook, identities, 7, command.asset(), command.deltaUnits()));
 
-            assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
+            assertThat(SnapshotWriter.writeSnapshot(accountBook, identities))
                     .as(productLine.name())
                     .isEqualTo(expected);
         }
@@ -145,13 +145,13 @@ class RuntimeStateTransitionsTest {
         TradingCoreState before = new RuntimeTestStateTransitions().adjustBalance(
                 TradingCoreState.empty(ProductLine.SPOT), 7, new BalanceAdjustmentCommand("USDT", 10));
         // 本次投影独用的整数身份表，与对应运行时成对使用
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
 
-        assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareBalanceAdjustment(runtime, identities, 7, "USDT", -11)))
+        assertThatThrownBy(() -> LedgerControlTestSupport.await(accountBook, new AccountCommandService().prepareBalanceAdjustment(accountBook, identities, 7, "USDT", -11)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(before);
+        assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(before);
     }
 
     /**
@@ -168,13 +168,13 @@ class RuntimeStateTransitionsTest {
         // 冷转换辅助对同一输入生成的预期完整状态
         TradingCoreState expected = new RuntimeTestStateTransitions().updateRiskScanControl(before, command, 123);
         // 本次投影独用的整数身份表，与对应运行时成对使用
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
 
-        runtime.updateRiskScanControl(command, 123);
+        accountBook.updateRiskScanControl(command, 123);
 
-        assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
+        assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(expected);
     }
 
     /**
@@ -190,13 +190,13 @@ class RuntimeStateTransitionsTest {
         // 冷转换辅助对同一输入生成的预期完整状态
         TradingCoreState expected = new RuntimeTestStateTransitions().registerInstrument(before, command);
         // 本次投影独用的整数身份表，与对应运行时成对使用
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
 
-        InstrumentConfigurationCommands.applyConfiguration(runtime, identities, command);
+        InstrumentConfigurationCommands.applyConfiguration(accountBook, identities, command);
 
-        assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
+        assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(expected);
     }
 
     /**
@@ -211,16 +211,16 @@ class RuntimeStateTransitionsTest {
         // 冷转换辅助对同一输入生成的预期完整状态
         TradingCoreState expected = new RuntimeTestStateTransitions().updatePositionMode(before, 7, command);
         // 本次投影独用的整数身份表，与对应运行时成对使用
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
 
         var task = new AccountCommandService();
-        LedgerControlTestSupport.await(runtime, task.preparePositionModeChange(runtime, 7, command));
+        LedgerControlTestSupport.await(accountBook, task.preparePositionModeChange(accountBook, 7, command));
         assertThat(task.stateChanged()).isTrue();
 
-        assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
-        LedgerControlTestSupport.await(runtime, task.preparePositionModeChange(runtime, 7, command));
+        assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(expected);
+        LedgerControlTestSupport.await(accountBook, task.preparePositionModeChange(accountBook, 7, command));
         assertThat(task.stateChanged()).isFalse();
     }
 
@@ -245,14 +245,14 @@ class RuntimeStateTransitionsTest {
         // 冷转换辅助对同一输入生成的预期完整状态
         TradingCoreState expected = reference.updateLeverage(before, 7, command);
         // 本次投影独用的整数身份表，与对应运行时成对使用
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
 
         var task = new AccountCommandService();
-        LedgerControlTestSupport.await(runtime, task.prepareLeverageChange(runtime, identities, 7, command));
+        LedgerControlTestSupport.await(accountBook, task.prepareLeverageChange(accountBook, identities, 7, command));
         assertThat(task.stateChanged()).isTrue();
 
-        assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
+        assertThat(SnapshotWriter.writeSnapshot(accountBook, identities)).isEqualTo(expected);
     }
 }

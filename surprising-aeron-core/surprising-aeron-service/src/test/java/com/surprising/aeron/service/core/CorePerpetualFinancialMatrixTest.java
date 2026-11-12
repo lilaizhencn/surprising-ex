@@ -27,14 +27,14 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.adl.AdlService;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.funding.FundingSettlementService;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.liquidation.LiquidationService;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.*;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import com.surprising.aeron.support.math.*;
@@ -191,7 +191,7 @@ class CorePerpetualFinancialMatrixTest {
      * 为默认正向全仓组合建立分属不同账户 Lane 的对向持仓，直接应用资金费并比较支付事实、完整物化状态和哈希；本用例未启动账户或账本工作线程。
      */
     @Test
-    void crossLaneFundingReturnsOwnerContributionsBeforeSequencerTreasuryApply() {
+    void crossLaneFundingReturnsOwnerContributionsBeforeSequencerSystemFundsApply() {
         // 当前执行的永续类型与保证金模式组合
         Variant variant = VARIANTS.getFirst();
         // 本场景建立的原冷状态，作为后续业务转换或资金行基线
@@ -206,17 +206,17 @@ class CorePerpetualFinancialMatrixTest {
         // 冷辅助返回的资金费状态、支付事实及进度，作为直接入口对照
         RuntimeTestStateTransitions.FundingApplication expected = reducer.applyFundingWithFacts(marked, command);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(marked, identities)) {
-            assertThat(runtime.topology().accountLaneId(USER_ID))
-                    .isNotEqualTo(runtime.topology().accountLaneId(SECOND_MAKER_ID));
+        IdIndex identities = new IdIndex();
+        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ AccountBook accountBook = SnapshotLoader.loadSnapshot(marked, identities)) {
+            assertThat(accountBook.topology().accountLaneId(USER_ID))
+                    .isNotEqualTo(accountBook.topology().accountLaneId(SECOND_MAKER_ID));
             // 直接资金费处理返回的支付事实和进度，不是另一个运行时快照
             FundingSettlementService.FundingResult actual =
-                    RuntimePerpetualFundingFixture.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
+                    RuntimePerpetualFundingFixture.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID), accountBook,
                             identities);
 
-            RuntimeStateParityChecker.assertMatches(expected.state(), identities, runtime);
-            assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
+            RuntimeStateParityChecker.assertMatches(expected.state(), identities, accountBook);
+            assertThat(SnapshotWriter.writeSnapshot(accountBook, identities))
                     .isEqualTo(expected.state());
             assertThat(actual.payments()).isEqualTo(expected.payments());
         }
@@ -256,13 +256,13 @@ class CorePerpetualFinancialMatrixTest {
         // 冷路径执行同一 ADL 后的完整预期状态
         TradingCoreState expected = reducer.executeAdl(beforeAdl, command);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本次验证直接转换或异步控制使用的投影运行时
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(beforeAdl, identities);
-        runtime.startAccountLanes();
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(beforeAdl, identities);
+        accountBook.startAccountLanes();
         try {
             // 已派到账户 Lane 的 ADL 可轮询工作
-            var work = AdlService.begin(null, command, runtime, identities);
+            var work = AdlService.begin(null, command, accountBook, identities);
             // 该异步 ADL 工作必须完成的单调时钟五秒期限
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while (!work.getAsBoolean()) {
@@ -270,9 +270,9 @@ class CorePerpetualFinancialMatrixTest {
                 Thread.onSpinWait();
             }
 
-            RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
+            RuntimeStateParityChecker.assertMatches(expected, identities, accountBook);
         } finally {
-            runtime.close();
+            accountBook.close();
         }
     }
 
@@ -300,17 +300,17 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(topology.accountLaneId(USER_ID) == topology.accountLaneId(SECOND_MAKER_ID))
                 .as("funding payer and receiver share a lane only in the single-lane fixture")
                 .isEqualTo(accountLaneCount == 1);
-        var identities = new RuntimeIdentityRegistry(topology);
-        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
-            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
+        var identities = new IdIndex(topology);
+        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var accountBook = SnapshotLoader.loadSnapshot(marked, identities, topology)) {
+            accountBook.startAccountLanes(); accountBook.bindLedgerPositionOwner();
             // 在原 System Ledger 作用域内准备的资金费续步工作
-            var work = FundingSettlementService.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
+            var work = FundingSettlementService.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID), accountBook,
                     identities);
-            LedgerControlTestSupport.await(runtime, work::poll);
+            LedgerControlTestSupport.await(accountBook, work::poll);
             assertThat(work.poll()).isTrue();
             assertThat(work.result().payments()).isEqualTo(expected.payments());
-            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected.state());
-            assertThat(runtime.treasury().fundingResidual(identities.assetId(variant.settleAsset())))
+            assertThat(LedgerControlTestSupport.commit(accountBook, identities, false)).isEqualTo(expected.state());
+            assertThat(accountBook.systemFunds().fundingResidual(identities.assetId(variant.settleAsset())))
                     .isEqualTo(expected.state().treasuryState().fundingResidualBalances().getOrDefault(variant.settleAsset(), 0L));
         }
     }
@@ -327,25 +327,25 @@ class CorePerpetualFinancialMatrixTest {
         var topology = new LaneTopology(1, accountLaneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
                 LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE, LaneTopology.DEFAULT_QUEUE_CAPACITY,
                 LaneTopology.DEFAULT_QUEUE_CAPACITY);
-        var identities = new RuntimeIdentityRegistry(topology);
-        try (var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
+        var identities = new IdIndex(topology);
+        try (var accountBook = SnapshotLoader.loadSnapshot(marked, identities, topology)) {
             // 本例先完成选页，再激活线程，才能只阻塞资金记账，不把用户选页也挡在满队列后。
             var work = FundingSettlementService.prepare(null, command,
-                    List.of(USER_ID, SECOND_MAKER_ID), runtime, identities);
-            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
-            LedgerControlTestSupport.await(runtime, work::poll);
+                    List.of(USER_ID, SECOND_MAKER_ID), accountBook, identities);
+            accountBook.startAccountLanes(); accountBook.bindLedgerPositionOwner();
+            LedgerControlTestSupport.await(accountBook, work::poll);
             var retained = work.result();
             assertThat(retained.payments()).isEqualTo(expected.payments());
-            var settled = LedgerControlTestSupport.commit(runtime, identities, false);
+            var settled = LedgerControlTestSupport.commit(accountBook, identities, false);
             assertThat(settled).isEqualTo(expected.state());
             var empty = FundingSettlementService.prepare(work,
-                    new ApplyFundingCommand(702, SYMBOL, 100_000), List.of(), runtime, identities);
+                    new ApplyFundingCommand(702, SYMBOL, 100_000), List.of(), accountBook, identities);
             assertThat(empty).isSameAs(work);
-            LedgerControlTestSupport.await(runtime, empty::poll);
+            LedgerControlTestSupport.await(accountBook, empty::poll);
             assertThat(empty.result().payments()).isEmpty();
             assertThat(empty.result().progress().complete()).isTrue();
             assertThat(empty.result().progress().processedUsers()).isZero();
-            var afterEmpty = LedgerControlTestSupport.commit(runtime, identities, false);
+            var afterEmpty = LedgerControlTestSupport.commit(accountBook, identities, false);
             assertThat(afterEmpty.users()).isEqualTo(settled.users());
             assertThat(afterEmpty.treasuryState().fundingSettlements()).containsEntry(SYMBOL, 702L);
             assertThat(retained.payments()).isEqualTo(expected.payments());
@@ -373,37 +373,37 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(topology.accountLaneId(USER_ID) == topology.accountLaneId(SECOND_MAKER_ID))
                 .as("ADL source and target share a lane only in the single-lane fixture")
                 .isEqualTo(accountLaneCount == 1);
-        var identities = new RuntimeIdentityRegistry(topology);
-        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
-            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
+        var identities = new IdIndex(topology);
+        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var accountBook = SnapshotLoader.loadSnapshot(marked, identities, topology)) {
+            accountBook.startAccountLanes(); accountBook.bindLedgerPositionOwner();
             // 按原账户及账本路径准备的可轮询强平执行工作
-            var execution = LiquidationService.beginExecution(null, execute, List.of(), 0, runtime, identities);
-            LedgerControlTestSupport.await(runtime, execution);
-            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+            var execution = LiquidationService.beginExecution(null, execute, List.of(), 0, accountBook, identities);
+            LedgerControlTestSupport.await(accountBook, execution);
+            assertThat(LedgerControlTestSupport.commit(accountBook, identities, false)).isEqualTo(expected);
             // 给保险外部注入的数量，随后按分配政策确定实际覆盖
             long coverage = variant.type() == ContractType.LINEAR_PERPETUAL ? 25 : 50_000;
             // 本次向结算资产保险基金增加指定数量的命令
             var adjustment = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), coverage);
             expected = reducer.adjustInsuranceFund(expected, adjustment);
-            LedgerControlTestSupport.await(runtime, InsuranceFundCommands.prepare(runtime, identities, adjustment));
-            assertThat(LedgerControlTestSupport.commit(runtime, identities, true)).isEqualTo(expected);
+            LedgerControlTestSupport.await(accountBook, InsuranceFundCommands.prepare(accountBook, identities, adjustment));
+            assertThat(LedgerControlTestSupport.commit(accountBook, identities, true)).isEqualTo(expected);
             coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(expected, 1);
             // 按政策金额确认保险覆盖的强平结果命令
             var resolve = new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
             expected = reducer.resolveLiquidation(expected, resolve);
-            LedgerControlTestSupport.await(runtime, LiquidationService.beginResolution(null, resolve, runtime, identities, List.of(1L)));
-            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+            LedgerControlTestSupport.await(accountBook, LiquidationService.beginResolution(null, resolve, accountBook, identities, List.of(1L)));
+            assertThat(LedgerControlTestSupport.commit(accountBook, identities, false)).isEqualTo(expected);
             // 覆盖剩余亏空的 ADL 命令，目标为第二做市用户空头
             var adl = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
                     -QUANTITY, 150, expected.riskState().markPrices().get(SYMBOL).priceSequence(), 5, linearOrInverse(variant, 700, 40_000));
             expected = reducer.executeAdl(expected, adl);
-            var work = AdlService.begin(null, adl, runtime, identities);
-            LedgerControlTestSupport.await(runtime, work);
-            long completedRevision = runtime.revision();
+            var work = AdlService.begin(null, adl, accountBook, identities);
+            LedgerControlTestSupport.await(accountBook, work);
+            long completedRevision = accountBook.revision();
             assertThat(work.getAsBoolean()).isTrue();
-            assertThat(runtime.revision()).isEqualTo(completedRevision);
-            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
-            runtime.assertAccountLanesHealthy();
+            assertThat(accountBook.revision()).isEqualTo(completedRevision);
+            assertThat(LedgerControlTestSupport.commit(accountBook, identities, false)).isEqualTo(expected);
+            accountBook.assertAccountLanesHealthy();
         }
     }
 
@@ -428,16 +428,16 @@ class CorePerpetualFinancialMatrixTest {
                 LaneTopology.DEFAULT_QUEUE_CAPACITY);
         assertThat(topology.accountLaneId(USER_ID) == topology.accountLaneId(SECOND_MAKER_ID))
                 .isEqualTo(accountLaneCount == 1);
-        var identities = new RuntimeIdentityRegistry(topology);
-        try (var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
-            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
+        var identities = new IdIndex(topology);
+        try (var accountBook = SnapshotLoader.loadSnapshot(marked, identities, topology)) {
+            accountBook.startAccountLanes(); accountBook.bindLedgerPositionOwner();
             var requests = actions.stream().map(action ->
                     new LiquidationService.ExecutionRequest(action, List.of(), 0)).toList();
             var work = LiquidationService.beginExecutionBatch(
-                    requests, batch.liquidationFeeRatePpm(), runtime, identities);
-            LedgerControlTestSupport.await(runtime, work);
+                    requests, batch.liquidationFeeRatePpm(), accountBook, identities);
+            LedgerControlTestSupport.await(accountBook, work);
             assertThat(work.getAsBoolean()).isTrue();
-            var actual = LedgerControlTestSupport.commit(runtime, identities, false);
+            var actual = LedgerControlTestSupport.commit(accountBook, identities, false);
             assertThat(actual).isEqualTo(expected);
             boolean isolated = variant.marginMode() == CoreMarginMode.ISOLATED;
             long fee = isolated ? 0 : linearOrInverse(variant, 80, 69);
@@ -446,9 +446,9 @@ class CorePerpetualFinancialMatrixTest {
                 assertThat(value.liquidationFeeUnits()).isEqualTo(fee);
             });
             assertThat(actual.treasuryState().insuranceBalances()).containsEntry(variant.settleAsset(), isolated ? 200L : 360L);
-            assertThat(runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
+            assertThat(accountBook.systemFunds().insurance(identities.assetId(variant.settleAsset())))
                     .isEqualTo(isolated ? 200L : 360L);
-            runtime.assertAccountLanesHealthy();
+            accountBook.assertAccountLanesHealthy();
         }
     }
 
@@ -550,26 +550,26 @@ class CorePerpetualFinancialMatrixTest {
         // 本段撤单并推进下一游标后的冷路径预期状态
         TradingCoreState expected = reducer.advanceLiquidationCancellation(ordered, command, canceled, 702);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本次验证直接转换或异步控制使用的投影运行时
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(ordered, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(ordered, identities);
 
         assertThat(RuntimeTestStateTransitions.applyLiquidationCancellationAdvance(ordered,
                 command,
                 RuntimeTestStateTransitions.cancellationRoutes(canceled),
                 702,
-                runtime,
-                identities)).isSameAs(runtime);
-        RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
+                accountBook,
+                identities)).isSameAs(accountBook);
+        RuntimeStateParityChecker.assertMatches(expected, identities, accountBook);
 
         // 仅应用所列撤单后的冷状态，供撤完再执行的预期结果使用
         TradingCoreState canceledState = reducer.cancelLifecycleOrders(ordered, canceled);
         // 先撤单再执行强平的冷路径完整预期状态
         TradingCoreState executionExpected = reducer.executeLiquidationAfterCancellation(canceledState, command);
         // 撤单后执行分支单独投影使用的身份表
-        RuntimeIdentityRegistry executionIdentities = new RuntimeIdentityRegistry();
+        IdIndex executionIdentities = new IdIndex();
         // 从同一 ordered 起点投影、供撤单加执行一步对照的运行时
-        TradingAccountRuntime executionRuntime = RuntimeStateProjector.project(ordered, executionIdentities);
+        AccountBook executionRuntime = SnapshotLoader.loadSnapshot(ordered, executionIdentities);
         assertThat(RuntimeTestStateTransitions.applyLiquidationExecution(ordered,
                 command,
                 RuntimeTestStateTransitions.cancellationRoutes(canceled),
@@ -843,9 +843,9 @@ class CorePerpetualFinancialMatrixTest {
         ExecuteLiquidationCommand liquidationCommand = new ExecuteLiquidationCommand(
                 1, plan.triggerPriceSequence(), executionPrice, feeRate);
         // 直接强平运行时投影和物化对比用的整数身份表
-        RuntimeIdentityRegistry liquidationIdentities = new RuntimeIdentityRegistry();
+        IdIndex liquidationIdentities = new IdIndex();
         // 执行同一强平命令的直接投影运行时，与冷状态结果逐项比较
-        TradingAccountRuntime runtimeLiquidated = RuntimeStateProjector.project(marked, liquidationIdentities);
+        AccountBook runtimeLiquidated = SnapshotLoader.loadSnapshot(marked, liquidationIdentities);
         assertThat(RuntimeTestStateTransitions.applyLiquidationExecution(marked,
                 liquidationCommand,
                 List.of(),
@@ -1086,9 +1086,9 @@ class CorePerpetualFinancialMatrixTest {
         ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(
                 1, liquidationSequence(marked), 90, 100_000);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
-        TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(marked, identities);
+        AccountBook runtimeEnding = SnapshotLoader.loadSnapshot(marked, identities);
         assertThat(RuntimeTestStateTransitions.applyLiquidationExecution(marked,
                 command,
                 List.of(),
@@ -1144,13 +1144,13 @@ class CorePerpetualFinancialMatrixTest {
         ResolveLiquidationCommand command = new ResolveLiquidationCommand(
                 1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 保险已注资状态快照往返后的冷状态，投影到直接确认路径前先核对一致
         TradingCoreState restoredFunded = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(funded), variant.productLine());
         assertThat(restoredFunded).isEqualTo(funded);
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
-        TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(restoredFunded, identities);
+        AccountBook runtimeEnding = SnapshotLoader.loadSnapshot(restoredFunded, identities);
         assertThat(RuntimeTestStateTransitions.applyLiquidationResolution(restoredFunded,
                 command,
                 runtimeEnding,
@@ -1242,13 +1242,13 @@ class CorePerpetualFinancialMatrixTest {
                 CorePositionSide.NET, -QUANTITY, 200,
                 beforeAdl.riskState().markPrices().get(SYMBOL).priceSequence(), 5, residual);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 待补亏状态快照往返后的冷状态，供直接 ADL 路径使用
         TradingCoreState restoredBeforeAdl = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(beforeAdl), variant.productLine());
         assertThat(restoredBeforeAdl).isEqualTo(beforeAdl);
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
-        TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(restoredBeforeAdl, identities);
+        AccountBook runtimeEnding = SnapshotLoader.loadSnapshot(restoredBeforeAdl, identities);
         assertThat(RuntimeTestStateTransitions.applyAdlExecution(restoredBeforeAdl, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用
         TradingCoreState ending = reducer.executeAdl(beforeAdl, command);

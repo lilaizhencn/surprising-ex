@@ -404,7 +404,7 @@ class TradingCommandCodecTest {
     }
 
     @Test
-    void registerInstrumentRoundTripPreservesTradingAdmissionSettings() {
+    void registerInstrumentRoundTripPreservesTradingOrderCheckSettings() {
         var command = new RegisterInstrumentCommand(
                 "1", "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(

@@ -140,7 +140,7 @@ public final class LinearPerpetualSaturationWorkload {
 
             @Override
             public int terminalTombstones() {
-                return harness.state().terminalRetentionTombstoneCount();
+                return harness.state().completedOrderArchiveTombstoneCount();
             }
 
             @Override
@@ -579,7 +579,7 @@ public final class LinearPerpetualSaturationWorkload {
         };
     }
 
-    private static long[] completedLaneOperations(TradingCoreRuntime state) {
+    private static long[] completedLaneOperations(TradingCore state) {
         long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
         long[] completed = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics()).accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
@@ -589,7 +589,7 @@ public final class LinearPerpetualSaturationWorkload {
         return total;
     }
 
-    private static int activeOrderCount(TradingCoreRuntime state) {
+    private static int activeOrderCount(TradingCore state) {
         return (int) state.tradingState().orders().values().stream()
                 .filter(order -> order.status() == CoreOrderStatus.OPEN)
                 .count();

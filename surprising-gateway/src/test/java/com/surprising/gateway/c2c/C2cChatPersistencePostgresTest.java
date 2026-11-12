@@ -93,7 +93,7 @@ class C2cChatPersistencePostgresTest {
         assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_messages",Long.class)).isEqualTo(1);
     }
 
-    @Test void storedFileKeepsItsCommittedAdmissionIfReadyUpdateFails() throws Exception {
+    @Test void storedFileKeepsItsCommittedOrderCheckIfReadyUpdateFails() throws Exception {
         UUID id=UUID.randomUUID();byte[] bytes=C2cAttachmentsPostgresTest.png();var attachments=fixture.bean(C2cAttachments.class);
         fixture.db.jdbc.execute("ALTER TABLE c2c_attachments ADD CONSTRAINT reject_ready CHECK(status<>'READY')");
         assertThatThrownBy(()->attachments.upload(12,id,"PAYMENT_QR",null,null,"qa-ready.png","image/png",bytes))

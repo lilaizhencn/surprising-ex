@@ -12,8 +12,8 @@ import com.surprising.aeron.protocol.CoreReservationView;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
@@ -33,23 +33,23 @@ public final class StateQueries {
 
     /** 在指定 Lane 定位用户，先核对实体数量上限，再整理有序明细。 */
     public static UserQueryResult userState(
-            TradingAccountRuntime runtime,
+            AccountBook accountBook,
             AccountPartition lane,
-            RuntimeIdentityRegistry identities,
+            IdIndex identities,
             long userId, boolean hashOnly) {
-        UserAccount user = runtime.user(lane, userId);
+        UserAccount user = accountBook.user(lane, userId);
         if (user == null) return UserQueryResult.notFound();
 
-        var balancesByAsset = runtime.balancesForUser(lane, userId);
+        var balancesByAsset = accountBook.balancesForUser(lane, userId);
         int balanceCount = balancesByAsset == null ? 0 : balancesByAsset.size();
-        int reservationCount = runtime.reservationCountForUser(lane, userId);
-        int positionCount = runtime.positionCountForUser(lane, userId);
-        var leverageKeys = runtime.leverageKeysForUser(lane, userId);
+        int reservationCount = accountBook.reservationCountForUser(lane, userId);
+        int positionCount = accountBook.positionCountForUser(lane, userId);
+        var leverageKeys = accountBook.leverageKeysForUser(lane, userId);
         int entityCount = Math.addExact(balanceCount,
                 Math.addExact(reservationCount, Math.addExact(positionCount, leverageKeys.size())));
         if (entityCount > MAX_USER_QUERY_ENTITIES) return UserQueryResult.oversized();
-        long[] reservationIds = runtime.reservationIdsForUser(lane, userId);
-        long[] positionKeys = runtime.positionKeysForUser(lane, userId);
+        long[] reservationIds = accountBook.reservationIdsForUser(lane, userId);
+        long[] positionKeys = accountBook.positionKeysForUser(lane, userId);
 
         ArrayList<CoreBalanceView> balances = new ArrayList<>(balanceCount);
         if (balancesByAsset != null) {
@@ -61,7 +61,7 @@ public final class StateQueries {
         Arrays.sort(reservationIds);
         ArrayList<CoreReservationView> reservations = new ArrayList<>(reservationIds.length);
         for (long orderId : reservationIds) {
-            OrderFundsReservation reservation = runtime.reservation(lane, orderId);
+            OrderFundsReservation reservation = accountBook.reservation(lane, orderId);
             if (reservation == null) continue;
             reservations.add(new CoreReservationView(reservation.orderId(),
                     identities.instrumentId(reservation.symbolId()), reservation.kind(),
@@ -71,7 +71,7 @@ public final class StateQueries {
 
         ArrayList<PositionEntry> positionEntries = new ArrayList<>(positionKeys.length);
         for (long positionKey : positionKeys) {
-            Position position = runtime.position(lane, positionKey);
+            Position position = accountBook.position(lane, positionKey);
             if (position == null) continue;
             String instrumentId = identities.instrumentId(position.symbolId());
             CorePositionView view = new CorePositionView(instrumentId, identities.asset(position.assetId()),
@@ -87,7 +87,7 @@ public final class StateQueries {
 
         ArrayList<CoreLeverageView> leverages = new ArrayList<>(leverageKeys.size());
         for (CoreLeverageKey key : leverageKeys) {
-            leverages.add(new CoreLeverageView(key.instrumentId(), key.marginMode(), runtime.leverage(lane, key)));
+            leverages.add(new CoreLeverageView(key.instrumentId(), key.marginMode(), accountBook.leverage(lane, key)));
         }
         if (hashOnly) return UserQueryResult.found(null,
                 userStateHash(user, balances, reservations, positions, leverages));
@@ -98,11 +98,11 @@ public final class StateQueries {
 
     /** 在指定 Lane 读取订单，按请求构造视图或计算包括内部撮合价在内的状态哈希。 */
     public static OrderQueryResult orderState(
-            TradingAccountRuntime runtime,
+            AccountBook accountBook,
             AccountPartition lane,
-            RuntimeIdentityRegistry identities,
+            IdIndex identities,
             long orderId, boolean hashOnly) {
-        Order order = runtime.order(lane, orderId);
+        Order order = accountBook.order(lane, orderId);
         if (order == null) return OrderQueryResult.notFound();
         if (hashOnly) return OrderQueryResult.found(null,
                 orderStateHash(order, identities.instrumentId(order.symbolId())));
@@ -118,15 +118,15 @@ public final class StateQueries {
 
     /** 先在该 Lane 定位用户的客户端订单身份，再查实际订单编号，任一身份或订单映射不存在时返回未找到，否则复用普通订单查询。 */
     public static OrderQueryResult clientOrderState(
-            TradingAccountRuntime runtime,
+            AccountBook accountBook,
             AccountPartition lane,
-            RuntimeIdentityRegistry identities,
+            IdIndex identities,
             long userId,
             String clientOrderId) {
         long clientKey = identities.findClientKeyValueInLane(lane, userId, clientOrderId);
         if (clientKey == 0) return OrderQueryResult.notFound();
-        long orderId = runtime.orderIdByClientValue(lane, userId, clientKey);
-        return orderId == 0 ? OrderQueryResult.notFound() : orderState(runtime, lane, identities, orderId, false);
+        long orderId = accountBook.orderIdByClientValue(lane, userId, clientKey);
+        return orderId == 0 ? OrderQueryResult.notFound() : orderState(accountBook, lane, identities, orderId, false);
     }
 
     /** 按用户身份、版本、模式及各视图列表的固定字段顺序混合状态哈希。 */

@@ -17,35 +17,35 @@ class TradingRuntimeOwnershipTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void rejectedForeignCloseDoesNotPoisonTheOwnerLifecycle(ProductLine product) throws Exception {
-        try (/* 当前测试自动关闭的真实运行时 */ var runtime = new TradingCoreRuntime(product)) {
+        try (/* 当前测试自动关闭的真实运行时 */ var tradingCore = new TradingCore(product)) {
             // Core 与账户运行时共享恢复时装配的同一组索引，避免重新绑定第二套状态。
-            var indexes = runtime.runtimeState().factIndexes();
-            assertThat(runtime.factIndexes()).isSameAs(indexes);
-            assertThat(runtime.positionUserIndex()).isSameAs(indexes.positionUsers());
-            assertThat(runtime.openInterestIndex()).isSameAs(indexes.openInterest());
-            assertThat(runtime.triggerOrderIndex()).isSameAs(indexes.triggers());
-            assertThat(runtime.algoOrderIndex()).isSameAs(indexes.algos());
-            assertThat(runtime.liquidationIndex()).isSameAs(indexes.liquidations());
-            assertThat(runtime.activeOrderIndex()).isSameAs(indexes.activeOrders());
-            assertThat(runtime.adlPositionIndex()).isSameAs(indexes.adlPositions());
-            runtime.activate();
+            var indexes = tradingCore.accountBook().bizIndex();
+            assertThat(tradingCore.bizIndex()).isSameAs(indexes);
+            assertThat(tradingCore.positionUserIndex()).isSameAs(indexes.positionUsers());
+            assertThat(tradingCore.openInterestIndex()).isSameAs(indexes.openInterest());
+            assertThat(tradingCore.triggerOrderIndex()).isSameAs(indexes.triggers());
+            assertThat(tradingCore.algoOrderIndex()).isSameAs(indexes.algos());
+            assertThat(tradingCore.liquidationIndex()).isSameAs(indexes.liquidations());
+            assertThat(tradingCore.activeOrderIndex()).isSameAs(indexes.activeOrders());
+            assertThat(tradingCore.adlPositionIndex()).isSameAs(indexes.adlPositions());
+            tradingCore.activate();
             // 错误线程调用前保存的业务状态哈希
-            long initialHash = runtime.stateHash();
+            long initialHash = tradingCore.stateHash();
             // 外部线程把关闭异常交回测试的原子引用
             var rejected = new AtomicReference<Throwable>();
             // 故意跨越所有权调用 close 的外部线程
             Thread thread = Thread.ofPlatform().start(() -> {
-                try { runtime.close(); }
+                try { tradingCore.close(); }
                 catch (/* 外部线程捕获并交回测试断言的关闭错误 */ Throwable failure) { rejected.set(failure); }
             });
             thread.join(5000);
             assertThat(thread.isAlive()).isFalse();
             assertThat(rejected.get()).isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("another thread");
-            assertThat(runtime.closed()).as("a foreign caller must not claim shutdown").isFalse();
-            assertThat(runtime.stateHash()).isEqualTo(initialHash);
-            runtime.close();
-            assertThat(runtime.closed()).isTrue();
+            assertThat(tradingCore.closed()).as("a foreign caller must not claim shutdown").isFalse();
+            assertThat(tradingCore.stateHash()).isEqualTo(initialHash);
+            tradingCore.close();
+            assertThat(tradingCore.closed()).isTrue();
         }
     }
 }

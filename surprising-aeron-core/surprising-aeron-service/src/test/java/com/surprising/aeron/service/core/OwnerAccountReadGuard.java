@@ -19,7 +19,7 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
     /** 创建哨兵的测试线程，代表当前 Owner；以线程对象身份判断访问方。 */
     private final Thread owner = Thread.currentThread();
     /** 当前受检查的运行时，用于访问账户 Lane。 */
-    private final TradingAccountRuntime runtime;
+    private final AccountBook accountBook;
     /** 只能由 Owner 写入的用户和冻结委托变更集合字段名。 */
     private final String[] changeNames = {"changedUsers", "changedReservations"};
     /** 安装哨兵前的变更集合引用，关闭时把临时集合内容写回这些原集合。 */
@@ -29,12 +29,12 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
      * 保存账户表和变更集合引用，复制原内容并安装带线程检查的替代容器；仅供测试验证状态所有权。
      * @param runtime 需要检查 Owner 与账户 Lane 访问边界的运行时
      */
-    public OwnerAccountReadGuard(TradingAccountRuntime runtime) throws ReflectiveOperationException {
-        this.runtime = runtime;
+    public OwnerAccountReadGuard(AccountBook accountBook) throws ReflectiveOperationException {
+        this.accountBook = accountBook;
         // 运行时内部账户 Lane 数组的反射字段，需要绕过可见性以安装测试哨兵。
-        Field field = runtime.getClass().getDeclaredField("accountLanes");
+        Field field = accountBook.getClass().getDeclaredField("accountLanes");
         field.setAccessible(true);
-        lanes = (Object[]) field.get(runtime);
+        lanes = (Object[]) field.get(accountBook);
         originals = new Object[lanes.length][names.length];
         for (/* 本轮要安装哨兵的账户 Lane 下标。 */ int lane = 0; lane < lanes.length; lane++) {
             for (/* 当前 Lane 内要替换的账户表种类下标。 */ int index = 0; index < names.length; index++) {
@@ -48,7 +48,7 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
             // 当前变更集合在运行时上的反射字段。
             Field changes = changeField(index);
             // 替换前的变更集合，原有内容也要复制进哨兵集合。
-            var source = (LongHashSet) changes.get(runtime);
+            var source = (LongHashSet) changes.get(accountBook);
             originalChanges[index] = source;
             // 当前变更集合的字段名，线程违规时带入断言消息便于定位。
             String name = changeNames[index];
@@ -64,7 +64,7 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
                 }
             };
             source.forEach(guard::add);
-            changes.set(runtime, guard);
+            changes.set(accountBook, guard);
         }
     }
 
@@ -74,7 +74,7 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
      */
     private Field changeField(int index) throws ReflectiveOperationException {
         // 按固定字段名定位的变更集合字段，供构造器替换及 close 恢复。
-        Field field = runtime.getClass().getDeclaredField(changeNames[index]);
+        Field field = accountBook.getClass().getDeclaredField(changeNames[index]);
         field.setAccessible(true);
         return field;
     }
@@ -160,10 +160,10 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
             // 当前带写入检查的变更集合字段。
             Field changes = changeField(index);
             // 测试期间累计的最新变更编号，写回原集合后才能恢复引用。
-            var source = (LongHashSet) changes.get(runtime);
+            var source = (LongHashSet) changes.get(accountBook);
             originalChanges[index].clear();
             originalChanges[index].addAll(source);
-            changes.set(runtime, originalChanges[index]);
+            changes.set(accountBook, originalChanges[index]);
         }
     }
 }

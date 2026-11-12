@@ -12,7 +12,7 @@ public final class ClientOrderIndexOps {
     public static void putClientOrderIndex(AccountPartition lane, long userId, long clientKey, long orderId) {
         Long2LongHashMap userClientOrders = lane.userClientOrders(userId);
         if (userClientOrders == null) {
-            userClientOrders = new Long2LongHashMap(lane.admissionIndexCapacity(), 0.65f, 0, false);
+            userClientOrders = new Long2LongHashMap(lane.orderCheckIndexCapacity(), 0.65f, 0, false);
             lane.storeUserClientOrders(userId, userClientOrders);
         }
         long previousOrderId = userClientOrders.get(clientKey);

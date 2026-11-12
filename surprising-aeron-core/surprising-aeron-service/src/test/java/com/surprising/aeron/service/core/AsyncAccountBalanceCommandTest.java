@@ -31,7 +31,7 @@ class AsyncAccountBalanceCommandTest {
     void crossUserCrossProductTransferSurvivesLostCreditAcknowledgement(ProductLine product) {
         // 与源产品不同的目标产品，现货对应U本位永续，其余对应现货
         ProductLine destination = product == ProductLine.SPOT ? ProductLine.LINEAR_PERPETUAL : ProductLine.SPOT;
-        try (/* 本例源产品运行时，退出时关闭 */ var source = new TradingCoreRuntime(product); /* 本例目标产品运行时，账户按产品隔离 */ var target = new TradingCoreRuntime(destination)) {
+        try (/* 本例源产品运行时，退出时关闭 */ var source = new TradingCore(product); /* 本例目标产品运行时，账户按产品隔离 */ var target = new TradingCore(destination)) {
             CoreTestCompletion.applyAsynchronously(source, command(product, CoreMessageType.ADJUST_BALANCE, 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100))));
             // 转出和转入共同使用的完整划转载荷
@@ -45,8 +45,8 @@ class AsyncAccountBalanceCommandTest {
             var in = new CoreMessage(CoreMessageHeader.command(CoreMessageType.TRANSFER_IN, new UUID(991, 3),
                     destination, CommandSource.GATEWAY, 991, 3, 22, 1_700_000_000_003L, 3), payload);
             assertThat(CoreTestCompletion.applyAsynchronously(target, in).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            try (/* 源产品快照恢复实例，用于检查重试及完成记录 */ var restoredSource = TradingCoreRuntime.fromSnapshot(product, source.snapshot(300));
-                 /* 目标产品恢复实例，用于核对已入账重试不再增加资金 */ var restoredTarget = TradingCoreRuntime.fromSnapshot(destination, target.snapshot(301))) {
+            try (/* 源产品快照恢复实例，用于检查重试及完成记录 */ var restoredSource = TradingCore.fromSnapshot(product, source.snapshot(300));
+                 /* 目标产品恢复实例，用于核对已入账重试不再增加资金 */ var restoredTarget = TradingCore.fromSnapshot(destination, target.snapshot(301))) {
                 assertThat(CoreTestCompletion.applyAsynchronously(restoredSource, out).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(CoreTestCompletion.applyAsynchronously(restoredTarget, in).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(CoreTestCompletion.applyAsynchronously(restoredSource,
@@ -69,7 +69,7 @@ class AsyncAccountBalanceCommandTest {
     void transferRetainsSeparateProductAccountsAndRecoversExactlyOnce(ProductLine product) {
         // 本例独立目标产品线
         ProductLine targetProduct = product == ProductLine.SPOT ? ProductLine.LINEAR_PERPETUAL : ProductLine.SPOT;
-        try (/* 本例源产品运行时，退出时关闭 */ var source = new TradingCoreRuntime(product); /* 本例目标产品运行时，账户按产品隔离 */ var target = new TradingCoreRuntime(targetProduct)) {
+        try (/* 本例源产品运行时，退出时关闭 */ var source = new TradingCore(product); /* 本例目标产品运行时，账户按产品隔离 */ var target = new TradingCore(targetProduct)) {
             // 源账户初始增加100的命令
             var deposit = command(product, CoreMessageType.ADJUST_BALANCE, 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
@@ -86,14 +86,14 @@ class AsyncAccountBalanceCommandTest {
             assertThat(CoreTestCompletion.applyAsynchronously(source,
                     command(product, CoreMessageType.TRANSFER_OUT, 3, payload)).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(CoreStateTestFixtures.totalUnits(source.tradingState().users().get(11L), "USDT")).isEqualTo(70);
-            try (/* 源账户恢复实例，保留一条待完成划转 */ var recovered = TradingCoreRuntime.fromSnapshot(product, source.snapshot(100))) {
+            try (/* 源账户恢复实例，保留一条待完成划转 */ var recovered = TradingCore.fromSnapshot(product, source.snapshot(100))) {
                 assertThat(recovered.pendingTransfers()).hasSize(1);
                 // 正确目标用户的转入请求，恢复后重发沿用同一 UUID
                 var in = command(targetProduct, CoreMessageType.TRANSFER_IN, 1, payload);
                 assertThat(CoreTestCompletion.applyAsynchronously(target, in).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(CoreTestCompletion.applyAsynchronously(target, in).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 // 用目标已入账后快照恢复并重发，模拟确认丢失；本例没有真实网络丢包。
-                try (/* 目标产品恢复实例，用于核对已入账重试不再增加资金 */ var restoredTarget = TradingCoreRuntime.fromSnapshot(targetProduct, target.snapshot(101))) {
+                try (/* 目标产品恢复实例，用于核对已入账重试不再增加资金 */ var restoredTarget = TradingCore.fromSnapshot(targetProduct, target.snapshot(101))) {
                     assertThat(CoreTestCompletion.applyAsynchronously(restoredTarget, in).status())
                             .isEqualTo(ResponseStatus.DUPLICATE);
                     assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(11L), "USDT")
@@ -135,7 +135,7 @@ class AsyncAccountBalanceCommandTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void differentUsersTransferWithinOneProductAndRecoverWithoutDoubleCredit(ProductLine product) {
-        try (/* 本例实际余额或同产品划转运行时 */ var state = new TradingCoreRuntime(product)) {
+        try (/* 本例实际余额或同产品划转运行时 */ var state = new TradingCore(product)) {
             assertThat(CoreTestCompletion.applyAsynchronously(state, command(product, CoreMessageType.ADJUST_BALANCE, 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100))))
                     .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
@@ -147,12 +147,12 @@ class AsyncAccountBalanceCommandTest {
             // 源用户的转出请求，重发时保持同一请求身份
             var out = command(product, CoreMessageType.TRANSFER_OUT, 2, payload);
             assertThat(CoreTestCompletion.applyAsynchronously(state, out).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            try (/* 当前快照恢复实例，检查原状态与重试 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot(200))) {
+            try (/* 当前快照恢复实例，检查原状态与重试 */ var restored = TradingCore.fromSnapshot(product, state.snapshot(200))) {
                 // 正确目标用户的转入请求，恢复后重发沿用同一 UUID
                 var in = new CoreMessage(CoreMessageHeader.command(CoreMessageType.TRANSFER_IN, new UUID(991, 3),
                         product, CommandSource.GATEWAY, 991, 3, 22, 1_700_000_000_003L, 3), payload);
                 assertThat(CoreTestCompletion.applyAsynchronously(restored, in).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                try (/* 转入后再次恢复的实例，核对两侧请求去重及最终余额 */ var recoveredAgain = TradingCoreRuntime.fromSnapshot(product, restored.snapshot(201))) {
+                try (/* 转入后再次恢复的实例，核对两侧请求去重及最终余额 */ var recoveredAgain = TradingCore.fromSnapshot(product, restored.snapshot(201))) {
                     assertThat(CoreTestCompletion.applyAsynchronously(recoveredAgain, in).status()).isEqualTo(ResponseStatus.DUPLICATE);
                     assertThat(CoreTestCompletion.applyAsynchronously(recoveredAgain, out).status()).isEqualTo(ResponseStatus.DUPLICATE);
                     // 完成源端待转记录的命令
@@ -191,7 +191,7 @@ class AsyncAccountBalanceCommandTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void accountAdjustmentAndCleanRejectionDoNotBorrowUnrelatedLanes(ProductLine product) throws Exception {
-        try (/* 本例实际余额或同产品划转运行时 */ var state = new TradingCoreRuntime(product); /* 第二个已激活运行时，实际同样调用 applyAsynchronously，并非独立串行算法 */ var serial = new TradingCoreRuntime(product)) {
+        try (/* 本例实际余额或同产品划转运行时 */ var state = new TradingCore(product); /* 第二个已激活运行时，实际同样调用 applyAsynchronously，并非独立串行算法 */ var serial = new TradingCore(product)) {
             state.activate(); serial.activate();
             // 余额调整目标用户11
             long user = 11;
@@ -213,11 +213,11 @@ class AsyncAccountBalanceCommandTest {
                         .isEqualTo(i == 2 || i == 4 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
                 assertThat(actual.resultCode()).isEqualTo(expected.resultCode());
                 // 反射取得首实例 ownerLaneAccess 标记，断言该轮没有借用账户所有权
-                assertThat(state.runtimeState.ownerLaneAccess()).isFalse();
+                assertThat(state.accountBook.ownerLaneAccess()).isFalse();
             }
             assertThat(state.tradingState().users().get(user).balances().get("USDT").availableUnits()).isEqualTo(80);
             assertThat(state.tradingState().businessStateHash()).isEqualTo(serial.tradingState().businessStateHash());
-            try (/* 当前快照恢复实例，检查原状态与重试 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot(100))) {
+            try (/* 当前快照恢复实例，检查原状态与重试 */ var restored = TradingCore.fromSnapshot(product, state.snapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }

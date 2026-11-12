@@ -45,7 +45,7 @@ public final class CoreInMemoryBenchmark {
     }
 
     private static Result run(int orderCount, boolean measured) {
-        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (TradingCore state = new TradingCore(ProductLine.SPOT)) {
             long gatewaySequence = 1;
             long operationsSequence = 1;
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
@@ -79,7 +79,7 @@ public final class CoreInMemoryBenchmark {
                 SYMBOL, "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
     }
 
-    private static void applied(TradingCoreRuntime state, CoreMessageType type, CommandSource source,
+    private static void applied(TradingCore state, CoreMessageType type, CommandSource source,
                                 long sourceSequence, long correlationId, byte[] payload) {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.SPOT,
                 source, source == CommandSource.OPERATIONS ? 9 : 7, sourceSequence, USER_ID,

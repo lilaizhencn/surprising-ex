@@ -28,7 +28,7 @@ class CoreRuntimeBalanceSurfaceTest {
     void initializesAnEmptyAccountWithoutMintingMoneyAndKeepsItThroughSnapshot(ProductLine product) {
         // 关闭原实例前捕获的完整快照字节
         byte[] snapshot;
-        try (/* 本例实际运行时，线程交接场景由首次业务线程先关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(product)) {
+        try (/* 本例实际运行时，线程交接场景由首次业务线程先关闭 */ TradingCore state = new TradingCore(product)) {
             // 用户1001资产零调整的原请求
             CoreMessage initialize = new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), product,
@@ -41,7 +41,7 @@ class CoreRuntimeBalanceSurfaceTest {
             assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1001L), "USDT")).isZero();
             snapshot = state.snapshot(101);
         }
-        try (/* 完整快照恢复后的运行时 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, snapshot)) {
+        try (/* 完整快照恢复后的运行时 */ TradingCore restored = TradingCore.fromSnapshot(product, snapshot)) {
             assertThat(restored.tradingState().users().get(1001L)).isNotNull();
             assertThat(CoreStateTestFixtures.totalUnits(restored.tradingState().users().get(1001L), "USDT")).isZero();
             // 恢复后增加10000的余额命令
@@ -65,7 +65,7 @@ class CoreRuntimeBalanceSurfaceTest {
      */
     @Test
     void appliesBalanceCommandThroughAuthoritativeRuntimeAndMaterializesQueryState() {
-        try (/* 本例实际运行时，线程交接场景由首次业务线程先关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本例实际运行时，线程交接场景由首次业务线程先关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 本例首次增加10000的实际请求
             CoreMessage command = new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), ProductLine.SPOT,
@@ -84,7 +84,7 @@ class CoreRuntimeBalanceSurfaceTest {
      */
     @Test
     void handsProjectedRuntimeFromConstructionThreadToFirstCoreCommandThread() throws InterruptedException {
-        try (/* 本例实际运行时，线程交接场景由首次业务线程先关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本例实际运行时，线程交接场景由首次业务线程先关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 本例首次增加10000的实际请求
             CoreMessage command = new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), ProductLine.SPOT,
@@ -122,7 +122,7 @@ class CoreRuntimeBalanceSurfaceTest {
      * @param state 本次实际交易运行时
      * @param command 原余额调整请求
      */
-    private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
+    private static CoreResponse apply(TradingCore state, CoreMessage command) {
         // 入口或直接控制槽当前得到的可空响应
         CoreResponse response = state.apply(command);
         // 直接控制轮询共用的五秒单调纳秒截止时间

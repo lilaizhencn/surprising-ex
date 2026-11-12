@@ -11,11 +11,11 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.LeverageLookup;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.OrderAdmissionService.AdmissionSummary;
+import com.surprising.aeron.service.order.OrderCheckService.OrderCheckSummary;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
@@ -55,7 +55,7 @@ public final class AccountPartition {
     @Accessors(fluent = true, chain = false)
     @Getter
     final ClientOrderIdRegistry clientIdentities;
-    final AccountExposureIndex admissionOrderIndex;
+    final AccountExposureIndex orderCheckOrderIndex;
     final LaneColdState cold = new LaneColdState(this);
     long revision;
     long appliedSequence;
@@ -86,7 +86,7 @@ public final class AccountPartition {
         this.reservations = new Long2ObjectHashMap<>(initialEntityCapacity, 0.65f, false);
         this.positions = new LongObjectHashMap<>(initialEntityCapacity);
         this.clientIdentities = new ClientOrderIdRegistry(this, initialEntityCapacity);
-        this.admissionOrderIndex = new AccountExposureIndex(this, initialEntityCapacity);
+        this.orderCheckOrderIndex = new AccountExposureIndex(this, initialEntityCapacity);
         if (laneId < 0 || laneId >= Long.SIZE || queueCapacity <= 0) {
             throw new IllegalArgumentException("invalid account lane");
         }
@@ -96,13 +96,13 @@ public final class AccountPartition {
         this.cold.localFundsHash = computeFundsHash();
     }
 
-    public int admissionIndexCapacity() { return admissionOrderIndex.admissionIndexCapacity; }
-    public void admissionIndexCapacity(int admissionIndexCapacity) { admissionOrderIndex.admissionIndexCapacity = admissionIndexCapacity; }
+    public int orderCheckIndexCapacity() { return orderCheckOrderIndex.orderCheckIndexCapacity; }
+    public void orderCheckIndexCapacity(int orderCheckIndexCapacity) { orderCheckOrderIndex.orderCheckIndexCapacity = orderCheckIndexCapacity; }
     public RiskScanner.LiquidationBatch riskLiquidationBatch() { return cold.riskLiquidationBatch; }
     public void riskLiquidationBatch(RiskScanner.LiquidationBatch riskLiquidationBatch) { cold.riskLiquidationBatch = riskLiquidationBatch; }
     public ClientOrderIdRegistry.OrderKeyIndex clientKeysByOrderId() { return clientIdentities.clientKeysByOrderId(); }
     public LeverageLookup leverageLookup() { return cold.leverageLookup; }
-    public RuntimeIdentityRegistry.LookupScratch identityLookupScratch() { return cold.identityLookupScratch; }
+    public IdIndex.LookupScratch identityLookupScratch() { return cold.identityLookupScratch; }
     public DerivativeTradeSettlementService.DerivativeSettlementAccumulator derivativeSettlementAccumulator() { return cold.derivativeSettlementAccumulator; }
     public SpotTradeSettlementService.SpotSettlementAccumulator spotSettlementAccumulator() { return cold.spotSettlementAccumulator; }
     public RiskScanner.PositionRiskScratch positionRiskScratch() { return cold.positionRiskScratch; }
@@ -181,7 +181,7 @@ public final class AccountPartition {
         cold.userRevisionChanges.putUser(userId, advanced);
     }
 
-    public void releaseOrderClientIdentities(RuntimeIdentityRegistry identities, long orderId, long userId) {
+    public void releaseOrderClientIdentities(IdIndex identities, long orderId, long userId) {
         clientIdentities.releaseOrderClientIdentities(identities, orderId, userId);
     }
 
@@ -263,7 +263,7 @@ public final class AccountPartition {
     public void removeUser(long userId) {
         assertOwner();
         userIds.remove(userId);
-        admissionOrderIndex.removeUnusedUser(userId);
+        orderCheckOrderIndex.removeUnusedUser(userId);
     }
 
     public void markPendingReservation(long orderId, long coreSequence) {
@@ -271,19 +271,19 @@ public final class AccountPartition {
         if (orderId <= 0 || coreSequence <= committedSequence) {
             throw new IllegalArgumentException("invalid pending reservation identity");
         }
-        if (admissionOrderIndex.pendingReservationSequences.containsKey(orderId)) {
+        if (orderCheckOrderIndex.pendingReservationSequences.containsKey(orderId)) {
             throw new IllegalStateException("reservation is already pending");
         }
         OrderFundsReservation reservation = reservations.get(orderId);
         if (reservation == null) throw new IllegalStateException("pending reservation is missing");
-        int nextUserCount = Math.addExact(admissionOrderIndex.pendingReservationCountsByUser.get(reservation.userId()), 1);
-        int nextTotal = Math.addExact(admissionOrderIndex.totalPendingReservations, 1);
+        int nextUserCount = Math.addExact(orderCheckOrderIndex.pendingReservationCountsByUser.get(reservation.userId()), 1);
+        int nextTotal = Math.addExact(orderCheckOrderIndex.totalPendingReservations, 1);
         long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
         long nextUnits = Math.addExact(previousUnits, reservation.reservedUnits());
-        admissionOrderIndex.pendingReservationSequences.put(orderId, coreSequence);
-        admissionOrderIndex.pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
-        admissionOrderIndex.setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
-        admissionOrderIndex.totalPendingReservations = nextTotal;
+        orderCheckOrderIndex.pendingReservationSequences.put(orderId, coreSequence);
+        orderCheckOrderIndex.pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
+        orderCheckOrderIndex.setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
+        orderCheckOrderIndex.totalPendingReservations = nextTotal;
     }
 
     public void completePendingReservation(long orderId, long coreSequence) {
@@ -296,28 +296,28 @@ public final class AccountPartition {
 
     private void pendingReservationCompletion(long orderId, long coreSequence, boolean apply) {
         assertOwner();
-        long pendingSequence = admissionOrderIndex.pendingReservationSequences.get(orderId);
+        long pendingSequence = orderCheckOrderIndex.pendingReservationSequences.get(orderId);
         if (pendingSequence != coreSequence) {
             throw new IllegalStateException("pending reservation sequence mismatch");
         }
         OrderFundsReservation reservation = reservations.get(orderId);
         if (reservation == null) throw new IllegalStateException("pending reservation is missing");
-        int userCount = admissionOrderIndex.pendingReservationCountsByUser.get(reservation.userId());
+        int userCount = orderCheckOrderIndex.pendingReservationCountsByUser.get(reservation.userId());
         int nextUserCount = Math.max(0, userCount - 1);
-        int nextTotal = Math.max(0, admissionOrderIndex.totalPendingReservations - 1);
+        int nextTotal = Math.max(0, orderCheckOrderIndex.totalPendingReservations - 1);
         long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
         long nextUnits = Math.max(0L, previousUnits - reservation.reservedUnits());
         if (!apply) return;
-        admissionOrderIndex.pendingReservationSequences.remove(orderId);
-        if (nextUserCount == 0) admissionOrderIndex.pendingReservationCountsByUser.removeKey(reservation.userId());
-        else admissionOrderIndex.pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
-        admissionOrderIndex.setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
-        admissionOrderIndex.totalPendingReservations = nextTotal;
+        orderCheckOrderIndex.pendingReservationSequences.remove(orderId);
+        if (nextUserCount == 0) orderCheckOrderIndex.pendingReservationCountsByUser.removeKey(reservation.userId());
+        else orderCheckOrderIndex.pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
+        orderCheckOrderIndex.setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
+        orderCheckOrderIndex.totalPendingReservations = nextTotal;
     }
 
     public void replacePendingReservation(OrderFundsReservation previous, OrderFundsReservation replacement) {
         assertOwner();
-        if (!admissionOrderIndex.pendingReservationSequences.containsKey(previous.orderId())) return;
+        if (!orderCheckOrderIndex.pendingReservationSequences.containsKey(previous.orderId())) return;
         if (previous.orderId() != replacement.orderId() || previous.userId() != replacement.userId()) {
             throw new IllegalStateException("pending reservation owner cannot change");
         }
@@ -326,60 +326,60 @@ public final class AccountPartition {
         if (remainingUnits < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
         if (previous.assetId() == replacement.assetId()) {
             long nextUnits = Math.addExact(remainingUnits, replacement.reservedUnits());
-            admissionOrderIndex.setPendingReservedUnits(previous.userId(), previous.assetId(), nextUnits);
+            orderCheckOrderIndex.setPendingReservedUnits(previous.userId(), previous.assetId(), nextUnits);
         } else {
             long replacementUnits = Math.addExact(
                     pendingReservedUnits(replacement.userId(), replacement.assetId()), replacement.reservedUnits());
-            admissionOrderIndex.setPendingReservedUnits(previous.userId(), previous.assetId(), remainingUnits);
-            admissionOrderIndex.setPendingReservedUnits(replacement.userId(), replacement.assetId(), replacementUnits);
+            orderCheckOrderIndex.setPendingReservedUnits(previous.userId(), previous.assetId(), remainingUnits);
+            orderCheckOrderIndex.setPendingReservedUnits(replacement.userId(), replacement.assetId(), replacementUnits);
         }
     }
 
     public boolean pendingReservation(long orderId) {
         assertOwner();
-        return admissionOrderIndex.pendingReservationSequences.containsKey(orderId);
+        return orderCheckOrderIndex.pendingReservationSequences.containsKey(orderId);
     }
 
     public long pendingReservationSequence(long orderId) {
         assertOwner();
-        return admissionOrderIndex.pendingReservationSequences.get(orderId);
+        return orderCheckOrderIndex.pendingReservationSequences.get(orderId);
     }
 
     public void updatePendingReservationInPlace(OrderFundsReservation reservation, long previousReservedUnits) {
         assertOwner();
         if (reservation == null || previousReservedUnits < 0) throw new IllegalArgumentException("invalid reservation update");
-        if (!admissionOrderIndex.pendingReservationSequences.containsKey(reservation.orderId())) return;
+        if (!orderCheckOrderIndex.pendingReservationSequences.containsKey(reservation.orderId())) return;
         long current = pendingReservedUnits(reservation.userId(), reservation.assetId());
         long next = Math.addExact(Math.subtractExact(current, previousReservedUnits), reservation.reservedUnits());
         if (next < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
-        admissionOrderIndex.setPendingReservedUnits(reservation.userId(), reservation.assetId(), next);
+        orderCheckOrderIndex.setPendingReservedUnits(reservation.userId(), reservation.assetId(), next);
     }
 
     public long pendingReservedUnits(long userId, int assetId) {
-        LongLongHashMap unitsByUser = admissionOrderIndex.pendingReservedUnitsByAsset.get(assetId);
+        LongLongHashMap unitsByUser = orderCheckOrderIndex.pendingReservedUnitsByAsset.get(assetId);
         return unitsByUser == null ? 0 : unitsByUser.get(userId);
     }
 
     public int pendingReservationCount(long userId) {
         assertOwner();
-        return admissionOrderIndex.pendingReservationCountsByUser.get(userId);
+        return orderCheckOrderIndex.pendingReservationCountsByUser.get(userId);
     }
 
     public int pendingReservationCount() {
         assertOwner();
-        return admissionOrderIndex.totalPendingReservations;
+        return orderCheckOrderIndex.totalPendingReservations;
     }
 
     boolean hasPendingReservations() {
         assertOwner();
-        return admissionOrderIndex.totalPendingReservations != 0;
+        return orderCheckOrderIndex.totalPendingReservations != 0;
     }
 
     public java.util.List<Long> preMatchingCancellations(long userId, int symbolId,
             com.surprising.aeron.protocol.CoreOrderSide side, long matchingPrice,
             long excludedOrderId, long newOrderId, java.util.List<Long> closeCapacity) {
         assertOwner();
-        var active = admissionOrderIndex.activeOrderIdsByUser.get(userId);
+        var active = orderCheckOrderIndex.activeOrderIdsByUser.get(userId);
         if (active == null || active.isEmpty()) return closeCapacity;
         LongHashSet cancellations = null;
         var iterator = active.iterator();
@@ -404,12 +404,12 @@ public final class AccountPartition {
         return com.surprising.aeron.support.collection.ImmutableLongArrayList.takeOwnership(ids);
     }
 
-    public AdmissionSummary admissionSummary(int symbolId, long userId, CorePositionSide positionSide,
+    public OrderCheckSummary orderCheckSummary(int symbolId, long userId, CorePositionSide positionSide,
             CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
         assertOwner();
         if (symbolId < 0) throw new IllegalArgumentException("invalid admission instrumentId");
-        admissionOrderIndex.symbolId = symbolId;
-        return admissionOrderIndex.inspect(userId, positionSide, side, conflictingMarginMode);
+        orderCheckOrderIndex.symbolId = symbolId;
+        return orderCheckOrderIndex.inspect(userId, positionSide, side, conflictingMarginMode);
     }
 
     public void putOrder(Order order) {
@@ -417,15 +417,15 @@ public final class AccountPartition {
         if (order == null) throw new IllegalArgumentException("order is required");
         order = order.laneValue();
         Order previous = orders.put(order.orderId(), order);
-        admissionOrderIndex.replaceActiveOrder(previous, order);
-        admissionOrderIndex.replace(previous, order);
+        orderCheckOrderIndex.replaceActiveOrder(previous, order);
+        orderCheckOrderIndex.replace(previous, order);
     }
 
     public Order removeOrder(long orderId) {
         assertOwner();
         Order previous = orders.remove(orderId);
-        admissionOrderIndex.replaceActiveOrder(previous, null);
-        admissionOrderIndex.replace(previous, null);
+        orderCheckOrderIndex.replaceActiveOrder(previous, null);
+        orderCheckOrderIndex.replace(previous, null);
         return previous;
     }
 
@@ -439,9 +439,9 @@ public final class AccountPartition {
         long previousRemaining = order.remainingQuantitySteps();
         order.applyFillInPlace(executed, remaining, feeUnits, nextStatus, nextRevision,
                 commitTimestamp, commitPosition);
-        if (previousActive && !AccountExposureIndex.active(order)) admissionOrderIndex.removeActiveOrder(order.userId(), order.orderId());
-        else if (!previousActive && AccountExposureIndex.active(order)) admissionOrderIndex.addActiveOrder(order.userId(), order.orderId());
-        admissionOrderIndex.updateInPlace(order, previousActive, previousRemaining);
+        if (previousActive && !AccountExposureIndex.active(order)) orderCheckOrderIndex.removeActiveOrder(order.userId(), order.orderId());
+        else if (!previousActive && AccountExposureIndex.active(order)) orderCheckOrderIndex.addActiveOrder(order.userId(), order.orderId());
+        orderCheckOrderIndex.updateInPlace(order, previousActive, previousRemaining);
         return order;
     }
 
@@ -451,16 +451,16 @@ public final class AccountPartition {
         if (order == null) throw new IllegalArgumentException("runtime order is not registered: " + orderId);
         boolean previousActive = AccountExposureIndex.active(order);
         order.applyStatusInPlace(nextStatus, nextRevision, commitTimestamp, commitPosition);
-        if (previousActive && !AccountExposureIndex.active(order)) admissionOrderIndex.removeActiveOrder(order.userId(), order.orderId());
-        else if (!previousActive && AccountExposureIndex.active(order)) admissionOrderIndex.addActiveOrder(order.userId(), order.orderId());
-        admissionOrderIndex.updateInPlace(order, previousActive, order.remainingQuantitySteps());
+        if (previousActive && !AccountExposureIndex.active(order)) orderCheckOrderIndex.removeActiveOrder(order.userId(), order.orderId());
+        else if (!previousActive && AccountExposureIndex.active(order)) orderCheckOrderIndex.addActiveOrder(order.userId(), order.orderId());
+        orderCheckOrderIndex.updateInPlace(order, previousActive, order.remainingQuantitySteps());
         return order;
     }
 
     public long openReduceOnlyQuantity(long userId, int symbolId, CorePositionSide positionSide,
                                 CoreOrderSide side, CoreMarginMode marginMode) {
         assertOwner();
-        var orderIds = admissionOrderIndex.activeOrderIdsByUser.get(userId);
+        var orderIds = orderCheckOrderIndex.activeOrderIdsByUser.get(userId);
         if (orderIds == null) return 0;
         long total = 0;
         var iterator = orderIds.iterator();
@@ -477,11 +477,11 @@ public final class AccountPartition {
     }
 
     public void addReservationId(long userId, long orderId) {
-        admissionOrderIndex.addReservationId(userId, orderId);
+        orderCheckOrderIndex.addReservationId(userId, orderId);
     }
 
     public void removeReservationId(long userId, long orderId) {
-        admissionOrderIndex.removeReservationId(userId, orderId);
+        orderCheckOrderIndex.removeReservationId(userId, orderId);
     }
 
     public void applied(long coreSequence) {
@@ -597,7 +597,7 @@ public final class AccountPartition {
         java.util.Arrays.fill(cold.committedSequencesByShard, committedSequence);
         this.cold.localStateHash = localStateHash;
         this.cold.localFundsHash = localFundsHash;
-        admissionOrderIndex.clearPendingReservations();
+        orderCheckOrderIndex.clearPendingReservations();
     }
 
     public AccountLaneSnapshot snapshot(long fenceSequence) {
@@ -614,7 +614,7 @@ public final class AccountPartition {
 
     public void requireSnapshot(long fenceSequence) {
         assertOwner();
-        if (!admissionOrderIndex.pendingReservationSequences.isEmpty()) {
+        if (!orderCheckOrderIndex.pendingReservationSequences.isEmpty()) {
             throw new IllegalStateException("pending reservation cannot cross snapshot fence");
         }
         if (fenceSequence < committedSequence || appliedSequence != committedSequence) {
@@ -777,16 +777,16 @@ public final class AccountPartition {
     public boolean leverageValuesEmpty() { return cold.leverages.isEmpty(); }
     public IntObjectHashMap<AccountBalance> storeUserBalances(long key, IntObjectHashMap<AccountBalance> value) { return balances.put(key, value); }
     public IntObjectHashMap<AccountBalance> userBalances(long key) { return balances.get(key); }
-    public org.agrona.collections.LongHashSet reservationIds(long key) { return admissionOrderIndex.reservationIdsByUser.get(key); }
-    public LongHashSet positionKeys(long key) { return admissionOrderIndex.positionKeysByUser.get(key); }
-    public LongHashSet removePositionKeys(long key) { return admissionOrderIndex.positionKeysByUser.remove(key); }
-    public org.agrona.collections.LongHashSet activeOrderIds(long key) { return admissionOrderIndex.activeOrderIdsByUser.get(key); }
+    public org.agrona.collections.LongHashSet reservationIds(long key) { return orderCheckOrderIndex.reservationIdsByUser.get(key); }
+    public LongHashSet positionKeys(long key) { return orderCheckOrderIndex.positionKeysByUser.get(key); }
+    public LongHashSet removePositionKeys(long key) { return orderCheckOrderIndex.positionKeysByUser.remove(key); }
+    public org.agrona.collections.LongHashSet activeOrderIds(long key) { return orderCheckOrderIndex.activeOrderIdsByUser.get(key); }
     public java.util.HashSet<CoreLeverageKey> storeLeverageKeys(long key, java.util.HashSet<CoreLeverageKey> value) { return cold.leverageKeysByUser.put(key, value); }
     public java.util.HashSet<CoreLeverageKey> leverageKeys(long key) { return cold.leverageKeysByUser.get(key); }
     public void clearLeverageKeys() { cold.leverageKeysByUser.clear(); }
-    public LongObjectHashMap<LongArrayList> storeSymbolPositionKeys(int key, LongObjectHashMap<LongArrayList> value) { return admissionOrderIndex.positionKeysBySymbolAndUser.put(key, value); }
-    public LongObjectHashMap<LongArrayList> symbolPositionKeys(int key) { return admissionOrderIndex.positionKeysBySymbolAndUser.get(key); }
-    public LongObjectHashMap<LongArrayList> removeSymbolPositionKeys(int key) { return admissionOrderIndex.positionKeysBySymbolAndUser.remove(key); }
+    public LongObjectHashMap<LongArrayList> storeSymbolPositionKeys(int key, LongObjectHashMap<LongArrayList> value) { return orderCheckOrderIndex.positionKeysBySymbolAndUser.put(key, value); }
+    public LongObjectHashMap<LongArrayList> symbolPositionKeys(int key) { return orderCheckOrderIndex.positionKeysBySymbolAndUser.get(key); }
+    public LongObjectHashMap<LongArrayList> removeSymbolPositionKeys(int key) { return orderCheckOrderIndex.positionKeysBySymbolAndUser.remove(key); }
     public IntObjectHashMap<LongObjectHashMap<Long>> storeActiveLiquidations(long key, IntObjectHashMap<LongObjectHashMap<Long>> value) { return cold.activeLiquidationIndex.put(key, value); }
     public IntObjectHashMap<LongObjectHashMap<Long>> activeLiquidations(long key) { return cold.activeLiquidationIndex.get(key); }
     public IntObjectHashMap<LongObjectHashMap<Long>> removeActiveLiquidations(long key) { return cold.activeLiquidationIndex.remove(key); }
@@ -796,16 +796,16 @@ public final class AccountPartition {
     public Long2LongHashMap userClientOrders(long key) { return clientIdentities.clientOrderIndex.get(key); }
 
     public void indexPositionKey(long userId, long key) {
-        LongHashSet keys = admissionOrderIndex.positionKeysByUser.get(userId);
-        if (keys == null) { keys = new LongHashSet(16); admissionOrderIndex.positionKeysByUser.put(userId, keys); }
+        LongHashSet keys = orderCheckOrderIndex.positionKeysByUser.get(userId);
+        if (keys == null) { keys = new LongHashSet(16); orderCheckOrderIndex.positionKeysByUser.put(userId, keys); }
         keys.add(key);
     }
 
     public void unindexPositionKey(long userId, long key) {
-        LongHashSet keys = admissionOrderIndex.positionKeysByUser.get(userId);
+        LongHashSet keys = orderCheckOrderIndex.positionKeysByUser.get(userId);
         if (keys == null) return;
         keys.remove(key);
-        if (keys.isEmpty()) admissionOrderIndex.positionKeysByUser.remove(userId);
+        if (keys.isEmpty()) orderCheckOrderIndex.positionKeysByUser.remove(userId);
     }
 
     public LongObjectHashMap<UserAccount> usersSnapshot() {
@@ -815,11 +815,11 @@ public final class AccountPartition {
     }
 
     public LongObjectHashMap<IntObjectHashMap<AccountBalance>> balancesSnapshot() {
-        return TradingAccountRuntime.copyAllBalances(balances);
+        return AccountBook.copyAllBalances(balances);
     }
 
     public LongObjectHashMap<org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap> clientOrdersSnapshot() {
-        return TradingAccountRuntime.copyClientOrderIndex(clientIdentities.clientOrderIndex);
+        return AccountBook.copyClientOrderIndex(clientIdentities.clientOrderIndex);
     }
 
     public LongObjectHashMap<Position> positionsSnapshot() { return new LongObjectHashMap<>(positions); }
@@ -827,7 +827,7 @@ public final class AccountPartition {
     public LongObjectHashMap<com.surprising.aeron.service.risk.RiskMarginCalculator.Snapshot> riskSnapshotsSnapshot() { return new LongObjectHashMap<>(cold.riskSnapshots); }
     public java.util.TreeMap<CoreLeverageKey, Long> leveragesSnapshot() { return new java.util.TreeMap<>(cold.leverages); }
 
-    public void requireAlgoChildAdmission(long userId, com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder child) {
+    public void requireAlgoChildOrderCheck(long userId, com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder child) {
         String key = child.clientOrderId();
         if (key == null || !key.startsWith("algo-")) return;
         int separator = key.lastIndexOf('-');
@@ -852,7 +852,7 @@ public final class AccountPartition {
             throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_ALGO_CHILD", "algo child is still active");
     }
 
-    public void retireAlgoChild(RuntimeIdentityRegistry identities,
+    public void retireAlgoChild(IdIndex identities,
                                 Order child,
                                 AccountPartitionCommit.Delta changes) {
         assertOwner();

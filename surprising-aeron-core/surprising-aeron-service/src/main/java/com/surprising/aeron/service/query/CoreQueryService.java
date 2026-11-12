@@ -13,9 +13,9 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.matcher.OrderBookDepthSnapshot;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -26,13 +26,13 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import lombok.RequiredArgsConstructor;
-import com.surprising.aeron.service.result.CommandResultLedger;
+import com.surprising.aeron.service.result.CommandResultLog;
 
 /** 核心内部查询的异步编排入口。Owner 解析条件并登记编号，账户 Lane、Matcher 或系统账本在各自所有权内读取。结果回到这里供 Owner 消费，不能为查询复制一份在线权威账户。参数 owner：所属交易运行时，提供查询投递、路由、身份和提交水位入口。 */
 @RequiredArgsConstructor
 public final class CoreQueryService {
     /** 提供业务路由、线程投递和提交水位的所属运行时，查询仍遵守实际状态所有权。 */
-    final TradingCoreRuntime owner;
+    final TradingCore owner;
 
     /** 只有 Owner 访问关联表。工作线程只完成请求自己的 Future。 */
     private final Map<UUID, CompletableFuture<QueryResult>> pendingQueries = new java.util.HashMap<>();
@@ -76,7 +76,7 @@ public final class CoreQueryService {
         if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
             try {
                 var query = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeQuery(message.payloadUnsafe());
-                var instrument = owner.runtimeState().instrument(query.instrumentId());
+                var instrument = owner.accountBook().instrument(query.instrumentId());
                 if (instrument == null) return owner.rejected(CoreResultCode.ENTITY_NOT_FOUND);
                 return queryLedger(message.header().messageType(), query, instrument.maintenance());
             } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
@@ -87,11 +87,11 @@ public final class CoreQueryService {
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.COMMAND_RESULT_QUERY) {
             try {
                 java.util.UUID commandId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeCommandResultQuery(message.payloadUnsafe());
-                CommandResultLedger.StoredResult result = owner.resultLedger().get(commandId);
+                CommandResultLog.StoredResult result = owner.commandResultLog().get(commandId);
                 if (result == null) {
                     return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED, com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                             CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, owner.appliedCommandCount(),
-                            TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                            TradingCore.EMPTY_RESPONSE_DATA);
                 }
                 owner.responseSlotPool().retain(result.responseDataUnsafe());
                 return CoreResponse.owned(com.surprising.aeron.protocol.ResponseStatus.OK, result.status(), result.resultCode(),
@@ -140,7 +140,7 @@ public final class CoreQueryService {
             try {
                 String instrumentId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeFundingProgressQuery(message.payloadUnsafe());
                 var view = OperationalQueries
-                        .fundingProgress(owner.runtimeState(), owner.identities(), instrumentId);
+                        .fundingProgress(owner.accountBook(), owner.identities(), instrumentId);
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, owner.appliedCommandCount(),
                         com.surprising.aeron.protocol.CoreFundingProgressCodec.encode(view));
             } catch (IllegalArgumentException exception) {
@@ -152,7 +152,7 @@ public final class CoreQueryService {
             try {
                 String instrumentId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeSettlementProgressQuery(message.payloadUnsafe());
                 var view = OperationalQueries
-                        .settlementProgress(owner.runtimeState(), owner.identities(), instrumentId);
+                        .settlementProgress(owner.accountBook(), owner.identities(), instrumentId);
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, owner.appliedCommandCount(),
                         com.surprising.aeron.protocol.CoreSettlementProgressCodec.encode(view));
             } catch (IllegalArgumentException exception) {
@@ -170,7 +170,7 @@ public final class CoreQueryService {
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.RISK_SCAN_CONTROL_QUERY) {
             if (message.payloadLength() != 0) return owner.rejected(CoreResultCode.INVALID_COMMAND);
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, owner.appliedCommandCount(),
-                    com.surprising.aeron.protocol.CoreRiskScanControlCodec.encodeView(owner.runtimeState().riskScanControl()));
+                    com.surprising.aeron.protocol.CoreRiskScanControlCodec.encodeView(owner.accountBook().riskScanControl()));
         }
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.OPEN_INTEREST_QUERY) {
@@ -180,10 +180,10 @@ public final class CoreQueryService {
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.CANCEL_ALL_AFTER_QUERY) {
             try {
                 var query = com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeQuery(message.payloadUnsafe());
-                var keys = owner.factIndexes().timers().query(query.userId(), query.symbolScope(), query.dueAtEpochMillis(),
-                        query.limit(), owner.runtimeState()::cancelAllAfterTimer);
+                var keys = owner.bizIndex().timers().query(query.userId(), query.symbolScope(), query.dueAtEpochMillis(),
+                        query.limit(), owner.accountBook()::cancelAllAfterTimer);
                 var values = OperationalQueries.cancelAllAfter(
-                        owner.runtimeState(), keys);
+                        owner.accountBook(), keys);
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, owner.appliedCommandCount(),
                         com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeList(values));
             } catch (QueryTooLargeException exception) {
@@ -233,9 +233,9 @@ public final class CoreQueryService {
 
     /** 从 Owner 的待完成划转路由取一页，空页直接返回。 */
     public CoreResponse beginPendingTransferQuery(CoreMessage message, int limit) {
-        var page = owner.runtimeState().pendingTransferRoutes(limit);
+        var page = owner.accountBook().pendingTransferRoutes(limit);
         if (page.ids().length == 0) {
-            owner.runtimeState().completePendingTransferPage(page);
+            owner.accountBook().completePendingTransferPage(page);
             return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount(),
                     com.surprising.aeron.protocol.CorePendingTransferCodec.encode(List.of()));
         }
@@ -245,7 +245,7 @@ public final class CoreQueryService {
                 new com.surprising.aeron.protocol.TransferFundsCommand[page.ids().length]);
         registerQuery(message, query);
         try {
-            if (!owner.runtimeState().dispatchAccountQuery(page.laneMask(), query)) {
+            if (!owner.accountBook().dispatchAccountQuery(page.laneMask(), query)) {
                 pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
@@ -253,7 +253,7 @@ public final class CoreQueryService {
             pendingQueries.remove(message.header().commandId());
             throw failure;
         }
-        owner.runtimeState().completePendingTransferPage(page);
+        owner.accountBook().completePendingTransferPage(page);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
@@ -265,12 +265,12 @@ public final class CoreQueryService {
         owner.requireOrderIdentityAvailable(userId, command);
         if (owner.orderIdInUse(command.orderId())) throw new com.surprising.aeron.exception.CoreStateRejectedException(
                 "DUPLICATE_ORDER_ID", "orderId already exists");
-        var context = com.surprising.aeron.service.order.OrderAdmissionService.queryContext(
-                owner.runtimeState(), owner.identities(), command.instrumentId(), timestamp);
+        var context = com.surprising.aeron.service.order.OrderCheckService.queryContext(
+                owner.accountBook(), owner.identities(), command.instrumentId(), timestamp);
         var query = new PreflightQuery(owner, owner.appliedCommandCount(), userId, command, context);
         registerQuery(message, query);
         try {
-            if (!owner.runtimeState().dispatchAccountQuery(owner.runtimeState().topology().accountLaneMask(userId), query)) {
+            if (!owner.accountBook().dispatchAccountQuery(owner.accountBook().topology().accountLaneMask(userId), query)) {
                 pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
@@ -318,14 +318,14 @@ public final class CoreQueryService {
                 long selected = openOrderIds.valueAt(index);
                 var route = owner.activeOrderIndex().activeOrderRoute(selected);
                 if (route == null) throw new IllegalStateException("active order query route is missing");
-                laneMask |= owner.runtimeState().topology().accountLaneMask(route.userId());
+                laneMask |= owner.accountBook().topology().accountLaneMask(route.userId());
             }
         } else if (orderQuery) {
             var route = owner.activeOrderIndex().activeOrderRoute(orderId);
-            int count = owner.runtimeState().topology().accountLaneCount();
-            laneMask = route != null ? owner.runtimeState().topology().accountLaneMask(route.userId())
+            int count = owner.accountBook().topology().accountLaneCount();
+            laneMask = route != null ? owner.accountBook().topology().accountLaneMask(route.userId())
                     : count == Long.SIZE ? -1L : (1L << count) - 1;
-        } else laneMask = owner.runtimeState().topology().accountLaneMask(userId);
+        } else laneMask = owner.accountBook().topology().accountLaneMask(userId);
         var query = new AccountQuery(owner, owner.appliedCommandCount(), type, userId, orderId, clientName, laneMask, openOrderIds, null);
         return dispatchAccountQuery(message, laneMask, query);
     }
@@ -359,7 +359,7 @@ public final class CoreQueryService {
                     || requested.status() != null && requested.status() != route.status()
                     || message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY && !route.status().open()) continue;
             selected.add(id); users.add(route.userId());
-            laneMask |= owner.runtimeState().topology().accountLaneMask(route.userId());
+            laneMask |= owner.accountBook().topology().accountLaneMask(route.userId());
             if (selected.size() == Math.min(requested.limit(), OperationalQueries.MAX_QUERY_ENTITIES)) break;
         }
         if (selected.isEmpty()) return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount(),
@@ -388,7 +388,7 @@ public final class CoreQueryService {
             var route = owner.algoOrderIndex().value(selected);
             if (route == null) throw new IllegalStateException("algo query route is missing");
             selectedIds[index] = selected; users[index] = route.userId();
-            laneMask |= owner.runtimeState().topology().accountLaneMask(route.userId());
+            laneMask |= owner.accountBook().topology().accountLaneMask(route.userId());
         }
         var page = new AlgoQueryPage(selectedIds, users,
                 new com.surprising.aeron.protocol.CoreAlgoOrderView[selectedIds.length]);
@@ -400,7 +400,7 @@ public final class CoreQueryService {
     private CoreResponse dispatchAccountQuery(CoreMessage message, long laneMask, AccountQuery query) {
         registerQuery(message, query);
         try {
-            if (!owner.runtimeState().dispatchAccountQuery(laneMask, query)) {
+            if (!owner.accountBook().dispatchAccountQuery(laneMask, query)) {
                 pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
@@ -432,11 +432,11 @@ public final class CoreQueryService {
             throw new QueryTooLargeException();
         var query = new LiquidationWorkQuery(owner, owner.appliedCommandCount(), requested, candidates);
         registerQuery(message, query);
-        if (query.laneMask != 0 && !owner.runtimeState().dispatchAccountQuery(query.laneMask, query)) {
+        if (query.laneMask != 0 && !owner.accountBook().dispatchAccountQuery(query.laneMask, query)) {
             pendingQueries.remove(message.header().commandId());
             return owner.rejected(CoreResultCode.MATCHING_REJECTED);
         }
-        if (query.ready()) query.apply(owner.runtimeState().treasury());
+        if (query.ready()) query.apply(owner.accountBook().systemFunds());
         else deferredLiquidationWorkQuery = query;
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
@@ -447,7 +447,7 @@ public final class CoreQueryService {
             com.surprising.aeron.protocol.CoreMaintenanceCodec.Query page,
             com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
         long commandCount = owner.appliedCommandCount();
-        TreasuryRuntime ledger = owner.runtimeState().treasury();
+        SystemFunds ledger = owner.accountBook().systemFunds();
         CoreResponse response;
         try {
             byte[] encoded;
@@ -473,7 +473,7 @@ public final class CoreQueryService {
                 encoded = com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
                         new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(maintenance, users, more));
             } else encoded = CoreStateQueryCodec.encodeTreasuryState(
-                    OperationalQueries.treasuryAssets(ledger, owner.identities()));
+                    OperationalQueries.systemFundsAssets(ledger, owner.identities()));
             response = new CoreResponse(ResponseStatus.OK, commandCount, encoded);
         } catch (QueryTooLargeException failure) {
             response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
@@ -558,7 +558,7 @@ public final class CoreQueryService {
         if (query == null) return null;
         if (query instanceof RiskAccountQuery riskQuery) riskQuery.dispatchAccounts();
         if (query == deferredLiquidationWorkQuery && deferredLiquidationWorkQuery.ready()) {
-            deferredLiquidationWorkQuery.apply(owner.runtimeState().treasury());
+            deferredLiquidationWorkQuery.apply(owner.accountBook().systemFunds());
             deferredLiquidationWorkQuery = null;
         }
         if (!query.isDone()) return null;
@@ -579,7 +579,7 @@ public final class CoreQueryService {
         }
         BookBootstrapSession session = BookBootstrapSession.create(completed.snapshotId(), exportSequence,
                 completed.bootstrapQuery().depth(), completed.bootstrapSnapshot());
-        while (bookBootstrapSessions.size() >= TradingCoreRuntime.Limits.MAX_BOOK_BOOTSTRAP_SNAPSHOTS) {
+        while (bookBootstrapSessions.size() >= TradingCore.Limits.MAX_BOOK_BOOTSTRAP_SNAPSHOTS) {
             bookBootstrapSessions.remove(bookBootstrapSessions.keySet().iterator().next());
         }
         bookBootstrapSessions.put(session.snapshotId(), session);
@@ -614,7 +614,7 @@ public final class CoreQueryService {
 
     /** 统一检查盘口层级数量和编码字节上限，超限返回专用错误，否则按当前已应用命令计数构造成功响应。 */
     CoreResponse boundedBookResponse(int levelCount, byte[] encoded) {
-        if (levelCount > TradingCoreRuntime.Limits.MAX_BOOK_RESPONSE_LEVELS || encoded.length > TradingCoreRuntime.Limits.MAX_BOOK_RESPONSE_BYTES) {
+        if (levelCount > TradingCore.Limits.MAX_BOOK_RESPONSE_LEVELS || encoded.length > TradingCore.Limits.MAX_BOOK_RESPONSE_BYTES) {
             return owner.rejected(CoreResultCode.BOOK_QUERY_RESPONSE_TOO_LARGE);
         }
         return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount(), encoded);

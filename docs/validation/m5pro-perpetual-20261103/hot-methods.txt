@@ -10,13 +10,13 @@ com.surprising.aeron.bootstrap.account.SettlementLaneWorker.run(TradingCpuAffini
 org.agrona.collections.Long2ObjectHashMap.getMapped(long)                                                   634   2.86%
 org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probe(long)                            541   2.44%
 com.surprising.aeron.model.AssetBalance.validAsset(String)                                                  384   1.73%
-com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto(...)                         364   1.64%
+com.surprising.aeron.service.order.admission.RuntimeOrderCheck.resolveInto(...)                         364   1.64%
 org.agrona.collections.Long2ObjectHashMap.put(long, Object)                                                 275   1.24%
 org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.probe(long)                              207   0.93%
 com.surprising.aeron.service.order.OrderBatchPending.clear()                                                169   0.76%
 org.agrona.collections.Long2LongHashMap.get(long)                                                           150   0.68%
-com.surprising.aeron.service.retention.TerminalStateRetention.acceptBatch(LaneCommitDelta)                  129   0.58%
-com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.hashUtf8(long, String)                   122   0.55%
+com.surprising.aeron.service.retention.CompletedOrderArchive.acceptBatch(LaneCommitDelta)                  129   0.58%
+com.surprising.aeron.service.core.identity.IdIndex.hashUtf8(long, String)                   122   0.55%
 com.surprising.aeron.service.core.change.RuntimeChangeBuffer.put(long, Object)                              112   0.51%
 org.agrona.collections.Int2ObjectHashMap.getMapped(int)                                                     103   0.47%
 sun.security.provider.ByteArrayAccess.i2bBig(int[], int, byte[], int, int)                                  102   0.46%
@@ -24,7 +24,7 @@ com.surprising.aeron.protocol.CoreStateQueryCodec.writeUtf8Bytes(ByteBuffer, Str
 org.agrona.collections.LongHashSet.add(long)                                                                 93   0.42%
 com.surprising.aeron.service.settlement.MatcherSettlementEvent$BatchStorage.clear()                          92   0.42%
 org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.probe(long)                                   90   0.41%
-com.surprising.aeron.service.core.TradingAccountRuntime.retainDirectPositionIdentity(...)                    87   0.39%
+com.surprising.aeron.service.core.AccountBook.retainDirectPositionIdentity(...)                    87   0.39%
 org.agrona.collections.LongHashSet.compactChain(int)                                                         86   0.39%
-com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.execute(AccountLaneState)              78   0.35%
+com.surprising.aeron.service.order.admission.PlaceBatchCheckEvent.execute(AccountLaneState)              78   0.35%
 java.util.concurrent.ConcurrentHashMap.get(Object)                                                           77   0.35%

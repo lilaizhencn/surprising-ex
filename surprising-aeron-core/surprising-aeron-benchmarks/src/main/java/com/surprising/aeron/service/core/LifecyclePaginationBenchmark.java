@@ -169,11 +169,11 @@ public class LifecyclePaginationBenchmark {
     private long totalFunds(com.surprising.aeron.model.TradingCoreState state) {
         long total = 0;
         for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
-        var treasury = state.treasuryState();
-        total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.clearingPnlBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.roundingResidualBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.fundingResidualBalances().getOrDefault(asset, 0L));
+        var systemFunds = state.treasuryState();
+        total = Math.addExact(total, systemFunds.feeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.clearingPnlBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.roundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.fundingResidualBalances().getOrDefault(asset, 0L));
         return total;
     }
 }

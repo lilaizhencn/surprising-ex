@@ -26,12 +26,12 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.RuntimeStateParityChecker;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
@@ -69,15 +69,15 @@ class RuntimeDerivativeMatchProcessorTest {
         // 冷状态测试推进器给出的期望结果，其资金规则仍调用生产计算器。
         TradingCoreState expected = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
         // 当前投影对照使用的资产、合约及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
 
         // applyRuntime 返回的同一运行时引用，用于核对原位应用契约。
-        TradingAccountRuntime applied = RuntimeDerivativeMatchFixture.applyRuntime(
-                11, matches, runtime, identities);
+        AccountBook applied = RuntimeDerivativeMatchFixture.applyRuntime(
+                11, matches, accountBook, identities);
 
-        assertThat(applied).isSameAs(runtime);
+        assertThat(applied).isSameAs(accountBook);
         RuntimeStateParityChecker.assertMatches(expected, identities, applied);
     }
 
@@ -98,15 +98,15 @@ class RuntimeDerivativeMatchProcessorTest {
                 Map.of(11L, taker, 12L, maker),
                 Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 当前投影对照使用的资产、合约及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
 
         assertThatThrownBy(() -> RuntimeTestStateTransitions.applyDerivativeMatches(before, 11, List.of(trade(12, 8, 100, 1, true, true),
-                        trade(99, 9, 100, 1, true, true)), runtime, identities))
+                        trade(99, 9, 100, 1, true, true)), accountBook, identities))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("runtime matched order is not open: 99");
-        RuntimeStateParityChecker.assertMatches(before, identities, runtime);
+        RuntimeStateParityChecker.assertMatches(before, identities, accountBook);
     }
 
     /**
@@ -132,14 +132,14 @@ class RuntimeDerivativeMatchProcessorTest {
         // 冷状态测试推进器给出的期望结果，其资金规则仍调用生产计算器。
         TradingCoreState expected = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
         // 当前投影对照使用的资产、合约及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        runtime.putUser(new UserAccount(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
+        accountBook.putUser(new UserAccount(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
 
-        RuntimeDerivativeMatchFixture.applyTransition(before, expected, 11, matches, runtime, identities);
+        RuntimeDerivativeMatchFixture.applyTransition(before, expected, 11, matches, accountBook, identities);
 
-        assertThat(runtime.user(99).revision()).isEqualTo(999);
+        assertThat(accountBook.user(99).revision()).isEqualTo(999);
     }
 
     /**
@@ -168,17 +168,17 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
 
         // 当前投影对照使用的资产、合约及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 测试辅助投影并调用生产成交入口得到的运行时结果。
-        TradingAccountRuntime simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
+        AccountBook simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
 
         // 本次读取系统费用、保险及亏空的 USDT 资产编号。
         int assetId = identities.assetId("USDT");
-        assertThat(simulated.treasury().fee(assetId))
+        assertThat(simulated.systemFunds().fee(assetId))
                 .isEqualTo(after.treasuryState().feeBalances().getOrDefault("USDT", 0L));
-        assertThat(simulated.treasury().insurance(assetId))
+        assertThat(simulated.systemFunds().insurance(assetId))
                 .isEqualTo(after.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
-        assertThat(simulated.treasury().insuranceDeficit(assetId))
+        assertThat(simulated.systemFunds().insuranceDeficit(assetId))
                 .isEqualTo(after.treasuryState().insuranceDeficits().getOrDefault("USDT", 0L));
 
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);
@@ -217,10 +217,10 @@ class RuntimeDerivativeMatchProcessorTest {
         // 冷状态测试推进器应用成交后的参照状态。
         TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", List.of());
         // 当前投影对照使用的资产、合约及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
 
         // 测试辅助投影并调用生产成交入口得到的运行时结果。
-        TradingAccountRuntime simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, List.of(), identities);
+        AccountBook simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, List.of(), identities);
 
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);
     }
@@ -299,11 +299,11 @@ class RuntimeDerivativeMatchProcessorTest {
                 + closed.treasuryState().feeBalances().get("USDT")).isEqualTo(3_000_000_000_000L);
 
         // 当前投影对照使用的资产、合约及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
-        TradingAccountRuntime runtime = RuntimeDerivativeMatchFixture.simulateTransition(
+        AccountBook accountBook = RuntimeDerivativeMatchFixture.simulateTransition(
                 readyToClose, closed, 14, betterFill, identities);
-        RuntimeStateParityChecker.assertMatches(closed, identities, runtime);
+        RuntimeStateParityChecker.assertMatches(closed, identities, accountBook);
     }
 
     /**
@@ -335,18 +335,18 @@ class RuntimeDerivativeMatchProcessorTest {
         // 冷状态测试推进器应用成交后的参照状态。
         TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", matches);
         // 当前投影对照使用的资产、合约及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
 
         // 测试辅助投影并调用生产成交入口得到的运行时结果。
-        TradingAccountRuntime simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
+        AccountBook simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
 
         // 本次读取系统费用、保险及亏空的 USDT 资产编号。
         int assetId = identities.assetId("USDT");
-        assertThat(simulated.treasury().fee(assetId))
+        assertThat(simulated.systemFunds().fee(assetId))
                 .isEqualTo(after.treasuryState().feeBalances().getOrDefault("USDT", 0L));
-        assertThat(simulated.treasury().insurance(assetId))
+        assertThat(simulated.systemFunds().insurance(assetId))
                 .isEqualTo(after.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
-        assertThat(simulated.treasury().insuranceDeficit(assetId))
+        assertThat(simulated.systemFunds().insuranceDeficit(assetId))
                 .isEqualTo(after.treasuryState().insuranceDeficits().getOrDefault("USDT", 0L));
 
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);

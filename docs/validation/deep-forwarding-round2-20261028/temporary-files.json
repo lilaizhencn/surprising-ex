@@ -768,37 +768,37 @@
     "retention": "deleted after summary/view/configuration and SHA-256 archive"
   },
   {
-    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-0/profile.jfr",
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-0/profile.jfr",
     "bytes": 493610,
     "sha256": "8ccda154516c3f51a4be4e0a9dbefa76870476cb177f078bb37e10572a0d45a3",
     "retention": "deleted after summary/view/configuration and SHA-256 archive"
   },
   {
-    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-64/profile.jfr",
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-64/profile.jfr",
     "bytes": 575593,
     "sha256": "223810fb4dbc89693955abadae6962e6f0f4d1192abbff52aa4034733df3dbcc",
     "retention": "deleted after summary/view/configuration and SHA-256 archive"
   },
   {
-    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-8/profile.jfr",
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-8/profile.jfr",
     "bytes": 606412,
     "sha256": "c67a149d0004e44ee0908424d1e47a9b8f13ed3233effa1f9eeeb493fe5e1bfd",
     "retention": "deleted after summary/view/configuration and SHA-256 archive"
   },
   {
-    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-0/profile.jfr",
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-0/profile.jfr",
     "bytes": 498242,
     "sha256": "6736e705fea42ac9989cd15a959364fe045e6f93dc0e29f416d98f6b0dfbbb1d",
     "retention": "deleted after summary/view/configuration and SHA-256 archive"
   },
   {
-    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-64/profile.jfr",
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-64/profile.jfr",
     "bytes": 497799,
     "sha256": "2cb5656f422a82010f01ab58dc5111c66acb37ed476460aff2fbb633754cbc59",
     "retention": "deleted after summary/view/configuration and SHA-256 archive"
   },
   {
-    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-8/profile.jfr",
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-8/profile.jfr",
     "bytes": 500055,
     "sha256": "86911597e87d9a9f4f153e9f62fdf9143420b758f7104a617929b8d31fb7528e",
     "retention": "deleted after summary/view/configuration and SHA-256 archive"

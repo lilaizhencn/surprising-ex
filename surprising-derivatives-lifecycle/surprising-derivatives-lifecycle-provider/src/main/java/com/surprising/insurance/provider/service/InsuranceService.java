@@ -112,7 +112,7 @@ import java.util.UUID;
 
     public InsuranceFundBalanceQueryResponse balances(String asset) {
         String normalized = asset == null || asset.isBlank() ? null : normalizeAsset(asset);
-        var rows = CoreStateQueryCodec.decodeTreasuryState(aeron.treasury()).stream()
+        var rows = CoreStateQueryCodec.decodeTreasuryState(aeron.systemFunds()).stream()
                 .filter(value -> normalized == null || value.asset().equals(normalized))
                 .map(value -> new InsuranceFundBalanceResponse(value.asset(), value.insuranceBalanceUnits(),
                         Instant.now())).toList();

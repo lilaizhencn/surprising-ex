@@ -8,9 +8,9 @@ import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountTransactionRollback;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.*;
 import com.surprising.aeron.service.order.Order;
@@ -18,9 +18,9 @@ import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.OrderCommand.ResultTarget;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.FundsTotal;
+import com.surprising.aeron.service.treasury.SystemFundsChange;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.lang.invoke.MethodHandles;
@@ -45,7 +45,7 @@ public final class TradeSettlement implements
         void releaseMatcherSubmission(int matcherShard);
     }
 
-    private static final RuntimeTreasuryDelta EMPTY_TREASURY_DELTA = new RuntimeTreasuryDelta(1);
+    private static final SystemFundsChange EMPTY_TREASURY_DELTA = new SystemFundsChange(1);
     /** 不同 Lane 完成位之间相隔十六个 long，降低并发写相邻位置的竞争。 */
     private static final int CACHE_LINE_LONGS = 16;
     /** 完成数组的 VarHandle，Lane release 发布、Owner 及账本 acquire 读取。 */
@@ -60,16 +60,16 @@ public final class TradeSettlement implements
     private long requiredLaneMask;
     @Accessors(fluent = true, chain = false)
     @Getter
-    private TradingAccountRuntime runtime;
+    private AccountBook accountBook;
     @Accessors(fluent = true, chain = false)
     @Getter
-    private RuntimeIdentityRegistry identities;
-    private RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
+    private IdIndex identities;
+    private SystemFundsChange[] touchedLaneSystemFundsChanges;
     /** 当前代实体、余额及资金变化缓冲，完成后由 Owner 接管并解除引用。 */
     private Changes changes;
-    private boolean treasuryTrades;
+    private boolean systemFundsTrades;
     private long[] completedLanes;
-    private TreasurySettlement treasurySettlement;
+    private SystemFundsSettlement systemFundsSettlement;
     /** 本事件独占的计划及命令结果存储，不借用共享 Owner 暂存数组。 */
     private BatchStorage batchStorage;
     /** Matcher 已通过 volatile 发布结果或故障，Lane 据此允许消费。 */
@@ -89,7 +89,7 @@ public final class TradeSettlement implements
         int batchPlanCount;
         boolean cancellation;
         long cancellationUserId;
-        com.surprising.aeron.service.order.OrderCommand.ReplacementAdmission replacement;
+        com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheck replacement;
         int replacementAssetId;
         com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger;
         long triggeredAt;
@@ -113,13 +113,13 @@ public final class TradeSettlement implements
         String directSyntheticResultCode;
         MatcherCompletionRoute matcherCompletionRoute;
         int matcherCompletionShard;
-        boolean admissionRequired;
-        OrderCommand.ResolvedPlaceOrder admissionOrder;
-        long admissionUserId;
-        long admissionOrderId;
-        volatile boolean admissionResolved;
-        boolean admissionAccepted;
-        int admissionResultCode;
+        boolean orderCheckRequired;
+        OrderCommand.ResolvedPlaceOrder orderCheckOrder;
+        long orderCheckUserId;
+        long orderCheckOrderId;
+        volatile boolean orderCheckResolved;
+        boolean orderCheckAccepted;
+        int orderCheckResultCode;
         OrderCommand.ResultTarget resultTarget;
     }
 
@@ -203,17 +203,17 @@ public final class TradeSettlement implements
 
     /** 准备一代直达事件，默认以同一 Core 序号作为最终 Lane 提交序号，委托完整入口登记租约输入。 */
     public void prepareDirect(long sequence, long laneMask, long timestamp, long position,
-                       java.util.UUID commandId, int shard, TradingAccountRuntime runtime,
-                       RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
+                       java.util.UUID commandId, int shard, AccountBook accountBook,
+                       IdIndex identities, int count, java.util.List<Long> cancellations,
                        OrderCommand.ResultTarget target) {
         prepareDirect(sequence, sequence, laneMask, timestamp, position, commandId, shard,
-                runtime, identities, count, cancellations, target);
+                accountBook, identities, count, cancellations, target);
     }
 
     /** 检查序号、时间、路由及有效数量，重置本代准入和发布状态，保存命令证据并借用变化缓冲。顺序批次可用零提交序号先应用本项事实，整批终态再统一推进水位。 */
     public void prepareDirect(long coreSequence, long commitSequence, long laneMask, long timestamp, long position,
-                       java.util.UUID commandId, int shard, TradingAccountRuntime runtime,
-                       RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
+                       java.util.UUID commandId, int shard, AccountBook accountBook,
+                       IdIndex identities, int count, java.util.List<Long> cancellations,
                        OrderCommand.ResultTarget target) {
         if (coreSequence <= 0 || commitSequence < 0 || laneMask == 0 || timestamp < 0 || position < 0 || commandId == null
                 || count <= 0 || batchStorage == null || count > batchStorage.plans.length)
@@ -222,19 +222,19 @@ public final class TradeSettlement implements
         state.dispatched = false; state.queuedLaneMask = 0;
         state.expandLaneRoute = Long.bitCount(laneMask) == 1;
         state.directFailure = null;
-        resetAdmission();
+        resetOrderCheck();
         state.directCoreSequence = coreSequence;
         this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
         state.commitTimestamp = timestamp; state.commitClusterPosition = position;
         state.directCommandId = commandId;
         state.directShard = shard;
         state.authorizedCancellations = java.util.Objects.requireNonNull(cancellations);
-        this.runtime = runtime; this.identities = identities; state.resultTarget = target;
+        this.accountBook = accountBook; this.identities = identities; state.resultTarget = target;
         state.batchPlanCount = count;
-        changes = runtime.acquireMatcherSettlementChanges(laneMask);
+        changes = accountBook.acquireMatcherSettlementChanges(laneMask);
         changes.directPositionIdentities = true;
         state.collected = false;
-        resetCompletions(runtime.topology().accountLaneCount());
+        resetCompletions(accountBook.topology().accountLaneCount());
     }
 
     /** Owner 在预约 Matcher 发布前选定撤单业务及用户，后续 Lane 只应用 Matcher 接受的撤单。 */
@@ -256,10 +256,10 @@ public final class TradeSettlement implements
     }
 
     /** 在单项事件预约发布前保存改单准入输入及新预留资产编号，供所属 Lane 原位执行。 */
-    public void replacement(com.surprising.aeron.service.order.OrderCommand.ReplacementAdmission admission, int assetId) {
-        if (state.dispatched || directPublished || state.batchPlanCount != 1 || admission == null)
+    public void replacement(com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheck orderCheck, int assetId) {
+        if (state.dispatched || directPublished || state.batchPlanCount != 1 || orderCheck == null)
             throw new IllegalStateException("invalid direct replacement preparation");
-        state.replacement = admission;
+        state.replacement = orderCheck;
         state.replacementAssetId = assetId;
     }
 
@@ -292,34 +292,34 @@ public final class TradeSettlement implements
     }
 
     /** 把准入回执编码转换为业务名称，尚为 NONE 时按当前接口约定返回 SUCCESS。不能据此判断回执已到达。 */
-    public String admissionResultCode() {
-        return state.admissionResultCode == CoreResultCode.NONE.wireCode()
-                ? "SUCCESS" : CoreResultCode.fromWireCode(state.admissionResultCode).name();
+    public String orderCheckResultCode() {
+        return state.orderCheckResultCode == CoreResultCode.NONE.wireCode()
+                ? "SUCCESS" : CoreResultCode.fromWireCode(state.orderCheckResultCode).name();
     }
 
     /** 未要求普通下单准入时视为接受，否则返回已复制的准入接受标记。调用方仍须遵守回执发布顺序。 */
-    public boolean admissionAccepted() { return !state.admissionRequired || state.admissionAccepted; }
+    public boolean orderCheckAccepted() { return !state.orderCheckRequired || state.orderCheckAccepted; }
 
     /** 在已登记普通下单准入路由的事件中保存不可变订单输入与用户，预留回执须匹配该订单编号。 */
-    public void admissionOrder(OrderCommand.ResolvedPlaceOrder order, long userId) {
-        if (state.batchPlanCount == 0 || !state.admissionRequired || order == null || userId <= 0) {
+    public void orderCheckOrder(OrderCommand.ResolvedPlaceOrder order, long userId) {
+        if (state.batchPlanCount == 0 || !state.orderCheckRequired || order == null || userId <= 0) {
             throw new IllegalStateException("invalid place admission order");
         }
-        state.admissionOrder = order;
-        state.admissionUserId = userId;
-        state.admissionOrderId = order.orderId();
+        state.orderCheckOrder = order;
+        state.orderCheckUserId = userId;
+        state.orderCheckOrderId = order.orderId();
     }
 
     /** Matcher 校验 Lane 固定收据槽的订单身份，只保存接受标记和结果码，最后通过 volatile 标记发布回执。同代不允许重复发布。 */
-    public void admissionReceipt(long reservationId, boolean accepted, int resultCode) {
-        if (state.batchPlanCount == 0 || !state.admissionRequired || state.admissionResolved || reservationId <= 0
-                || reservationId != state.admissionOrderId
+    public void orderCheckReceipt(long reservationId, boolean accepted, int resultCode) {
+        if (state.batchPlanCount == 0 || !state.orderCheckRequired || state.orderCheckResolved || reservationId <= 0
+                || reservationId != state.orderCheckOrderId
                 || resultCode < 0) {
             throw new IllegalStateException("invalid place admission receipt");
         }
-        state.admissionAccepted = accepted;
-        state.admissionResultCode = resultCode;
-        state.admissionResolved = true;
+        state.orderCheckAccepted = accepted;
+        state.orderCheckResultCode = resultCode;
+        state.orderCheckResolved = true;
     }
 
     /** 检查原生结果、合成拒绝码或执行故障是否已准备。 */
@@ -356,17 +356,17 @@ public final class TradeSettlement implements
                 if (batchStorage.cancellationOrderIds[0] != orderId)
                     throw new IllegalStateException("direct cancellation order is inconsistent");
                 batchStorage.plans[0].buildDirectNativeCancellation(state.directCoreSequence, state.cancellationUserId,
-                        orderId, result, runtime);
-            } else if (state.admissionRequired && state.admissionAccepted) {
-                if (state.admissionOrder == null || state.admissionOrder.orderId() != orderId)
+                        orderId, result, accountBook);
+            } else if (state.orderCheckRequired && state.orderCheckAccepted) {
+                if (state.orderCheckOrder == null || state.orderCheckOrder.orderId() != orderId)
                     throw new IllegalStateException("direct admission order is inconsistent");
-                batchStorage.plans[0].buildDirectNative(state.directCoreSequence, state.admissionUserId, state.admissionOrder,
-                        batchStorage.instruments[0], result, runtime);
+                batchStorage.plans[0].buildDirectNative(state.directCoreSequence, state.orderCheckUserId, state.orderCheckOrder,
+                        batchStorage.instruments[0], result, accountBook);
             } else {
                 if (admitted == null || admitted.orderId() != orderId)
                     throw new IllegalStateException("direct matcher order is inconsistent");
                 batchStorage.plans[0].buildDirectNative(state.directCoreSequence, admitted,
-                        batchStorage.instruments[0], result, runtime);
+                        batchStorage.instruments[0], result, accountBook);
             }
             state.directNativeResult = result;
             state.directMatcherSequence = matcherSequence;
@@ -403,10 +403,10 @@ public final class TradeSettlement implements
                 throw new IllegalStateException("direct matcher batch order is inconsistent");
             if (state.cancellation) {
                 batchStorage.plans[index].buildDirectNativeCancellation(state.directCoreSequence, state.cancellationUserId,
-                        orderId, result, runtime);
+                        orderId, result, accountBook);
             } else {
                 batchStorage.plans[index].buildDirectNative(state.directCoreSequence, admitted,
-                        batchStorage.instruments[index], result, runtime);
+                        batchStorage.instruments[index], result, accountBook);
             }
             if (index == 0) {
                 batchStorage.plans[index].acceptedPreCancellations(
@@ -441,7 +441,7 @@ public final class TradeSettlement implements
             Order admitted = batchStorage.admittedOrders[0];
             if (admitted == null) throw new IllegalStateException("replacement order is missing");
             batchStorage.plans[0].buildDirectNative(state.directCoreSequence, admitted,
-                    batchStorage.instruments[0], result, runtime);
+                    batchStorage.instruments[0], result, accountBook);
             if (placementAccepted || businessRejection)
                 batchStorage.plans[0].acceptedReplacementCancellation(state.replacement.originalOrderId());
             batchStorage.plans[0].acceptedPreCancellations(
@@ -461,13 +461,13 @@ public final class TradeSettlement implements
     public void publishDirectRejection(String resultCode, long coreSequence,
             long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        requireProof(state.batchPlanCount != 0 && state.dispatched && !directPublished && state.admissionRequired
-                        && !state.admissionAccepted && resultCode != null && !resultCode.isBlank(),
+        requireProof(state.batchPlanCount != 0 && state.dispatched && !directPublished && state.orderCheckRequired
+                        && !state.orderCheckAccepted && resultCode != null && !resultCode.isBlank(),
                 coreSequence, commandIdMostSignificantBits, commandIdLeastSignificantBits, matcherShard,
-                orderId == state.admissionOrderId && matcherSequence > 0, "direct matcher rejection proof is inconsistent");
+                orderId == state.orderCheckOrderId && matcherSequence > 0, "direct matcher rejection proof is inconsistent");
         try {
             batchStorage.plans[0].prepareRejectedDirect(
-                    state.directCoreSequence, state.admissionUserId, state.admissionOrderId, routedLaneMask);
+                    state.directCoreSequence, state.orderCheckUserId, state.orderCheckOrderId, routedLaneMask);
             state.directSyntheticResultCode = resultCode;
             state.directMatcherSequence = state.directLastMatcherSequence = matcherSequence;
             state.directNativeAccepted = false;
@@ -494,8 +494,8 @@ public final class TradeSettlement implements
     }
 
     /** 准入回执已复制且接受后，将 Owner 已授权撤单与 Lane 新授权撤单合并去重并按编号排序，保存为本代只读授权列表。 */
-    public void addAdmissionCancellations(java.util.List<Long> orderIds) {
-        if (state.batchPlanCount == 0 || directPublished || !state.admissionResolved || !state.admissionAccepted)
+    public void addOrderCheckCancellations(java.util.List<Long> orderIds) {
+        if (state.batchPlanCount == 0 || directPublished || !state.orderCheckResolved || !state.orderCheckAccepted)
             throw new IllegalStateException("place admission cancellations are not ready");
         if (orderIds.isEmpty()) return;
         var combined = new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
@@ -512,8 +512,8 @@ public final class TradeSettlement implements
     }
 
     /** 准入成功后供 Matcher 借用合并后的授权撤单列表，未满足回执条件时拒绝读取。 */
-    public java.util.List<Long> admissionCancellations() {
-        if (state.batchPlanCount == 0 || !state.admissionResolved || !state.admissionAccepted)
+    public java.util.List<Long> orderCheckCancellations() {
+        if (state.batchPlanCount == 0 || !state.orderCheckResolved || !state.orderCheckAccepted)
             throw new IllegalStateException("place admission cancellations are not ready");
         return state.authorizedCancellations;
     }
@@ -560,8 +560,8 @@ public final class TradeSettlement implements
             throw new IllegalStateException("matcher result escaped its admitted Lane dependency scope");
         if (state.expandLaneRoute) routedLaneMask = actualLanes;
         requiredLaneMask = actualLanes;
-        treasuryTrades = hasTrade(batchStorage.plans, state.batchPlanCount);
-        prepareTreasuryDeltas(actualLanes, treasuryTrades);
+        systemFundsTrades = hasTrade(batchStorage.plans, state.batchPlanCount);
+        prepareSystemFundsChanges(actualLanes, systemFundsTrades);
         changes.ensureOrderCapacity(orders, actualLanes);
         if (!state.matcherPublicationDeferred) notifyDirectPublication();
     }
@@ -576,7 +576,7 @@ public final class TradeSettlement implements
 
     /** 下单步骤 4.3：持有发布租约时释放原 Matcher 提交占用，再发布结果并完成各 Lane 投递，最后解除租约。 */
     private void notifyDirectPublication() {
-        TradingAccountRuntime completionRuntime = runtime;
+        AccountBook completionRuntime = accountBook;
         // 队列中的已发布事实一旦可见，Lane 就能开始消费。
         // 发布方释放传输占用并完成全部入队前，Owner 仍不能回收事件。
         state.matcherPublicationDeferred = true;
@@ -672,11 +672,11 @@ public final class TradeSettlement implements
     }
 
     /** 校验普通下单准入 Lane，并为活动事件设置一次需要准入回执的边界。 */
-    public void admissionRoute(int laneId) {
-        if (state.batchPlanCount == 0 || state.admissionRequired || laneId < 0) {
+    public void orderCheckRoute(int laneId) {
+        if (state.batchPlanCount == 0 || state.orderCheckRequired || laneId < 0) {
             throw new IllegalStateException("invalid place admission route");
         }
-        state.admissionRequired = true;
+        state.orderCheckRequired = true;
     }
 
     /** Owner 在交给 Matcher 前预约逻辑派发状态，仅设置预约标记，不接触任何 Lane 队列。 */
@@ -692,7 +692,7 @@ public final class TradeSettlement implements
         if (!complete() || changes != null) {
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
-        if (treasurySettlement != null) treasurySettlement.clear();
+        if (systemFundsSettlement != null) systemFundsSettlement.clear();
         state.cancellation = false; directPublished = false; state.directFailure = null; state.dispatched = false;
         state.queuedLaneMask = 0;
         state.expandLaneRoute = false;
@@ -704,7 +704,7 @@ public final class TradeSettlement implements
         state.triggeredAt = 0;
         state.matcherCompletionRoute = null;
         state.matcherCompletionShard = -1;
-        resetAdmission();
+        resetOrderCheck();
         state.directCoreSequence = 0;
         state.directCommandId = null;
         state.authorizedCancellations = java.util.List.of();
@@ -718,9 +718,9 @@ public final class TradeSettlement implements
         state.resultTarget = null;
         if (batchStorage != null) batchStorage.clear();
         state.batchPlanCount = 0;
-        runtime = null;
+        accountBook = null;
         identities = null;
-        treasuryTrades = false;
+        systemFundsTrades = false;
         state.collected = false;
     }
 
@@ -735,19 +735,19 @@ public final class TradeSettlement implements
     }
 
     /** 已终态的订单释放剩余预留，确有释放才推进用户修订。 */
-    static void releaseCanceledReservation(TradingAccountRuntime runtime, AccountPartition lane, Order order) {
+    static void releaseCanceledReservation(AccountBook accountBook, AccountPartition lane, Order order) {
         if (order == null || !order.canceled()) return;
-        long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
-        if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
+        long releaseUnits = accountBook.releaseTerminalReservationInLane(lane, order, null);
+        if (releaseUnits > 0) accountBook.advanceUserRevision(lane, order.userId());
     }
 
-    private void resetAdmission() {
-        state.admissionRequired = false;
-        state.admissionOrder = null;
-        state.admissionUserId = state.admissionOrderId = 0;
-        state.admissionResolved = false;
-        state.admissionAccepted = false;
-        state.admissionResultCode = CoreResultCode.NONE.wireCode();
+    private void resetOrderCheck() {
+        state.orderCheckRequired = false;
+        state.orderCheckOrder = null;
+        state.orderCheckUserId = state.orderCheckOrderId = 0;
+        state.orderCheckResolved = false;
+        state.orderCheckAccepted = false;
+        state.orderCheckResultCode = CoreResultCode.NONE.wireCode();
     }
 
     /** 下单步骤 4.4：所属 Lane 应用本代各计划、整理终态并发布完成位。 */
@@ -763,18 +763,18 @@ public final class TradeSettlement implements
             throw new IllegalStateException("matcher fact was routed to an unrelated account lane");
         }
         // 准入拒绝时只整理完成回执， 不执行正常成交资金计算，让 Owner 能退休已提交的事件。
-        if (state.admissionRequired && !state.admissionResolved) {
+        if (state.orderCheckRequired && !state.orderCheckResolved) {
             throw new IllegalStateException("place admission receipt is missing");
         }
-        if (state.admissionRequired && !state.admissionAccepted) {
+        if (state.orderCheckRequired && !state.orderCheckAccepted) {
             changes().prepareLaneTerminal(laneId, identities, lane, state.directCoreSequence);
             publishCompletion(lane);
             return;
         }
-        runtime.enterMatcherSettlementScope(lane, changes());
+        accountBook.enterMatcherSettlementScope(lane, changes());
         try {
-            RuntimeTreasuryDelta delta = !treasuryTrades
-                    ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
+            SystemFundsChange delta = !systemFundsTrades
+                    ? EMPTY_TREASURY_DELTA : touchedLaneSystemFundsChanges[laneSlot(laneId)];
             for (int index = 0; index < state.batchPlanCount; index++) {
                 TradeSettlement.Plan batchPlan = batchStorage.plans[index];
                 if ((batchPlan.requiredLaneMask() & laneMask) == 0) continue;
@@ -783,22 +783,22 @@ public final class TradeSettlement implements
                         batchStorage.settleAssetIds[index], delta,
                         batchStorage.admittedOrders[index]);
                 if (commitSequence != 0 || state.cancellation) {
-                    runtime.stampMatcherOrders(
+                    accountBook.stampMatcherOrders(
                             lane, batchPlan, state.commitTimestamp, state.commitClusterPosition);
                 }
             }
             changes.prepareLaneTerminal(laneId, identities, lane, state.directCoreSequence);
             if (state.resultTarget != null
-                    && laneId == runtime.topology().accountLaneId(plan().activeUserId())) {
+                    && laneId == accountBook.topology().accountLaneId(plan().activeUserId())) {
                 OrderCommand.ResultTarget.capture(state.resultTarget, changes.laneDeltas[laneId], identities, lane);
             }
             if (commitSequence != 0) {
                 lane.applied(state.directShard, commitSequence);
                 lane.committed(state.directShard, commitSequence);
-                runtime.publishLaneCommittedSequence(lane);
+                accountBook.publishLaneCommittedSequence(lane);
             }
         } finally {
-            runtime.exitMatcherSettlementScope(lane, changes);
+            accountBook.exitMatcherSettlementScope(lane, changes);
         }
         // 每个 Lane 独立发布自己的完成位，Owner 核对事件整体完成边界， 避免所有账户线程竞争写同一个原子 OR 位图。
         publishCompletion(lane);
@@ -807,7 +807,7 @@ public final class TradeSettlement implements
     /** Lane 记录操作并以 release 发布自己独立的完成标记，拒绝重复完成。 */
     private void publishCompletion(AccountPartition lane) {
         int laneId = lane.laneId();
-        TradingAccountRuntime completionRuntime = runtime;
+        AccountBook completionRuntime = accountBook;
         lane.recordSettlementOperation();
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
@@ -819,11 +819,11 @@ public final class TradeSettlement implements
 
     private void applyPlan(AccountPartition lane, int laneId, TradeSettlement.Plan value,
                            CoreInstrument valueInstrument, int valueBaseAssetId,
-                           int valueQuoteAssetId, int valueSettleAssetId, RuntimeTreasuryDelta delta,
-                           Order admissionVersion) {
+                           int valueQuoteAssetId, int valueSettleAssetId, SystemFundsChange delta,
+                           Order orderCheckVersion) {
         if (state.cancellation) {
             if (!value.rejectedTaker())
-                runtime.cancelOrderInLane(lane, value.activeUserId(), value.takerOrderId(),
+                accountBook.cancelOrderInLane(lane, value.activeUserId(), value.takerOrderId(),
                         state.commitTimestamp, state.commitClusterPosition);
             return;
         }
@@ -831,47 +831,47 @@ public final class TradeSettlement implements
             applyReplacement(lane, value);
             if (!accepted()) return;
         }
-        value.validateDirectLane(lane, runtime, identities, valueInstrument);
+        value.validateDirectLane(lane, accountBook, identities, valueInstrument);
         for (int index = 0; state.replacement == null && index < value.preCancellationCount(); index++) {
             long orderId = value.preCancellationOrderId(index);
             Order order = lane.order(orderId);
             if (order != null && order.status() == CoreOrderStatus.OPEN) {
-                runtime.cancelOrderInLane(lane, order.userId(), order, -1, -1);
+                accountBook.cancelOrderInLane(lane, order.userId(), order, -1, -1);
             }
         }
         if (value.rejectedTaker()) {
-            if (lane.laneId() == runtime.accountLaneId(value.activeUserId()))
-                runtime.rejectOrderInLane(lane, value.activeUserId(), value.takerOrderId(), state.commitTimestamp, state.commitClusterPosition);
+            if (lane.laneId() == accountBook.accountLaneId(value.activeUserId()))
+                accountBook.rejectOrderInLane(lane, value.activeUserId(), value.takerOrderId(), state.commitTimestamp, state.commitClusterPosition);
         } else if (valueInstrument.contractType().productLine().isDerivative()) {
             DerivativeTradeSettlementService.applyLane(value.takerOrderId(), value, lane, laneId,
-                    runtime, identities, valueInstrument, valueSettleAssetId, delta, state.commitTimestamp, state.commitClusterPosition);
+                    accountBook, identities, valueInstrument, valueSettleAssetId, delta, state.commitTimestamp, state.commitClusterPosition);
         } else {
             SpotTradeSettlementService.applyLane(value.takerOrderId(), value, lane, laneId,
-                    runtime, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta, state.commitTimestamp, state.commitClusterPosition);
+                    accountBook, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta, state.commitTimestamp, state.commitClusterPosition);
         }
-        runtime.completeMatcherPendingReservations(lane, value, admissionVersion);
-        publishAdmittedState(lane, value, admissionVersion);
+        accountBook.completeMatcherPendingReservations(lane, value, orderCheckVersion);
+        publishAdmittedState(lane, value, orderCheckVersion);
         var trigger = value.completedTrigger();
-        if (trigger != null && lane.laneId() == runtime.accountLaneId(trigger.userId())) runtime.putTriggerOrder(lane, trigger);
+        if (trigger != null && lane.laneId() == accountBook.accountLaneId(trigger.userId())) accountBook.putTriggerOrder(lane, trigger);
     }
 
     private void publishAdmittedState(
-            AccountPartition lane, TradeSettlement.Plan value, Order admissionVersion) {
-        Order admitted = admissionVersion == null ? value.admittedTaker() : admissionVersion;
-        boolean eventAdmission = state.admissionRequired && state.admissionAccepted && state.admissionOrder != null;
+            AccountPartition lane, TradeSettlement.Plan value, Order orderCheckVersion) {
+        Order admitted = orderCheckVersion == null ? value.admittedTaker() : orderCheckVersion;
+        boolean eventOrderCheck = state.orderCheckRequired && state.orderCheckAccepted && state.orderCheckOrder != null;
         long userId = admitted != null ? admitted.userId()
-                : eventAdmission ? state.admissionUserId : value.activeUserId();
+                : eventOrderCheck ? state.orderCheckUserId : value.activeUserId();
         long orderId = admitted != null ? admitted.orderId()
-                : eventAdmission ? state.admissionOrderId : value.takerOrderId();
-        if ((admitted == null && !eventAdmission)
-                || lane.laneId() != runtime.accountLaneId(userId)) return;
-        runtime.publishUser(lane, userId, lane.user(userId));
-        runtime.publishOrder(lane, orderId, lane.order(orderId));
-        runtime.publishReservation(lane, orderId, lane.reservation(orderId));
+                : eventOrderCheck ? state.orderCheckOrderId : value.takerOrderId();
+        if ((admitted == null && !eventOrderCheck)
+                || lane.laneId() != accountBook.accountLaneId(userId)) return;
+        accountBook.publishUser(lane, userId, lane.user(userId));
+        accountBook.publishOrder(lane, orderId, lane.order(orderId));
+        accountBook.publishReservation(lane, orderId, lane.reservation(orderId));
     }
 
     private void applyReplacement(AccountPartition lane, TradeSettlement.Plan value) {
-        if (lane.laneId() != runtime.accountLaneId(state.replacement.userId())) return;
+        if (lane.laneId() != accountBook.accountLaneId(state.replacement.userId())) return;
         long userId = state.replacement.userId();
         Order original = lane.order(state.replacement.originalOrderId());
         UserAccount user = lane.user(userId);
@@ -882,40 +882,40 @@ public final class TradeSettlement implements
                     + state.replacement.originalOrderRevision() + " user="
                     + (user == null ? "missing" : user.revision()) + '/' + state.replacement.userRevision());
         for (int index = 0; index < value.preCancellationCount(); index++)
-            runtime.cancelOrderInLane(lane, userId, value.preCancellationOrderId(index),
+            accountBook.cancelOrderInLane(lane, userId, value.preCancellationOrderId(index),
                     state.commitTimestamp, state.commitClusterPosition);
         if (!accepted()) return;
         Order prepared = batchStorage.admittedOrders[0];
         if (lane.order(state.replacement.originalOrderId()).status() != CoreOrderStatus.CANCELED)
             throw new IllegalStateException("accepted replacement did not cancel original order");
-        long clientKey = RuntimeIdentityRegistry.clientKeyValue(
+        long clientKey = IdIndex.clientKeyValue(
                 identities.prepareClientKeyInLane(lane, userId, prepared.clientOrderId()));
-        runtime.accountRollback().captureBalanceBefore(lane, userId, state.replacementAssetId);
-        runtime.placeOrderInLane(lane, userId, state.replacement.resolved(), state.directCommandId,
+        accountBook.accountRollback().captureBalanceBefore(lane, userId, state.replacementAssetId);
+        accountBook.placeOrderInLane(lane, userId, state.replacement.resolved(), state.directCommandId,
                 state.replacement.requiredReservationUnits(), clientKey, prepared.symbolId(), state.replacementAssetId,
                 state.directCoreSequence, prepared, state.commitTimestamp, state.commitClusterPosition);
-        runtime.publishUser(lane, userId, lane.user(userId));
-        runtime.publishOrder(lane, prepared.orderId(), lane.order(prepared.orderId()));
-        runtime.publishReservation(lane, prepared.orderId(), lane.reservation(prepared.orderId()));
-        runtime.accountRollback().captureBalanceAfter(lane, userId, state.replacementAssetId);
+        accountBook.publishUser(lane, userId, lane.user(userId));
+        accountBook.publishOrder(lane, prepared.orderId(), lane.order(prepared.orderId()));
+        accountBook.publishReservation(lane, prepared.orderId(), lane.reservation(prepared.orderId()));
+        accountBook.accountRollback().captureBalanceAfter(lane, userId, state.replacementAssetId);
     }
 
     /** 按实际参与 Lane 的紧凑顺序保留财务差额槽，容量不足才扩展。 */
-    private void prepareTreasuryDeltas(long laneMask, boolean trades) {
+    private void prepareSystemFundsChanges(long laneMask, boolean trades) {
         if (trades) {
             int touchedLaneCount = Long.bitCount(laneMask);
-            int capacity = touchedLaneTreasuryDeltas == null ? 0 : touchedLaneTreasuryDeltas.length;
+            int capacity = touchedLaneSystemFundsChanges == null ? 0 : touchedLaneSystemFundsChanges.length;
             if (capacity < touchedLaneCount) {
-                touchedLaneTreasuryDeltas = capacity == 0
-                        ? new RuntimeTreasuryDelta[touchedLaneCount]
-                        : java.util.Arrays.copyOf(touchedLaneTreasuryDeltas, touchedLaneCount);
+                touchedLaneSystemFundsChanges = capacity == 0
+                        ? new SystemFundsChange[touchedLaneCount]
+                        : java.util.Arrays.copyOf(touchedLaneSystemFundsChanges, touchedLaneCount);
                 for (int index = capacity; index < touchedLaneCount; index++) {
-                    touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
+                    touchedLaneSystemFundsChanges[index] = new SystemFundsChange();
                 }
             }
         }
-        if (touchedLaneTreasuryDeltas != null)
-            for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
+        if (touchedLaneSystemFundsChanges != null)
+            for (SystemFundsChange delta : touchedLaneSystemFundsChanges) delta.clear();
     }
 
     private static boolean hasTrade(TradeSettlement.Plan[] plans, int planCount) {
@@ -939,7 +939,7 @@ public final class TradeSettlement implements
 
     /** 事件就绪且没有独立账户线程时，按路由推进尚未完成的 Lane。不在此代替已启动的账户工作线程执行。 */
     public void ensureLanesExecuted() {
-        if (!ready() || runtime == null || runtime.accountLanesStarted() || !state.dispatched) return;
+        if (!ready() || accountBook == null || accountBook.accountLanesStarted() || !state.dispatched) return;
         long remaining = routedLaneMask() & ~completedLaneMask();
         while (remaining != 0) {
             int laneId = Long.numberOfTrailingZeros(remaining);
@@ -947,7 +947,7 @@ public final class TradeSettlement implements
             if ((state.queuedLaneMask & (1L << laneId)) == 0) {
                 markLaneQueued(laneId);
             }
-            execute(runtime.accountLane(laneId));
+            execute(accountBook.accountLane(laneId));
         }
     }
 
@@ -957,8 +957,8 @@ public final class TradeSettlement implements
         if (!ready()) return false;
         ensureLanesExecuted();
         if (completedLaneMask() != routedLaneMask()) return false;
-        if (hasLedgerSettlement() && !treasurySettlement.completed)
-            treasurySettlement.apply(runtime.treasury());
+        if (hasLedgerSettlement() && !systemFundsSettlement.completed)
+            systemFundsSettlement.apply(accountBook.systemFunds());
         state.ownerObservedComplete = true;
         return true;
     }
@@ -995,12 +995,12 @@ public final class TradeSettlement implements
         state.collected = true;
     }
 
-    private RuntimeTreasuryDelta mergeTreasuryDeltas() {
-        if (!treasuryTrades) return EMPTY_TREASURY_DELTA;
-        RuntimeTreasuryDelta aggregate = null;
+    private SystemFundsChange mergeSystemFundsChanges() {
+        if (!systemFundsTrades) return EMPTY_TREASURY_DELTA;
+        SystemFundsChange aggregate = null;
         int touchedLaneCount = Long.bitCount(requiredLaneMask);
         for (int index = 0; index < touchedLaneCount; index++) {
-            RuntimeTreasuryDelta delta = touchedLaneTreasuryDeltas[index];
+            SystemFundsChange delta = touchedLaneSystemFundsChanges[index];
             if (aggregate == null) aggregate = delta;
             else aggregate.merge(delta);
         }
@@ -1009,38 +1009,38 @@ public final class TradeSettlement implements
     }
 
     /** 登记本代财务结算并尝试推进。账户回执未齐时由 complete 继续，禁止重复登记。 */
-    public void submitTreasurySettlement() {
-        if (runtime == null || changes == null || state.collected)
+    public void submitSystemFundsSettlement() {
+        if (accountBook == null || changes == null || state.collected)
             throw new IllegalStateException("Ledger settlement requires retained isolated account facts");
-        if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
-        if (treasurySettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
+        if (systemFundsSettlement == null) systemFundsSettlement = new SystemFundsSettlement();
+        if (systemFundsSettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
         state.ownerObservedComplete = false;
-        treasurySettlement.queued = true;
+        systemFundsSettlement.queued = true;
         complete();
     }
 
     /** 返回财务工作是否已登记成功，包括本地无成交与就地完成路径。 */
-    public boolean hasLedgerSettlement() { return treasurySettlement != null && treasurySettlement.queued; }
+    public boolean hasLedgerSettlement() { return systemFundsSettlement != null && systemFundsSettlement.queued; }
 
     /** 本事件复用的财务槽，Owner 等账户完成后应用差额并核对资金。 */
-    private final class TreasurySettlement {
-        private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
+    private final class SystemFundsSettlement {
+        private final FundsTotal funds = new FundsTotal();
         /** 本代财务工作已成功登记，等待 Owner 在账户完成后推进。 */
         private boolean queued;
         private boolean completed;
 
         /** 全部账户回执到齐后由 Owner 核对资金。 */
-        public void apply(TreasuryRuntime treasury) {
-            if (completed || (treasuryTrades && treasury.hasChangedValues()))
+        public void apply(SystemFunds systemFunds) {
+            if (completed || (systemFundsTrades && systemFunds.hasChangedValues()))
                 throw new IllegalStateException("invalid Ledger financial scope");
-            if (treasuryTrades) mergeTreasuryDeltas().apply(treasury);
+            if (systemFundsTrades) mergeSystemFundsChanges().apply(systemFunds);
             changes.appendFundsDelta(requiredLaneMask, funds);
-            if (treasuryTrades) treasury.appendFundsDelta(funds);
+            if (systemFundsTrades) systemFunds.appendFundsDelta(funds);
             funds.requireConserved(false);
             funds.clear();
-            if (treasuryTrades) {
-                runtime.applyLedgerSettlementPositions(changes, requiredLaneMask, identities);
-                treasury.clearChangedKeys();
+            if (systemFundsTrades) {
+                accountBook.applyLedgerSettlementPositions(changes, requiredLaneMask, identities);
+                systemFunds.clearChangedKeys();
             }
             completed = true;
         }
@@ -1142,33 +1142,33 @@ public static final class Plan {
 
     /** 由已准入运行时订单及原生 MatcherResult 构建直达计划，按订单剩余量校验成交。 */
     void buildDirectNative(long sequence, Order taker, CoreInstrument instrument,
-                           exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
+                           exchange.core2.core.common.MatcherResult result, AccountBook accountBook) {
         if (taker == null || instrument == null || result == null || instrument != taker.instrument())
             throw new IllegalArgumentException("invalid direct native matcher fact");
         buildDirectNative(sequence, taker.orderId(), taker.userId(), taker.side(), taker.symbolId(),
-                taker.instrument(), taker.remainingQuantitySteps(), taker, result, runtime);
+                taker.instrument(), taker.remainingQuantitySteps(), taker, result, accountBook);
     }
 
     /** 由普通下单不可变准入值构建原生事实，使用完整准入数量，保留无需跨线程读取账户的校验字段。 */
     void buildDirectNative(long sequence, long userId, OrderCommand.ResolvedPlaceOrder taker, CoreInstrument instrument,
-                           exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
+                           exchange.core2.core.common.MatcherResult result, AccountBook accountBook) {
         if (userId <= 0 || taker == null || instrument == null || result == null
                 || instrument != taker.instrument())
             throw new IllegalArgumentException("invalid direct native matcher fact");
         buildDirectNative(sequence, taker.orderId(), userId, taker.side(), taker.symbolId(),
-                taker.instrument(), taker.quantitySteps(), null, result, runtime);
+                taker.instrument(), taker.quantitySteps(), null, result, accountBook);
     }
 
     private void buildDirectNative(long sequence, long orderId, long userId,
                                    com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
                                    CoreInstrument takerInstrument, long remainingQuantity, Order taker,
-                                   exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
+                                   exchange.core2.core.common.MatcherResult result, AccountBook accountBook) {
         clearReferences();
         coreSequence = sequence; admittedTaker = taker;
         directTakerSide = side; directTakerSymbolId = symbolId; directTakerInstrument = takerInstrument;
         takerOrderId = orderId; activeUserId = userId;
-        takerLaneId = runtime.topology().accountLaneId(activeUserId);
-        requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
+        takerLaneId = accountBook.topology().accountLaneId(activeUserId);
+        requiredLaneMask = accountBook.topology().accountLaneMask(activeUserId);
         matcherEvents = result.events();
         int eventCount = matcherEvents.size();
         if (eventCount == 0) {
@@ -1193,7 +1193,7 @@ public static final class Plan {
                 remaining = Math.subtractExact(remaining, event.size());
                 if (remaining < 0) throw new IllegalStateException("fill exceeds admitted taker quantity");
                 count = addUniqueLinear(orderIds, count, event.matchedOrderId());
-                requiredLaneMask |= runtime.topology().accountLaneMask(event.matchedOrderUid());
+                requiredLaneMask |= accountBook.topology().accountLaneMask(event.matchedOrderUid());
                 tradeCount++;
             }
             orderCount = count;
@@ -1214,11 +1214,11 @@ public static final class Plan {
                 remaining = Math.subtractExact(remaining, event.size());
                 if (remaining < 0) throw new IllegalStateException("fill exceeds admitted taker quantity");
                 orderCount = addUnique(keys, orderIds, orderCount, event.matchedOrderId());
-                requiredLaneMask |= runtime.topology().accountLaneMask(event.matchedOrderUid());
+                requiredLaneMask |= accountBook.topology().accountLaneMask(event.matchedOrderUid());
                 tradeCount++;
             }
             rejectTaker(!nativeAccepted(result));
-            indexLaneEvents(runtime);
+            indexLaneEvents(accountBook);
         } finally { keys.clear(); }
     }
 
@@ -1239,7 +1239,7 @@ public static final class Plan {
     /** 检查原生撤单不夹带成交，重置并保存目标用户路由和接受标记。 */
     void buildDirectNativeCancellation(long sequence, long userId, long orderId,
                                        exchange.core2.core.common.MatcherResult result,
-                                       TradingAccountRuntime runtime) {
+                                       AccountBook accountBook) {
         if (orderId <= 0 || result == null) throw new IllegalArgumentException("invalid direct cancellation fact");
         for (int index = 0; index < result.events().size(); index++) {
             MatcherEvent event = result.events().get(index);
@@ -1249,9 +1249,9 @@ public static final class Plan {
         clearReferences();
         boolean accepted = nativeAccepted(result);
         coreSequence = sequence; takerOrderId = orderId; activeUserId = userId;
-        takerLaneId = runtime.topology().accountLaneId(activeUserId);
+        takerLaneId = accountBook.topology().accountLaneId(activeUserId);
         rejectedTaker = !accepted;
-        requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
+        requiredLaneMask = accountBook.topology().accountLaneMask(activeUserId);
         orderCount = accepted ? 1 : 0;
         if (orderCount != 0) orderIds[0] = orderId;
     }
@@ -1278,20 +1278,20 @@ public static final class Plan {
     }
 
     /** 所属 Lane 以当前权威订单校验直达成交身份及 maker 单次剩余量，必要时保留持仓身份。深度成交的非 taker Lane 只沿自己的 maker 链遍历，不跨线程读其他账户。 */
-    void validateDirectLane(AccountPartition lane, TradingAccountRuntime runtime,
-                            RuntimeIdentityRegistry identities, CoreInstrument instrument) {
+    void validateDirectLane(AccountPartition lane, AccountBook accountBook,
+                            IdIndex identities, CoreInstrument instrument) {
         if (directTakerSide == null) return;
-        if (runtime.topology().accountLaneId(activeUserId) == lane.laneId()) {
+        if (accountBook.topology().accountLaneId(activeUserId) == lane.laneId()) {
             Order taker = lane.order(takerOrderId);
             requireDirectOrder(taker, activeUserId, directTakerSide);
-            if (tradeCount != 0) runtime.retainDirectPositionIdentity(lane, identities, instrument, taker);
+            if (tradeCount != 0) accountBook.retainDirectPositionIdentity(lane, identities, instrument, taker);
         }
         for (int index = firstMatcherEvent(lane.laneId()); index >= 0;
                 index = nextMatcherEvent(index, lane.laneId())) {
             MatcherEvent event = matcherEvents.get(index);
             if (event.eventType() != MatcherEventType.TRADE
-                    || !matcherEventTouchesLane(index, lane.laneId(), runtime)
-                    || runtime.topology().accountLaneId(event.matchedOrderUid()) != lane.laneId()) continue;
+                    || !matcherEventTouchesLane(index, lane.laneId(), accountBook)
+                    || accountBook.topology().accountLaneId(event.matchedOrderUid()) != lane.laneId()) continue;
             Order maker = lane.order(event.matchedOrderId());
             requireDirectOrder(maker, event.matchedOrderUid(), directTakerSide
                     == com.surprising.aeron.protocol.CoreOrderSide.BUY
@@ -1299,7 +1299,7 @@ public static final class Plan {
                     : com.surprising.aeron.protocol.CoreOrderSide.BUY);
             if (maker.remainingQuantitySteps() < event.size())
                 throw new IllegalStateException("fill exceeds Lane maker remaining quantity");
-            runtime.retainDirectPositionIdentity(lane, identities, instrument, maker);
+            accountBook.retainDirectPositionIdentity(lane, identities, instrument, maker);
         }
     }
 
@@ -1365,19 +1365,19 @@ public static final class Plan {
     /** 读取前置撤单原语编号，调用方保证下标小于有效项数。 */
     long preCancellationOrderId(int index) { return preCancellationOrderIds[index]; }
     /** 事件至少八个且涉及多个 Lane 时，逆序串出各 maker Lane 的事件链，保持原成交顺序。taker Lane 继续顺序读取全部原事件。 */
-    private Plan indexLaneEvents(TradingAccountRuntime runtime) {
+    private Plan indexLaneEvents(AccountBook accountBook) {
         // 深度成交时各 maker Lane 只沿自己的事件链读取， taker Lane 仍保留原事件顺序，不复制成交事件。
         if (matcherEvents.size() < 8 || Long.bitCount(requiredLaneMask) < 2) return this;
         laneEventsIndexed = true;
-        if (makerLaneHeads == null || makerLaneHeads.length != runtime.topology().accountLaneCount())
-            makerLaneHeads = new int[runtime.topology().accountLaneCount()];
+        if (makerLaneHeads == null || makerLaneHeads.length != accountBook.topology().accountLaneCount())
+            makerLaneHeads = new int[accountBook.topology().accountLaneCount()];
         if (makerLaneNext == null || makerLaneNext.length < matcherEvents.size())
             makerLaneNext = new int[matcherEvents.size()];
         java.util.Arrays.fill(makerLaneHeads, -1);
         for (int index = matcherEvents.size() - 1; index >= 0; index--) {
             MatcherEvent event = matcherEvents.get(index);
             if (event.eventType() != MatcherEventType.TRADE) continue;
-            int lane = runtime.topology().accountLaneId(event.matchedOrderUid());
+            int lane = accountBook.topology().accountLaneId(event.matchedOrderUid());
             makerLaneNext[index] = makerLaneHeads[lane];
             makerLaneHeads[lane] = index;
         }
@@ -1397,11 +1397,11 @@ public static final class Plan {
     }
 
     /** 判断当前成交是否涉及指定 Lane。 */
-    public boolean matcherEventTouchesLane(int index, int laneId, TradingAccountRuntime runtime) {
+    public boolean matcherEventTouchesLane(int index, int laneId, AccountBook accountBook) {
         if (laneEventsIndexed && laneId != takerLaneId) return true;
         MatcherEvent event = matcherEvents.get(index);
         return takerLaneId == laneId
-                || runtime.topology().accountLaneId(event.matchedOrderUid()) == laneId;
+                || accountBook.topology().accountLaneId(event.matchedOrderUid()) == laneId;
     }
 }
 
@@ -1411,7 +1411,7 @@ public static final class Changes {
     /** 未激活 Lane 共用的空余额捕获哨兵，不可写入业务变化。 */
     private static final AccountTransactionRollback.BalancePatches EMPTY_BALANCE_PATCHES = new AccountTransactionRollback.BalancePatches();
     /** 未激活 Lane 共用的空资金增量哨兵，不可累加金额。 */
-    private static final RuntimeFundsAccumulator EMPTY_FUNDS_DELTA = new RuntimeFundsAccumulator();
+    private static final FundsTotal EMPTY_FUNDS_DELTA = new FundsTotal();
     /** 未激活 Lane 共用的空用户修订哨兵，不可写入用户增量。 */
     private static final LongLongHashMap EMPTY_USER_REVISIONS = new LongLongHashMap();
     /** Owner 收集时据此释放已发布身份。返回本代是否采用直达持仓身份交接，供 Owner 选择身份释放方式。 */
@@ -1433,7 +1433,7 @@ public static final class Changes {
     final AccountPartitionCommit.Delta[] laneDeltas;
     /** 按 Lane 保存的余额前后值，供回滚及资金差额核对。 */
     public final AccountTransactionRollback.BalancePatches[] balancePatches;
-    final RuntimeFundsAccumulator[] laneFundsDeltas;
+    final FundsTotal[] laneFundsDeltas;
     final LongLongHashMap[] userRevisionDeltas;
 
     /** 按账户 Lane 数创建缓冲入口，默认不关联固定环槽。 */
@@ -1446,7 +1446,7 @@ public static final class Changes {
         this.ringIndex = ringIndex;
         laneDeltas = new AccountPartitionCommit.Delta[laneCount];
         balancePatches = new AccountTransactionRollback.BalancePatches[laneCount];
-        laneFundsDeltas = new RuntimeFundsAccumulator[laneCount];
+        laneFundsDeltas = new FundsTotal[laneCount];
         userRevisionDeltas = new LongLongHashMap[laneCount];
         java.util.Arrays.fill(laneDeltas, EMPTY_LANE_DELTA);
         java.util.Arrays.fill(balancePatches, EMPTY_BALANCE_PATCHES);
@@ -1461,7 +1461,7 @@ public static final class Changes {
             laneMask &= laneMask - 1;
             if (laneDeltas[laneId] == EMPTY_LANE_DELTA) laneDeltas[laneId] = new AccountPartitionCommit.Delta();
             if (balancePatches[laneId] == EMPTY_BALANCE_PATCHES) balancePatches[laneId] = new AccountTransactionRollback.BalancePatches();
-            if (laneFundsDeltas[laneId] == EMPTY_FUNDS_DELTA) laneFundsDeltas[laneId] = new RuntimeFundsAccumulator();
+            if (laneFundsDeltas[laneId] == EMPTY_FUNDS_DELTA) laneFundsDeltas[laneId] = new FundsTotal();
             if (userRevisionDeltas[laneId] == EMPTY_USER_REVISIONS) userRevisionDeltas[laneId] = new LongLongHashMap();
         }
     }
@@ -1480,10 +1480,10 @@ public static final class Changes {
     }
 
     /** 为指定 Lane 提前准备准入与终态槽容量。 */
-    public void ensureAdmissionCapacity(int laneId, int expectedOrders) {
+    public void ensureOrderCheckCapacity(int laneId, int expectedOrders) {
         if (expectedOrders <= 0) return;
         ensureActiveLanes(1L << laneId);
-        laneDeltas[laneId].ensureAdmissionCapacity(expectedOrders);
+        laneDeltas[laneId].ensureOrderCheckCapacity(expectedOrders);
         laneDeltas[laneId].ensureTerminalCapacity(expectedOrders);
     }
 
@@ -1501,7 +1501,7 @@ public static final class Changes {
     }
 
     /** 下单步骤 4.4 的账户收尾：应用修订、记录终态，预留耗尽后移除可退休订单并释放客户身份。 */
-    public void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountPartition lane, long sequence) {
+    public void prepareLaneTerminal(int laneId, IdIndex identities, AccountPartition lane, long sequence) {
         applyUserRevisions(laneId, lane);
         AccountPartitionCommit.Delta changes = laneDeltas[laneId];
         for (int index = 0; index < changes.orders().size(); index++) {
@@ -1550,12 +1550,12 @@ public static final class Changes {
         }
         changes.preparePositionRetirement(lane);
         changes.preparePublication();
-        TradingAccountRuntime.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
+        AccountBook.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
     }
 
     /** 从指定 Lane 已捕获的余额前后值准备准入资金增量，不在这里执行完整订单终态清理。 */
-    public void prepareAdmissionLane(int laneId) {
-        TradingAccountRuntime.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
+    public void prepareOrderCheckLane(int laneId) {
+        AccountBook.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
     }
 
     /** 遍历全部已经分配的余额缓冲，把前值合并到目标。 */
@@ -1569,7 +1569,7 @@ public static final class Changes {
     }
 
     /** 按调用方给出的 Lane 位图，把各 Lane 已准备的资金增量加入目标累加器，不清空源。 */
-    public void appendFundsDelta(long laneMask, RuntimeFundsAccumulator target) {
+    public void appendFundsDelta(long laneMask, FundsTotal target) {
         if (target == null) throw new IllegalArgumentException("funds accumulator is required");
         long lanes = laneMask;
         while (lanes != 0) {
@@ -1580,11 +1580,11 @@ public static final class Changes {
     }
 
     /** 把参与 Lane 的待退休订单交回对应账户的回收缓存。 */
-    public void returnRetiredOrders(TradingAccountRuntime runtime) {
+    public void returnRetiredOrders(AccountBook accountBook) {
         long lanes = activeLaneMask;
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
-            laneDeltas[laneId].returnRetiredOrders(runtime.accountLane(laneId));
+            laneDeltas[laneId].returnRetiredOrders(accountBook.accountLane(laneId));
         }
     }
 

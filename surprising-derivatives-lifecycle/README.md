@@ -19,7 +19,7 @@ Lifecycle scheduling and funding scheduling use separate pools so funding waits 
 
 ## Core execution boundaries
 
-`DerivativesLifecycleMaintenanceTask` coordinates bounded risk and lifecycle work. Core's `RiskScanner`, `RiskMarginCalculator`, `LiquidationService`, `InsuranceFundCommands`, `TreasuryRuntime`, `AdlService`, and `ContractExpirySettlementService` perform actual ordered state transitions. Preserve resumable cursors, cancellation budgets, frozen funding inputs, exact amounts, command IDs, and unknown-result handling.
+`DerivativesLifecycleMaintenanceTask` coordinates bounded risk and lifecycle work. Core's `RiskScanner`, `RiskMarginCalculator`, `LiquidationService`, `InsuranceFundCommands`, `SystemFunds`, `AdlService`, and `ContractExpirySettlementService` perform actual ordered state transitions. Preserve resumable cursors, cancellation budgets, frozen funding inputs, exact amounts, command IDs, and unknown-result handling.
 
 Funding payment/history and liquidation queries use committed facts and product-scoped cursors. Do not manufacture missing history from a current mark price. Administrative int64 values require exact parsing and no floating-point conversion.
 

@@ -5,10 +5,10 @@ import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
@@ -35,7 +35,7 @@ class CoreFinancialLedgerProductionTest {
      */
     @Test
     void liquidationBatchReadsRiskInputsInsideItsUncommittedLedgerScope() throws Exception {
-        try (/* 本轮真实交易入口，退出时关闭账户与账本资源 */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本轮真实交易入口，退出时关闭账户与账本资源 */ var core = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             register(core, core.productLine);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), core.productLine), TIME);
@@ -96,7 +96,7 @@ class CoreFinancialLedgerProductionTest {
     void liquidationInsuranceAndAdlCommitOriginalLedgerInProductionOrder() throws Exception {
         // 本场景U本位永续产品线
         var line = ProductLine.LINEAR_PERPETUAL;
-        try (/* 本轮真实交易入口，退出时关闭账户与账本资源 */ var core = new TradingCoreRuntime(line)) {
+        try (/* 本轮真实交易入口，退出时关闭账户与账本资源 */ var core = new TradingCore(line)) {
             register(core, line);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), core.productLine), TIME);
@@ -105,7 +105,7 @@ class CoreFinancialLedgerProductionTest {
             trade(core, line, 10, 100);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME), core.productLine), TIME);
-            for (/* 等待风险阶段完成的续扫轮次，要求少于20次 */ int polls = 0; core.runtimeState.firstRiskIncompleteScan() != null; polls++) {
+            for (/* 等待风险阶段完成的续扫轮次，要求少于20次 */ int polls = 0; core.accountBook.firstRiskIncompleteScan() != null; polls++) {
                 assertThat(polls).isLessThan(20);
                 applied(core, CoreMessageType.CONTINUE_RISK_SCAN, 0,
                         TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)), TIME);
@@ -119,9 +119,9 @@ class CoreFinancialLedgerProductionTest {
             var expected = expected(core.tradingState(), (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
                     RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(execute, List.of(), runtime, identities));
             // 执行前的账户所有权交接轮次，执行后要求不变
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
             appliedWithGuard(core, CoreMessageType.EXECUTE_LIQUIDATION, 0, TradingCommandCodec.encodeExecuteLiquidation(execute), TIME);
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(expected);
 
             // 使保险余额达到25所需的差额调整，不能直接理解为固定充值25
@@ -157,7 +157,7 @@ class CoreFinancialLedgerProductionTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
     void expiryCommandUsesAutomaticallyStartedLedgerAndMatchesColdStateTransitions(ProductLine line) throws Exception {
-        try (/* 本轮真实交易入口，退出时关闭账户与账本资源 */ var core = new TradingCoreRuntime(line)) {
+        try (/* 本轮真实交易入口，退出时关闭账户与账本资源 */ var core = new TradingCore(line)) {
             register(core, line);
             // 币本位交割使用BTC，其余本例使用USDT
             String asset = line == ProductLine.INVERSE_DELIVERY ? "BTC" : "USDT";
@@ -174,9 +174,9 @@ class CoreFinancialLedgerProductionTest {
             var expected = expected(opening, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
                     RuntimeTestStateTransitions.applyLifecycleSettlement(opening, settlement, null, null, runtime, identities));
             // 执行前的账户所有权交接轮次，执行后要求不变
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
             appliedWithGuard(core, CoreMessageType.SETTLE_INSTRUMENT, 0, TradingCommandCodec.encodeSettleInstrument(settlement), TIME + 2_000);
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(expected);
             assertThat(core.tradingState().users().values()).allSatisfy(/* 本轮准备资金、成交或检查的测试用户 */ user -> assertThat(user.positions().values()).allSatisfy(/* 当前断言的持仓视图，要求数量为零 */ position -> assertThat(position.signedQuantitySteps()).isZero()));
             core.assertClusterCallbackComplete();
@@ -188,13 +188,13 @@ class CoreFinancialLedgerProductionTest {
      * @param before 冷对照投影前的业务状态
      * @param mutation 在冷运行时应用原底层业务转换的回调
      */
-    private TradingCoreState expected(TradingCoreState before, BiConsumer<TradingAccountRuntime, RuntimeIdentityRegistry> mutation) {
+    private TradingCoreState expected(TradingCoreState before, BiConsumer<AccountBook, IdIndex> mutation) {
         // 与冷对照运行时配套的身份注册表
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 冷对照回调实际操作的账户运行时 */ var runtime = RuntimeStateProjector.project(before, identities)) {
-            mutation.accept(runtime, identities);
-            runtime.clearChangedKeys();
-            return RuntimeStateMaterializer.materialize(runtime, identities);
+        var identities = new IdIndex();
+        try (/* 冷对照回调实际操作的账户运行时 */ var accountBook = SnapshotLoader.loadSnapshot(before, identities)) {
+            mutation.accept(accountBook, identities);
+            accountBook.clearChangedKeys();
+            return SnapshotWriter.writeSnapshot(accountBook, identities);
         }
     }
 
@@ -203,7 +203,7 @@ class CoreFinancialLedgerProductionTest {
      * @param core 本次真实命令运行时
      * @param line 本轮实际使用的产品线
      */
-    private void register(TradingCoreRuntime core, ProductLine line) {
+    private void register(TradingCore core, ProductLine line) {
         // 从本产品契约码得到的合约类型
         var type = ContractType.valueOf(line.contractTypeCode());
         // 该类型是否币本位，用于选择结算资产和尺度
@@ -225,7 +225,7 @@ class CoreFinancialLedgerProductionTest {
      * @param asset 测试余额资产名称
      * @param amount 测试余额调整整数数量
      */
-    private void balance(TradingCoreRuntime core, long user, String asset, long amount) {
+    private void balance(TradingCore core, long user, String asset, long amount) {
         applied(core, CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, amount)), TIME);
     }
@@ -237,7 +237,7 @@ class CoreFinancialLedgerProductionTest {
      * @param quantity 本次双方成交数量
      * @param price 本次双方成交整数价格
      */
-    private void trade(TradingCoreRuntime core, ProductLine line, long quantity, long price) {
+    private void trade(TradingCore core, ProductLine line, long quantity, long price) {
         for (long /* 本轮准备资金、成交或检查的测试用户 */ user : new long[]{2, 1}) applied(core, CoreMessageType.PLACE_ORDER, user,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "1",
                         user == 2 ? CoreOrderSide.SELL : CoreOrderSide.BUY, price, quantity, false,
@@ -253,8 +253,8 @@ class CoreFinancialLedgerProductionTest {
      * @param payload 原命令编码载荷
      * @param timestamp 指定的原复制业务时间
      */
-    private CoreResponse appliedWithGuard(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload, long timestamp) throws Exception {
-        try (/* 已有 Owner 账户读取守卫，只包住本次真实执行 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+    private CoreResponse appliedWithGuard(TradingCore core, CoreMessageType type, long user, byte[] payload, long timestamp) throws Exception {
+        try (/* 已有 Owner 账户读取守卫，只包住本次真实执行 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
             return applied(core, type, user, payload, timestamp);
         }
     }
@@ -267,7 +267,7 @@ class CoreFinancialLedgerProductionTest {
      * @param payload 原命令编码载荷
      * @param timestamp 指定的原复制业务时间
      */
-    private CoreResponse applied(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload, long timestamp) {
+    private CoreResponse applied(TradingCore core, CoreMessageType type, long user, byte[] payload, long timestamp) {
         // 本测试新分配的原命令序号
         long seq = ++sequence;
         // 完整命令头与载荷，位置和时间显式传给完成帮助器

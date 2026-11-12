@@ -3,33 +3,33 @@ package com.surprising.aeron.service.instrument.command;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreMaintenanceCodec;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 
 /** 标的注册、配置修改及维护状态转换。 */
 public final class InstrumentConfigurationCommands {
     private InstrumentConfigurationCommands() { }
     /** 检查输入和所有权，构造本产品线配置并阻止进行中的资金费或生命周期操作。 */
-    public static void applyConfiguration(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    public static void applyConfiguration(AccountBook accountBook, IdIndex identities,
                                          RegisterInstrumentCommand command) {
-        if (runtime == null || identities == null || command == null) {
+        if (accountBook == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime instrument update");
         }
-        runtime.assertOwner();
-        CoreInstrument instrument = CoreInstrument.from(runtime.productLine(), command);
+        accountBook.assertOwner();
+        CoreInstrument instrument = CoreInstrument.from(accountBook.productLine(), command);
         int symbolId = identities.symbolId(instrument.instrumentIdValue());
-        if (runtime.treasury().fundingProgress(symbolId) != null
-                || runtime.treasury().lifecycleProgress(symbolId) != null) {
+        if (accountBook.systemFunds().fundingProgress(symbolId) != null
+                || accountBook.systemFunds().lifecycleProgress(symbolId) != null) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "instrument lifecycle is in progress");
         }
-        CoreInstrument current = runtime.instrument(instrument.instrumentId());
+        CoreInstrument current = accountBook.instrument(instrument.instrumentId());
         if (current == null) {
             identities.assetId(instrument.baseAsset());
             identities.assetId(instrument.quoteAsset());
             identities.assetId(instrument.settleAsset());
-            runtime.requireRevisionCapacity();
-            runtime.registerInstrument(instrument);
+            accountBook.requireRevisionCapacity();
+            accountBook.registerInstrument(instrument);
         } else {
             if (!sameInstrumentIdentity(current, instrument)) {
                 throw new CoreStateRejectedException("INSTRUMENT_IDENTITY_IMMUTABLE",
@@ -39,10 +39,10 @@ public final class InstrumentConfigurationCommands {
             identities.assetId(instrument.baseAsset());
             identities.assetId(instrument.quoteAsset());
             identities.assetId(instrument.settleAsset());
-            runtime.requireRevisionCapacity();
-            runtime.updateInstrumentConfiguration(current, instrument);
+            accountBook.requireRevisionCapacity();
+            accountBook.updateInstrumentConfiguration(current, instrument);
         }
-        runtime.incrementCommandRevision();
+        accountBook.incrementCommandRevision();
     }
 
     private static boolean sameInstrumentIdentity(CoreInstrument current, CoreInstrument updated) {
@@ -62,13 +62,13 @@ public final class InstrumentConfigurationCommands {
     }
 
     /** 先检查标的并允许相同状态直接返回。 */
-    public static void updateMaintenance(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    public static void updateMaintenance(AccountBook accountBook, IdIndex identities,
                                    CoreMaintenanceCodec.Command command) {
-        if (runtime == null || identities == null || command == null) {
+        if (accountBook == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime instrument maintenance update");
         }
-        runtime.assertOwner();
-        CoreInstrument instrument = runtime.instrument(command.instrumentId());
+        accountBook.assertOwner();
+        CoreInstrument instrument = accountBook.instrument(command.instrumentId());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
@@ -88,11 +88,11 @@ public final class InstrumentConfigurationCommands {
                 || (before.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
                 && (after.mode() != com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED
                 || after.settlementPriceTicks() != before.settlementPriceTicks()
-                || runtime.treasury().lifecycleSettlement(identities.symbolId(command.instrumentId())) != before.taskId()))) {
+                || accountBook.systemFunds().lifecycleSettlement(identities.symbolId(command.instrumentId())) != before.taskId()))) {
             throw new CoreStateRejectedException("INVALID_COMMAND",
                     "settlement maintenance cannot be released or repriced");
         }
-        if (runtime.productLine() == com.surprising.product.api.ProductLine.SPOT
+        if (accountBook.productLine() == com.surprising.product.api.ProductLine.SPOT
                 && (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.REDUCE_ONLY
                 || after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT)) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
@@ -100,21 +100,21 @@ public final class InstrumentConfigurationCommands {
         }
         int symbolId = identities.symbolId(command.instrumentId());
         if (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
-                && runtime.treasury().lifecycleSettlement(symbolId) != 0) {
+                && accountBook.systemFunds().lifecycleSettlement(symbolId) != 0) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument settlement is already complete");
         }
         if (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
-                && runtime.hasUnresolvedLiquidation(instrument.instrumentId(), symbolId)) {
+                && accountBook.hasUnresolvedLiquidation(instrument.instrumentId(), symbolId)) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                     "finish active liquidation, insurance and ADL work before fixed-price clearance");
         }
-        if (runtime.treasury().fundingProgress(symbolId) != null
-                || runtime.treasury().lifecycleProgress(symbolId) != null) {
+        if (accountBook.systemFunds().fundingProgress(symbolId) != null
+                || accountBook.systemFunds().lifecycleProgress(symbolId) != null) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                     "finish the active lifecycle operation first");
         }
-        runtime.requireRevisionCapacity();
-        runtime.updateInstrumentMaintenance(instrument, after);
-        runtime.incrementCommandRevision();
+        accountBook.requireRevisionCapacity();
+        accountBook.updateInstrumentMaintenance(instrument, after);
+        accountBook.incrementCommandRevision();
     }
 }

@@ -12,31 +12,31 @@ class MatchingNotificationProbeTest {
      * 按 Matcher 分片发布0、1及重复1，断言提示合并为两位，取走后无剩余通知。
      */
     @Test
-    void batchAdmissionWakeBitsAreShardScopedAndCoalesce() {
+    void batchOrderCheckWakeBitsAreShardScopedAndCoalesce() {
         // 本场景明确的 Matcher 与账户拓扑，队列容量足以容纳逐项确认窗口
         var topology = new LaneTopology(2, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
-            runtime.publishAccountAdmissionReadyShard(1);
-            runtime.publishAccountAdmissionReadyShard(0);
-            runtime.publishAccountAdmissionReadyShard(1);
-            assertThat(runtime.hasMatchingNotifications()).isTrue();
-            assertThat(runtime.takeAccountAdmissionReadyShardMask()).isEqualTo(3);
-            assertThat(runtime.hasMatchingNotifications()).isFalse();
+        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var accountBook = new AccountBook(topology)) {
+            accountBook.publishAccountOrderCheckReadyShard(1);
+            accountBook.publishAccountOrderCheckReadyShard(0);
+            accountBook.publishAccountOrderCheckReadyShard(1);
+            assertThat(accountBook.hasMatchingNotifications()).isTrue();
+            assertThat(accountBook.takeAccountOrderCheckReadyShardMask()).isEqualTo(3);
+            assertThat(accountBook.hasMatchingNotifications()).isFalse();
         }
     }
 
     /** 清理一次直达提示后，同一 Lane 后续发布仍能唤醒 Owner。 */
     @Test
     void lateSettlementNotificationRemainsVisibleAfterFirstIsConsumed() {
-        try (var runtime = new TradingAccountRuntime()) {
-            assertThat(runtime.takeDirectMatcherSettlementReadyLaneMask()).isZero();
-            runtime.publishDirectMatcherSettlementReady(0);
-            assertThat(runtime.takeDirectMatcherSettlementReadyLaneMask()).isOne();
-            assertThat(runtime.hasMatchingNotifications()).isFalse();
-            runtime.publishDirectMatcherSettlementReady(0);
-            assertThat(runtime.hasMatchingNotifications()).isTrue();
-            assertThat(runtime.takeDirectMatcherSettlementReadyLaneMask()).isOne();
-            assertThat(runtime.hasMatchingNotifications()).isFalse();
+        try (var accountBook = new AccountBook()) {
+            assertThat(accountBook.takeDirectMatcherSettlementReadyLaneMask()).isZero();
+            accountBook.publishDirectMatcherSettlementReady(0);
+            assertThat(accountBook.takeDirectMatcherSettlementReadyLaneMask()).isOne();
+            assertThat(accountBook.hasMatchingNotifications()).isFalse();
+            accountBook.publishDirectMatcherSettlementReady(0);
+            assertThat(accountBook.hasMatchingNotifications()).isTrue();
+            assertThat(accountBook.takeDirectMatcherSettlementReadyLaneMask()).isOne();
+            assertThat(accountBook.hasMatchingNotifications()).isFalse();
         }
     }
 
@@ -47,18 +47,18 @@ class MatchingNotificationProbeTest {
     void cursorProbeDoesNotConsumeTheLastLaneSettlementNotification() throws Exception {
         // 本场景明确的 Matcher 与账户拓扑，队列容量足以容纳逐项确认窗口
         var topology = new LaneTopology(1, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
-            assertThat(runtime.hasMatchingNotifications()).isFalse();
+        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var accountBook = new AccountBook(topology)) {
+            assertThat(accountBook.hasMatchingNotifications()).isFalse();
             // 当前等待退出的发布线程，或本例一次性发布两条通知的线程
             var worker = Thread.ofPlatform().start(() -> {
-                runtime.publishDirectMatcherSettlementReady(0);
-                runtime.publishDirectMatcherSettlementReady(1);
+                accountBook.publishDirectMatcherSettlementReady(0);
+                accountBook.publishDirectMatcherSettlementReady(1);
             });
             worker.join();
-            assertThat(runtime.hasMatchingNotifications()).isTrue();
-            assertThat(runtime.hasMatchingNotifications()).isTrue();
-            assertThat(runtime.takeDirectMatcherSettlementReadyLaneMask()).isEqualTo(3);
-            assertThat(runtime.hasMatchingNotifications()).isFalse();
+            assertThat(accountBook.hasMatchingNotifications()).isTrue();
+            assertThat(accountBook.hasMatchingNotifications()).isTrue();
+            assertThat(accountBook.takeDirectMatcherSettlementReadyLaneMask()).isEqualTo(3);
+            assertThat(accountBook.hasMatchingNotifications()).isFalse();
         }
     }
 }

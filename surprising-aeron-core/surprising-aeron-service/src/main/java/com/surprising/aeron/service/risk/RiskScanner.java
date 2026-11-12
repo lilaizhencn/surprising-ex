@@ -7,8 +7,8 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
@@ -30,9 +30,9 @@ import lombok.experimental.Accessors;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
 public final class RiskScanner {
-    private final TradingAccountRuntime runtime;
+    private final AccountBook accountBook;
     /** 本命令共用的业务编号映射，Owner 准备路由和 Lane 估值时使用。 */
-    private final RuntimeIdentityRegistry identities;
+    private final IdIndex identities;
     private final PositionUserIndex positionUsers;
     private int budget;
     /** 本命令尚未消耗的工作预算，Owner 每片完成后扣减。 */
@@ -57,15 +57,15 @@ public final class RiskScanner {
     private int phase;
 
     /** 创建使用持仓用户索引的风险续扫对象，初始化一次各 Lane 缓冲区，再按本命令设置预算。 */
-    public RiskScanner(int maxWork, PositionUserIndex positionUsers, TradingAccountRuntime runtime,
-            RuntimeIdentityRegistry identities) {
+    public RiskScanner(int maxWork, PositionUserIndex positionUsers, AccountBook accountBook,
+            IdIndex identities) {
         if (maxWork <= 0 || maxWork > 4096 || positionUsers == null
-                || runtime == null || identities == null) throw new IllegalArgumentException("invalid risk scan budget");
-        runtime.assertOwner();
-        this.runtime = runtime;
+                || accountBook == null || identities == null) throw new IllegalArgumentException("invalid risk scan budget");
+        accountBook.assertOwner();
+        this.accountBook = accountBook;
         this.identities = identities;
         this.positionUsers = positionUsers;
-        int lanes = runtime.topology().accountLaneCount();
+        int lanes = accountBook.topology().accountLaneCount();
         inputs = new RiskLaneProgress[lanes];
         results = new Page[lanes];
         allocations = new int[lanes];
@@ -76,16 +76,16 @@ public final class RiskScanner {
 
     /** Owner 为下一命令重新设置预算和阶段，复用各 Lane 数组，丢弃旧命令完成或失败回滚后的残留片段。 */
     public void resetForCommand(int maxWork) {
-        runtime.assertOwner();
+        accountBook.assertOwner();
         if (maxWork <= 0 || maxWork > 4096) {
             throw new IllegalArgumentException("invalid risk scan budget");
         }
         // 直接命令槽由 Owner 串行复用。
         // 续步失败且 Lane 工作已回滚后， 这里可能仍停在阶段 1 或 2。
         // 下一命令重置时必须丢弃旧页和旧输入。
-        budget = runtime.riskScanControl().enabled()
-                ? Math.min(maxWork, adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
-                        runtime.incompleteRiskScanCount())) : 0;
+        budget = accountBook.riskScanControl().enabled()
+                ? Math.min(maxWork, adaptiveBudget(accountBook.riskScanControl().scanBatchSize(),
+                        accountBook.incompleteRiskScanCount())) : 0;
         remaining = budget;
         initial = null;
         instrument = null;
@@ -105,28 +105,28 @@ public final class RiskScanner {
 
     /** Owner 非阻塞推进已有阶段：准备一片、准备用户页、派发并收集 Lane 估值、给新强平编号并等原 Lane 写入，最后提交游标。 */
     public boolean poll() {
-        runtime.assertOwner();
+        accountBook.assertOwner();
         if (phase == 3) return true;
         if (phase == 0) {
-            RiskScanner.State selected = remaining == 0 ? null : runtime.firstRiskIncompleteScan();
+            RiskScanner.State selected = remaining == 0 ? null : accountBook.firstRiskIncompleteScan();
             if (selected == null) { phase = 3; return true; }
             prepare(selected, Math.min(8, remaining));
-            runtime.publishRiskPositionInputs();
+            accountBook.publishRiskPositionInputs();
             prepareRoutes();
-            if (laneMask != 0) runtime.dispatchRiskLanes(laneMask, lane ->
-                    scan(runtime, lane, inputs[lane], userPages[lane],
+            if (laneMask != 0) accountBook.dispatchRiskLanes(laneMask, lane ->
+                    scan(accountBook, lane, inputs[lane], userPages[lane],
                             instrument, mark, settleAssetId, initial.symbolId(), allocations[lane], identities));
             phase = 1;
         }
-        if (laneMask != 0 && !runtime.pollControlLanes()) return false;
+        if (laneMask != 0 && !accountBook.pollControlLanes()) return false;
         if (phase == 1) {
             for (int lane = 0; lane < inputs.length; lane++)
                 if ((laneMask & (1L << lane)) != 0)
-                    results[lane] = (Page) runtime.controlLaneResult(lane);
+                    results[lane] = (Page) accountBook.controlLaneResult(lane);
             assignLiquidationIds();
             if (creationMask != 0) {
-                runtime.dispatchRiskLanes(creationMask, lane -> {
-                    results[lane].creations().apply(runtime);
+                accountBook.dispatchRiskLanes(creationMask, lane -> {
+                    results[lane].creations().apply(accountBook);
                     return null;
                 });
                 phase = 2;
@@ -134,9 +134,9 @@ public final class RiskScanner {
             }
         }
         finish();
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
         remaining -= work;
-        phase = remaining == 0 || runtime.firstRiskIncompleteScan() == null ? 3 : 0;
+        phase = remaining == 0 || accountBook.firstRiskIncompleteScan() == null ? 3 : 0;
         return phase == 3;
     }
 
@@ -148,8 +148,8 @@ public final class RiskScanner {
         initial = selected;
         if (initial == null || initial.riskComplete() || sliceBudget <= 0)
             throw new IllegalStateException("risk scan is not pending");
-        instrument = runtime.instrument(identities.instrumentId(initial.symbolId()));
-        mark = runtime.markPrice(initial.symbolId());
+        instrument = accountBook.instrument(identities.instrumentId(initial.symbolId()));
+        mark = accountBook.markPrice(initial.symbolId());
         if (instrument == null || mark == null || mark.priceSequence() != initial.priceSequence())
             throw new IllegalStateException("risk scan input is missing");
         settleAssetId = identities.assetId(instrument.settleAsset());
@@ -197,7 +197,7 @@ public final class RiskScanner {
 
     /** Owner 按 Lane 编号从小到大收集工作量，为新增强平需求分配连续编号，结果与线程完成先后无关。 */
     private void assignLiquidationIds() {
-        nextLiquidationId = runtime.nextLiquidationId();
+        nextLiquidationId = accountBook.nextLiquidationId();
         if (laneMask == 0) work = 1;
         for (int lane = 0; lane < results.length; lane++) {
             if ((laneMask & (1L << lane)) == 0) continue;
@@ -219,12 +219,12 @@ public final class RiskScanner {
             cursors.add(cursor);
             complete &= cursor.complete();
         }
-        if (nextLiquidationId != runtime.nextLiquidationId()) runtime.setNextLiquidationId(nextLiquidationId);
+        if (nextLiquidationId != accountBook.nextLiquidationId()) accountBook.setNextLiquidationId(nextLiquidationId);
         if (complete) nextLane = inputs.length - 1;
         if (!complete) {
             while (cursors.get(nextLane).complete()) nextLane = (nextLane + 1) % inputs.length;
         }
-        long scheduledRevision = Math.incrementExact(runtime.revision());
+        long scheduledRevision = Math.incrementExact(accountBook.revision());
         RiskScanner.State next;
         if (complete && initial.scanStartPriceSequence() != initial.priceSequence()) {
             next = new RiskScanner.State(initial.symbolId(), 0, initial.priceSequence(), initial.priceSequence(),
@@ -238,50 +238,50 @@ public final class RiskScanner {
                     initial.triggerMarkPriceTicks(), initial.triggerGeneratedAtEpochMillis(),
                     initial.triggerOcoOrderId(), initial.triggerOcoCursor(), scheduledRevision, cursors);
         }
-        runtime.putRiskScan(next);
+        accountBook.putRiskScan(next);
     }
 
-    static Page scan(TradingAccountRuntime runtime, int laneId, RiskLaneProgress initial,
+    static Page scan(AccountBook accountBook, int laneId, RiskLaneProgress initial,
                                         LongArrayList indexedUserIds,
                                         CoreInstrument changedInstrument, MarkPrice changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
-                                        RuntimeIdentityRegistry identities) {
-        RiskScanner.LiquidationBatch creations = runtime.riskLiquidationBatch(maxWork);
+                                        IdIndex identities) {
+        RiskScanner.LiquidationBatch creations = accountBook.riskLiquidationBatch(maxWork);
         RiskLaneProgress progress = initial;
         int remaining = maxWork;
         long userRevision = initial.userRevision();
         long expectedMarketRevision = initial.marketRevision();
         while (remaining > 0) {
             UserAccount user = progress.userId() == 0
-                    ? nextUser(runtime, indexedUserIds, progress.lastUserId())
-                    : runtime.user(progress.userId());
+                    ? nextUser(accountBook, indexedUserIds, progress.lastUserId())
+                    : accountBook.user(progress.userId());
             if (user == null) {
                 return finishPage(progress, maxWork - remaining, true, creations);
             }
             if (progress.userId() == 0 || user.revision() != userRevision
-                    || expectedMarketRevision != runtime.marketRevision()) {
+                    || expectedMarketRevision != accountBook.marketRevision()) {
                 progress = new RiskLaneProgress(progress.lastUserId(), false, user.userId(), 0, "-", 0,
-                        0, 0, 0, 0, user.revision(), runtime.marketRevision());
+                        0, 0, 0, 0, user.revision(), accountBook.marketRevision());
             }
             userRevision = user.revision();
-            expectedMarketRevision = runtime.marketRevision();
-            UserPage page = processUser(runtime, laneId, progress, user, changedInstrument, changedMark,
+            expectedMarketRevision = accountBook.marketRevision();
+            UserPage page = processUser(accountBook, laneId, progress, user, changedInstrument, changedMark,
                     settleAssetId, changedSymbolId, remaining, creations, identities);
             progress = page.progress();
             int consumed = Math.max(1, page.workUnits());
             remaining -= consumed;
         }
         boolean complete = progress.userId() == 0
-                && nextUser(runtime, indexedUserIds, progress.lastUserId()) == null;
+                && nextUser(accountBook, indexedUserIds, progress.lastUserId()) == null;
         return finishPage(progress, maxWork - remaining, complete, creations);
     }
 
-    private static UserPage processUser(TradingAccountRuntime runtime, int laneId,
+    private static UserPage processUser(AccountBook accountBook, int laneId,
                                         RiskLaneProgress scan, UserAccount user,
                                         CoreInstrument changedInstrument, MarkPrice changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
                                         RiskScanner.LiquidationBatch creations,
-                                        RuntimeIdentityRegistry identities) {
+                                        IdIndex identities) {
         int phase = scan.phase();
         String positionCursor = scan.positionCursor();
         long reservationCursor = scan.reservationCursor();
@@ -290,21 +290,21 @@ public final class RiskScanner {
         long isolatedMargin = scan.isolatedMarginUnits();
         long isolatedReservation = scan.isolatedReservationUnits();
         long wallet = Long.MIN_VALUE;
-        PositionRiskScratch positionRisk = runtime.accountLane(laneId).positionRiskScratch();
+        PositionRiskScratch positionRisk = accountBook.accountLane(laneId).positionRiskScratch();
         // 同一条常驻 Lane 线程可能在旧扫描失效后继续处理新价格。
         // 把小型行情缓存绑定到当前市场修订，避免继续使用旧标记价。
-        positionRisk.scanMarketRevision = runtime.marketRevision();
+        positionRisk.scanMarketRevision = accountBook.marketRevision();
         int work = 0;
         while (work < maxWork) {
             if (phase == 0) {
-                long positionIdentity = runtime.nextRiskPositionKey(user.userId(), positionCursor, identities);
+                long positionIdentity = accountBook.nextRiskPositionKey(user.userId(), positionCursor, identities);
                 if (positionIdentity == 0) {
                     phase = 1;
                     positionCursor = "-";
                     continue;
                 }
                 positionCursor = identities.positionKey(user.userId(), positionIdentity);
-                Position position = runtime.position(positionIdentity);
+                Position position = accountBook.position(positionIdentity);
                 work++;
                 if (position.signedQuantitySteps() == 0) continue;
                 if (position.marginMode() == CoreMarginMode.ISOLATED) {
@@ -312,19 +312,19 @@ public final class RiskScanner {
                         isolatedMargin = Math.addExact(isolatedMargin, position.positionMarginUnits());
                     }
                     if (position.symbolId() == changedSymbolId) {
-                        updateIsolated(runtime, user.userId(), positionCursor, position,
+                        updateIsolated(accountBook, user.userId(), positionCursor, position,
                                 changedInstrument, changedMark, creations, identities);
                     }
                     continue;
                 }
                 if (position.assetId() != settleAssetId) continue;
-                if (!risk(runtime, position, identities, positionRisk)) continue;
+                if (!risk(accountBook, position, identities, positionRisk)) continue;
                 unrealized = Math.addExact(unrealized, positionRisk.equityDelta);
                 maintenance = Math.addExact(maintenance, positionRisk.maintenance);
                 continue;
             }
             if (phase == 1) {
-                OrderFundsReservation reservation = nextReservation(runtime, user.userId(), reservationCursor);
+                OrderFundsReservation reservation = nextReservation(accountBook, user.userId(), reservationCursor);
                 if (reservation == null) {
                     if (maintenance == 0) {
                         return new UserPage(new RiskLaneProgress(user.userId(), false, 0, 0, "-", 0, 0, 0, 0, 0),
@@ -336,33 +336,33 @@ public final class RiskScanner {
                 }
                 reservationCursor = reservation.orderId();
                 work++;
-                Order order = runtime.order(reservation.orderId());
+                Order order = accountBook.order(reservation.orderId());
                 if (order != null && order.marginMode() == CoreMarginMode.ISOLATED
                         && reservation.assetId() == settleAssetId) {
                     isolatedReservation = Math.addExact(isolatedReservation, reservation.reservedUnits());
                 }
                 continue;
             }
-            long positionIdentity = runtime.nextRiskPositionKey(user.userId(), positionCursor, identities);
+            long positionIdentity = accountBook.nextRiskPositionKey(user.userId(), positionCursor, identities);
             if (positionIdentity == 0) {
                 return new UserPage(new RiskLaneProgress(user.userId(), false, 0, 0, "-", 0, 0, 0, 0, 0),
                         work);
             }
             positionCursor = identities.positionKey(user.userId(), positionIdentity);
-            Position position = runtime.position(positionIdentity);
+            Position position = accountBook.position(positionIdentity);
             work++;
             if (position.signedQuantitySteps() == 0 || position.marginMode() != CoreMarginMode.CROSS
                     || position.assetId() != settleAssetId) continue;
-            if (!risk(runtime, position, identities, positionRisk)) continue;
+            if (!risk(accountBook, position, identities, positionRisk)) continue;
             if (wallet == Long.MIN_VALUE) {
-                AccountBalance balance = runtime.balance(user.userId(), settleAssetId);
+                AccountBalance balance = accountBook.balance(user.userId(), settleAssetId);
                 long total = balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
                 wallet = Math.subtractExact(Math.subtractExact(total, isolatedMargin), isolatedReservation);
                 if (wallet < 0) throw new IllegalStateException("isolated margin exceeds wallet balance");
             }
             long equity = Math.addExact(wallet, unrealized);
             long ratio = riskRatio(maintenance, equity);
-            putRiskAndLiquidation(runtime, user.userId(), positionCursor, position,
+            putRiskAndLiquidation(accountBook, user.userId(), positionCursor, position,
                     positionRisk.instrument, positionRisk.priceSequence, equity, positionRisk.unrealized,
                     positionRisk.maintenance, ratio, creations, identities);
         }
@@ -371,10 +371,10 @@ public final class RiskScanner {
                 scan.userRevision(), scan.marketRevision()), work);
     }
 
-    private static void updateIsolated(TradingAccountRuntime runtime, long userId, String positionKey,
+    private static void updateIsolated(AccountBook accountBook, long userId, String positionKey,
                                        Position position, CoreInstrument instrument,
                                        MarkPrice mark, RiskScanner.LiquidationBatch creations,
-                                       RuntimeIdentityRegistry identities) {
+                                       IdIndex identities) {
         long unrealized = PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), mark.markPriceTicks(), instrument.notionalMultiplierUnits(),
                 instrument.priceTickUnits(), instrument.settleScaleUnits());
@@ -386,37 +386,37 @@ public final class RiskScanner {
                 mark.markPriceTicks()) : unrealized;
         long equity = Math.addExact(position.positionMarginUnits(), equityDelta);
         long ratio = riskRatio(maintenance, equity);
-        putRiskAndLiquidation(runtime, userId, positionKey, position, instrument, mark.priceSequence(), equity,
+        putRiskAndLiquidation(accountBook, userId, positionKey, position, instrument, mark.priceSequence(), equity,
                 unrealized, maintenance, ratio, creations, identities);
     }
 
-    private static void putRiskAndLiquidation(TradingAccountRuntime runtime, long userId, String positionKey,
+    private static void putRiskAndLiquidation(AccountBook accountBook, long userId, String positionKey,
                                               Position position, CoreInstrument instrument,
                                               long priceSequence, long equity, long unrealized, long maintenance,
                                               long ratio, RiskScanner.LiquidationBatch creations,
-                                              RuntimeIdentityRegistry identities) {
+                                              IdIndex identities) {
         CoreRiskStatus status = CoreRiskStatus.of(ratio);
         int symbolId = position.symbolId();
         long riskKey = identities.preparedPositionKey(userId, positionKey);
-        RiskMarginCalculator.Snapshot previousSnapshot = runtime.riskSnapshot(riskKey);
+        RiskMarginCalculator.Snapshot previousSnapshot = accountBook.riskSnapshot(riskKey);
         if (previousSnapshot == null || previousSnapshot.priceSequence() != priceSequence
                 || previousSnapshot.equityUnits() != equity
                 || previousSnapshot.unrealizedPnlUnits() != unrealized
                 || previousSnapshot.maintenanceMarginUnits() != maintenance
                 || previousSnapshot.marginRatioPpm() != ratio
                 || previousSnapshot.positionSide() != position.positionSide()) {
-            runtime.putRiskSnapshot(riskKey, new RiskMarginCalculator.Snapshot(userId, symbolId, position.positionSide(),
+            accountBook.putRiskSnapshot(riskKey, new RiskMarginCalculator.Snapshot(userId, symbolId, position.positionSide(),
                     priceSequence, equity, unrealized, maintenance, ratio));
         }
         if (instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
                 || instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) {
             return;
         }
-        RiskScanner.LiquidationOrder active = runtime.activeLiquidation(userId, symbolId, position.positionSide());
+        RiskScanner.LiquidationOrder active = accountBook.activeLiquidation(userId, symbolId, position.positionSide());
         if (status != CoreRiskStatus.LIQUIDATION
                 || !RiskMarginCalculator.canLiquidate(instrument.contractType(), position.signedQuantitySteps())) {
             if (active != null && active.status() == CoreLiquidationState.Status.PLANNED) {
-                runtime.replaceLiquidation(new RiskScanner.LiquidationOrder(active.liquidationId(), active.userId(),
+                accountBook.replaceLiquidation(new RiskScanner.LiquidationOrder(active.liquidationId(), active.userId(),
                         active.symbolId(), active.marginMode(), active.positionSide(), active.instrument(),
                         active.triggerPriceSequence(), active.signedQuantitySteps(), active.closeQuantitySteps(),
                         0, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
@@ -433,7 +433,7 @@ public final class RiskScanner {
                         || active.triggerPriceSequence() != priceSequence
                         || active.signedQuantitySteps() != quantity
                         || active.closeQuantitySteps() != Math.absExact(quantity)) {
-                    runtime.replaceLiquidation(new RiskScanner.LiquidationOrder(active.liquidationId(), userId, symbolId,
+                    accountBook.replaceLiquidation(new RiskScanner.LiquidationOrder(active.liquidationId(), userId, symbolId,
                             position.marginMode(), position.positionSide(), instrument, priceSequence,
                             quantity, Math.absExact(quantity), 0, 0, 0, 0,
                             CoreLiquidationState.Status.PLANNED, 0));
@@ -444,22 +444,22 @@ public final class RiskScanner {
         creations.add(position, priceSequence);
     }
 
-    private static boolean risk(TradingAccountRuntime runtime, Position position,
-                                RuntimeIdentityRegistry identities, PositionRiskScratch result) {
+    private static boolean risk(AccountBook accountBook, Position position,
+                                IdIndex identities, PositionRiskScratch result) {
         int symbolId = position.symbolId();
         CoreInstrument instrument = result.instrument;
         MarkPrice mark = result.mark;
         if (instrument == null || mark == null || result.symbolId != symbolId
                 || instrument != position.instrument()
                 || result.marketRevision != result.scanMarketRevision
-                || result.runtime != runtime) {
-            instrument = runtime.instrument(identities.instrumentId(symbolId));
-            mark = runtime.markPrice(symbolId);
+                || result.accountBook != accountBook) {
+            instrument = accountBook.instrument(identities.instrumentId(symbolId));
+            mark = accountBook.markPrice(symbolId);
             result.symbolId = symbolId;
             result.instrument = instrument;
             result.mark = mark;
             result.marketRevision = result.scanMarketRevision;
-            result.runtime = runtime;
+            result.accountBook = accountBook;
         }
         if (instrument == null || mark == null) return false;
         long unrealized = PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(), position.signedQuantitySteps(),
@@ -488,15 +488,15 @@ public final class RiskScanner {
         }
     }
 
-    private static UserAccount nextUser(TradingAccountRuntime runtime, LongArrayList users, long cursor) {
+    private static UserAccount nextUser(AccountBook accountBook, LongArrayList users, long cursor) {
         int slot = users.binarySearch(cursor);
         slot = slot >= 0 ? slot + 1 : -slot - 1;
-        return slot == users.size() ? null : runtime.user(users.get(slot));
+        return slot == users.size() ? null : accountBook.user(users.get(slot));
     }
 
-    private static OrderFundsReservation nextReservation(TradingAccountRuntime runtime, long userId, long cursor) {
-        long id = runtime.nextRiskReservationId(userId, cursor);
-        return id == 0 ? null : runtime.reservation(id);
+    private static OrderFundsReservation nextReservation(AccountBook accountBook, long userId, long cursor) {
+        long id = accountBook.nextRiskReservationId(userId, cursor);
+        return id == 0 ? null : accountBook.reservation(id);
     }
 
     /** 一个账户 Lane 复用的单持仓估值暂存区，处理下一持仓时覆盖。只缓存当前币对的配置和行情，跨市场修订或跨运行时不能沿用旧缓存。 */
@@ -508,7 +508,7 @@ public final class RiskScanner {
         private long marketRevision = Long.MIN_VALUE;
         private long scanMarketRevision = Long.MIN_VALUE;
         /** 缓存所对应的运行时引用，防止同一暂存区误用另一运行时的市场数据。 */
-        private TradingAccountRuntime runtime;
+        private AccountBook accountBook;
         private long priceSequence;
         /** 当前持仓的未实现盈亏，单位为结算资产最小整数单位。 */
         private long unrealized;
@@ -633,11 +633,11 @@ public static final class LiquidationBatch {
     }
 
     /** 原账户 Lane 使用 Owner 已分配的编号，把本批需求逐条落为 PLANNED 强平记录。 */
-    void apply(TradingAccountRuntime runtime) {
+    void apply(AccountBook accountBook) {
         if (firstId <= 0) throw new IllegalStateException("risk liquidation IDs not assigned");
         for (int i = 0; i < count; i++) {
             Position p = positions[i];
-            runtime.putLiquidation(new RiskScanner.LiquidationOrder(firstId + i, p.userId(), p.symbolId(), p.marginMode(),
+            accountBook.putLiquidation(new RiskScanner.LiquidationOrder(firstId + i, p.userId(), p.symbolId(), p.marginMode(),
                     p.positionSide(), p.instrument(), priceSequences[i], p.signedQuantitySteps(),
                     Math.absExact(p.signedQuantitySteps()), 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0));
         }

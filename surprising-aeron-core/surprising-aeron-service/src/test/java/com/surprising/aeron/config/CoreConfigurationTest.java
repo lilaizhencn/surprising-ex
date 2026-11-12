@@ -1,7 +1,7 @@
 package com.surprising.aeron.config;
 
 import com.surprising.aeron.controller.AeronTradingClusterService;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;
@@ -64,7 +64,7 @@ class CoreConfigurationTest {
                 service.onStart(cluster, null);
                 try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decodePassive(
                         service.captureSnapshot(1, 0), ProductLine.SPOT, runtimeConfiguration, topology)) {
-                    assertThat(restored.runtimeState().topology()).isEqualTo(topology);
+                    assertThat(restored.accountBook().topology()).isEqualTo(topology);
                 }
             } finally {
                 service.onTerminate(cluster);
@@ -124,8 +124,8 @@ class CoreConfigurationTest {
         // 暂存节点当前属性，确保测试结束后恢复，不影响其他产品线。
         String previous = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "3");
-        try (/* 首次启动显式拓扑的独立运行时。 */ var original = new TradingCoreRuntime(product, topology)) {
-            assertThat(original.runtimeState().topology()).isSameAs(topology);
+        try (/* 首次启动显式拓扑的独立运行时。 */ var original = new TradingCore(product, topology)) {
+            assertThat(original.accountBook().topology()).isSameAs(topology);
             // 捕获真实 Matcher 与账户的配对快照，随后按该快照恢复。
             com.surprising.aeron.service.order.CoreTestCompletion.applyAsynchronously(original,
                     new com.surprising.aeron.protocol.CoreMessage(com.surprising.aeron.protocol.CoreMessageHeader.command(
@@ -136,11 +136,11 @@ class CoreConfigurationTest {
             byte[] snapshot = original.snapshot(101);
             try (/* 从快照恢复的独立运行时，不读取当前节点路由属性。 */
                     var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decode(snapshot, product, configuration, deployment)) {
-                assertThat(restored.runtimeState().topology()).isEqualTo(expected);
+                assertThat(restored.accountBook().topology()).isEqualTo(expected);
                 assertThat(restored.stateHash()).isEqualTo(original.stateHash());
                 try (var again = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decode(
                         restored.snapshot(102), product, configuration, deployment)) {
-                    assertThat(again.runtimeState().topology()).isEqualTo(expected);
+                    assertThat(again.accountBook().topology()).isEqualTo(expected);
                     assertThat(again.stateHash()).isEqualTo(original.stateHash());
                 }
             }

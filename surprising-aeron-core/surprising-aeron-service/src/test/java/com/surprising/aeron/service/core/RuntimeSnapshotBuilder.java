@@ -21,7 +21,7 @@ public final class RuntimeSnapshotBuilder {
      * @param state 调用方已建立合法快照读取边界的可变运行时
      * @param revision 给测试投影指定的非负修订号
      */
-    public static TradingRuntimeSnapshot capture(TradingAccountRuntime state, long revision) {
+    public static TradingRuntimeSnapshot capture(AccountBook state, long revision) {
         state.assertOwner();
         if (revision < 0) {
             throw new IllegalArgumentException("snapshot revision must not be negative");
@@ -108,35 +108,35 @@ public final class RuntimeSnapshotBuilder {
                         scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress())));
 
         // 按资产编号排序的七类系统子账金额投影。
-        Map<Integer, TradingRuntimeSnapshot.TreasurySnapshot> treasury = new TreeMap<>();
+        Map<Integer, TradingRuntimeSnapshot.SystemFundsSnapshot> systemFunds = new TreeMap<>();
         // 从七类系统子账键收集并排序去重的资产集合。
-        TreeSet<Integer> treasuryAssets = new TreeSet<>();
-        state.treasury().feeBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> treasuryAssets.add(assetId));
-        state.treasury().insuranceBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> treasuryAssets.add(assetId));
-        state.treasury().insuranceDeficits().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> treasuryAssets.add(assetId));
-        state.treasury().liquidationFeeBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> treasuryAssets.add(assetId));
-        state.treasury().fundingResidualBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> treasuryAssets.add(assetId));
-        state.treasury().roundingResidualBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> treasuryAssets.add(assetId));
-        state.treasury().clearingPnlBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> treasuryAssets.add(assetId));
-        treasuryAssets.forEach(/* 当前余额或财库子账的整数资产编号。 */ assetId -> treasury.put(assetId, new TradingRuntimeSnapshot.TreasurySnapshot(
-                state.treasury().fee(assetId), state.treasury().insurance(assetId),
-                state.treasury().insuranceDeficit(assetId), state.treasury().liquidationFee(assetId),
-                state.treasury().fundingResidual(assetId), state.treasury().roundingResidual(assetId),
-                state.treasury().clearingPnl(assetId))));
+        TreeSet<Integer> systemFundsAssets = new TreeSet<>();
+        state.systemFunds().feeBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> systemFundsAssets.add(assetId));
+        state.systemFunds().insuranceBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> systemFundsAssets.add(assetId));
+        state.systemFunds().insuranceDeficits().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> systemFundsAssets.add(assetId));
+        state.systemFunds().liquidationFeeBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> systemFundsAssets.add(assetId));
+        state.systemFunds().fundingResidualBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> systemFundsAssets.add(assetId));
+        state.systemFunds().roundingResidualBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> systemFundsAssets.add(assetId));
+        state.systemFunds().clearingPnlBalances().forEachKeyValue((/* 当前余额或财库子账的整数资产编号。 */ assetId, /* 当前子账条目金额，收集资产键时不读取此值。 */ units) -> systemFundsAssets.add(assetId));
+        systemFundsAssets.forEach(/* 当前余额或财库子账的整数资产编号。 */ assetId -> systemFunds.put(assetId, new TradingRuntimeSnapshot.SystemFundsSnapshot(
+                state.systemFunds().fee(assetId), state.systemFunds().insurance(assetId),
+                state.systemFunds().insuranceDeficit(assetId), state.systemFunds().liquidationFee(assetId),
+                state.systemFunds().fundingResidual(assetId), state.systemFunds().roundingResidual(assetId),
+                state.systemFunds().clearingPnl(assetId))));
         // 按品种保存的已完成资金费批次标记。
         Map<Integer, Long> fundingSettlements = new TreeMap<>();
-        state.treasury().fundingSettlements().forEachKeyValue(fundingSettlements::put);
+        state.systemFunds().fundingSettlements().forEachKeyValue(fundingSettlements::put);
         // 按品种保存的资金费分批执行进度投影。
         Map<Integer, TradingRuntimeSnapshot.FundingProgressSnapshot> fundingProgress = new TreeMap<>();
-        state.treasury().fundingProgresses().forEachKeyValue((/* 当前行情、风控或生命周期进度对应的品种编号。 */ symbolId, /* 当前资金费或到期结算的运行进度，按对应集合逐字段投影。 */ progress) -> fundingProgress.put(symbolId,
+        state.systemFunds().fundingProgresses().forEachKeyValue((/* 当前行情、风控或生命周期进度对应的品种编号。 */ symbolId, /* 当前资金费或到期结算的运行进度，按对应集合逐字段投影。 */ progress) -> fundingProgress.put(symbolId,
                 new TradingRuntimeSnapshot.FundingProgressSnapshot(progress.settlementId(), progress.fundingRatePpm(),
                         progress.nextCursorUserId(), progress.markPriceTicks())));
         // 按品种保存的已完成到期/行权批次标记。
         Map<Integer, Long> lifecycleSettlements = new TreeMap<>();
-        state.treasury().lifecycleSettlements().forEachKeyValue(lifecycleSettlements::put);
+        state.systemFunds().lifecycleSettlements().forEachKeyValue(lifecycleSettlements::put);
         // 按品种保存的到期结算分批执行进度投影。
         Map<Integer, TradingRuntimeSnapshot.LifecycleProgressSnapshot> lifecycleProgress = new TreeMap<>();
-        state.treasury().lifecycleProgresses().forEachKeyValue((/* 当前行情、风控或生命周期进度对应的品种编号。 */ symbolId, /* 当前资金费或到期结算的运行进度，按对应集合逐字段投影。 */ progress) -> lifecycleProgress.put(symbolId,
+        state.systemFunds().lifecycleProgresses().forEachKeyValue((/* 当前行情、风控或生命周期进度对应的品种编号。 */ symbolId, /* 当前资金费或到期结算的运行进度，按对应集合逐字段投影。 */ progress) -> lifecycleProgress.put(symbolId,
                 new TradingRuntimeSnapshot.LifecycleProgressSnapshot(progress.settlementId(), progress.settlementPriceTicks(),
                         progress.ordersComplete(), progress.nextCursorOrderId(), progress.nextCursorUserId(),
                         progress.requiredInsuranceUnits())));
@@ -144,7 +144,7 @@ public final class RuntimeSnapshotBuilder {
                 positions, liquidations, markPrices, riskSnapshots, riskScans, state.nextLiquidationId(), state.marketRevision(),
                 new TreeMap<>(state.instrumentsForRuntime()), new TreeMap<>(state.leveragesForRuntime()),
                 new TreeMap<>(state.algoOrdersForRuntime()), new TreeMap<>(state.cancelAllAfterTimersForRuntime()),
-                new TreeMap<>(state.triggerOrdersForRuntime()), treasury, fundingSettlements, fundingProgress,
+                new TreeMap<>(state.triggerOrdersForRuntime()), systemFunds, fundingSettlements, fundingProgress,
                 lifecycleSettlements, lifecycleProgress);
     }
 }

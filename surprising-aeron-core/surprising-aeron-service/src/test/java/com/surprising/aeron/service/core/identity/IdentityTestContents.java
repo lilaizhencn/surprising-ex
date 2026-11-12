@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core.identity;
 
 import com.surprising.aeron.service.account.ClientOrderIdRegistry;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,19 +11,19 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 public final class IdentityTestContents {
     private IdentityTestContents() {}
 
-    public static Map<String, Object> capture(RuntimeIdentityRegistry identities) {
+    public static Map<String, Object> capture(IdIndex identities) {
         identities.assertOwner();
         Map<List<Object>, Long> clients = new HashMap<>();
-        TradingAccountRuntime runtime = field(identities, "clientRuntime");
-        if (runtime != null) {
-            for (int lane = 0; lane < runtime.accountLaneCount(); lane++)
-                clients(runtime.accountLane(lane).clientIdentities(), clients);
+        AccountBook accountBook = field(identities, "clientRuntime");
+        if (accountBook != null) {
+            for (int lane = 0; lane < accountBook.accountLaneCount(); lane++)
+                clients(accountBook.accountLane(lane).clientIdentities(), clients);
         } else {
             LongObjectHashMap<ClientOrderIdRegistry> tables = field(identities, "unboundClients");
             if (tables != null) tables.forEachValue(table -> clients(table, clients));
         }
         Map<String, Integer> assets = field(identities, "assetIds");
-        Map<RuntimeIdentityRegistry.PositionIdentity, Long> positions = field(identities, "positionKeys");
+        Map<IdIndex.PositionIdentity, Long> positions = field(identities, "positionKeys");
         String[] symbols = field(identities, "symbols");
         Map<String, Integer> instruments = new HashMap<>();
         for (int id = 0; id < symbols.length; id++)

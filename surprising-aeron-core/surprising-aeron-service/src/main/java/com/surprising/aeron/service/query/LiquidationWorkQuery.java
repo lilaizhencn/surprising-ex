@@ -10,14 +10,14 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountPartition;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.treasury.InsuranceAllocationPolicy;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import java.util.concurrent.CompletableFuture;
 
 /** 一次强平执行、保险或 ADL 工作页的交接任务。Owner 固定候选和市场输入，Lane 读取计划事实，等待所有 Lane 后计算保险建议并编码有界页，不实际执行强平或赔付。 */
 final class LiquidationWorkQuery extends CompletableFuture<CoreQueryService.QueryResult> implements AccountLaneCommand {
-    private final TradingCoreRuntime owner;
+    private final TradingCore owner;
     private final long commandCount;
     final long laneMask;
     private final CoreLiquidationWorkView.Query requested;
@@ -38,36 +38,36 @@ final class LiquidationWorkQuery extends CompletableFuture<CoreQueryService.Quer
     private final InsuranceAllocationPolicy.AllocationInputs[] claims;
     private final java.util.concurrent.atomic.AtomicLong completed = new java.util.concurrent.atomic.AtomicLong();
     /** 按扫描上限固定候选编号、所属 Lane、币对、结算资产和标记价，并记录是否已选完来源及风险续扫信息。 */
-    LiquidationWorkQuery(TradingCoreRuntime owner, long commandCount, CoreLiquidationWorkView.Query requested, java.util.NavigableSet<Long> candidates) {
+    LiquidationWorkQuery(TradingCore owner, long commandCount, CoreLiquidationWorkView.Query requested, java.util.NavigableSet<Long> candidates) {
         this.owner = owner;
         this.commandCount = commandCount; this.requested = requested;
         int count = Math.min(candidates.size(), OperationalQueries.MAX_INDEX_SCAN);
         sourceComplete = count == candidates.size();
-        continuation = LiquidationQueries.continuation(owner.runtimeState(), owner.identities(), requested.purpose());
+        continuation = LiquidationQueries.continuation(owner.accountBook(), owner.identities(), requested.purpose());
         ids = new long[count]; lanes = new int[ids.length]; assetIds = new int[ids.length];
         instruments = new com.surprising.aeron.service.instrument.CoreInstrument[ids.length];
         receipts = new CoreLiquidationWorkView.Resolution[ids.length];
         actions = new com.surprising.aeron.protocol.CoreLiquidationActionView[ids.length];
         marks = new com.surprising.aeron.service.market.MarkPrice[ids.length];
-        failures = new CoreResultCode[owner.runtimeState().topology().accountLaneCount()];
-        claims = new InsuranceAllocationPolicy.AllocationInputs[owner.runtimeState().topology().accountLaneCount()];
+        failures = new CoreResultCode[owner.accountBook().topology().accountLaneCount()];
+        claims = new InsuranceAllocationPolicy.AllocationInputs[owner.accountBook().topology().accountLaneCount()];
         long mask = 0;
         int index = 0;
         for (long liquidationId : candidates) {
             if (index == count) break;
             var route = owner.liquidationIndex().route(liquidationId);
             if (route == null) throw new IllegalStateException("liquidation query route is missing");
-            instruments[index] = owner.runtimeState().instrument(route.instrumentId());
+            instruments[index] = owner.accountBook().instrument(route.instrumentId());
             assetIds[index] = owner.identities().assetId(instruments[index].settleAsset());
-            marks[index] = owner.runtimeState().markPrice(owner.identities().findSymbolId(route.instrumentId()));
-            ids[index] = liquidationId; lanes[index] = owner.runtimeState().topology().accountLaneId(route.userId());
+            marks[index] = owner.accountBook().markPrice(owner.identities().findSymbolId(route.instrumentId()));
+            ids[index] = liquidationId; lanes[index] = owner.accountBook().topology().accountLaneId(route.userId());
             mask |= 1L << lanes[index++];
         }
         laneMask = mask;
     }
     /** 当前 Lane 读取其候选计划，按工作类型和固定市场输入筛选执行动作或缺口回执。保险页还准备本 Lane 的全部相关请求，记录错误后发布完成位并通知 Owner。 */
     @Override public void execute(AccountPartition lane) {
-        try { owner.runtimeState().readAccountLane(lane, owned -> {
+        try { owner.accountBook().readAccountLane(lane, owned -> {
             for (int index = 0; index < ids.length; index++) {
                 if (lanes[index] != owned.laneId()) continue;
                 var value = owned.liquidation(ids[index]);
@@ -97,7 +97,7 @@ final class LiquidationWorkQuery extends CompletableFuture<CoreQueryService.Quer
                         value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(), 0, purpose);
             }
             if (requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE)
-                claims[owned.laneId()] = InsuranceAllocationPolicy.prepareLaneAllocations(owner.runtimeState(), ids, assetIds, instruments);
+                claims[owned.laneId()] = InsuranceAllocationPolicy.prepareLaneAllocations(owner.accountBook(), ids, assetIds, instruments);
             return null;
         }); }
         catch (QueryTooLargeException tooLarge) {
@@ -110,7 +110,7 @@ final class LiquidationWorkQuery extends CompletableFuture<CoreQueryService.Quer
     /** 只有所有目标 Lane 的完成位齐全，才可读取回执。 */
     public boolean ready() { return completed.get() == laneMask; }
     /** 等待 Lane 已完成后，先返回失败或组装有界工作页。保险页依据全部请求和原基金余额计算建议金额，编码结果并通知 Owner，不执行资金支付。 */
-    public void apply(TreasuryRuntime ledger) {
+    public void apply(SystemFunds ledger) {
         CoreResponse response;
         try {
             for (CoreResultCode failure : failures) {

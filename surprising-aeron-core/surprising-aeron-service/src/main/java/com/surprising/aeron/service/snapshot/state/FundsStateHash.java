@@ -34,16 +34,16 @@ public final class FundsStateHash {
             users.add(entryHash(userId, mix(userHash, "balances", balances)));
         }
 
-        CoreTreasuryState treasury = state.treasuryState();
+        CoreTreasuryState systemFunds = state.treasuryState();
         long hash = CoreStateHash.mix(CoreStateHash.start(), com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(state.productLine()));
         hash = mix(hash, "users", users);
-        hash = mix(hash, "fee", aggregate(treasury.feeBalances(), balances));
-        hash = mix(hash, "insurance", aggregate(treasury.insuranceBalances(), balances));
-        hash = mix(hash, "deficit", aggregate(treasury.insuranceDeficits(), balances));
-        hash = mix(hash, "liquidationFee", aggregate(treasury.liquidationFeeBalances(), balances));
-        hash = mix(hash, "fundingResidual", aggregate(treasury.fundingResidualBalances(), balances));
-        hash = mix(hash, "roundingResidual", aggregate(treasury.roundingResidualBalances(), balances));
-        return mix(hash, "clearingPnl", aggregate(treasury.clearingPnlBalances(), balances));
+        hash = mix(hash, "fee", aggregate(systemFunds.feeBalances(), balances));
+        hash = mix(hash, "insurance", aggregate(systemFunds.insuranceBalances(), balances));
+        hash = mix(hash, "deficit", aggregate(systemFunds.insuranceDeficits(), balances));
+        hash = mix(hash, "liquidationFee", aggregate(systemFunds.liquidationFeeBalances(), balances));
+        hash = mix(hash, "fundingResidual", aggregate(systemFunds.fundingResidualBalances(), balances));
+        hash = mix(hash, "roundingResidual", aggregate(systemFunds.roundingResidualBalances(), balances));
+        return mix(hash, "clearingPnl", aggregate(systemFunds.clearingPnlBalances(), balances));
     }
 
     private static Aggregate aggregate(Map<String, Long> values, Aggregate aggregate) {

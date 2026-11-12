@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
+import com.surprising.aeron.service.core.identity.IdIndex;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import static org.assertj.core.api.Assertions.*;
@@ -16,11 +16,11 @@ public final class LedgerControlTestSupport {
      * @param runtime 当前测试独占并推进控制命令的运行时
      * @param completion 用于继续投递或检查当前业务完成的 BooleanSupplier
      */
-    public static void await(TradingAccountRuntime runtime, BooleanSupplier completion) {
+    public static void await(AccountBook accountBook, BooleanSupplier completion) {
         // 从单调时钟计算的本次五秒轮询截止点。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!completion.getAsBoolean()) {
-            runtime.assertAccountLanesHealthy();
+            accountBook.assertAccountLanesHealthy();
             if (System.nanoTime() >= deadline) throw new AssertionError("Ledger control completion timed out");
             Thread.onSpinWait();
         }
@@ -32,14 +32,14 @@ public final class LedgerControlTestSupport {
      * @param identities 冷状态物化使用的资产、币对及持仓身份字典
      * @param external 是否允许外部资金调整，传给原守恒验证入口
      */
-    public static TradingCoreState commit(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, boolean external) {
-        runtime.validateControlFunds(external);
-        runtime.clearChangedKeys();
+    public static TradingCoreState commit(AccountBook accountBook, IdIndex identities, boolean external) {
+        accountBook.validateControlFunds(external);
+        accountBook.clearChangedKeys();
         // 本次是否需要临时取得账户读取所有权，真正取得在后续轮询结束时完成。
-        boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
+        boolean acquired = accountBook.accountLanesStarted() && !accountBook.ownerLaneAccess();
         try {
-            if (acquired) while (!runtime.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
-            return RuntimeStateMaterializer.materialize(runtime, identities);
-        } finally { if (acquired) runtime.releaseOwnerLaneAccess(); }
+            if (acquired) while (!accountBook.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            return SnapshotWriter.writeSnapshot(accountBook, identities);
+        } finally { if (acquired) accountBook.releaseOwnerLaneAccess(); }
     }
 }

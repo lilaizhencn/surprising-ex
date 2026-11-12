@@ -41,10 +41,10 @@ class ClusteredBatchTradingBenchmarkTest {
             var serviceField = workload.getClass().getDeclaredField("service");
             serviceField.setAccessible(true);
             var service = (TradingCoreOwner) serviceField.get(workload);
-            var runtime = service.state().runtimeState;
-            var lifecycleField = TradingAccountRuntime.class.getDeclaredField("laneLifecycle");
+            var accountBook = service.state().accountBook;
+            var lifecycleField = AccountBook.class.getDeclaredField("laneLifecycle");
             lifecycleField.setAccessible(true);
-            var lifecycle = lifecycleField.get(runtime);
+            var lifecycle = lifecycleField.get(accountBook);
             var epochField = lifecycle.getClass().getDeclaredField("handoffEpoch");
             epochField.setAccessible(true);
             long before = epochField.getLong(lifecycle);
@@ -279,8 +279,8 @@ class ClusteredBatchTradingBenchmarkTest {
             workload.setup();
             var counters = new ClusteredBatchTradingBenchmark.Counters();
             var benchmark = new ClusteredBatchTradingBenchmark();
-            benchmark.decodedBatchAdmissionAndSettlement(workload, counters);
-            benchmark.decodedBatchAdmissionAndSettlement(workload, counters);
+            benchmark.decodedBatchOrderCheckAndSettlement(workload, counters);
+            benchmark.decodedBatchOrderCheckAndSettlement(workload, counters);
             org.junit.jupiter.api.Assertions.assertEquals(7168, counters.terminalBusinessOperations);
             org.junit.jupiter.api.Assertions.assertEquals(counters.acceptedBusinessOperations,
                     counters.terminalBusinessOperations);

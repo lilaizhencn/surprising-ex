@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import static org.assertj.core.api.Assertions.*;
@@ -17,7 +17,7 @@ class SystemLedgerFundsValidationTest {
     @Test
     void unbalancedControlPostingFailsOnLedgerBeforeOwnerCanCommit() {
         // 本例账户与财库运行时，显式启动账本
-        var accountRuntime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY);
+        var accountRuntime = new AccountBook(com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY);
         accountRuntime.bindOwner();
         accountRuntime.bindLedgerPositionOwner();
         // 故意产生不守恒分账的匿名财务命令
@@ -28,7 +28,7 @@ class SystemLedgerFundsValidationTest {
              * 故意把资产1手续费设为7而不增加平衡分账，构造资金不守恒输入。
              * @param ledger 账本线程实际拥有的财库
              */
-            @Override protected void applyLedger(TreasuryRuntime ledger) { ledger.setFee(1, 7); }
+            @Override protected void applyLedger(SystemFunds ledger) { ledger.setFee(1, 7); }
         };
         accountRuntime.dispatchLedgerCommand(work);
         Throwable rejected = catchThrowable(() -> accountRuntime.validateControlFunds(false));

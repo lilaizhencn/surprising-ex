@@ -297,7 +297,7 @@ class AeronClientAgentTest {
     }
 
     @Test
-    void returnsTypedNegativeAdmissionWithoutRetry() throws Exception {
+    void returnsTypedNegativeOrderCheckWithoutRetry() throws Exception {
         AtomicInteger offers = new AtomicInteger();
         long[] rawResults = {Publication.BACK_PRESSURED, Publication.NOT_CONNECTED,
                 Publication.CLOSED, Publication.MAX_POSITION_EXCEEDED, -99};

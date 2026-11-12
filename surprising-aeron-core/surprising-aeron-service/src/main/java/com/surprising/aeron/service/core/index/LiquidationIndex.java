@@ -6,7 +6,7 @@ import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.InstrumentId;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.risk.RiskScanner;
 import java.util.Map;
@@ -49,7 +49,7 @@ public final class LiquidationIndex {
     }
 
     /** 先按旧路由撤掉未结束集合，再从账户运行时状态建立新路由。 */
-    public void apply(long liquidationId, RiskScanner.LiquidationOrder after, RuntimeIdentityRegistry identities) {
+    public void apply(long liquidationId, RiskScanner.LiquidationOrder after, IdIndex identities) {
         LiquidationRoute previous = keysById.remove(liquidationId);
         if (previous != null && previous.unresolved()) remove(liquidationId, previous.key());
         if (after != null) {

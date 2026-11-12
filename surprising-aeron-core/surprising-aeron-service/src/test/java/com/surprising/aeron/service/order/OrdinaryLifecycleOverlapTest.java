@@ -2,7 +2,7 @@ package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -19,26 +19,26 @@ class OrdinaryLifecycleOverlapTest {
      */
     @ParameterizedTest @EnumSource(ProductLine.class)
     void ordinaryChecksRetainAccountAndSymbolIsolationUntilLifecycleRetires(ProductLine line) {
-        try (/* 当前产品线创建并自动关闭的 Core */ var core = new TradingCoreRuntime(line)) {
+        try (/* 当前产品线创建并自动关闭的 Core */ var core = new TradingCore(line)) {
             // 用户七、品种一的在途强平范围，反复检查时仍应保留同一对象
-            var liquidation = new OrderAdmissionService.PendingLifecycleRanges(1);
+            var liquidation = new OrderCheckService.PendingLifecycleRanges(1);
             liquidation.add(7, "1", false);
-            core.admissions().pendingLifecycleScopes.put(91, liquidation);
+            core.orderChecks().pendingLifecycleScopes.put(91, liquidation);
             for (/* 重复检查次数下标，验证冲突探测不会消耗原范围 */ int cycle = 0; cycle < 3; cycle++) {
                 assertThatThrownBy(() -> check(core, 7, "1"))
                         .isInstanceOf(CoreStateRejectedException.class);
                 assertThatCode(() -> check(core, 8, "1")).doesNotThrowAnyException();
                 assertThatCode(() -> check(core, 7, "2")).doesNotThrowAnyException();
-                assertThat(core.admissions().pendingLifecycleScopes.get(91)).isSameAs(liquidation);
+                assertThat(core.orderChecks().pendingLifecycleScopes.get(91)).isSameAs(liquidation);
             }
-            core.admissions().pendingLifecycleScopes.remove(91);
+            core.orderChecks().pendingLifecycleScopes.remove(91);
             assertThatCode(() -> check(core, 7, "1")).doesNotThrowAnyException();
-            var settlement = new OrderAdmissionService.PendingLifecycleRanges(1);
+            var settlement = new OrderCheckService.PendingLifecycleRanges(1);
             settlement.add(0, "1", true);
-            core.admissions().pendingLifecycleScopes.put(92, settlement);
+            core.orderChecks().pendingLifecycleScopes.put(92, settlement);
             assertThatThrownBy(() -> check(core, 8, "1")).isInstanceOf(CoreStateRejectedException.class);
             assertThatCode(() -> check(core, 8, "2")).doesNotThrowAnyException();
-            core.admissions().pendingLifecycleScopes.remove(92);
+            core.orderChecks().pendingLifecycleScopes.remove(92);
             assertThatCode(() -> check(core, 8, "1")).doesNotThrowAnyException();
         }
     }
@@ -49,13 +49,13 @@ class OrdinaryLifecycleOverlapTest {
      * @param userId 本次模拟普通下单用户
      * @param symbol 本次模拟下单的品种名称
      */
-    private static void check(TradingCoreRuntime core, long userId, String symbol) {
+    private static void check(TradingCore core, long userId, String symbol) {
         // 仅用于普通订单生命周期检查的原始 Core 消息
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, new UUID(95, userId),
                 core.productLine(), CommandSource.GATEWAY, 95, userId, userId, 1, 1),
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100, symbol, CoreOrderSide.BUY,
                         100, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                         CoreTimeInForce.GTC, false, "ordinary")));
-        core.admissions().rejectLifecycleOverlap(message, OrderCommand.Operation.PLACE, core.decodeMatchingCommand(message));
+        core.orderChecks().rejectLifecycleOverlap(message, OrderCommand.Operation.PLACE, core.decodeMatchingCommand(message));
     }
 }

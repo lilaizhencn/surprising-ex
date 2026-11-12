@@ -3,7 +3,7 @@ package com.surprising.aeron.service.snapshot;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.product.api.ProductLine;
@@ -53,7 +53,7 @@ final class SectionedCoreSnapshotValidation {
     /** 把头部与解码后的 Core、Matcher、来源及费率/划转逐项配对：产品线/拓扑/快照号/序号一致，业务与资金哈希重算一致，来源摘要一致。 */
     static void validatePairing(
             HeaderManifest manifest,
-            Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
+            Map<TradingCore.SourceKey, Long> sourceSequences,
             OrderBookSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies,
@@ -62,12 +62,12 @@ final class SectionedCoreSnapshotValidation {
                 && manifest.productLine() == tradingState.productLine(), "product line");
         requireMatch(manifest.snapshotId() == matcherSnapshot.snapshotId(), "snapshot id");
         requireMatch(manifest.appliedCommandCount() == matcherSnapshot.coreSequence(), "core sequence");
-        requireMatch(manifest.businessStateHash() == TradingCoreRuntime.canonicalBusinessStateHash(
+        requireMatch(manifest.businessStateHash() == TradingCore.canonicalBusinessStateHash(
                 tradingState.businessStateHash(), feePolicies, pendingTransfers)
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
         requireMatch(manifest.globalFundsHash()
                 == com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(tradingState), "funds hash");
-        requireMatch(manifest.sourceSequenceDigest() == TradingCoreRuntime.sourceSequenceDigest(sourceSequences),
+        requireMatch(manifest.sourceSequenceDigest() == TradingCore.sourceSequenceDigest(sourceSequences),
                 "source sequence digest");
     }
 

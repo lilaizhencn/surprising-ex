@@ -11,7 +11,7 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;
@@ -26,20 +26,20 @@ import java.util.function.Supplier;
 public final class OrderMatchingFlow {
 
     /** 组织本条交接链的所属交易运行时，不复制各线程业务事实。 */
-    private final TradingCoreRuntime owner;
+    private final TradingCore owner;
 
     /** 保存非空所属运行时引用，不创建第二份交易状态。 */
-    public OrderMatchingFlow(TradingCoreRuntime owner) {
+    public OrderMatchingFlow(TradingCore owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
     /** 若已有待命令，仍占新 Core 序号并登记有序拒绝项，先返回 MATCHING_PENDING，等待前序退休。队列为空时直接记录源水位和幂等拒绝结果后返回。 */
-    CoreResponse recordRejectedMatching(CoreMessage message, TradingCoreRuntime.SourceKey sourceKey,
+    CoreResponse recordRejectedMatching(CoreMessage message, TradingCore.SourceKey sourceKey,
                                         CommandFingerprint fingerprint, CoreResultCode resultCode) {
         if (!owner.pendingMatching().isEmpty()) {
             long sequence = owner.nextAppliedSequence();
-            OrderCommand pending = owner.admissions().newPendingMatching(sequence,
-                    OrderAdmissionService.matchingOperation(message.header().messageType()),
+            OrderCommand pending = owner.orderChecks().newPendingMatching(sequence,
+                    OrderCheckService.matchingOperation(message.header().messageType()),
                     message, fingerprint, owner.decodeMatchingCommand(message));
             putPendingMatching(pending);
             pending.rejectMatching(resultCode);
@@ -47,40 +47,40 @@ public final class OrderMatchingFlow {
             owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
             return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
                     CoreResultCode.MATCHING_PENDING, sequence,
-                    TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                    TradingCore.EMPTY_RESPONSE_DATA);
         }
         long sequence = owner.nextAppliedSequence();
         owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
-        owner.resultLedger().storeOwnedResult(message.header().commandIdMsb(), message.header().commandIdLsb(), fingerprint,
+        owner.commandResultLog().storeOwnedResult(message.header().commandIdMsb(), message.header().commandIdLsb(), fingerprint,
                 ResponseStatus.REJECTED, resultCode, sequence,
-                TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                TradingCore.EMPTY_RESPONSE_DATA);
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                sequence, TradingCore.EMPTY_RESPONSE_DATA);
     }
 
     /** 退休前解除生命周期范围，确认替换/下单准入已收齐，必要时取消已无后续执行的 Matcher 等待并释放收据。返回可复用原槽，异常不会回滚此前已解除的辅助记录。 */
     public OrderCommand removePendingMatching(long sequence) {
-        owner.admissions().releasePendingLifecycle(sequence);
+        owner.orderChecks().releasePendingLifecycle(sequence);
         int shard = owner.pendingMatching().submissionShard(sequence);
         boolean releasesSubmissionHead = shard >= 0
                 && owner.pendingMatching().isSubmissionHead(sequence, shard);
         OrderCommand current = owner.pendingMatching().get(sequence);
         if (current != null) {
-            if (current.replacementAdmission() != null) {
-                if (!current.replacementAdmission().complete())
+            if (current.replacementOrderCheck() != null) {
+                if (!current.replacementOrderCheck().complete())
                     throw new IllegalStateException("terminal command has incomplete replacement admission");
-                owner.runtimeState().releaseReplacementAdmission(current.takeReplacementAdmission());
+                owner.accountBook().releaseReplaceOrderCheck(current.takeReplaceOrderCheck());
             }
-            if (current.placeAdmission() != null && !current.placeAdmissionOwnerCollected()
-                    && !collectPlaceAdmissionIfReady(current)) {
+            if (current.placeOrderCheck() != null && !current.placeOrderCheckOwnerCollected()
+                    && !collectPlaceOrderCheckIfReady(current)) {
                 throw new IllegalStateException("terminal command has an incomplete place admission");
             }
             current.committed();
-            if (current.placeAdmission() != null && !current.placeAdmission().matcherConsumed()) {
-                current.placeAdmission().cancelMatcherWait();
+            if (current.placeOrderCheck() != null && !current.placeOrderCheck().matcherConsumed()) {
+                current.placeOrderCheck().cancelMatcherWait();
             }
-            releasePlaceAdmissionIfConsumed(current);
-            if (current.placeAdmission() != null) {
+            releasePlaceOrderCheckIfConsumed(current);
+            if (current.placeOrderCheck() != null) {
                 throw new IllegalStateException("terminal command still owns an unconsumed place admission");
             }
         }
@@ -99,19 +99,19 @@ public final class OrderMatchingFlow {
 
     /** 固定命令的 Cluster 独立模式，可复用已准备分片，然后入队并为非批量命令登记分片提交顺序。 */
     void putPendingMatching(OrderCommand pending) {
-        pending.clusterIndependent = owner.clusterPipelineAdmission();
+        pending.clusterIndependent = owner.clusterPipelineOrderCheck();
         if (owner.pendingMatching().size() >= owner.pendingMatching().capacity()) {
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
         try {
-            if (owner.clusterPipelineAdmission()
+            if (owner.clusterPipelineOrderCheck()
                     && owner.preparedRouteUserLaneBit() != 0
                     && owner.preparedRouteMatcherShard() >= 0) {
                 pending.cachedMatcherShard(owner.preparedRouteMatcherShard());
             }
             owner.pendingMatching().put(pending);
             CoreMessageType type = pending.command().header().messageType();
-            if (!TradingCoreRuntime.isOrderBatchCommand(type)) {
+            if (!TradingCore.isOrderBatchCommand(type)) {
                 owner.pendingMatching().registerSubmission(pending.sequence(), matcherShard(pending));
             }
         } catch (RuntimeException failure) {
@@ -129,8 +129,8 @@ public final class OrderMatchingFlow {
         String instrumentId = pending.operation() == OrderCommand.Operation.LIQUIDATION
                 || pending.operation() == OrderCommand.Operation.LIQUIDATION_BATCH
                 || pending.operation() == OrderCommand.Operation.SETTLEMENT
-                ? owner.admissions().pendingLifecycleSymbol(pending)
-                : owner.admissions().matchingSymbol(pending.operation(), pending.decodedCommand());
+                ? owner.orderChecks().pendingLifecycleSymbol(pending)
+                : owner.orderChecks().matchingSymbol(pending.operation(), pending.decodedCommand());
         int shard = instrumentId == null || instrumentId.isBlank() ? 0 : owner.matchingAdapter().matcherShardId(instrumentId);
         pending.cachedMatcherShard(shard);
         return shard;
@@ -163,7 +163,7 @@ public final class OrderMatchingFlow {
                 && pending.orderBatch.nextIndex > 0 && pending.isMatchingSubmitted();
         if (pending.crossShardCancellationStarted
                 || !batchContinuation && owner.matchingProgress.submissionDeferred(pending.sequence())) return;
-        if (!collectReplacementAdmissionIfReady(pending) || hasPendingMatchingRejection(pending.sequence())) return;
+        if (!collectReplaceOrderCheckIfReady(pending) || hasPendingMatchingRejection(pending.sequence())) return;
         if (!collectLiquidationChecksIfReady(pending) || pending.hasMatchingRejection()) return;
         pending.prepareLaneResultTarget(owner.responseSlotPool());
         if (pending.orderBatch != null) {
@@ -191,13 +191,13 @@ public final class OrderMatchingFlow {
         var direct = owner.prepareForMatching(pending);
         var command = prepareMatchingCommand(pending, direct);
         java.util.function.Supplier<?> matcherSubmission = command;
-        if (direct != null && pending.placeAdmission() != null) {
-            matcherSubmission = pending.gateAdmission(owner, pending.placeAdmission(), matcherShard(pending),
+        if (direct != null && pending.placeOrderCheck() != null) {
+            matcherSubmission = pending.gateOrderCheck(owner, pending.placeOrderCheck(), matcherShard(pending),
                     direct, matcherSubmission);
         }
         owner.matcherPipeline().submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
         pending.matchingSubmitted();
-        if (pending.placeAdmission() == null) owner.matchingProgress.submissionCompleted(pending);
+        if (pending.placeOrderCheck() == null) owner.matchingProgress.submissionCompleted(pending);
     }
 
     /** 空列表返回负一，全部同分片返回该号，遇到混合分片返回负二。 */
@@ -227,18 +227,18 @@ public final class OrderMatchingFlow {
     }
 
     /** 准入未完成检查 Lane 健康后返回假。 */
-    boolean collectReplacementAdmissionIfReady(OrderCommand pending) {
-        var event = pending.replacementAdmission();
-        if (event == null || pending.matchingAdmission() != null || pending.hasMatchingRejection()) return true;
-        if (!event.complete()) { owner.runtimeState().assertAccountLanesHealthy(); return false; }
+    boolean collectReplaceOrderCheckIfReady(OrderCommand pending) {
+        var event = pending.replacementOrderCheck();
+        if (event == null || pending.matchingOrderCheck() != null || pending.hasMatchingRejection()) return true;
+        if (!event.complete()) { owner.accountBook().assertAccountLanesHealthy(); return false; }
         RuntimeException rejection = event.rejection();
         try {
             if (rejection != null) throw rejection;
-            var admission = event.admission();
-            if (admission.resolved().orderId() != admission.originalOrderId())
-                owner.requireOrderIdentityAvailable(admission.userId(), admission.command());
-            pending.withAdmission(admission);
-            pending.withPreMatchingCancellations(pending.replacementAdmission().closeCapacityCancellations());
+            var orderCheck = event.orderCheck();
+            if (orderCheck.resolved().orderId() != orderCheck.originalOrderId())
+                owner.requireOrderIdentityAvailable(orderCheck.userId(), orderCheck.command());
+            pending.withOrderCheck(orderCheck);
+            pending.withPreMatchingCancellations(pending.replacementOrderCheck().closeCapacityCancellations());
         } catch (com.surprising.aeron.exception.CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             pending.rejectMatching(failure instanceof com.surprising.aeron.exception.CoreStateRejectedException rejected
                     ? CoreResultCode.fromRejectionCode(rejected.code())
@@ -254,8 +254,8 @@ public final class OrderMatchingFlow {
         var check = pending.liquidationCheck();
         if (!check.prepared()) {
             if (pending.operation() == OrderCommand.Operation.LIQUIDATION)
-                check.prepare(pending.decodedCommand().liquidation(), owner.runtimeState(), owner.identities());
-            else check.prepare(pending.decodedCommand().liquidationBatch(), owner.runtimeState(), owner.identities());
+                check.prepare(pending.decodedCommand().liquidation(), owner.accountBook(), owner.identities());
+            else check.prepare(pending.decodedCommand().liquidationBatch(), owner.accountBook(), owner.identities());
         }
         try { if (!check.poll()) return false; }
         catch (CoreStateRejectedException rejection) {
@@ -274,12 +274,12 @@ public final class OrderMatchingFlow {
     }
 
     /** 只在第一次 Owner 收据收集时保存准入或拒绝，随后推进分片提交顺序。 */
-    public boolean collectPlaceAdmissionIfReady(OrderCommand pending) {
-        if (pending == null || pending.placeAdmission() == null) return true;
-        var admission = pending.placeAdmission();
-        if (!admission.complete()) return false;
-        RuntimeException rejection = admission.rejection();
-        if (!pending.placeAdmissionOwnerCollected()) {
+    public boolean collectPlaceOrderCheckIfReady(OrderCommand pending) {
+        if (pending == null || pending.placeOrderCheck() == null) return true;
+        var orderCheck = pending.placeOrderCheck();
+        if (!orderCheck.complete()) return false;
+        RuntimeException rejection = orderCheck.rejection();
+        if (!pending.placeOrderCheckOwnerCollected()) {
             if (rejection != null) {
                 CoreResultCode resultCode = rejection instanceof CoreStateRejectedException rejected
                         ? CoreResultCode.fromRejectionCode(rejected.code())
@@ -287,27 +287,27 @@ public final class OrderMatchingFlow {
                         : CoreResultCode.INVALID_COMMAND;
                 pending.rejectMatching(resultCode);
             } else {
-                OrderCommand.ResolvedPlaceOrder admitted = owner.runtimeState().collectPlaceAdmission(admission);
+                OrderCommand.ResolvedPlaceOrder admitted = owner.accountBook().collectPlaceOrderCheck(orderCheck);
                 if (owner.realtimeCapture() != null) pending.realtimeResolvedTakerOrder(admitted);
             }
-            pending.markPlaceAdmissionOwnerCollected();
+            pending.markPlaceOrderCheckOwnerCollected();
         }
-        completePlaceAdmissionSubmission(pending);
-        if (!pending.isMatchingSubmitted() && rejection != null && !admission.matcherConsumed()) {
-            admission.cancelMatcherWait();
+        completePlaceOrderCheckSubmission(pending);
+        if (!pending.isMatchingSubmitted() && rejection != null && !orderCheck.matcherConsumed()) {
+            orderCheck.cancelMatcherWait();
         }
         return true;
     }
 
     /** 只有 Owner 已收齐且 Matcher 已消费该收据时，取走并归还下单准入事件。 */
-    void releasePlaceAdmissionIfConsumed(OrderCommand pending) {
-        if (pending != null && pending.placeAdmissionOwnerCollected()
-                && pending.placeAdmission() != null && pending.placeAdmission().matcherConsumed()) {
-            owner.runtimeState().releasePlaceAdmission(pending.takePlaceAdmission());
+    void releasePlaceOrderCheckIfConsumed(OrderCommand pending) {
+        if (pending != null && pending.placeOrderCheckOwnerCollected()
+                && pending.placeOrderCheck() != null && pending.placeOrderCheck().matcherConsumed()) {
+            owner.accountBook().releasePlaceOrderCheck(pending.takePlaceOrderCheck());
         }
     }
 
-    private void completePlaceAdmissionSubmission(OrderCommand pending) {
+    private void completePlaceOrderCheckSubmission(OrderCommand pending) {
         if (pending != null && pending.isMatchingSubmitted()
                 && owner.pendingMatching().submissionShard(pending.sequence()) >= 0) {
             owner.matchingProgress.submissionCompleted(pending);
@@ -326,12 +326,12 @@ public final class OrderMatchingFlow {
         if (isControlCommand(pending)) return prepareControlCancellations(pending);
         java.util.Objects.requireNonNull(direct, "trading command requires its direct settlement slot");
         pending.matcherPreCancellations(pending.operation() == OrderCommand.Operation.PLACE
-                && pending.placeAdmission() != null ? List.of() : preMatchingCancellationOrders(pending));
+                && pending.placeOrderCheck() != null ? List.of() : preMatchingCancellationOrders(pending));
         long userId = pending.command().header().userId();
         int shard = matcherShard(pending);
         return switch (pending.operation()) {
             case PLACE -> pending.preparePlaceMatching(owner, shard, userId,
-                    java.util.Objects.requireNonNull(pending.placeAdmission(), "place admission receipt").matchingOrder(),
+                    java.util.Objects.requireNonNull(pending.placeOrderCheck(), "place admission receipt").matchingOrder(),
                     direct);
             case CANCEL -> {
                 var command = pending.decodedCommand().cancelOrder();
@@ -340,12 +340,12 @@ public final class OrderMatchingFlow {
                 yield pending.prepareCancelMatching(owner, shard, command.orderId(), userId, route.instrumentId(), direct);
             }
             case REPLACE, AMEND -> {
-                var admission = owner.requireMatchingAdmission(pending);
-                yield pending.prepareReplaceMatching(owner, shard, admission.resolved().orderId(), userId,
-                        admission.originalOrderId(), admission.command().instrumentId(), admission.resolved(), direct);
+                var orderCheck = owner.requireMatchingOrderCheck(pending);
+                yield pending.prepareReplaceMatching(owner, shard, orderCheck.resolved().orderId(), userId,
+                        orderCheck.originalOrderId(), orderCheck.command().instrumentId(), orderCheck.resolved(), direct);
             }
             case TRIGGER -> pending.prepareAdmittedPlaceMatching(owner, shard, userId,
-                    java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(), "trigger admission receipt"), direct);
+                    java.util.Objects.requireNonNull(pending.triggerOrderCheckOrder(), "trigger admission receipt"), direct);
             default -> throw new IllegalStateException("unsupported trading operation " + pending.operation());
         };
     }
@@ -404,12 +404,12 @@ public final class OrderMatchingFlow {
 
 public static final class Progress {
     /** 当前 Owner 运行时及其现有队列/事件入口。 */
-    private final TradingCoreRuntime owner;
+    private final TradingCore owner;
     private long readyShardMask;
     private long nextHealthCheckNs = System.nanoTime();
 
     /** 保存非空所属运行时，使用既有命令和事件结构推进，不创建新工作线程。 */
-    public Progress(TradingCoreRuntime owner) {
+    public Progress(TradingCore owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
@@ -452,8 +452,8 @@ public static final class Progress {
     }
 
     /** 先收准入就绪分片提示，逐就绪分片只推进提交头。失败则清理准备数据，单项保留已知拒绝，多项转顺序准入。普通 PLACE 可以先提交 Matcher 等收据，顺序批次项仍由批次执行器拥有游标。 */
-    public void progressPlaceBatchAdmissions() {
-        drainPlaceAdmissionNotifications();
+    public void progressPlaceBatchOrderChecks() {
+        drainPlaceOrderCheckNotifications();
         if (readyShardMask == 0 && hasDeferredMatchingSubmission()) {
             OrderCommand head = owner.pendingMatching().get(owner.pendingMatching().firstSequence());
             readyShardMask |= 1L << owner.matchingFlow.pendingSubmissionShard(head);
@@ -469,15 +469,15 @@ public static final class Progress {
                     readyShardMask &= ~shardBit;
                     break;
                 }
-                var admission = pending.placeAdmission();
+                var orderCheck = pending.placeOrderCheck();
                 OrderBatchProcessor.PendingBatch orderBatch = pending.orderBatch;
-                OrderBatchProcessor.PlaceBatchAdmissionEvent batchAdmission = orderBatch == null
-                        ? null : orderBatch.placeBatchAdmissionEvent;
+                OrderBatchProcessor.PlaceBatchCheckEvent batchOrderCheck = orderBatch == null
+                        ? null : orderBatch.placeBatchOrderCheckEvent;
                 if (pending != null && pending.hasMatchingRejection()) {
                     readyShardMask &= ~shardBit;
                     break;
                 }
-                if (admission == null && batchAdmission == null) {
+                if (orderCheck == null && batchOrderCheck == null) {
                     if (orderBatch != null && pending.clusterIndependent
                             && orderBatch.kind == OrderBatchProcessor.Kind.CANCEL && orderBatch.activated()
                             && !pending.isMatchingSubmitted()) {
@@ -491,20 +491,20 @@ public static final class Progress {
                     readyShardMask &= ~shardBit;
                     break;
                 }
-                if (batchAdmission != null) {
-                    if (!batchAdmission.complete()) {
+                if (batchOrderCheck != null) {
+                    if (!batchOrderCheck.complete()) {
                         // 就绪位只是合并提示，事件未完成时保留，避免同分片较晚通知合并后被清掉。
                         break;
                     }
-                    RuntimeException rejection = batchAdmission.rejection();
+                    RuntimeException rejection = batchOrderCheck.rejection();
                     if (rejection != null) {
-                        owner.runtimeState().discardPlaceBatchAdmission(batchAdmission);
-                        owner.runtimeState().releasePlaceBatchAdmission(batchAdmission);
-                        orderBatch.placeBatchAdmissionEvent = null;
+                        owner.accountBook().discardPlaceBatchOrderCheck(batchOrderCheck);
+                        owner.accountBook().releasePlaceBatchOrderCheck(batchOrderCheck);
+                        orderBatch.placeBatchOrderCheckEvent = null;
                         owner.batches().unregisterPipelinedBatchSymbols(orderBatch);
                         orderBatch.clearPreparedDecisionCache();
                         orderBatch.pipelined = false;
-                        orderBatch.sequentialAdmission = true;
+                        orderBatch.sequentialOrderCheck = true;
                         // 只有一项时，Lane 已校验并回滚，无需重做部分批次准入。
                         if (orderBatch.items.size() == 1
                                 && (rejection instanceof CoreStateRejectedException
@@ -533,9 +533,9 @@ public static final class Progress {
                         }
                         break;
                     }
-                    if (!orderBatch.admissionCollected()) {
-                        owner.runtimeState().registerPlaceBatchAdmission(batchAdmission);
-                        orderBatch.admissionCollected(true);
+                    if (!orderBatch.orderCheckCollected()) {
+                        owner.accountBook().registerPlaceBatchOrderCheck(batchOrderCheck);
+                        orderBatch.orderCheckCollected(true);
                     }
                     if (!pending.isMatchingSubmitted()) {
                         owner.batches().submitPipelinedPlaceBatch(pending, orderBatch);
@@ -560,8 +560,8 @@ public static final class Progress {
     }
 
     /** 取清运行时账户准入的分片就绪位并合入本地提示，不在这里取走准入 payload。 */
-    void drainPlaceAdmissionNotifications() {
-        readyShardMask |= owner.runtimeState().takeAccountAdmissionReadyShardMask();
+    void drainPlaceOrderCheckNotifications() {
+        readyShardMask |= owner.accountBook().takeAccountOrderCheckReadyShardMask();
     }
 
     /** 比较最早延后命令和未激活批次的 Core 序号，先推进较早项。流水批次可尝试并行激活，顺序准入必须等到全局队首，使用原时间、位置和来源恢复延后命令。 */
@@ -587,7 +587,7 @@ public static final class Progress {
                 return;
             }
             if (pending != null && pending.deferredMatching()) {
-                CoreResponse response = owner.admissions().prepareMatching(pending.command(), pending.deferredClusterTimestamp(),
+                CoreResponse response = owner.orderChecks().prepareMatching(pending.command(), pending.deferredClusterTimestamp(),
                         pending.deferredClusterPosition(), pending.deferredSourceKey(), pending.operation(),
                         pending.fingerprint(), pending);
                 if (response == null) return;
@@ -601,7 +601,7 @@ public static final class Progress {
     public boolean hasDrainWork() {
         return owner.crossShardCancellations().hasPending()
                 || readyShardMask != 0
-                || owner.runtimeState().hasMatchingNotifications()
+                || owner.accountBook().hasMatchingNotifications()
                 || owner.matcherPipeline().hasMatchingCompletions()
                 || hasLocalMatchingWork();
     }
@@ -609,31 +609,31 @@ public static final class Progress {
     /** 各推进一次跨分片控制、下单收据、分片提交及 Matcher/结算通知，更新待队列修订。 */
     public void drainMatchingCompletions() {
         if (owner.crossShardCancellations().hasPending()) owner.crossShardCancellations().poll();
-        drainPlaceAdmissionCompletions();
-        if (readyShardMask != 0 || owner.runtimeState().hasPlaceAdmissionNotifications()
+        drainPlaceOrderCheckCompletions();
+        if (readyShardMask != 0 || owner.accountBook().hasPlaceOrderCheckNotifications()
                 || hasDeferredMatchingSubmission()) {
-            progressPlaceBatchAdmissions();
+            progressPlaceBatchOrderChecks();
         }
         if (owner.matcherPipeline().hasMatchingCompletions()) {
             owner.matcherPipeline().drainMatchingCompletions();
             owner.pendingMatching().progressChanged();
         }
-        if (owner.runtimeState().hasSettlementNotifications()) owner.commits.drainMatcherSettlementCompletions();
+        if (owner.accountBook().hasSettlementNotifications()) owner.commits.drainMatcherSettlementCompletions();
     }
 
     /** 未提交项只唤起其分片，已提交项尝试由 Owner 收据收集并记进展，准入数据保留在原事件。 */
-    private void drainPlaceAdmissionCompletions() {
-        long readyLanes = owner.runtimeState().takePlaceAdmissionReadyLaneMask();
+    private void drainPlaceOrderCheckCompletions() {
+        long readyLanes = owner.accountBook().takePlaceOrderCheckReadyLaneMask();
         while (readyLanes != 0) {
             int laneId = Long.numberOfTrailingZeros(readyLanes);
             readyLanes &= readyLanes - 1;
             long sequence;
-            while ((sequence = owner.runtimeState().pollPlaceAdmissionReady(laneId)) != 0) {
+            while ((sequence = owner.accountBook().pollPlaceOrderCheckReady(laneId)) != 0) {
                 OrderCommand pending = owner.pendingMatching().get(sequence);
-                if (pending == null || pending.placeAdmission() == null) continue;
+                if (pending == null || pending.placeOrderCheck() == null) continue;
                 if (!pending.isMatchingSubmitted()) {
                     readyShardMask |= 1L << owner.matchingFlow.pendingSubmissionShard(pending);
-                } else if (owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) {
+                } else if (owner.matchingFlow.collectPlaceOrderCheckIfReady(pending)) {
                     owner.pendingMatching().progressChanged();
                 }
             }
@@ -646,8 +646,8 @@ public static final class Progress {
         OrderCommand head = owner.pendingMatching().get(owner.pendingMatching().firstSequence());
         OrderBatchProcessor.PendingBatch batch = head == null ? null : head.orderBatch;
         // 交接和最终元数据提交可能没有新的结算通知，仍要推进这些有界 Owner 续步。
-        return batch != null && (!batch.activated() || batch.laneCommitEvent != null || batch.itemAdmission != null)
-                || head != null && !head.isMatchingSubmitted() && head.placeAdmission() == null
+        return batch != null && (!batch.activated() || batch.laneCommitEvent != null || batch.itemOrderCheck != null)
+                || head != null && !head.isMatchingSubmitted() && head.placeOrderCheck() == null
                 && !head.deferredMatching()
                 || head != null && owner.commits.matchingCommitReady(head);
     }
@@ -670,22 +670,22 @@ public static final class Progress {
             owner.assertHealthy();
             nextHealthCheckNs = now + 1_000_000L;
         }
-        return owner.runtimeState().hasMatchingNotifications() || owner.matcherPipeline().hasMatchingCompletions();
+        return owner.accountBook().hasMatchingNotifications() || owner.matcherPipeline().hasMatchingCompletions();
     }
 }
 
 }
 
-final class ControlMatchingContinuation implements Supplier<Object> {
+final class ControlMatchCallback implements Supplier<Object> {
     private final OrderCommand slot;
-    private TradingCoreRuntime owner;
+    private TradingCore owner;
     private List<CancellationOrder> orders;
 
-    ControlMatchingContinuation(OrderCommand slot) {
+    ControlMatchCallback(OrderCommand slot) {
         this.slot = Objects.requireNonNull(slot);
     }
 
-    void prepare(TradingCoreRuntime owner, List<CancellationOrder> orders) {
+    void prepare(TradingCore owner, List<CancellationOrder> orders) {
         this.owner = Objects.requireNonNull(owner);
         this.orders = Objects.requireNonNull(orders);
     }
@@ -705,22 +705,22 @@ final class ControlMatchingContinuation implements Supplier<Object> {
     }
 }
 
-final class AdmissionMatchingContinuation implements Supplier<Object> {
+final class AfterCheckMatchCallback implements Supplier<Object> {
     private final OrderCommand slot;
-    private TradingCoreRuntime owner;
-    private OrderCommand.PlaceAdmissionEvent admission;
+    private TradingCore owner;
+    private OrderCommand.PlaceOrderCheckEvent orderCheck;
     private int matcherShard;
     private TradeSettlement settlement;
     private Supplier<?> original;
 
-    AdmissionMatchingContinuation(OrderCommand slot) {
+    AfterCheckMatchCallback(OrderCommand slot) {
         this.slot = Objects.requireNonNull(slot);
     }
 
-    void prepare(TradingCoreRuntime owner, OrderCommand.PlaceAdmissionEvent admission, int matcherShard,
+    void prepare(TradingCore owner, OrderCommand.PlaceOrderCheckEvent orderCheck, int matcherShard,
                  TradeSettlement settlement, Supplier<?> original) {
         this.owner = Objects.requireNonNull(owner);
-        this.admission = Objects.requireNonNull(admission);
+        this.orderCheck = Objects.requireNonNull(orderCheck);
         this.matcherShard = matcherShard;
         this.settlement = Objects.requireNonNull(settlement);
         this.original = Objects.requireNonNull(original);
@@ -728,7 +728,7 @@ final class AdmissionMatchingContinuation implements Supplier<Object> {
 
     void clear() {
         owner = null;
-        admission = null;
+        orderCheck = null;
         matcherShard = 0;
         settlement = null;
         original = null;
@@ -736,23 +736,23 @@ final class AdmissionMatchingContinuation implements Supplier<Object> {
 
     @Override
     public Object get() {
-        admission.awaitMatcherReceipt(settlement);
-        if (!settlement.admissionAccepted()) {
+        orderCheck.awaitMatcherReceipt(settlement);
+        if (!settlement.orderCheckAccepted()) {
             var place = slot.decodedCommand().placeOrder();
             owner.matchingAdapter().rejectedPlaceDirect(
                     matcherShard, slot.coreSequence, slot.command().header().commandId(), place.orderId(),
                     slot.command().header().submittedAtEpochMillis(),
-                    settlement.admissionResultCode(), settlement);
+                    settlement.orderCheckResultCode(), settlement);
             return settlement;
         }
-        var cancellations = settlement.admissionCancellations();
+        var cancellations = settlement.orderCheckCancellations();
         var place = slot.decodedCommand().placeOrder();
         for (int index = 0; index < cancellations.size(); index++) {
             long orderId = cancellations instanceof ImmutableLongArrayList primitive
                     ? primitive.valueAt(index) : cancellations.get(index);
             var result = owner.matchingAdapter().cancelDirectPrefix(
                     slot.command().header().submittedAtEpochMillis(), slot.command().header().userId(),
-                    orderId, admission.matchingOrder().instrument().instrumentIdValue());
+                    orderId, orderCheck.matchingOrder().instrument().instrumentIdValue());
             if (result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_UNKNOWN_ORDER_ID) {
                 continue;
             }
@@ -768,10 +768,10 @@ final class AdmissionMatchingContinuation implements Supplier<Object> {
     }
 }
 
-final class OrderMatchingContinuation implements Supplier<Object> {
+final class OrderMatchCallback implements Supplier<Object> {
     private enum Action { PLACE, CANCEL, REPLACE }
     private final OrderCommand slot;
-    private TradingCoreRuntime owner;
+    private TradingCore owner;
     private Action action;
     private int matcherShard;
     private long userId;
@@ -782,11 +782,11 @@ final class OrderMatchingContinuation implements Supplier<Object> {
     private Order admittedOrder;
     private TradeSettlement direct;
 
-    OrderMatchingContinuation(OrderCommand slot) {
+    OrderMatchCallback(OrderCommand slot) {
         this.slot = Objects.requireNonNull(slot);
     }
 
-    void preparePlace(TradingCoreRuntime owner, int matcherShard, long userId,
+    void preparePlace(TradingCore owner, int matcherShard, long userId,
                  OrderCommand.ResolvedPlaceOrder resolvedOrder, Order admittedOrder, TradeSettlement direct) {
         if ((resolvedOrder == null) == (admittedOrder == null)) {
             throw new IllegalArgumentException("exactly one admitted PLACE order representation is required");
@@ -800,7 +800,7 @@ final class OrderMatchingContinuation implements Supplier<Object> {
         this.direct = Objects.requireNonNull(direct, "direct settlement");
     }
 
-    void prepareCancel(TradingCoreRuntime owner, int matcherShard, long orderId,
+    void prepareCancel(TradingCore owner, int matcherShard, long orderId,
             long userId, String instrumentId, TradeSettlement direct) {
         this.owner = Objects.requireNonNull(owner);
         this.action = Action.CANCEL;
@@ -811,7 +811,7 @@ final class OrderMatchingContinuation implements Supplier<Object> {
         this.direct = Objects.requireNonNull(direct, "direct settlement");
     }
 
-    void prepareReplace(TradingCoreRuntime owner, int matcherShard, long orderId,
+    void prepareReplace(TradingCore owner, int matcherShard, long orderId,
             long userId, long originalOrderId, String instrumentId, OrderCommand.ResolvedPlaceOrder replacement,
             TradeSettlement direct) {
         this.owner = Objects.requireNonNull(owner);
@@ -862,7 +862,7 @@ final class OrderMatchingContinuation implements Supplier<Object> {
     }
 }
 
-final class SettlementControlContinuation implements BooleanSupplier {
+final class SettlementCallback implements BooleanSupplier {
     private OrderCommitService coordinator;
     private com.surprising.aeron.service.settlement.ContractExpirySettlementService.SettlementWork work;
 
@@ -890,7 +890,7 @@ final class SettlementControlContinuation implements BooleanSupplier {
     }
 }
 
-final class LiquidationExecutionContinuation implements BooleanSupplier {
+final class LiquidationCallback implements BooleanSupplier {
     private OrderCommitService coordinator;
     private com.surprising.aeron.service.liquidation.LiquidationService.ExecutionWork work;
     private com.surprising.aeron.protocol.CoreLiquidationProgressView progress;

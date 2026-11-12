@@ -36,7 +36,7 @@
 
 ## 2026-10-26 全面架构简化与代码瘦身后基准性能验证
 
-**验证结论**：资金正确性100%通过，全量核心单元测试通过（0 失败，0 错误）。通过消减过度抽象、收敛微类碎片、解耦 `CommandSlot` 与 `TradingAccountRuntime`，生产核心热路径上的吞吐不仅无回退，而且在高并发场景下表现极高稳定性。
+**验证结论**：资金正确性100%通过，全量核心单元测试通过（0 失败，0 错误）。通过消减过度抽象、收敛微类碎片、解耦 `CommandSlot` 与 `AccountBook`，生产核心热路径上的吞吐不仅无回退，而且在高并发场景下表现极高稳定性。
 
 ### 1. 核心看板摘要 (Executive Summary)
 
@@ -93,8 +93,8 @@
 | 重构模块 | 优化前状态 | 优化后状态 | 代码精简效果 | 架构与可读性收益 |
 | :--- | :--- | :--- | :--- | :--- |
 | **准入微类收敛** (`order/admission`) | 4个碎片微类独立小文件，调用跳跃深 | 内联至核心事件与处理类中 | **彻底删除 4 个小文件** | 准入链路从跨 6 类跳转收敛为顺畅阅读 |
-| **`CommandSlot` 上帝类瘦身** | 包含 7 个内部 Continuation 类与代理集合（1906 行） | 抽离为 `CommandSlotContinuations.java`，统一 `OrderRuntimeSource` | **净减少 621 行代码** (-32.5%) | 槽位职责纯粹化为 RingBuffer 槽位载体 |
-| **`TradingAccountRuntime` 拆解** | 8125 行巨石类，混杂并发掩码、探针与校验条目 | 独立提取 `PaddedReadyMask`、`LeverageLookup`、`ControlFundsValidation` | **净减少 258 行代码** | 解耦总账/生命周期，消除重复内部类，保持完全兼容 |
+| **`CommandSlot` 上帝类瘦身** | 包含 7 个内部 Continuation 类与代理集合（1906 行） | 抽离为 `CommandSlotContinuations.java`，统一 `OrderSource` | **净减少 621 行代码** (-32.5%) | 槽位职责纯粹化为 RingBuffer 槽位载体 |
+| **`AccountBook` 拆解** | 8125 行巨石类，混杂并发掩码、探针与校验条目 | 独立提取 `PaddedReadyMask`、`LeverageLookup`、`ControlFundsValidation` | **净减少 258 行代码** | 解耦总账/生命周期，消除重复内部类，保持完全兼容 |
 | **全库总代码量** | 充斥过度抽象与机械包装 | 15 个核心类大幅瘦身 | **净删除 1,008 行冗余抽象代码** | 彻底消除多余抽象层与冗余包装，主流程一顺到底 |
 
 ---
@@ -143,7 +143,7 @@
 
 版本更新：15:13提交 `9c8ce94e1` 包含晚于旧fat的19个Core生产Java修改。根代理已完成当前HEAD的Core/tools/bench全量clean install；新service fat为 `bbbe57ed318d666ab2b2d08a1df67a38f12aee130b0c1d40e85f552bc5677eec`，新bench fat为 `d22720e59e88c894a0c5b06215c39bf7a50e6eada33604d977446b248290bac9`，均已独立核对。
 
-新旧Core实际ZIP逐项比较：16个被测类（含padding基类）字节一致，Eclipse Collections等第三方类无变化；`jdeps`/`javap`确认组件调用未进入已变化的`TradingAccountRuntime`外层业务方法，相关继承类一致。因此同JDK27及布局参数下，仅沿用表中的独立Buffer/Queue/ReadyMask分配和字段/数组布局事实；没有重跑新组件，也不沿用外层runtime或整条流水线结论。旧bench fat已被clean删除，不能用thin jar冒充或继承其执行结果。
+新旧Core实际ZIP逐项比较：16个被测类（含padding基类）字节一致，Eclipse Collections等第三方类无变化；`jdeps`/`javap`确认组件调用未进入已变化的`AccountBook`外层业务方法，相关继承类一致。因此同JDK27及布局参数下，仅沿用表中的独立Buffer/Queue/ReadyMask分配和字段/数组布局事实；没有重跑新组件，也不沿用外层runtime或整条流水线结论。旧bench fat已被clean删除，不能用thin jar冒充或继承其执行结果。
 
 8个临时Java工具已对新bench重新编译，exit0（布局探针有9条Unsafe弃用警告）。新service与新bench内的16个被测类也逐字节一致。比较清单、依赖、反汇编及工具hash保存在 `/tmp/surprising-remediation-performance/new-head-9c8ce94e1/`；旧Core fat归档及根构建清单位于 `/tmp/surprising-remediation-root-20261022.zrHw4B/old-core-artifacts/`、同根的`core-current-head-artifacts.json`。根构建清单记录Core1584项/1跳过、Bench318项/0跳过、Tools22项，均0失败/错误；这只证明构建回归。
 
@@ -384,7 +384,7 @@ python3 /tmp/surprising-remediation-performance/recover-original-archive-once.py
    - 在 [`CoreMessageHeader.java`](surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessageHeader.java) 中增加 `public boolean hasCommandId()` 原语检查，消除进入流水线时为非空断言而强制调用的 `command.header().commandId()`；
    - 在 [`PendingMatchingRing.java`](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java) 中，将 `entriesByCommandId` 映射查询由 `UUID` 包装对象替换为原语双键查询 `entriesByCommandId.get(header.commandIdMsb(), header.commandIdLsb())`；
    - 在 [`TradingCoreOwner.java`](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) 的 `progressCommandsInScope` 热路径轮询中，增加 `state.bookQueries.hasPendingQueries()` 门禁，避免在 99.9999% 的普通交易命令下盲目调用 `takeQueryResult(request.header().commandId())` 产生堆分配；
-   - 在 [`CommandResultLedger.java`](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLedger.java) 补充 `(long msb, long lsb)` 的原语便捷重载，并在 `MatchingCommandAdmission`、`CoreMatchingFlow`、`TradingCoreRuntime`、`OrderBatchExecutor` 中全面以长整型原语持久化终态。
+   - 在 [`CommandResultLog.java`](surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLog.java) 补充 `(long msb, long lsb)` 的原语便捷重载，并在 `MatchingCommandAdmission`、`CoreMatchingFlow`、`TradingCore`、`OrderBatchExecutor` 中全面以长整型原语持久化终态。
 
 3. **测试桩对准修正**：
    - 在 [`TradingCoreOwnerTest.java`](surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java) 中，将栈帧注入断言同步扩充为包含 `validateCommitStampInputs`，确保元数据准备故障注入精准生效，消除因方法重命名引起的偶发非预期断言失败。
@@ -556,7 +556,7 @@ java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base
 
 ## 12. 2026-10-26 彻底内联 SystemLedgerLane 与消除 Entry 接口后权威性能实测 (Round 15)
 
-- **执行基线**：Git Commit `8f8d38468`（彻底删除 `SystemLedgerLane.java`、消除 `TreasuryRuntime.Entry`、内联财库独占读写后的最新 `master`）
+- **执行基线**：Git Commit `8f8d38468`（彻底删除 `SystemLedgerLane.java`、消除 `SystemFunds.Entry`、内联财库独占读写后的最新 `master`）
 - **测试环境**：Apple Silicon (macOS / arm64), Amazon Corretto HotSpot JDK 27 (build 27+33-FR), Maven 3.9.16
 - **JVM 参数**：`--enable-native-access=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms1g -Xmx1g -XX:+UseG1GC`
 - **规范遵循**：严格遵循 `AGENTS-performance.md`（资金正确性优先、1 真实 Aeron 成员、1 Matcher、2 Account Lanes、全局 in-flight=256）。
@@ -591,11 +591,11 @@ java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base
 
 ### 13.1 本轮清理过度设计与内联残留代码
 
-1. **物理删除 TreasuryRuntime 死方法**：彻底移除 `handoffTo(Thread)`、`transferOwner(Thread)`、`bindOwner()` 等已无任何外部调用的过渡所有权代码。
+1. **物理删除 SystemFunds 死方法**：彻底移除 `handoffTo(Thread)`、`transferOwner(Thread)`、`bindOwner()` 等已无任何外部调用的过渡所有权代码。
 2. **剥离 AccountLaneLifecycle 伪生命周期**：清理 `ledgerStarted`、`ledgerOwner`、`ledgerStarted()`、`startLedger(...)` 及 `close()` 内部重置，生命周期专职于账户分片。
-3. **消除 SystemLedgerCommand 内存屏障与伪多线程握手**：删除 5 处 `volatile` 修饰符，去除 `ScopeClose` 内部的 `requested` 与 `validationRequested` 伪多线程两阶段握手标志，物理删除死方法 `applyBeforeActivation`；精简 `TradingAccountRuntime` 内的命令派发和回滚逻辑。
+3. **消除 SystemLedgerCommand 内存屏障与伪多线程握手**：删除 5 处 `volatile` 修饰符，去除 `ScopeClose` 内部的 `requested` 与 `validationRequested` 伪多线程两阶段握手标志，物理删除死方法 `applyBeforeActivation`；精简 `AccountBook` 内的命令派发和回滚逻辑。
 4. **消除 ledgerDispatched 过渡变量**：在 `RuntimeDerivativeLiquidationProcessor`、`RuntimeLiquidationResolution`、`RuntimeLifecycleSettlementContinuation` 中彻底删除过渡轮询变量，收敛为就地同步直调。
-5. **移除 systemLedgerStarted() 伪双轨制死分支**：清理 `TradingAccountRuntime`、`CoreSnapshotLifecycle`、`OrderedCommitCoordinator` 中的已无用判断。
+5. **移除 systemLedgerStarted() 伪双轨制死分支**：清理 `AccountBook`、`CoreSnapshotLifecycle`、`OrderedCommitCoordinator` 中的已无用判断。
 6. **消除 MatcherSettlementEvent 内存屏障**：将 `treasurySettlement` 与 `TreasurySettlement.completed` 移除 `volatile` 修饰。
 
 ### 13.2 实测性能看板矩阵
@@ -635,7 +635,7 @@ java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base
 
 - 基线：master `7a2caa5a4` 加本轮工作树修改；只测当前源码，不重跑旧版本、不据此宣称提升。
 - 环境：macOS 26.7.2 / x86_64，Corretto HotSpot JDK 27+33-FR，Maven 3.9.16；开始磁盘 223 GiB，实施途中约 221 GiB。
-- 首个局部场景：`OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision`；单线程冷 Lane，LINEAR_PERPETUAL，1 用户、1 symbol、活动只减仓订单 0/8/64，额外容量 0/1，新平仓数量 1；保持固定订单身份与提交次序。它只验证容量决策的时间与分配，不包含网络、Archive、撮合和记账吞吐。
+- 首个局部场景：`OrderCheckAllocationBenchmark.laneCloseCapacityDecision`；单线程冷 Lane，LINEAR_PERPETUAL，1 用户、1 symbol、活动只减仓订单 0/8/64，额外容量 0/1，新平仓数量 1；保持固定订单身份与提交次序。它只验证容量决策的时间与分配，不包含网络、Archive、撮合和记账吞吐。
 - 锁定局部采样：1 fork，2×1s 预热、3×1s 测量，固定 JDK 27、1 GiB G1。主时间采样不带 profiler；同参数另跑 GC profiler 和 JFR。无冲突路径分配目标 0 B/op，冲突路径必须保持最新优先结果；不以短录制无样本证明零分配。
 - 真实 Aeron 单成员、单 Matcher、全局在途 256 的交易与控制夹具已经执行，具体参数按下节预先锁定；命令、窗口、终态和资金结果已归档。
 - 当前结论：功能、资金及恢复核对通过；JMH/JFR 已执行并归档。时间/吞吐因持续 swap **正式验收无效**，只展示诊断观察；不提供提升或全链路零分配结论。
@@ -908,7 +908,7 @@ JFR 摘要/采样视图（使用 `jfr summary` 和 `jfr print --json --events jd
 
 本轮范围：资金历史身份由 Owner 独占内存原语列保存，扩容先于资金业务变更；Lane 准入删除唯一实现接口，批量下单删除纯透传意图接口；生命周期在途范围复用原语数组；Matcher 撤改传永久整数品种号；标记价续扫复用旧 Lane 游标。审计确认订单的两份浅字段副本对应准入与结算后的不同时间点，Matcher 游标已有间隔布局，未强行删除。没有旧版本同条件完整链路基线，不报告提速比例。
 
-最终功能验证：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test` 退出 0，14 个 Reactor 模块均成功。Aeron service 1572 项、0 失败、0 错误、1 跳过；benchmark 模块 314 项、0 失败、0 错误。资金幂等测试包含超过 13 万条历史身份后的快照恢复和重复入账拦截；资金账本、提交恢复、永续及交割/期权财务矩阵通过。基准功能测试的四档流水线校验均报告 `fundsDiff=0`、`unfinished=0`。首次跨模块运行因旧 `OrderAdmissionAllocationBenchmark` 调用已删除的准入接口而编译失败，修复后完整重跑通过。`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package -DskipTests` 退出 0。
+最终功能验证：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test` 退出 0，14 个 Reactor 模块均成功。Aeron service 1572 项、0 失败、0 错误、1 跳过；benchmark 模块 314 项、0 失败、0 错误。资金幂等测试包含超过 13 万条历史身份后的快照恢复和重复入账拦截；资金账本、提交恢复、永续及交割/期权财务矩阵通过。基准功能测试的四档流水线校验均报告 `fundsDiff=0`、`unfinished=0`。首次跨模块运行因旧 `OrderCheckAllocationBenchmark` 调用已删除的准入接口而编译失败，修复后完整重跑通过。`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package -DskipTests` 退出 0。
 
 资金身份 JMH：使用 `product-core-benchmarks.jar`，筛选 `FundsCommandIndexBenchmark.(missingComparison|historicalComparison|repeatedWrite)`；1 fork、预热 2×1 秒、测量 3×1 秒、`-prof gc`，本机 Corretto 27 / macOS。三档分别为 55,964,620、15,437,661、14,977,255 ops/s；GC 归一化分配均约为 0.001 B/op 或更低，GC count 为 0。早期返回完整指纹对象的命中微基准记录约 112 B/op；生产幂等入口现直接比较四个 `long`，最终 `historicalComparison` 接近零分配。短窗口和宽置信区间只支持局部路径分配判断，不代表全交易链路零分配或生产吞吐提升。未测长期堆容量、真实 Aeron 网络/Archive 延迟、CPU 缓存竞争与三节点恢复。
 

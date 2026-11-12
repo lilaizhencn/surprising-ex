@@ -4,12 +4,12 @@ import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.product.ProductTradingRules;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.treasury.SystemFundsChange;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.List;
@@ -28,19 +28,19 @@ public final class RuntimeSpotMatchFixture {
      * @param identities 解析实际币对及资产编号的运行时字典
      */
     public static void applyRuntime(long takerOrderId, List<MatcherEvent> matches,
-                                    TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (matches == null || runtime == null || identities == null || runtime.productLine().isDerivative()) {
+                                    AccountBook accountBook, IdIndex identities) {
+        if (matches == null || accountBook == null || identities == null || accountBook.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid spot match apply");
         }
-        runtime.assertOwner();
+        accountBook.assertOwner();
         // 当前主动订单的权威值，每笔应用前重新读取以累计数量。
-        Order taker = requireOpen(runtime, takerOrderId);
+        Order taker = requireOpen(accountBook, takerOrderId);
         if (matches.isEmpty() && !taker.timeInForce().immediate()
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
             return;
         }
         // 运行时规范现货币对，须与订单保存的对象一致。
-        CoreInstrument instrument = runtime.instrument(identities.instrumentId(taker.symbolId()));
+        CoreInstrument instrument = accountBook.instrument(identities.instrumentId(taker.symbolId()));
         if (instrument == null || instrument != taker.instrument()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
@@ -52,36 +52,36 @@ public final class RuntimeSpotMatchFixture {
         int baseAssetId = identities.assetId(instrument.baseAsset());
         // 从规范币对解析的计价及收费资产编号。
         int quoteAssetId = identities.assetId(instrument.quoteAsset());
-        validateMatches(runtime, taker, matches);
+        validateMatches(accountBook, taker, matches);
         // 本轮通用现货结算创建的系统费用差额。
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        SystemFundsChange systemFundsChange = new SystemFundsChange();
         for (/* 通用原始撮合事件的当前下标。 */ int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
             // 当前原始 Matcher 事件，只有 TRADE 参与计算。
             MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
-            taker = requireOpen(runtime, takerOrderId);
+            taker = requireOpen(accountBook, takerOrderId);
             // 本笔对应的权威对手订单，Lane 路径只读取本地对象。
-            Order maker = requireOpen(runtime, match.matchedOrderId());
+            Order maker = requireOpen(accountBook, match.matchedOrderId());
             // 本笔成交量是否恰好耗尽 maker 剩余量。
             boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
             // 按订单方向选出的买方订单，不一定是 taker。
             Order buyer = taker.side() == CoreOrderSide.BUY ? taker : maker;
             // 按订单方向选出的卖方订单，不一定是 maker。
             Order seller = taker.side() == CoreOrderSide.SELL ? taker : maker;
-            applyFill(runtime, instrument, buyer, match.price(), match.size(),
-                    buyer.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
-            applyFill(runtime, instrument, seller, match.price(), match.size(),
-                    seller.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
-            if (makerTerminal) releaseTerminalReservation(runtime, maker.orderId());
+            applyFill(accountBook, instrument, buyer, match.price(), match.size(),
+                    buyer.orderId() == taker.orderId(), baseAssetId, quoteAssetId, systemFundsChange);
+            applyFill(accountBook, instrument, seller, match.price(), match.size(),
+                    seller.orderId() == taker.orderId(), baseAssetId, quoteAssetId, systemFundsChange);
+            if (makerTerminal) releaseTerminalReservation(accountBook, maker.orderId());
         }
-        taker = runtime.order(takerOrderId);
+        taker = accountBook.order(takerOrderId);
         if (!taker.canceled() && (taker.timeInForce().immediate()
                 || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-            runtime.replaceOrder(taker.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(taker.revision()), -1, -1));
+            accountBook.replaceOrder(taker.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(taker.revision()), -1, -1));
         }
-        releaseTerminalReservation(runtime, takerOrderId);
-        treasuryDelta.apply(runtime.treasury());
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        releaseTerminalReservation(accountBook, takerOrderId);
+        systemFundsChange.apply(accountBook.systemFunds());
+        accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
     }
 
     /**
@@ -94,13 +94,13 @@ public final class RuntimeSpotMatchFixture {
      * @param taker 本笔是否为主动成交，决定订单费用率
      * @param baseAssetId 基础资产的运行时编号
      * @param quoteAssetId 计价及收费资产的运行时编号
-     * @param treasuryDelta 所属 Lane 系统费用差额接收槽
+     * @param systemFundsChange 所属 Lane 系统费用差额接收槽
      */
-    private static Order applyFill(TradingAccountRuntime runtime, CoreInstrument instrument, Order order,
+    private static Order applyFill(AccountBook accountBook, CoreInstrument instrument, Order order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
-                                  int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
-        return SpotTradeSettlementService.applyFill(runtime, runtime.accountLaneForUser(order.userId()), instrument, order, fillPriceTicks, fillQuantitySteps, taker,
-                baseAssetId, quoteAssetId, treasuryDelta, -1, -1);
+                                  int baseAssetId, int quoteAssetId, SystemFundsChange systemFundsChange) {
+        return SpotTradeSettlementService.applyFill(accountBook, accountBook.accountLaneForUser(order.userId()), instrument, order, fillPriceTicks, fillQuantitySteps, taker,
+                baseAssetId, quoteAssetId, systemFundsChange, -1, -1);
     }
 
     /**
@@ -108,11 +108,11 @@ public final class RuntimeSpotMatchFixture {
      * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
      * @param orderId 当前要累加、读取或释放预留的订单编号
      */
-    private static void releaseTerminalReservation(TradingAccountRuntime runtime, long orderId) {
+    private static void releaseTerminalReservation(AccountBook accountBook, long orderId) {
         // 当前首次累加、终态释放或读取时取得的权威订单。
-        Order order = runtime.order(orderId);
-        if (order != null && com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, orderId) > 0)
-            runtime.advanceUserRevision(order.userId());
+        Order order = accountBook.order(orderId);
+        if (order != null && com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(accountBook, orderId) > 0)
+            accountBook.advanceUserRevision(order.userId());
     }
 
     /**
@@ -121,7 +121,7 @@ public final class RuntimeSpotMatchFixture {
      * @param taker 已经读取并确认可成交的主动订单
      * @param matches 原始撮合事件列表，非 TRADE 事件不应用成交
      */
-    private static void validateMatches(TradingAccountRuntime runtime, Order taker,
+    private static void validateMatches(AccountBook accountBook, Order taker,
                                         List<MatcherEvent> matches) {
         // 验证过程中主动订单逐成交扣减后的累计剩余量。
         long takerRemaining = taker.remainingQuantitySteps();
@@ -140,7 +140,7 @@ public final class RuntimeSpotMatchFixture {
                     throw new IllegalArgumentException("invalid runtime match");
                 }
                 // 本笔对应的权威对手订单，Lane 路径只读取本地对象。
-                Order maker = requireOpen(runtime, match.matchedOrderId());
+                Order maker = requireOpen(accountBook, match.matchedOrderId());
                 if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                         || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                     throw new IllegalStateException("runtime match does not match authoritative orders");
@@ -164,9 +164,9 @@ public final class RuntimeSpotMatchFixture {
      * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
      * @param orderId 当前要累加、读取或释放预留的订单编号
      */
-    private static Order requireOpen(TradingAccountRuntime runtime, long orderId) {
+    private static Order requireOpen(AccountBook accountBook, long orderId) {
         // 当前首次累加、终态释放或读取时取得的权威订单。
-        Order order = runtime.order(orderId);
+        Order order = accountBook.order(orderId);
         if (order == null || order.canceled() || order.remainingQuantitySteps() == 0) {
             throw new IllegalStateException("runtime matched order is not open: " + orderId);
         }

@@ -6,7 +6,7 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.account.provider.service.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.gateway.provider.client.SpotAccountClient;
 import com.surprising.gateway.provider.model.ProductTransferCommand;
 import com.surprising.gateway.provider.model.ProductTransferStatus;
@@ -85,12 +85,12 @@ class MultiProductMoneyIntegrationTest {
     private long total(Map<ProductLine,Core> cores) { return cores.values().stream().mapToLong(Core::balance).sum(); }
     private static final class Core implements AutoCloseable {
         final ProductLine line;
-        TradingCoreRuntime state;
+        TradingCore state;
         long sequence;
         final AtomicBoolean dropReply = new AtomicBoolean();
         final AccountCommandGateway accounts;
         Core(ProductLine line) {
-            this.line=line;state=new TradingCoreRuntime(line);
+            this.line=line;state=new TradingCore(line);
             var properties=new AccountProperties();properties.getKafka().setProductLine(line);
             var aeron=mock(AccountAeronGateway.class);
             when(aeron.command(any(),any(),anyLong(),any())).thenAnswer(call -> {
@@ -136,7 +136,7 @@ class MultiProductMoneyIntegrationTest {
             var balance = user == null ? null : user.balances().get("USDT");
             return balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
         }
-        void restart() { byte[] snapshot=state.snapshot(900);state.close();state=TradingCoreRuntime.fromSnapshot(line,snapshot); }
+        void restart() { byte[] snapshot=state.snapshot(900);state.close();state=TradingCore.fromSnapshot(line,snapshot); }
         @Override public void close() { state.close(); }
     }
 }

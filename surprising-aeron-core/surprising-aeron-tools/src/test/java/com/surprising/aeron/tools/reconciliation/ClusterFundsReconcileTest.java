@@ -208,7 +208,7 @@ class ClusterFundsReconcileTest {
     }
 
     @Test
-    void comparesReservationPositionRealizedPnlTreasuryAndFlowConservationExactly() {
+    void comparesReservationPositionRealizedPnlSystemFundsAndFlowConservationExactly() {
         CoreUserStateView state = new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 1, 9,
                 CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 80, 20)),
                 List.of(new CoreReservationView(91, "1", ReservationKind.DERIVATIVE_MARGIN,
@@ -241,7 +241,7 @@ class ClusterFundsReconcileTest {
                 row("OPERATION", "TREASURY", 0, "USDT", "-", "TREASURY_CLEARING_PNL", 0));
         CoreUserStateView maker = user(2, List.of());
         FakeGateway gateway = new FakeGateway(Map.of(1L, state, 2L, maker), List.of(), 23);
-        gateway.treasury = List.of(new CoreTreasuryAssetView("USDT", 4, 9, 12));
+        gateway.systemFunds = List.of(new CoreTreasuryAssetView("USDT", 4, 9, 12));
 
         FundsReconciliation.Result result = FundsReconciliation.reconcile(
                 config("1:2", "2:3", ledger(lines)), gateway);
@@ -403,7 +403,7 @@ class ClusterFundsReconcileTest {
         private final List<CoreLiquidationWorkView.Resolution> resolutions;
         private final long stateHash;
         private final List<Long> userQueries = new ArrayList<>();
-        private List<CoreTreasuryAssetView> treasury = List.of();
+        private List<CoreTreasuryAssetView> systemFunds = List.of();
         private CoreMessageType rejectType;
         private int interruptAtUserQuery;
         private int liquidationQueries;
@@ -427,7 +427,7 @@ class ClusterFundsReconcileTest {
             return switch (type) {
                 case USER_STATE_QUERY -> userResponse(userId);
                 case RISK_STATE_QUERY -> ok(CoreRiskQueryCodec.encode(List.of()));
-                case TREASURY_STATE_QUERY -> ok(CoreStateQueryCodec.encodeTreasuryState(treasury));
+                case TREASURY_STATE_QUERY -> ok(CoreStateQueryCodec.encodeTreasuryState(systemFunds));
                 case BUSINESS_STATE_HASH_QUERY -> ok(CoreStateQueryCodec.encodeStateHash(stateHash));
                 case LIQUIDATION_WORK_QUERY -> liquidationResponse(payload);
                 default -> throw new AssertionError("unexpected query " + type);

@@ -16,12 +16,12 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
-import com.surprising.aeron.service.order.OrderAdmissionService;
-import com.surprising.aeron.service.order.OrderCommand.PlaceAdmissionEvent;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.order.OrderCheckService;
+import com.surprising.aeron.service.order.OrderCommand.PlaceOrderCheckEvent;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -54,21 +54,21 @@ class PlaceLaneDecisionTest {
         var state = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1, Map.of(7L, user), Map.of(),
                 Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 原资产、标的和客户端身份表
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 从冷状态投影的测试运行时，结束自动关闭 */ var runtime = RuntimeStateProjector.project(state, identities)) {
+        var identities = new IdIndex();
+        try (/* 从冷状态投影的测试运行时，结束自动关闭 */ var accountBook = SnapshotLoader.loadSnapshot(state, identities)) {
             // USDT 内部资产编号
             // 标的一的内部稠密编号
             int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
-            runtime.putMarkPrice(new MarkPrice(symbol, instrument, 100, 1, 1_000));
-            runtime.upsertFeePolicy(new UpsertFeePolicyCommand(1, 1, 7, "1", -10, 20, 0, true, 1, 0));
-            runtime.startAccountLanes();
+            accountBook.putMarkPrice(new MarkPrice(symbol, instrument, 100, 1, 1_000));
+            accountBook.upsertFeePolicy(new UpsertFeePolicyCommand(1, 1, 7, "1", -10, 20, 0, true, 1, 0));
+            accountBook.startAccountLanes();
             // 通知测试线程阻塞工作已进入账户 Lane 的门闩
             var entered = new CountDownLatch(1);
             // 允许账户 Lane 继续处理准入的门闩，所有退出路径放行
             var release = new CountDownLatch(1);
             // 用户七所属的实际账户 Lane 下标
-            int laneId = runtime.topology().accountLaneId(7);
-            runtime.submitAccountCommand(laneId, /* 当前执行阻塞工作的账户 Lane */ lane -> {
+            int laneId = accountBook.topology().accountLaneId(7);
+            accountBook.submitAccountCommand(laneId, /* 当前执行阻塞工作的账户 Lane */ lane -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timed out"); }
                 catch (/* 门闩等待中断，转成测试失败 */ InterruptedException failure) { throw new AssertionError(failure); }
@@ -80,52 +80,52 @@ class PlaceLaneDecisionTest {
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                         CoreTimeInForce.IOC, false, "client");
                 // 首次以过期业务时间派发、随后应拒绝的准入槽
-                var rejected = runtime.acquirePlaceAdmission();
-                OrderAdmissionService.prepare(rejected, runtime, identities, 7, command, 6_001);
-                runtime.dispatchPlaceAdmission(2, 7, rejected, new UUID(1, 2), runtime.treasury().settlementStatus(symbol), asset,
+                var rejected = accountBook.acquirePlaceOrderCheck();
+                OrderCheckService.prepare(rejected, accountBook, identities, 7, command, 6_001);
+                accountBook.dispatchPlaceOrderCheck(2, 7, rejected, new UUID(1, 2), accountBook.systemFunds().settlementStatus(symbol), asset,
                         identities, 6_001, 2);
                 assertThat(rejected.complete()).isFalse();
                 assertThat(rejected.matchingOrder().intent()).isSameAs(command);
                 assertThat(rejected.resolvedOrderInitialized()).isFalse();
                 assertThat(rejected.matchingPriceTicks()).isZero();
                 release.countDown();
-                await(runtime, rejected);
+                await(accountBook, rejected);
                 assertThat(rejected.rejection()).isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
                         .hasMessageContaining("freshness");
-                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.findClientKeyValueInLane(
-                        runtime.accountLane(laneId), 7, "client"))).isZero();
+                assertThat(AccountLaneQueryTestSupport.read(accountBook, 7, () -> identities.findClientKeyValueInLane(
+                        accountBook.accountLane(laneId), 7, "client"))).isZero();
                 rejected.cancelMatcherWait();
-                runtime.releasePlaceAdmission(rejected);
-                var insufficient = runtime.acquirePlaceAdmission();
+                accountBook.releasePlaceOrderCheck(rejected);
+                var insufficient = accountBook.acquirePlaceOrderCheck();
                 assertThat(insufficient).isSameAs(rejected);
                 var oversized = new PlaceOrderCommand(12, "1", CoreOrderSide.BUY, 0, 1_000_000, false,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                         CoreTimeInForce.IOC, false, "client");
-                OrderAdmissionService.prepare(insufficient, runtime, identities, 7, oversized, 1_001);
-                runtime.dispatchPlaceAdmission(3, 7, insufficient, new UUID(1, 3), runtime.treasury().settlementStatus(symbol), asset,
+                OrderCheckService.prepare(insufficient, accountBook, identities, 7, oversized, 1_001);
+                accountBook.dispatchPlaceOrderCheck(3, 7, insufficient, new UUID(1, 3), accountBook.systemFunds().settlementStatus(symbol), asset,
                         identities, 1_001, 3);
-                await(runtime, insufficient);
+                await(accountBook, insufficient);
                 assertThat(insufficient.resolvedOrderInitialized()).isTrue();
                 assertThat(insufficient.rejection()).isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class);
-                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.findClientKeyValueInLane(
-                        runtime.accountLane(laneId), 7, "client"))).isZero();
+                assertThat(AccountLaneQueryTestSupport.read(accountBook, 7, () -> identities.findClientKeyValueInLane(
+                        accountBook.accountLane(laneId), 7, "client"))).isZero();
                 insufficient.cancelMatcherWait();
-                runtime.releasePlaceAdmission(insufficient);
+                accountBook.releasePlaceOrderCheck(insufficient);
                 // 拒绝槽归还后再次借出的同一实例，本轮使用有效价格时间
-                var accepted = runtime.acquirePlaceAdmission();
+                var accepted = accountBook.acquirePlaceOrderCheck();
                 assertThat(accepted).isSameAs(rejected);
-                OrderAdmissionService.prepare(accepted, runtime, identities, 7, command, 1_001);
-                runtime.dispatchPlaceAdmission(4, 7, accepted, new UUID(1, 4), runtime.treasury().settlementStatus(symbol), asset,
+                OrderCheckService.prepare(accepted, accountBook, identities, 7, command, 1_001);
+                accountBook.dispatchPlaceOrderCheck(4, 7, accepted, new UUID(1, 4), accountBook.systemFunds().settlementStatus(symbol), asset,
                         identities, 1_001, 4);
-                await(runtime, accepted);
+                await(accountBook, accepted);
                 assertThat(accepted.rejection()).isNull();
                 assertThat(accepted.resolvedOrder().matchingPriceTicks()).isEqualTo(101);
                 assertThat(accepted.makerFeeRatePpm()).isEqualTo(-10);
                 assertThat(accepted.takerFeeRatePpm()).isEqualTo(20);
-                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.findClientKeyValueInLane(
-                        runtime.accountLane(laneId), 7, "client"))).isPositive();
+                assertThat(AccountLaneQueryTestSupport.read(accountBook, 7, () -> identities.findClientKeyValueInLane(
+                        accountBook.accountLane(laneId), 7, "client"))).isPositive();
                 accepted.cancelMatcherWait();
-                runtime.releasePlaceAdmission(accepted);
+                accountBook.releasePlaceOrderCheck(accepted);
             } finally { release.countDown(); }
         }
     }
@@ -135,11 +135,11 @@ class PlaceLaneDecisionTest {
      * @param runtime 拥有真实账户工作资源的原运行时
      * @param event 已派发且仍保留租约的准入事件
      */
-    private static void await(TradingAccountRuntime runtime, OrderCommand.PlaceAdmissionEvent event) {
+    private static void await(AccountBook accountBook, OrderCommand.PlaceOrderCheckEvent event) {
         // 等本次准入完成的三秒单调时钟截止时间
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!event.complete()) {
-            runtime.assertAccountLanesHealthy();
+            accountBook.assertAccountLanesHealthy();
             if (System.nanoTime() >= deadline) throw new AssertionError("admission timed out");
             Thread.onSpinWait();
         }

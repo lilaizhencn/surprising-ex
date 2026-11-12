@@ -33,7 +33,7 @@ Nacos `127.0.0.1:8848` 连接告警是本地环境噪声，不影响结果。
 | --- | --- | --- |
 | `DeterministicExchangeCoreAdapterTest`（4 个） | `MatcherEventFixtures` 读取 `TradeSettlement.ExecutionState.directNativeResult` | 先取 `state`，再取其中的 `directNativeResult` |
 | `MatcherPipelineGroupTest`（1 个） | 同上 | 同上 |
-| `SectionedCoreSnapshotCodecTest`（2 个） | `CoreFaults` 读取 `TradingCoreRuntime.matchingAdapter()` | 使用公开入口 `state.matchingAdapter()` |
+| `SectionedCoreSnapshotCodecTest`（2 个） | `CoreFaults` 读取 `TradingCore.matchingAdapter()` | 使用公开入口 `state.matchingAdapter()` |
 
 修复后全量测试通过。
 
@@ -52,10 +52,10 @@ Nacos `127.0.0.1:8848` 连接告警是本地环境噪声，不影响结果。
 
 | 类 | 之前 | 之后 | 净减 |
 | --- | ---: | ---: | ---: |
-| `TradingAccountRuntime` | 6,350 | 5,663 | 687 |
+| `AccountBook` | 6,350 | 5,663 | 687 |
 | `OrderCommand` | 3,197 | 2,951 | 246 |
 | `OrderBatchProcessor` | 2,787 | 2,531 | 256 |
-| `TradingCoreRuntime` | 2,634 | 2,502 | 132 |
+| `TradingCore` | 2,634 | 2,502 | 132 |
 | `TradeSettlement` | 2,309 | 2,109 | 200 |
 | `CoreQueryService` | 2,298 | 2,126 | 172 |
 | `OrderBookEngine` | 2,206 | 1,923 | 283 |
@@ -79,10 +79,10 @@ Nacos `127.0.0.1:8848` 连接告警是本地环境噪声，不影响结果。
 ## 说明
 
 - `2a6673f17` 的评审行数不作为 `b843fd3d5` 基线；本文件只记录当前源码上的测试与注释清理结果。
-- `TradingAccountRuntime` 仍有 5,663 行、`OrderCommand` 仍有 2,951 行，包互赖仍有 45 对。按状态所有权继续拆，而不是按行数拆。
+- `AccountBook` 仍有 5,663 行、`OrderCommand` 仍有 2,951 行，包互赖仍有 45 对。按状态所有权继续拆，而不是按行数拆。
 
 ## 下一步
 
 1. 录 10 条黄金轨迹（输入/响应字节 + `stateHash` + `fundsHash`），用于证明后续重构行为不变。
-2. 继续清理 `OrderCommitService`、`OrderAdmissionService` 等大类的复述型注释。
-3. 优先处理 `OrderCommand`（155 个 public 声明）和 `TradingAccountRuntime`（341 个 public 声明）的公开面。
+2. 继续清理 `OrderCommitService`、`OrderCheckService` 等大类的复述型注释。
+3. 优先处理 `OrderCommand`（155 个 public 声明）和 `AccountBook`（341 个 public 声明）的公开面。

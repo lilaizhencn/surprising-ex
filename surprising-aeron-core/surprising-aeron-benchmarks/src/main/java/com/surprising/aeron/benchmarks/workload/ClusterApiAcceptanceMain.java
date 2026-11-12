@@ -129,11 +129,11 @@ public final class ClusterApiAcceptanceMain {
             actual = Math.addExact(actual, balanceTotal(userState(userId), settleAsset()));
             CoreRiskQueryCodec.decode(query(CoreMessageType.RISK_STATE_QUERY, userId, new byte[0]));
         }
-        for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
+        for (var systemFunds : CoreStateQueryCodec.decodeTreasuryState(
                 query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
-            if (treasury.asset().equals(settleAsset())) {
-                actual = Math.addExact(actual, treasury.feeBalanceUnits());
-                actual = Math.addExact(actual, treasury.insuranceBalanceUnits());
+            if (systemFunds.asset().equals(settleAsset())) {
+                actual = Math.addExact(actual, systemFunds.feeBalanceUnits());
+                actual = Math.addExact(actual, systemFunds.insuranceBalanceUnits());
             }
         }
         if (actual != expected) {

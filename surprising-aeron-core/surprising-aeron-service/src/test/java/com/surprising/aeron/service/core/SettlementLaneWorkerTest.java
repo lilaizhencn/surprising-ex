@@ -19,7 +19,7 @@ class SettlementLaneWorkerTest {
      * @param strategy 本轮参数化选择的账户等待策略名称
      */
     @Test
-    void pendingLedgerInputKeepsAdmissionFifoWithoutPreventingOlderSettlement() throws Exception {
+    void pendingLedgerInputKeepsOrderCheckFifoWithoutPreventingOlderSettlement() throws Exception {
         // 模拟账本输入是否到齐的原子开关，关闭清理时也会放开
         var inputReady = new java.util.concurrent.atomic.AtomicBoolean();
         // 任务实际执行顺序的原子计数，与逐项 expected 比较
@@ -41,7 +41,7 @@ class SettlementLaneWorkerTest {
                 // 较早普通邮箱任务的完成门闩，该任务本身不是 Matcher 结算事件
                 var olderSettlement = new CountDownLatch(1);
                 worker.submit(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> olderSettlement.countDown());
-                worker.submitAdmission(/* 模拟需要等待账本输入的准入任务，门禁打开后按序执行 */ new AccountLaneCommand() {
+                worker.submitOrderCheck(/* 模拟需要等待账本输入的准入任务，门禁打开后按序执行 */ new AccountLaneCommand() {
                     /**
                      * 把原子开关作为本准入任务的模拟账本输入就绪条件。
                      */
@@ -58,13 +58,13 @@ class SettlementLaneWorkerTest {
                 for (/* 本轮后续任务的下标，随后固定为其预期执行顺序 */ int item = 1; item < 8; item++) {
                     // 该任务必须取得的执行顺序号，固定后由回调捕获
                     int expected = item;
-                    worker.submitAdmission(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> {
+                    worker.submitOrderCheck(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> {
                         if (executed.getAndIncrement() != expected) throw new AssertionError("later admission passed waiting input");
                         completed.countDown();
                     });
                 }
-                assertThat(worker.hasAdmissionCapacity()).isFalse();
-                assertThatThrownBy(() -> worker.submitAdmission(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> {})).isInstanceOf(RejectedExecutionException.class);
+                assertThat(worker.hasOrderCheckCapacity()).isFalse();
+                assertThatThrownBy(() -> worker.submitOrderCheck(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> {})).isInstanceOf(RejectedExecutionException.class);
                 release.countDown();
                 assertThat(olderSettlement.await(2, TimeUnit.SECONDS)).isTrue();
                 assertThat(executed.get()).isZero();

@@ -185,7 +185,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
                             CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC, false, "")));
         }
-        try (var restored = TradingCoreRuntime.fromSnapshot(productLine, service.captureSnapshot())) {
+        try (var restored = TradingCore.fromSnapshot(productLine, service.captureSnapshot())) {
             for (int i = 0; i < 256; i++) {
                 var order = restored.tradingState().orders().get(orders[i]);
                 var balance = restored.tradingState().users().get((long) (1000 + i)).balances().get(asset);
@@ -239,7 +239,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
             // Fact and snapshot before cancellation. Terminal-only checks could miss that loss.
             verifyPendingSnapshotBoundary();
             byte[] snapshot = service.captureSnapshot();
-            try (var restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
+            try (var restored = TradingCore.fromSnapshot(productLine, snapshot)) {
                 // 覆盖整批终态发布/缓冲复用，不能只核对每批首项是否已删除。
                 var restoredState = restored.tradingState();
                 if (!restoredState.orders().isEmpty())

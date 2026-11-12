@@ -22,7 +22,7 @@ class CommittedOptionExerciseReplayTest {
      */
     private long sequence, now=TIME;
     /** 本用例资源作用域内在线运行时的引用，接收和回放相同消息。 */
-    private TradingCoreRuntime reference;
+    private TradingCore reference;
 
     /**
      * 建立两份期权双向仓，先已付权利金二十；到期按每份行权现金结算卖方，页间恢复后结算买方并检查完成。平值/虚值无现金页，实值按两份数量收付；重复原结算不再出页且在线/回放哈希一致。
@@ -33,7 +33,7 @@ class CommittedOptionExerciseReplayTest {
     @ParameterizedTest
     @CsvSource({"CALL,120,20", "CALL,100,0", "CALL,80,0", "PUT,80,20", "PUT,100,0", "PUT,120,0"})
     void exerciseCashIsSeparateFromPremiumAndMarginAndSurvivesSnapshot(OptionType type,long underlying,long cashPerContract) {
-        try (/* 同本次回放互相核对的期权权威运行时，退出自动关闭 */ var online=new TradingCoreRuntime(ProductLine.OPTION)) {
+        try (/* 同本次回放互相核对的期权权威运行时，退出自动关闭 */ var online=new TradingCore(ProductLine.OPTION)) {
             reference=online;
             // 卖方首结算分页后的快照，供恢复后买方分页续接
             byte[] snapshot;
@@ -62,9 +62,9 @@ class CommittedOptionExerciseReplayTest {
                 // 本次买方结算原消息，或 apply 构造并同时交两边的原消息
                 var command=apply(replay,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now,
                         "1", underlying, 1, 1, 0, 10)));
-                try(/* 从买方结算后的回放快照恢复的结果核对运行时 */ var probe=TradingCoreRuntime.fromSnapshot(ProductLine.OPTION,replay.snapshot())) {
+                try(/* 从买方结算后的回放快照恢复的结果核对运行时 */ var probe=TradingCore.fromSnapshot(ProductLine.OPTION,replay.snapshot())) {
                     // 买方本次结算在幂等结果表中的已提交响应
-                    var result=probe.resultLedger().get(command.header().commandId());
+                    var result=probe.commandResultLog().get(command.header().commandId());
                     assertThat(result.status()).isEqualTo(ResponseStatus.APPLIED);
                     assertThat(CoreSettlementProgressCodec.decode(result.responseData()).complete()).isTrue();
                 }

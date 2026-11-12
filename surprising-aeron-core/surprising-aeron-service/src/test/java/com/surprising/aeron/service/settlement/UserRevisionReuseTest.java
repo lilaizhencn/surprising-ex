@@ -7,11 +7,11 @@ import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.AccountLaneTestAccess;
 import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.core.change.LaneCommitTestAccess;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -192,13 +192,13 @@ class UserRevisionReuseTest {
      * 记录修订三的用户元数据后继续修改权威值并复用收据，最终从实时 outbox 解码到的帧仍必须保存修订三及原模式。
      */
     @Test void delayedMetadataOutputKeepsItsCommandRevisionAfterAuthorityAndCellReuse() {
-        try (/* 本场景独立交易运行时，作用域结束关闭工作资源。 */ var runtime = new TradingAccountRuntime()) {
+        try (/* 本场景独立交易运行时，作用域结束关闭工作资源。 */ var accountBook = new AccountBook()) {
             // 接收实时编码结果的有界帧输出缓冲。
             var outbox = new com.surprising.aeron.client.RealtimeOutbox(32, 65_536);
             // 负责捕获并编码当前命令实时变化的输出边界。
             var capture = new com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture(
-                    outbox, ProductLine.LINEAR_PERPETUAL, new RuntimeIdentityRegistry());
-            runtime.realtimeCapture(capture);
+                    outbox, ProductLine.LINEAR_PERPETUAL, new IdIndex());
+            accountBook.realtimeCapture(capture);
             capture.begin(1, 1, 0, 0);
             // 当前场景的 Lane 权威用户，同一 Lane 的修订更新可原位进行。
             var authority = new UserAccount(7).laneValue();
@@ -207,7 +207,7 @@ class UserRevisionReuseTest {
             authority.withState(3, CorePositionMode.HEDGE);
             changes.putUser(7, authority);
             authority.withState(4, CorePositionMode.ONE_WAY);
-            changes.recordControlChanges(runtime, 0);
+            changes.recordControlChanges(accountBook, 0);
             changes.clear();
             changes.putUser(7, authority);
             authority.withState(5, CorePositionMode.HEDGE);
@@ -237,47 +237,47 @@ class UserRevisionReuseTest {
      * 实际启动账户 Lane，连续更新并回滚已有用户，检查原权威身份及最早修订模式恢复；再核对模式重试不重复变更、命令中新建用户回滚后消失。
      */
     @Test void actualLaneRollbackRestoresRevisionModeAndAuthorityIdentity() {
-        try (/* 本场景独立交易运行时，作用域结束关闭工作资源。 */ var runtime = new TradingAccountRuntime()) {
-            runtime.putUser(new UserAccount(7));
-            runtime.clearChangedKeys();
-            runtime.startAccountLanes();
+        try (/* 本场景独立交易运行时，作用域结束关闭工作资源。 */ var accountBook = new AccountBook()) {
+            accountBook.putUser(new UserAccount(7));
+            accountBook.clearChangedKeys();
+            accountBook.startAccountLanes();
             // 用户七所属账户 Lane 编号，只把实际回滚测试派发到此分区。
-            int laneId = runtime.topology().accountLaneId(7);
-            runtime.dispatchControlLanes(1L << laneId, /* 控制回调提供的 Lane 编号，本测试用当前命令作用域访问，不读取此参数。 */ ignored -> {
+            int laneId = accountBook.topology().accountLaneId(7);
+            accountBook.dispatchControlLanes(1L << laneId, /* 控制回调提供的 Lane 编号，本测试用当前命令作用域访问，不读取此参数。 */ ignored -> {
                 // 当前测试线程或控制回调受控持有的账户 Lane。
-                var lane = runtime.currentLaneCommandScope();
-                runtime.setUserState(7, 3, CorePositionMode.ONE_WAY);
-                runtime.accountRollback().clearNonBalanceImages();
+                var lane = accountBook.currentLaneCommandScope();
+                accountBook.setUserState(7, 3, CorePositionMode.ONE_WAY);
+                accountBook.accountRollback().clearNonBalanceImages();
                 // 当前场景的 Lane 权威用户，同一 Lane 的修订更新可原位进行。
                 var authority = lane.user(7);
-                runtime.setUserState(7, 4, CorePositionMode.HEDGE);
-                runtime.setUserState(7, 5, CorePositionMode.HEDGE);
+                accountBook.setUserState(7, 4, CorePositionMode.HEDGE);
+                accountBook.setUserState(7, 5, CorePositionMode.HEDGE);
                 assertThat(lane.user(7)).isSameAs(authority);
-                runtime.accountRollback().restoreLane(lane);
+                accountBook.accountRollback().restoreLane(lane);
                 assertThat(lane.user(7)).isSameAs(authority);
                 assertThat(authority.revision()).isEqualTo(3);
                 assertThat(authority.positionMode()).isEqualTo(CorePositionMode.ONE_WAY);
-                runtime.accountRollback().clearNonBalanceImages();
+                accountBook.accountRollback().clearNonBalanceImages();
                 // 把用户从单向切为双向的业务命令，第二次相同模式应返回未变化。
                 var switchMode = new com.surprising.aeron.protocol.UpdatePositionModeCommand(CorePositionMode.HEDGE);
-                assertThat(AccountCommandService.updateAccountPositionMode(runtime, 7, switchMode)).isTrue();
-                assertThat(AccountCommandService.updateAccountPositionMode(runtime, 7, switchMode)).isFalse();
+                assertThat(AccountCommandService.updateAccountPositionMode(accountBook, 7, switchMode)).isTrue();
+                assertThat(AccountCommandService.updateAccountPositionMode(accountBook, 7, switchMode)).isFalse();
                 assertThat(authority.revision()).isEqualTo(4);
-                runtime.accountRollback().restoreLane(lane);
+                accountBook.accountRollback().restoreLane(lane);
                 assertThat(authority.revision()).isEqualTo(3);
                 assertThat(authority.positionMode()).isEqualTo(CorePositionMode.ONE_WAY);
-                runtime.accountRollback().clearNonBalanceImages();
+                accountBook.accountRollback().clearNonBalanceImages();
                 // 逐步寻找与用户七同 Lane、且原本不存在的新用户编号。
                 long absentUser = 8;
-                while (runtime.topology().accountLaneId(absentUser) != laneId) absentUser++;
-                runtime.setUserState(absentUser, 1, CorePositionMode.HEDGE);
-                runtime.accountRollback().restoreLane(lane);
+                while (accountBook.topology().accountLaneId(absentUser) != laneId) absentUser++;
+                accountBook.setUserState(absentUser, 1, CorePositionMode.HEDGE);
+                accountBook.accountRollback().restoreLane(lane);
                 assertThat(lane.user(absentUser)).isNull();
                 return null;
             });
             // 等待真实 Lane 回滚及其断言完成的五秒单调时钟截止时间。
             long deadline = System.nanoTime() + 5_000_000_000L;
-            while (!runtime.pollControlLanes()) {
+            while (!accountBook.pollControlLanes()) {
                 if (System.nanoTime() > deadline) throw new AssertionError("user rollback command timed out");
                 Thread.onSpinWait();
             }

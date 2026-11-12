@@ -66,7 +66,7 @@ class CoreMaintenanceTest {
             var sameConfig=apply(state,command(line,0,CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(config(instrument), line)));
             assertThat(sameConfig.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            try (/* 从维护或清仓中间快照恢复的运行时，离开作用域关闭 */ var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(501))) {
+            try (/* 从维护或清仓中间快照恢复的运行时，离开作用域关闭 */ var restored=TradingCore.fromSnapshot(line,state.snapshot(501))) {
                 // 恢复后查询得到的标的外壳，用于检查维护任务状态
                 var recovered=restored.tradingState().instruments().get("1");
                 assertThat(recovered.maintenance()).isEqualTo(
@@ -112,7 +112,7 @@ class CoreMaintenanceTest {
             var denied = apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(200,false,CoreOrderSide.BUY))));
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
-            try (/* 从维护或清仓中间快照恢复的运行时，离开作用域关闭 */ var restored = TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
+            try (/* 从维护或清仓中间快照恢复的运行时，离开作用域关闭 */ var restored = TradingCore.fromSnapshot(line,state.snapshot(500))) {
                 assertThat(restored.tradingState().instruments().get("1").maintenance()).isEqualTo(new CoreInstrumentMaintenance(701,mode,0));
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
                 // 使用错误原任务 ID 尝试释放门禁得到的响应
@@ -160,7 +160,7 @@ class CoreMaintenanceTest {
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801, "1", 120, 0, 1, 0, 1))));
             // 本次成功响应解出的清仓续步游标和完成标记
             var progress = CoreSettlementProgressCodec.decode(first.data());
-            try (/* 从维护或清仓中间快照恢复的运行时，离开作用域关闭 */ var restored = TradingCoreRuntime.fromSnapshot(line,state.snapshot(700))) {
+            try (/* 从维护或清仓中间快照恢复的运行时，离开作用域关闭 */ var restored = TradingCore.fromSnapshot(line,state.snapshot(700))) {
                 // 恢复后推进页数的保护计数，必须小于二十以发现无法收敛
                 int steps = 0;
                 while (!progress.complete()) {
@@ -188,9 +188,9 @@ class CoreMaintenanceTest {
      * 创建本产品线标的、初始价格和用户十一、二十二的资金，供维护及清仓测试复用；返回的运行时由调用方关闭。
      * @param line 当前参数化用例的独立产品线
      */
-    private TradingCoreRuntime fixture(ProductLine line) {
+    private TradingCore fixture(ProductLine line) {
         // 当前产品线的新运行时，成功返回后由调用方的资源作用域关闭
-        var state = new TradingCoreRuntime(line);
+        var state = new TradingCore(line);
         // 该产品线对应的合约类型，决定反向资产、期权价格及永续资金费分支
         var type = ContractType.valueOf(line.contractTypeCode());
         // 该产品线采用的结算资产，反向为 BTC，其余为 USDT
@@ -215,7 +215,7 @@ class CoreMaintenanceTest {
      * @param state 本用例负责关闭的交易运行时
      * @param line 当前参数化用例的独立产品线
      */
-    private static long total(TradingCoreRuntime state, ProductLine line) {
+    private static long total(TradingCore state, ProductLine line) {
         // 该产品线采用的结算资产，反向为 BTC，其余为 USDT
         String asset = ContractType.valueOf(line.contractTypeCode()).isInverse()?"BTC":"USDT";
         // 本次查询得到的财库状态，用于合计各结算资产余额
@@ -260,7 +260,7 @@ class CoreMaintenanceTest {
      * @param state 本用例负责关闭的交易运行时
      * @param message 本次提交的命令及原时间、来源序号
      */
-    private static CoreResponse applied(TradingCoreRuntime state,CoreMessage message) {
+    private static CoreResponse applied(TradingCore state,CoreMessage message) {
         // 本次执行或撮合补齐得到的响应，辅助方法继续检查其状态
         var response = apply(state,message);
         assertThat(response.commandStatus()).as("%s: %s",message.header().messageType(),response.resultCode()).isEqualTo(ResponseStatus.APPLIED);
@@ -271,7 +271,7 @@ class CoreMaintenanceTest {
      * @param state 本用例负责关闭的交易运行时
      * @param message 本次提交的命令及原时间、来源序号
      */
-    private static CoreResponse apply(TradingCoreRuntime state,CoreMessage message) {
+    private static CoreResponse apply(TradingCore state,CoreMessage message) {
         // 本次执行或撮合补齐得到的响应，辅助方法继续检查其状态
         var response = state.apply(message);
         // 直接控制槽轮询使用的单调时钟五秒期限，撮合补齐另走原同步辅助

@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.result;
 
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongArray;
 import lombok.Getter;
@@ -29,7 +29,7 @@ public final class ResponseSlotPool {
     private final byte[][] identityKeys;
     private final int[] identityTable;
 
-    private static final Slot EMPTY_SLOT = new Slot(TradingCoreRuntime.EMPTY_RESPONSE_DATA, false, -1);
+    private static final Slot EMPTY_SLOT = new Slot(TradingCore.EMPTY_RESPONSE_DATA, false, -1);
 
     /** 一次响应编码可使用的数组描述符，保存池归属和槽号。 */
     public static final class Slot {
@@ -107,7 +107,7 @@ public final class ResponseSlotPool {
 
     /** 零长返回共享空数组。其余尝试原子借固定槽，不能借时创建精确长度独立数组。池数组可能大于有效响应，调用方必须另带有效长度。 */
     byte[] acquire(int requiredLength) {
-        if (requiredLength == 0) return TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+        if (requiredLength == 0) return TradingCore.EMPTY_RESPONSE_DATA;
         int index = claimPooledSlot(requiredLength);
         return index < 0 ? new byte[requiredLength] : slots[index];
     }

@@ -10,8 +10,8 @@ import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.AccountPartition;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
@@ -23,7 +23,7 @@ import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.treasury.InsuranceAllocationPolicy;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.aeron.support.math.OptionContractMath;
@@ -38,15 +38,15 @@ public final class LiquidationService {
     /** 新建或复用已经可回收的单笔强平续步，保留校验及账户步骤对象供命令槽复用，并派发目标账户 Lane。 */
     public static ExecutionWork beginExecution(ExecutionWork reuse, ExecuteLiquidationCommand command,
             Collection<CancellationOrder> canceledOrders, long nextCursorOrderId,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (command == null || runtime == null || identities == null || nextCursorOrderId < 0
-                || !runtime.productLine().isDerivative()) {
+            AccountBook accountBook, IdIndex identities) {
+        if (command == null || accountBook == null || identities == null || nextCursorOrderId < 0
+                || !accountBook.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation account stage");
         }
-        runtime.assertOwner();
+        accountBook.assertOwner();
         ExecutionWork work = reuse == null || !reuse.reusable() ? new ExecutionWork() : reuse;
-        long laneMask = work.prepare(command, canceledOrders, nextCursorOrderId, runtime, identities);
-        runtime.dispatchControlLanes(laneMask, work);
+        long laneMask = work.prepare(command, canceledOrders, nextCursorOrderId, accountBook, identities);
+        accountBook.dispatchControlLanes(laneMask, work);
         return work;
     }
 
@@ -60,10 +60,10 @@ public final class LiquidationService {
         private ExecuteLiquidationCommand singleCommand;
         /** 批检查直接读取原不可变动作列表，不复制价格、编号和游标。 */
         private ExecuteLiquidationBatchCommand batchCommand;
-        private RuntimeIdentityRegistry identities;
+        private IdIndex identities;
         /** 各动作的检查结果字节，Lane 写入后通过既有控制完成位发布给 Owner。 */
         private byte[] results = new byte[4];
-        private TradingAccountRuntime runtime;
+        private AccountBook accountBook;
         private int count;
         /** 本批前置检查涉及的账户 Lane 位集合，Owner 据此只派发相关 Lane。 */
         private long laneMask;
@@ -71,17 +71,17 @@ public final class LiquidationService {
         private boolean dispatched, done;
 
         /** 为单笔强平初始化一个检查槽，保留原命令并定位需要读取的 Lane。 */
-        public void prepare(ExecuteLiquidationCommand command, TradingAccountRuntime runtime,
-                            RuntimeIdentityRegistry identities) {
-            initialize(runtime, identities, 1);
+        public void prepare(ExecuteLiquidationCommand command, AccountBook accountBook,
+                            IdIndex identities) {
+            initialize(accountBook, identities, 1);
             singleCommand = command;
             prepareAction(0, command.liquidationId());
         }
 
         /** 按批命令动作数量准备检查槽，保留原动作列表并定位 Lane 路由，让一批动作共用一次账户检查派发。 */
-        public void prepare(ExecuteLiquidationBatchCommand command, TradingAccountRuntime runtime,
-                            RuntimeIdentityRegistry identities) {
-            initialize(runtime, identities, command.actions().size());
+        public void prepare(ExecuteLiquidationBatchCommand command, AccountBook accountBook,
+                            IdIndex identities) {
+            initialize(accountBook, identities, command.actions().size());
             batchCommand = command;
             for (int index = 0; index < count; index++) {
                 var action = command.actions().get(index);
@@ -90,40 +90,40 @@ public final class LiquidationService {
         }
 
         /** Owner 确认旧输入已释放，按需一起扩容所有并行数组，再清空本次参与 Lane 和完成标记，避免把两条命令混在一起。 */
-        private void initialize(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, int count) {
-            runtime.assertOwner();
-            if (this.runtime != null) throw new IllegalStateException("liquidation checks already prepared");
+        private void initialize(AccountBook accountBook, IdIndex identities, int count) {
+            accountBook.assertOwner();
+            if (this.accountBook != null) throw new IllegalStateException("liquidation checks already prepared");
             if (count > results.length) {
                 int capacity = Math.max(count, Math.multiplyExact(results.length, 2));
                 liquidations = new RiskScanner.LiquidationOrder[capacity];
                 laneIds = new int[capacity]; results = new byte[capacity];
             }
-            this.runtime = runtime; this.identities = identities;
+            this.accountBook = accountBook; this.identities = identities;
             this.count = count; laneMask = 0; dispatched = done = false;
         }
 
         private void prepareAction(int index, long liquidationId) {
             results[index] = OBSOLETE; laneIds[index] = -1;
-            var route = runtime.liquidationRoute(liquidationId);
+            var route = accountBook.liquidationRoute(liquidationId);
             long userId = route == null ? 0 : route.userId();
             if (userId == 0) return;
-            laneIds[index] = runtime.topology().accountLaneId(userId);
+            laneIds[index] = accountBook.topology().accountLaneId(userId);
             results[index] = CHECK_LANE; laneMask |= 1L << laneIds[index];
         }
 
         /** 判断当前是否已绑定一条待检查命令，绑定后必须完成或清理引用才能再次准备。 */
-        public boolean prepared() { return runtime != null; }
+        public boolean prepared() { return accountBook != null; }
 
         /** Owner 只派发一次相关 Lane 并非阻塞等待结果。 */
         public boolean poll() {
             if (done) return true;
-            runtime.assertOwner();
+            accountBook.assertOwner();
             if (laneMask == 0) { done = true; return true; }
             if (!dispatched) {
-                runtime.dispatchControlLanes(laneMask, this);
+                accountBook.dispatchControlLanes(laneMask, this);
                 dispatched = true;
             }
-            if (!runtime.pollControlLanes()) return false;
+            if (!accountBook.pollControlLanes()) return false;
             done = true;
             return true;
         }
@@ -145,7 +145,7 @@ public final class LiquidationService {
         }
 
         private void checkAction(int index, long liquidationId, long priceSequence, long executionPriceTicks, long cursor) {
-            RiskScanner.LiquidationOrder value = runtime.liquidation(liquidationId);
+            RiskScanner.LiquidationOrder value = accountBook.liquidation(liquidationId);
             liquidations[index] = value;
             if (value == null || (value.status() != CoreLiquidationState.Status.PLANNED
                     && value.status() != CoreLiquidationState.Status.ORDERED)) {
@@ -154,20 +154,20 @@ public final class LiquidationService {
             if (value.status() == CoreLiquidationState.Status.PLANNED && cursor != 0
                     || value.status() == CoreLiquidationState.Status.ORDERED && cursor != value.nextCancelOrderId())
                 throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT", "liquidation cursor does not match state");
-            MarkPrice mark = runtime.markPrice(value.symbolId());
+            MarkPrice mark = accountBook.markPrice(value.symbolId());
             if (mark == null || mark.priceSequence() != value.triggerPriceSequence()
                     || priceSequence > 0 && priceSequence != value.triggerPriceSequence()
                     || executionPriceTicks != mark.markPriceTicks()) {
                 results[index] = STALE_PRICE; return;
             }
-            CoreInstrument instrument = runtime.instrument(identities.instrumentId(value.symbolId()));
+            CoreInstrument instrument = accountBook.instrument(identities.instrumentId(value.symbolId()));
             if (instrument == null || !RiskMarginCalculator.canLiquidate(instrument.contractType(), value.signedQuantitySteps())) {
                 results[index] = OBSOLETE; return;
             }
-            long positionKey = identities.findPositionKeyValueInLane(runtime.currentLaneCommandScope(),
+            long positionKey = identities.findPositionKeyValueInLane(accountBook.currentLaneCommandScope(),
                     value.userId(), instrument, value.positionSide());
             results[index] = positionKey != 0 && LiquidationService.executable(
-                    runtime, value, instrument, positionKey) ? EXECUTABLE : OBSOLETE;
+                    accountBook, value, instrument, positionKey) ? EXECUTABLE : OBSOLETE;
         }
 
         /** 检查结果已完成后取得该动作捕获的强平记录。 */
@@ -194,7 +194,7 @@ public final class LiquidationService {
         public void clearReferences() {
             java.util.Arrays.fill(liquidations, 0, count, null);
             singleCommand = null; batchCommand = null;
-            runtime = null; identities = null; count = 0; laneMask = 0; dispatched = done = false;
+            accountBook = null; identities = null; count = 0; laneMask = 0; dispatched = done = false;
         }
     }
 
@@ -213,21 +213,21 @@ public final class LiquidationService {
     /** Owner 根据各动作源用户合并 Lane 路由，一次派发多个账户执行步骤。 */
     public static java.util.function.BooleanSupplier beginExecutionBatch(
             List<ExecutionRequest> requests, long liquidationFeeRatePpm,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (requests == null || requests.isEmpty() || runtime == null || identities == null) {
+            AccountBook accountBook, IdIndex identities) {
+        if (requests == null || requests.isEmpty() || accountBook == null || identities == null) {
             throw new IllegalArgumentException("invalid liquidation execution batch");
         }
-        runtime.assertOwner();
+        accountBook.assertOwner();
         BatchExecutionStage[] stages = new BatchExecutionStage[requests.size()];
         long laneMask = 0;
         int[] laneIds = new int[requests.size()];
         for (int index = 0; index < requests.size(); index++) {
-            var route = runtime.liquidationRoute(requests.get(index).action().liquidationId());
+            var route = accountBook.liquidationRoute(requests.get(index).action().liquidationId());
             if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
-            laneIds[index] = runtime.topology().accountLaneId(route.userId());
+            laneIds[index] = accountBook.topology().accountLaneId(route.userId());
             laneMask |= 1L << laneIds[index];
         }
-        runtime.dispatchControlLanes(laneMask, lane -> {
+        accountBook.dispatchControlLanes(laneMask, lane -> {
             for (int index = 0; index < stages.length; index++) {
                 if (laneIds[index] != lane) continue;
                 var request = requests.get(index);
@@ -235,11 +235,11 @@ public final class LiquidationService {
                 stages[index] = new BatchExecutionStage();
                 stages[index].execute(action.liquidationId(), action.triggerPriceSequence(),
                         action.executionPriceTicks(), liquidationFeeRatePpm, action.cursorOrderId(), request.canceledOrders(),
-                        request.nextCursorOrderId(), runtime, identities);
+                        request.nextCursorOrderId(), accountBook, identities);
             }
             return null;
         });
-        return new BatchFinancialWork(runtime, stages);
+        return new BatchFinancialWork(accountBook, stages);
     }
 
     /** 一批独立强平账户步骤的资金交接续步。各 Lane 各写自己的结果，Owner 收集后把资金差额交账本逐项应用，账本完成后才一次提交本批全局修订号。 */
@@ -251,31 +251,31 @@ public final class LiquidationService {
         private boolean done;
 
         /** 绑定这批包含资金回执的账户步骤，初始化一次账本命令，供 Owner 后续轮询完成。 */
-        private BatchFinancialWork(TradingAccountRuntime runtime, BatchExecutionStage[] stages) {
-            initializeLedgerCommand(runtime);
+        private BatchFinancialWork(AccountBook accountBook, BatchExecutionStage[] stages) {
+            initializeLedgerCommand(accountBook);
             this.stages = stages;
         }
 
         /** Owner 先等全部账户步骤，登记有资金结果的用户并累计修订号增量。 */
         @Override public boolean getAsBoolean() {
             if (done) return true;
-            if (!runtime.pollControlLanes()) return false;
+            if (!accountBook.pollControlLanes()) return false;
             long revisionDelta = 0;
             for (int index = 0; index < stages.length; index++) {
                 BatchExecutionStage stage = stages[index];
                 if (stage.liquidated)
-                    runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
+                    accountBook.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
                 revisionDelta = Math.addExact(revisionDelta, stage.canceledOrdersApplied ? 2 : 1);
             }
-            Math.addExact(runtime.revision(), revisionDelta);
-            runtime.dispatchLedgerCommand(this);
-            runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), revisionDelta));
+            Math.addExact(accountBook.revision(), revisionDelta);
+            accountBook.dispatchLedgerCommand(this);
+            accountBook.setMetadata(accountBook.productLine(), Math.addExact(accountBook.revision(), revisionDelta));
             done = true;
             return true;
         }
 
         /** 账本按请求数组顺序应用各非空资金差额，单纯撤单游标推进或失效计划没有额外资金回执。 */
-        @Override protected void applyLedger(TreasuryRuntime ledger) {
+        @Override protected void applyLedger(SystemFunds ledger) {
             for (BatchExecutionStage stage : stages) {
                 stage.applyLedger(ledger);
             }
@@ -298,13 +298,13 @@ public final class LiquidationService {
                              long liquidationFeeRatePpm, long cursorOrderId,
                              Collection<CancellationOrder> canceledOrders,
                              long nextCursorOrderId,
-                             TradingAccountRuntime runtime,
-                             RuntimeIdentityRegistry identities) {
+                             AccountBook accountBook,
+                             IdIndex identities) {
             liquidated = false;
-            if (!runtime.productLine().isDerivative()) {
+            if (!accountBook.productLine().isDerivative()) {
                 throw new IllegalArgumentException("liquidation requires derivative product");
             }
-            RiskScanner.LiquidationOrder liquidation = runtime.liquidation(liquidationId);
+            RiskScanner.LiquidationOrder liquidation = accountBook.liquidation(liquidationId);
             if (liquidation == null) {
                 throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
             }
@@ -320,7 +320,7 @@ public final class LiquidationService {
                         && liquidation.status() != CoreLiquidationState.Status.ORDERED) {
                     throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not planned");
                 }
-                validatePrice(runtime, liquidation, triggerPriceSequence, executionPriceTicks);
+                validatePrice(accountBook, liquidation, triggerPriceSequence, executionPriceTicks);
             }
             boolean hasCancellations = canceledOrders != null && !canceledOrders.isEmpty();
             if (hasCancellations) {
@@ -330,8 +330,8 @@ public final class LiquidationService {
                     }
                 }
             }
-            CoreInstrument instrument = advance ? null : runtime.instrument(identities.instrumentId(liquidation.symbolId()));
-            AccountPartition scoped = runtime.currentLaneCommandScope();
+            CoreInstrument instrument = advance ? null : accountBook.instrument(identities.instrumentId(liquidation.symbolId()));
+            AccountPartition scoped = accountBook.currentLaneCommandScope();
             long positionKey = instrument == null ? 0 : scoped == null
                     ? identities.findPositionKeyValue(liquidation.userId(), instrument, liquidation.positionSide())
                     : identities.findPositionKeyValueInLane(scoped, liquidation.userId(), instrument, liquidation.positionSide());
@@ -343,28 +343,28 @@ public final class LiquidationService {
             this.userId = liquidation.userId();
             this.assetId = assetId;
             this.positionKey = positionKey;
-            boolean obsolete = !advance && !executable(runtime, liquidation, instrument, positionKey);
+            boolean obsolete = !advance && !executable(accountBook, liquidation, instrument, positionKey);
             canceledOrdersApplied = !obsolete && hasCancellations;
             if (canceledOrdersApplied) for (var canceledOrder : canceledOrders) {
                 long orderId = canceledOrder.orderId();
-                Order order = runtime.order(orderId);
+                Order order = accountBook.order(orderId);
                 if (order == null || order.userId() != liquidation.userId() || order.canceled()
                         || order.remainingQuantitySteps() == 0) {
                     throw new IllegalArgumentException("runtime liquidation cancellation requires open orders");
                 }
-                OrderFundsReservation reservation = runtime.reservation(orderId);
+                OrderFundsReservation reservation = accountBook.reservation(orderId);
                 if (reservation == null) {
                     throw new IllegalStateException("runtime liquidation reservation is missing: " + orderId);
                 }
-                runtime.cancelOrder(orderId, liquidation.userId(), reservation.reservedUnits());
+                accountBook.cancelOrder(orderId, liquidation.userId(), reservation.reservedUnits());
             }
             if (obsolete) {
-                runtime.replaceLiquidation(copy(liquidation, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
-                runtime.advanceUserRevision(liquidation.userId());
+                accountBook.replaceLiquidation(copy(liquidation, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
+                accountBook.advanceUserRevision(liquidation.userId());
                 return;
             }
             if (advance) {
-                runtime.replaceLiquidation(new RiskScanner.LiquidationOrder(liquidation.liquidationId(), liquidation.userId(),
+                accountBook.replaceLiquidation(new RiskScanner.LiquidationOrder(liquidation.liquidationId(), liquidation.userId(),
                         liquidation.symbolId(), liquidation.marginMode(), liquidation.positionSide(), liquidation.instrument(),
                         liquidation.triggerPriceSequence(),
                         liquidation.signedQuantitySteps(), liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
@@ -372,13 +372,13 @@ public final class LiquidationService {
                         liquidation.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
                 return;
             }
-            executeAccountLiquidation(executionPriceTicks, liquidationFeeRatePpm, runtime, liquidation, instrument);
+            executeAccountLiquidation(executionPriceTicks, liquidationFeeRatePpm, accountBook, liquidation, instrument);
         }
 
         private void executeAccountLiquidation(long executionPriceTicks, long liquidationFeeRatePpm,
-                TradingAccountRuntime runtime, RiskScanner.LiquidationOrder liquidation, CoreInstrument instrument) {
-            Position position = runtime.position(positionKey);
-            AccountBalance balance = runtime.balance(liquidation.userId(), assetId);
+                AccountBook accountBook, RiskScanner.LiquidationOrder liquidation, CoreInstrument instrument) {
+            Position position = accountBook.position(positionKey);
+            AccountBalance balance = accountBook.balance(liquidation.userId(), assetId);
             if (position == null || balance == null) {
                 throw new IllegalStateException("runtime liquidation entities are missing");
             }
@@ -447,11 +447,11 @@ public final class LiquidationService {
             CoreLiquidationState.Status nextStatus = uncovered > 0
                     ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED;
 
-            runtime.replaceBalance(nextBalance);
-            runtime.replacePosition(positionKey, nextPosition);
-            runtime.replaceLiquidation(copy(liquidation, uncovered, executionPriceTicks,
+            accountBook.replaceBalance(nextBalance);
+            accountBook.replacePosition(positionKey, nextPosition);
+            accountBook.replaceLiquidation(copy(liquidation, uncovered, executionPriceTicks,
                     liquidationFeeRatePpm, nextStatus, collectedFee));
-            runtime.advanceUserRevision(liquidation.userId());
+            accountBook.advanceUserRevision(liquidation.userId());
             // 所属 Lane 保存实际两项金额，Owner 收齐账户完成位后交原账本消费。
             this.insuranceDelta = insuranceDelta;
             this.deficitUnits = uncovered;
@@ -459,7 +459,7 @@ public final class LiquidationService {
         }
 
         /** 账本按原次序预先算好全部新值，再写保险、亏空和清算。 */
-        private void applyLedger(TreasuryRuntime ledger) {
+        private void applyLedger(SystemFunds ledger) {
             if (!liquidated) return;
             long nextInsurance = Math.addExact(ledger.insurance(assetId), insuranceDelta);
             long nextDeficit = Math.addExact(ledger.insuranceDeficit(assetId), deficitUnits);
@@ -478,19 +478,19 @@ public final class LiquidationService {
         private ExecuteLiquidationCommand command;
         private Collection<CancellationOrder> canceledOrders;
         private long nextCursorOrderId;
-        private RuntimeIdentityRegistry identities;
+        private IdIndex identities;
         /** done：本阶段已经完成的标记，Owner 重复轮询时可直接结束。 */
         private boolean done;
 
         private long prepare(ExecuteLiquidationCommand command, Collection<CancellationOrder> canceledOrders,
-                long nextCursorOrderId, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-            initializeLedgerCommand(runtime);
+                long nextCursorOrderId, AccountBook accountBook, IdIndex identities) {
+            initializeLedgerCommand(accountBook);
             this.command = command; this.canceledOrders = canceledOrders;
             this.nextCursorOrderId = nextCursorOrderId; this.identities = identities;
-            var route = runtime.liquidationRoute(command.liquidationId());
-            long userId = route == null ? runtime.liquidation(command.liquidationId()).userId() : route.userId();
+            var route = accountBook.liquidationRoute(command.liquidationId());
+            long userId = route == null ? accountBook.liquidation(command.liquidationId()).userId() : route.userId();
             this.done = false;
-            return runtime.topology().accountLaneMask(userId);
+            return accountBook.topology().accountLaneMask(userId);
         }
 
         /** 所属账户 Lane 创建或复用本笔执行步骤，应用撤单解冻或最终平仓，由步骤保存需要交账本的资金差额。 */
@@ -498,7 +498,7 @@ public final class LiquidationService {
         public Object apply(int ignored) {
             if (stage == null) stage = new BatchExecutionStage();
             stage.execute(command.liquidationId(), command.triggerPriceSequence(), command.executionPriceTicks(),
-                    command.liquidationFeeRatePpm(), command.cursorOrderId(), canceledOrders, nextCursorOrderId, runtime, identities);
+                    command.liquidationFeeRatePpm(), command.cursorOrderId(), canceledOrders, nextCursorOrderId, accountBook, identities);
             return null;
         }
 
@@ -506,18 +506,18 @@ public final class LiquidationService {
         @Override
         public boolean getAsBoolean() {
             if (done) return true;
-            if (!runtime.pollControlLanes()) return false;
+            if (!accountBook.pollControlLanes()) return false;
             if (stage.liquidated)
-                runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
-            Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1);
-            runtime.dispatchLedgerCommand(this);
-            runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1));
+                accountBook.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
+            Math.addExact(accountBook.revision(), stage.canceledOrdersApplied ? 2 : 1);
+            accountBook.dispatchLedgerCommand(this);
+            accountBook.setMetadata(accountBook.productLine(), Math.addExact(accountBook.revision(), stage.canceledOrdersApplied ? 2 : 1));
             done = true;
             return true;
         }
 
         /** 账本应用本笔强平非空的资金回执。 */
-        @Override protected void applyLedger(TreasuryRuntime ledger) {
+        @Override protected void applyLedger(SystemFunds ledger) {
             stage.applyLedger(ledger);
         }
 
@@ -531,13 +531,13 @@ public final class LiquidationService {
         }
     }
 
-    private static boolean executable(TradingAccountRuntime runtime, RiskScanner.LiquidationOrder liquidation,
+    private static boolean executable(AccountBook accountBook, RiskScanner.LiquidationOrder liquidation,
                                       CoreInstrument instrument, long positionKey) {
         if (instrument == null || !RiskMarginCalculator.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         if (positionKey == 0) return false;
-        Position position = runtime.position(positionKey);
-        RiskMarginCalculator.Snapshot risk = runtime.riskSnapshot(positionKey);
+        Position position = accountBook.position(positionKey);
+        RiskMarginCalculator.Snapshot risk = accountBook.riskSnapshot(positionKey);
         return position != null && position.instrument() == liquidation.instrument()
                 && position.marginMode() == liquidation.marginMode()
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
@@ -546,9 +546,9 @@ public final class LiquidationService {
     }
 
     /** 核对当前行情序号与强平计划一致，命令指定的触发序号和执行价也必须匹配。 */
-    private static void validatePrice(TradingAccountRuntime runtime, RiskScanner.LiquidationOrder liquidation,
+    private static void validatePrice(AccountBook accountBook, RiskScanner.LiquidationOrder liquidation,
                                       long triggerPriceSequence, long executionPriceTicks) {
-        MarkPrice mark = runtime.markPrice(liquidation.symbolId());
+        MarkPrice mark = accountBook.markPrice(liquidation.symbolId());
         if (mark == null || mark.priceSequence() != liquidation.triggerPriceSequence()
                 || triggerPriceSequence > 0
                 && triggerPriceSequence != liquidation.triggerPriceSequence()
@@ -566,18 +566,18 @@ public final class LiquidationService {
     }
 
     public static ResolutionWork beginResolution(ResolutionWork reuse, ResolveLiquidationCommand command,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
-        if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
+            AccountBook accountBook, IdIndex identities, Iterable<Long> candidateIds) {
+        if (command == null || accountBook == null || identities == null || !accountBook.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
-        runtime.assertOwner();
-        var route = runtime.liquidationRoute(command.liquidationId());
+        accountBook.assertOwner();
+        var route = accountBook.liquidationRoute(command.liquidationId());
         if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
-        CoreInstrument instrument = runtime.requireInstrument(route.instrumentId());
+        CoreInstrument instrument = accountBook.requireInstrument(route.instrumentId());
         int assetId = identities.assetId(instrument.settleAsset());
         ResolutionWork work = reuse == null || !reuse.reusable() ? new ResolutionWork() : reuse;
         work.sourceUserId = route.userId();
-        work.prepare(runtime, command, assetId);
+        work.prepare(accountBook, command, assetId);
         work.prepareClaimReads(candidateIds, identities);
         return work;
     }
@@ -597,23 +597,23 @@ public final class LiquidationService {
         private RiskScanner.LiquidationOrder[] claimReceipts = new RiskScanner.LiquidationOrder[4];
         private int claimCount;
 
-        private void prepare(TradingAccountRuntime runtime, ResolveLiquidationCommand command, int assetId) {
-            initializeLedgerCommand(runtime);
-            runtime.requireRevisionCapacity();
+        private void prepare(AccountBook accountBook, ResolveLiquidationCommand command, int assetId) {
+            initializeLedgerCommand(accountBook);
+            accountBook.requireRevisionCapacity();
             this.command = command;
             this.assetId = assetId;
             liquidation = nextLiquidation = null;
             done = accountsDispatched = capturingClaims = false;
         }
 
-        private void prepareClaimReads(Iterable<Long> candidateIds, RuntimeIdentityRegistry identities) {
+        private void prepareClaimReads(Iterable<Long> candidateIds, IdIndex identities) {
             claimCount = 0;
-            long readMask = runtime.topology().accountLaneMask(sourceUserId);
+            long readMask = accountBook.topology().accountLaneMask(sourceUserId);
             if (command.resolution() == ResolveLiquidationCommand.Resolution.INSURANCE) {
                 for (long id : candidateIds) {
-                    var route = runtime.liquidationRoute(id);
+                    var route = accountBook.liquidationRoute(id);
                     if (route == null) continue;
-                    var instrument = runtime.instrument(route.instrumentId());
+                    var instrument = accountBook.instrument(route.instrumentId());
                     if (instrument == null || identities.assetId(instrument.settleAsset()) != assetId) continue;
                     if (claimCount == claimIds.length) {
                         int capacity = Math.multiplyExact(claimCount, 2);
@@ -621,17 +621,17 @@ public final class LiquidationService {
                         claimLanes = java.util.Arrays.copyOf(claimLanes, capacity);
                         claimReceipts = java.util.Arrays.copyOf(claimReceipts, capacity);
                     }
-                    int laneId = runtime.topology().accountLaneId(route.userId());
+                    int laneId = accountBook.topology().accountLaneId(route.userId());
                     claimIds[claimCount] = id; claimLanes[claimCount] = laneId; claimReceipts[claimCount++] = null;
                     readMask |= 1L << laneId;
                 }
             }
             capturingClaims = true;
-            runtime.dispatchControlLanes(readMask, this);
+            accountBook.dispatchControlLanes(readMask, this);
         }
 
         /** 账本校验强平阶段、确定分配顺序及期望覆盖额，只按可用保险余额覆盖亏空并生成新强平记录。 */
-        @Override protected void applyLedger(TreasuryRuntime ledger) {
+        @Override protected void applyLedger(SystemFunds ledger) {
             long nextDeficit = liquidation.deficitUnits();
             CoreLiquidationState.Status nextStatus;
             switch (command.resolution()) {
@@ -675,19 +675,19 @@ public final class LiquidationService {
         /** 账户 Lane 在读取阶段提供自己持有的源强平及待保险索赔回执。 */
         @Override public Object apply(int laneId) {
             if (capturingClaims) {
-                if (runtime.currentLaneOwns(sourceUserId)) {
-                    liquidation = runtime.liquidation(command.liquidationId());
+                if (accountBook.currentLaneOwns(sourceUserId)) {
+                    liquidation = accountBook.liquidation(command.liquidationId());
                     if (liquidation == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
                 }
                 for (int index = 0; index < claimCount; index++) {
                     if (claimLanes[index] != laneId) continue;
-                    var value = runtime.liquidation(claimIds[index]);
+                    var value = accountBook.liquidation(claimIds[index]);
                     if (value != null && value.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED)
                         claimReceipts[index] = value;
                 }
                 return null;
             }
-            runtime.replaceLiquidation(nextLiquidation);
+            accountBook.replaceLiquidation(nextLiquidation);
             return null;
         }
 
@@ -695,23 +695,23 @@ public final class LiquidationService {
         @Override public boolean getAsBoolean() {
             if (done) return true;
             if (capturingClaims) {
-                if (!runtime.pollControlLanes()) return false;
+                if (!accountBook.pollControlLanes()) return false;
                 capturingClaims = false;
             }
             if (!accountsDispatched) {
-                runtime.dispatchLedgerCommand(this);
+                accountBook.dispatchLedgerCommand(this);
                 requireLedgerAccepted();
-                runtime.dispatchControlLanes(runtime.topology().accountLaneMask(sourceUserId), this);
+                accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(sourceUserId), this);
                 accountsDispatched = true;
             }
-            if (!runtime.pollControlLanes()) return false;
+            if (!accountBook.pollControlLanes()) return false;
             finish();
             return true;
         }
 
         private void finish() {
             if (done) return;
-            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
             java.util.Arrays.fill(claimReceipts, 0, claimCount, null);
             liquidation = nextLiquidation = null;
             command = null;

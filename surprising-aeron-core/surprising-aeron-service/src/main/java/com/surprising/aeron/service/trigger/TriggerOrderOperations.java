@@ -8,27 +8,27 @@ import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 
-/** 条件单在 TradingAccountRuntime 中的生命周期和准入校验业务操作。 */
+/** 条件单在 AccountBook 中的生命周期和准入校验业务操作。 */
 public final class TriggerOrderOperations {
 
-    private final TradingAccountRuntime runtime;
+    private final AccountBook accountBook;
 
-    public TriggerOrderOperations(TradingAccountRuntime runtime) {
-        this.runtime = runtime;
+    public TriggerOrderOperations(AccountBook accountBook) {
+        this.accountBook = accountBook;
     }
 
     public void upsertTriggerOrder(long userId,
                                    CoreTriggerOrderStateView view, int symbolId,
                                    long positionKey, boolean instrumentSettled) {
-        runtime.requireRevisionCapacity();
+        accountBook.requireRevisionCapacity();
         CoreTriggerOrderState trigger = prepareTriggerPlacement(userId, view, symbolId, positionKey, instrumentSettled);
-        runtime.putTriggerOrder(trigger);
-        runtime.incrementCommandRevision();
+        accountBook.putTriggerOrder(trigger);
+        accountBook.incrementCommandRevision();
     }
 
     /** 先校验止盈和止损两腿关系，再分别完成登记校验，并预检两次版本递增容量。 */
@@ -38,11 +38,11 @@ public final class TriggerOrderOperations {
         TriggerOrderCommands.validateOcoPair(takeProfit, stopLoss);
         var first = prepareTriggerPlacement(userId, takeProfit, symbolId, positionKey, instrumentSettled);
         var second = prepareTriggerPlacement(userId, stopLoss, symbolId, positionKey, instrumentSettled);
-        Math.addExact(runtime.revision(), 2);
-        runtime.putTriggerOrder(first);
-        runtime.putTriggerOrder(second);
-        runtime.incrementCommandRevision();
-        runtime.incrementCommandRevision();
+        Math.addExact(accountBook.revision(), 2);
+        accountBook.putTriggerOrder(first);
+        accountBook.putTriggerOrder(second);
+        accountBook.incrementCommandRevision();
+        accountBook.incrementCommandRevision();
     }
 
     /** 核对归属、客户标识、币对存在和未结算、普通编号与客户编号不重复，再检查持仓容量。 */
@@ -52,24 +52,24 @@ public final class TriggerOrderOperations {
         if (view == null || userId <= 0 || symbolId < 0 || positionKey < 0) {
             throw new IllegalArgumentException("invalid prepared runtime trigger order update");
         }
-        runtime.assertOwner();
-        if (view.userId() != userId || view.productLine() != runtime.productLine()) {
+        accountBook.assertOwner();
+        if (view.userId() != userId || view.productLine() != accountBook.productLine()) {
             throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
         }
         if (view.clientTriggerOrderId().isBlank()) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
         }
-        CoreInstrument instrument = runtime.instrument(view.instrumentId());
+        CoreInstrument instrument = accountBook.instrument(view.instrumentId());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
         }
         if (instrumentSettled) {
             throw new CoreStateRejectedException("INSTRUMENT_SETTLED", "instrument is already settled");
         }
-        if (runtime.triggerOrder(view.triggerOrderId()) != null) {
+        if (accountBook.triggerOrder(view.triggerOrderId()) != null) {
             throw new CoreStateRejectedException("DUPLICATE_TRIGGER_ORDER_ID", "trigger order already exists");
         }
-        if (runtime.hasTriggerClient(userId, view.clientTriggerOrderId())) {
+        if (accountBook.hasTriggerClient(userId, view.clientTriggerOrderId())) {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
                     "clientTriggerOrderId already exists");
         }
@@ -79,15 +79,15 @@ public final class TriggerOrderOperations {
 
     private void validateTriggerPlacement(long userId, int symbolId,
                                           long positionKey, CoreTriggerOrderStateView view) {
-        UserAccount user = runtime.user(userId);
+        UserAccount user = accountBook.user(userId);
         if (user == null) throw new CoreStateRejectedException("USER_NOT_FOUND", "user does not exist");
-        if (!runtime.productLine().isDerivative()) return;
+        if (!accountBook.productLine().isDerivative()) return;
         if (user.positionMode() == CorePositionMode.ONE_WAY && view.positionSide().hedgeSide()
                 || user.positionMode() == CorePositionMode.HEDGE && !view.positionSide().hedgeSide()) {
             throw new CoreStateRejectedException("POSITION_MODE_MISMATCH",
                     "trigger position side does not match user position mode");
         }
-        Position position = runtime.position(positionKey);
+        Position position = accountBook.position(positionKey);
         if (position == null || position.signedQuantitySteps() == 0) {
             throw new CoreStateRejectedException("TRIGGER_POSITION_REQUIRED",
                     "trigger order requires an open position");
@@ -101,9 +101,9 @@ public final class TriggerOrderOperations {
             throw new CoreStateRejectedException("TRIGGER_SIDE_NOT_REDUCING",
                     "trigger order side must reduce the current position");
         }
-        long openReduceOnly = runtime.openReduceOnlyQuantity(
+        long openReduceOnly = accountBook.openReduceOnlyQuantity(
                 userId, symbolId, view.positionSide(), closeSide, view.marginMode());
-        long projectedTriggerCapacity = runtime.projectedTriggerCapacity(userId, view);
+        long projectedTriggerCapacity = accountBook.projectedTriggerCapacity(userId, view);
         if (Math.addExact(openReduceOnly, projectedTriggerCapacity)
                 > Math.absExact(position.signedQuantitySteps())) {
             throw new CoreStateRejectedException("TRIGGER_CLOSE_CAPACITY_EXCEEDED",
@@ -128,7 +128,7 @@ public final class TriggerOrderOperations {
     public boolean cancelPendingTriggerOrderForCommit(long triggerId) {
         CoreTriggerOrderState current = requireTriggerOrder(triggerId);
         if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
-        runtime.putTriggerOrder(current.toPendingCancellation());
+        accountBook.putTriggerOrder(current.toPendingCancellation());
         return true;
     }
 
@@ -159,7 +159,7 @@ public final class TriggerOrderOperations {
                                              long activatedAtEpochMillis) {
         CoreTriggerOrderState current = requireTriggerOrder(triggerOrderId);
         if (!current.status().open() || current.triggerType() != CoreTriggerOrderType.TRAILING_STOP) return false;
-        runtime.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(),
+        accountBook.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(),
                 current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(),
                 current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
@@ -170,7 +170,7 @@ public final class TriggerOrderOperations {
                 current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
                 Math.incrementExact(current.revision()), current.priceSource()));
-        runtime.incrementCommandRevision();
+        accountBook.incrementCommandRevision();
         return true;
     }
 
@@ -198,16 +198,16 @@ public final class TriggerOrderOperations {
     private void updateTriggerOrder(CoreTriggerOrderState current,
                                     CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
                                     long triggeredPriceTicks, String rejectReason, long updatedAt) {
-        runtime.requireRevisionCapacity();
-        runtime.putTriggerOrder(current.transition(status, placedOrderId, triggerSequence,
+        accountBook.requireRevisionCapacity();
+        accountBook.putTriggerOrder(current.transition(status, placedOrderId, triggerSequence,
                 triggeredPriceTicks, rejectReason, updatedAt));
-        runtime.incrementCommandRevision();
+        accountBook.incrementCommandRevision();
     }
 
     private CoreTriggerOrderState requireTriggerOrder(long triggerOrderId) {
         if (triggerOrderId <= 0) throw new IllegalArgumentException("invalid runtime trigger order");
-        runtime.assertOwner();
-        CoreTriggerOrderState current = runtime.triggerOrder(triggerOrderId);
+        accountBook.assertOwner();
+        CoreTriggerOrderState current = accountBook.triggerOrder(triggerOrderId);
         if (current == null) {
             throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
         }

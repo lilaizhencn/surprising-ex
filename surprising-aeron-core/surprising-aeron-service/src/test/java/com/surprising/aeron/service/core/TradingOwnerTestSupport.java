@@ -247,11 +247,11 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      */
     @Override
     public void onTerminate(Cluster ignored) {
-        TradingCoreRuntime runtime = null;
-        try { runtime = owner.state(); } catch (RuntimeException ignoredFailure) {}
+        TradingCore tradingCore = null;
+        try { tradingCore = owner.state(); } catch (RuntimeException ignoredFailure) {}
         try { owner.terminate(); }
         catch (/* 关闭真实 Owner 时产生的运行时异常，只有原故障已记录时才抑制 */ RuntimeException failure) {
-            if (runtime == null || runtime.fatalFailure() == null) throw failure;
+            if (tradingCore == null || tradingCore.fatalFailure() == null) throw failure;
         }
         finally { egress.clear(); }
         cluster = null;
@@ -345,7 +345,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
     /**
      * 取得真实 Owner 当前已启动的运行时引用，仍须遵守账户所有权。
      */
-    public TradingCoreRuntime state() { return owner.state(); }
+    public TradingCore state() { return owner.state(); }
     /**
      * 通过真实 Owner 归还响应缓冲；运行时已释放时由 Owner 避免再访问池。
      * @param response 已完成或需归还的响应缓冲

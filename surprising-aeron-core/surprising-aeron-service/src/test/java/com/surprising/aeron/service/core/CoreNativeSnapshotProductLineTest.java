@@ -22,18 +22,18 @@ class CoreNativeSnapshotProductLineTest {
         byte[] snapshot;
         // 快照前后比较的订单簿 int 哈希。
         int bookHash;
-        try (/* 保存快照前的原运行时，资源退出时关闭。 */ TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
+        try (/* 保存快照前的原运行时，资源退出时关闭。 */ TradingCore state = new TradingCore(productLine)) {
             snapshot = state.snapshot(101);
-            bookHash = TradingCoreRuntime.inspectSnapshot(state.productLine(), state.snapshot()).engineStateHash();
+            bookHash = TradingCore.inspectSnapshot(state.productLine(), state.snapshot()).engineStateHash();
         }
 
         // 完整解析原快照得到的公开配对清单。
-        CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(productLine, snapshot);
-        try (/* 从同产品线快照恢复并激活的运行时，退出时关闭。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
+        CoreSnapshotManifest manifest = TradingCore.inspectSnapshot(productLine, snapshot);
+        try (/* 从同产品线快照恢复并激活的运行时，退出时关闭。 */ TradingCore restored = TradingCore.fromSnapshot(productLine, snapshot)) {
             assertThat(manifest.productLine()).isEqualTo(productLine);
             assertThat(restored.laneTopology()).isEqualTo(manifest.topology());
             assertThat(restored.productLine()).isEqualTo(productLine);
-            assertThat(TradingCoreRuntime.inspectSnapshot(restored.productLine(), restored.snapshot()).engineStateHash()).isEqualTo(bookHash);
+            assertThat(TradingCore.inspectSnapshot(restored.productLine(), restored.snapshot()).engineStateHash()).isEqualTo(bookHash);
         }
     }
 }

@@ -12,7 +12,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.result.CommandResultBuilder;
 import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.product.api.ProductLine;
@@ -54,9 +54,9 @@ class CommandSlotTest {
      * 挂起用户七/订单一百零一的变更缓冲，构建器另写八/一百零二，再恢复原缓冲；同一个 PrimitiveLongView 对象必须先看到新值再看到恢复值，避免每次复制视图。
      */
     @Test void changedIdViewsFollowSuspendedPrimitiveBuffersWithoutPerCommitCopies() {
-        try (/* 提供结果构建器的真实线性永续运行时，退出时关闭。 */ var runtime = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 提供结果构建器的真实线性永续运行时，退出时关闭。 */ var tradingCore = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             // Owner 结果与变更集合构建器，空 Owner 场景用于禁止回读。
-            var builder = runtime.resultBuilder;
+            var builder = tradingCore.resultBuilder;
             builder.beginCommand();
             builder.changedUserIds().add(7);
             builder.changedOrderIds().add(101);
@@ -91,12 +91,12 @@ class CommandSlotTest {
      */
     @Test
     void clearsControlResultAndWorkBeforeReusingTheSameSlot() {
-        try (var runtime = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (var tradingCore = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             // 本方法实际测试的直接命令槽。
-            OrderCommand.Direct slot = runtime.directCommand;
+            OrderCommand.Direct slot = tradingCore.directCommand;
             // 首条直接命令，批次代际测试中则为当前代首个 Core 序号。
             CoreMessage first = command(1000);
-            slot.initialize(first, CommandFingerprint.of(first), new TradingCoreRuntime.SourceKey(
+            slot.initialize(first, CommandFingerprint.of(first), new TradingCore.SourceKey(
                     CommandSource.OPERATIONS, 1), 10, 20, 1, 2, 3);
             slot.deferControl(() -> true);
             slot.result(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
@@ -106,7 +106,7 @@ class CommandSlotTest {
 
             // 复用同一直接槽的新命令。
             CoreMessage second = command(1001);
-            slot.initialize(second, CommandFingerprint.of(second), new TradingCoreRuntime.SourceKey(
+            slot.initialize(second, CommandFingerprint.of(second), new TradingCore.SourceKey(
                     CommandSource.OPERATIONS, 1), 30, 40, 4, 5, 6);
             assertThat(slot.command()).isSameAs(second);
             assertThat(slot.hasControlWork()).isFalse();
@@ -143,7 +143,7 @@ class CommandSlotTest {
      */
     @Test
     void batchOrderingDetachesMiddleHeadAndTailAcrossRingReuse() {
-        try (/* 提供待队列和批次链入口的真实运行时。 */ var owner = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 提供待队列和批次链入口的真实运行时。 */ var owner = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             for (/* 当前槽位复用代际，循环共三次。 */ int generation = 0; generation < 3; generation++) {
                 // 首条直接命令，批次代际测试中则为当前代首个 Core 序号。
                 long first = 1000L + (long) generation * owner.pendingMatching().capacity();
@@ -152,7 +152,7 @@ class CommandSlotTest {
                 // 本代三个批次上下文数组。
                 var batches = new OrderBatchProcessor.PendingBatch[3];
                 for (/* 当前创建或清理的三个批次/命令下标。 */ int i = 0; i < 3; i++) {
-                    pending[i] = owner.admissions().newPendingMatching(first + i,
+                    pending[i] = owner.orderChecks().newPendingMatching(first + i,
                             OrderCommand.Operation.PLACE, command(first + i));
                     owner.pendingMatching().put(pending[i]);
                     batches[i] = new OrderBatchProcessor.PendingBatch(1, owner.responseSlotPool());

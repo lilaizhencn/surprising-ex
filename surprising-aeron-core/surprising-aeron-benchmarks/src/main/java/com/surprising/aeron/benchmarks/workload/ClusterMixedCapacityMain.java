@@ -470,7 +470,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         log.info("{}", "mixedLiquidationCancellation=PASS pages=" + cancellationPages);
         var insurance=work(CoreLiquidationWorkView.Purpose.INSURANCE).resolutions();
         if(insurance.size()!=1)throw new IllegalStateException("insurance work missing: "+insurance);
-        long available=treasury().stream().filter(x->x.asset().equals("USDT")).findFirst().orElseThrow().insuranceBalanceUnits();
+        long available=systemFunds().stream().filter(x->x.asset().equals("USDT")).findFirst().orElseThrow().insuranceBalanceUnits();
         long coverage=Math.min(available,insurance.getFirst().deficitUnits()-1);
         if(coverage<=0)throw new IllegalStateException("insurable deficit missing");
         execute(CoreMessageType.RESOLVE_LIQUIDATION,0,TradingCommandCodec.encodeResolveLiquidation(
@@ -577,9 +577,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         return r;
     }
     private CoreUserStateView user(long id) { return CoreStateQueryCodec.decodeUserState(query(CoreMessageType.USER_STATE_QUERY,id,new byte[0]).data()); }
-    private List<CoreTreasuryAssetView> treasury() { return CoreStateQueryCodec.decodeTreasuryState(query(CoreMessageType.TREASURY_STATE_QUERY,0,new byte[0]).data()); }
+    private List<CoreTreasuryAssetView> systemFunds() { return CoreStateQueryCodec.decodeTreasuryState(query(CoreMessageType.TREASURY_STATE_QUERY,0,new byte[0]).data()); }
     static long expectedFunds() { return (USERS+3L*SYMBOLS)*BALANCE+Long.getLong("surprising.aeron.mixed-loss-balance", 100L)+25; }
-    static long treasuryFunds(CoreTreasuryAssetView t) {
+    static long systemFundsFunds(CoreTreasuryAssetView t) {
         long sum=Math.addExact(t.feeBalanceUnits(),t.insuranceBalanceUnits());
         sum=Math.addExact(sum,t.liquidationFeeBalanceUnits());sum=Math.addExact(sum,t.fundingResidualBalanceUnits());
         sum=Math.addExact(sum,t.roundingResidualBalanceUnits());sum=Math.addExact(sum,t.clearingPnlBalanceUnits());
@@ -605,9 +605,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             if(b.availableUnits()<0||b.lockedUnits()<0)throw new IllegalStateException("negative balance");
             if(b.asset().equals("USDT"))total=Math.addExact(total,Math.addExact(b.availableUnits(),b.lockedUnits()));
         }
-        for(var t:treasury())if(t.asset().equals("USDT")) {
+        for(var t:systemFunds())if(t.asset().equals("USDT")) {
             if(t.insuranceDeficitUnits()!=0)throw new IllegalStateException("mixed treasury deficit remains");
-            total=Math.addExact(total,treasuryFunds(t));
+            total=Math.addExact(total,systemFundsFunds(t));
         }
         if (sideLoad != null) total = Math.addExact(total, sideLoad.verifyAndBalance());
         long expected = Math.addExact(expectedFunds(), sideLoad == null ? 0 : sideLoad.netDeposits());

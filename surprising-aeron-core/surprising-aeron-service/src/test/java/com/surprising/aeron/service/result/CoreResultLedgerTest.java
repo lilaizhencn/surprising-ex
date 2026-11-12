@@ -8,8 +8,8 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport;
+import com.surprising.aeron.service.core.TradingCore;
+import com.surprising.aeron.service.core.TradingCoreRestoreTestSupport;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
@@ -30,7 +30,7 @@ class CoreResultLedgerTest {
     @Test
     void borrowedFingerprintsOutliveDecoderReuseAndExposedValuesOutliveLedgerRecordReuse() {
         // 本场景真实的近期结果账本
-        var ledger = new CommandResultLedger(new LinkedHashMap<>());
+        var ledger = new CommandResultLog(new LinkedHashMap<>());
         // 可生成借用指纹槽和独立指纹值的计算器
         var calculator = new com.surprising.aeron.protocol.CommandFingerprint.Calculator();
         // 本场景反复借还输入消息的解码器
@@ -55,14 +55,14 @@ class CoreResultLedgerTest {
             // 当前独立消息计算出的稳定指纹参照
             var stable = calculator.of(owned);
             ledger.storeOwnedResult(id, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                    sequence, TradingCore.EMPTY_RESPONSE_DATA);
             if (sequence == 1) {
                 firstExposed = ledger.get(id).fingerprint();
                 firstExpected = stable;
             }
             input.releaseDecoderSlot();
             expected.put(id, stable);
-            if (expected.size() > TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS)
+            if (expected.size() > TradingCore.Limits.MAX_IDEMPOTENCY_RESULTS)
                 expected.remove(expected.keySet().iterator().next());
             for (var /* 仍应保留的参照 Map 当前键值项 */ entry : expected.entrySet())
                 assertThat(ledger.get(entry.getKey()).fingerprint()).isEqualTo(entry.getValue());
@@ -82,7 +82,7 @@ class CoreResultLedgerTest {
     @Test
     void sustainedTurnoverPreservesLookupRetentionAndRestoreOrder() {
         // 本场景真实的近期结果账本
-        var ledger = new CommandResultLedger(new LinkedHashMap<>());
+        var ledger = new CommandResultLog(new LinkedHashMap<>());
         // 按场景保存参照指纹或应用计数与保留序号的有序 Map
         var expected = new LinkedHashMap<UUID, long[]>();
         // 固定种子九百一十五的随机源，保证两万次周转可复现
@@ -98,7 +98,7 @@ class CoreResultLedgerTest {
             // 参照模型本次沿用或新增的保留序号
             long retention = expected.containsKey(id) ? expected.get(id)[1] : nextRetention++;
             expected.put(id, new long[]{sequence, retention});
-            if (expected.size() > TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS)
+            if (expected.size() > TradingCore.Limits.MAX_IDEMPOTENCY_RESULTS)
                 expected.remove(expected.keySet().iterator().next());
             ledger.storeOwnedResult(id, stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
                     sequence, 0, new byte[]{(byte) sequence}, 0).fingerprint(), ResponseStatus.APPLIED,
@@ -114,7 +114,7 @@ class CoreResultLedgerTest {
             }
             assertThat(ledger.get(new UUID(0, -sequence))).isNull();
             if (sequence % 970 == 0)
-                ledger = new CommandResultLedger(new LinkedHashMap<>(ledger.entries()));
+                ledger = new CommandResultLog(new LinkedHashMap<>(ledger.entries()));
         }
     }
 
@@ -124,7 +124,7 @@ class CoreResultLedgerTest {
     @Test
     void ownedInsertionPreservesSequenceAndPriorResultWhenReplacing() {
         // 本场景真实的近期结果账本
-        var ledger = new CommandResultLedger(new LinkedHashMap<>());
+        var ledger = new CommandResultLog(new LinkedHashMap<>());
         // 按场景最先存入的结果 UUID
         // 按场景第二个结果 UUID
         UUID first = UUID.randomUUID(), second = UUID.randomUUID();
@@ -147,7 +147,7 @@ class CoreResultLedgerTest {
         assertThat(ledger.get(first).responseDataUnsafe()).isSameAs(replacementBytes);
         assertThat(ledger.get(first).retentionSequence()).isEqualTo(original.retentionSequence());
         assertThat(ledger.entries().keySet()).containsExactly(first, second);
-        CommandResultLedger.validateResultLedger(ledger.entries());
+        CommandResultLog.validateResultLedger(ledger.entries());
     }
 
     /**
@@ -158,12 +158,12 @@ class CoreResultLedgerTest {
         // 独立记录构造时默认复制的原字节数组
         byte[] source = new byte[]{1, 2, 3};
         // 默认复制响应字节的原独立记录
-        CommandResultLedger.StoredResult created = stored(
+        CommandResultLog.StoredResult created = stored(
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 7, source, 0);
         source[0] = 9;
 
         // 用原响应构造另一保留序号的独立记录
-        CommandResultLedger.StoredResult retained = stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
+        CommandResultLog.StoredResult retained = stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1, 7, created.responseData(), 11);
         // 从记录导出的有效响应副本，测试故意改写它
         byte[] exposed = retained.responseData();
@@ -178,12 +178,12 @@ class CoreResultLedgerTest {
      */
     @Test
     void evictedCommandResultIsExplicitlyOutsideRetention() {
-        try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 条数淘汰场景中最早应用并随后查询的命令 UUID
             UUID firstCommandId = UUID.randomUUID();
             assertThat(CoreTestCompletion.applyAsynchronously(state, checkpoint(firstCommandId, 1, 1)).status())
                     .isEqualTo(ResponseStatus.APPLIED);
-            for (/* 当前写入或应用的探针序号 */ int sequence = 2; sequence <= TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
+            for (/* 当前写入或应用的探针序号 */ int sequence = 2; sequence <= TradingCore.Limits.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
                 assertThat(CoreTestCompletion.applyAsynchronously(state, checkpoint(UUID.randomUUID(), sequence, 1)).status())
                         .isEqualTo(ResponseStatus.APPLIED);
             }
@@ -203,7 +203,7 @@ class CoreResultLedgerTest {
     @Test
     void restoredLedgerRejectsResponseBytesOverTheBound() {
         // 为超字节恢复场景准备的有序结果集合
-        Map<UUID, CommandResultLedger.StoredResult> results = new LinkedHashMap<>();
+        Map<UUID, CommandResultLog.StoredResult> results = new LinkedHashMap<>();
         // 本场景构造的大响应字节数组
         byte[] response = new byte[512_000];
         Arrays.fill(response, (byte) 7);
@@ -212,7 +212,7 @@ class CoreResultLedgerTest {
                     index + 1L, index + 10L, response, index + 1L));
         }
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TradingCoreRuntimeRestoreTestSupport.restore(
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TradingCoreRestoreTestSupport.restore(
                         ProductLine.SPOT, 70, results, Map.of(),
                         com.surprising.aeron.service.snapshot.state.TradingCoreState.empty(ProductLine.SPOT)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -224,7 +224,7 @@ class CoreResultLedgerTest {
      */
     @Test
     void evictsOldestResultWhenResponseBytesExceedTheBound() throws Exception {
-        try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 本场景构造的大响应字节数组
             byte[] response = new byte[12 * 1024 * 1024];
             // 按场景最先存入的结果 UUID
@@ -234,16 +234,16 @@ class CoreResultLedgerTest {
             // 按字节上限测试中第三个结果 UUID
             UUID third = UUID.randomUUID();
 
-            storeResult(state.resultLedger(), first,
+            storeResult(state.commandResultLog(), first,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, response, 0));
-            storeResult(state.resultLedger(), second,
+            storeResult(state.commandResultLog(), second,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 2, 2, response, 0));
-            storeResult(state.resultLedger(), third,
+            storeResult(state.commandResultLog(), third,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, response, 0));
 
             assertThat(state.commandResults()).doesNotContainKey(first);
             assertThat(state.commandResults()).containsKeys(second, third);
-            try (/* 从相同结果、来源与业务状态恢复的自动关闭 Core */ TradingCoreRuntime restored = TradingCoreRuntimeRestoreTestSupport.restore(
+            try (/* 从相同结果、来源与业务状态恢复的自动关闭 Core */ TradingCore restored = TradingCoreRestoreTestSupport.restore(
                     ProductLine.SPOT, state.appliedCommandCount(), state.commandResults(), state.lastSourceSequences(), state.tradingState())) {
                 assertThat(restored.stateHash()).isEqualTo(state.stateHash());
             }
@@ -255,7 +255,7 @@ class CoreResultLedgerTest {
      */
     @Test
     void replacementEvictsOldestOtherResultsAndKeepsTheReplacedKeyBounded() throws Exception {
-        try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 替换扩容场景最早的其他结果 UUID，超限时应淘汰
             UUID oldest = UUID.randomUUID();
             // 手动构造为待完成样式、随后替换的受保护结果 UUID
@@ -269,16 +269,16 @@ class CoreResultLedgerTest {
             // 受保护项替换后的四 MiB 响应数组
             byte[] fourMiB = new byte[4 * 1024 * 1024];
 
-            storeResult(state.resultLedger(), oldest,
+            storeResult(state.commandResultLog(), oldest,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, fourteenMiB, 0));
-            storeResult(state.resultLedger(), pending,
+            storeResult(state.commandResultLog(), pending,
                     stored(ResponseStatus.OK, CoreResultCode.MATCHING_PENDING, 2, 2, oneMiB, 0));
             // 替换前保存的受保护项保留序号，替换后必须沿用
             long pendingRetention = state.commandResults().get(pending).retentionSequence();
-            storeResult(state.resultLedger(), newest,
+            storeResult(state.commandResultLog(), newest,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, fourteenMiB, 0));
 
-            storeResult(state.resultLedger(), pending,
+            storeResult(state.commandResultLog(), pending,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 4, 4, fourMiB, 0));
 
             assertThat(state.commandResults()).doesNotContainKey(oldest);
@@ -286,7 +286,7 @@ class CoreResultLedgerTest {
             assertThat(state.commandResults().get(pending).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.commandResults().get(pending).responseData()).hasSize(fourMiB.length);
             assertThat(state.commandResults().get(pending).retentionSequence()).isEqualTo(pendingRetention);
-            try (/* 从相同结果、来源与业务状态恢复的自动关闭 Core */ TradingCoreRuntime restored = TradingCoreRuntimeRestoreTestSupport.restore(
+            try (/* 从相同结果、来源与业务状态恢复的自动关闭 Core */ TradingCore restored = TradingCoreRestoreTestSupport.restore(
                     ProductLine.SPOT, state.appliedCommandCount(), state.commandResults(), state.lastSourceSequences(), state.tradingState())) {
                 assertThat(restored.stateHash()).isEqualTo(state.stateHash());
             }
@@ -314,7 +314,7 @@ class CoreResultLedgerTest {
      * @param response 独立记录默认复制的输入响应数组
      * @param retentionSequence 独立记录初始保留序号，直接存入账本时由账本重新决定
      */
-    private static CommandResultLedger.StoredResult stored(
+    private static CommandResultLog.StoredResult stored(
             ResponseStatus status,
             CoreResultCode resultCode,
             long appliedCommandCount,
@@ -325,7 +325,7 @@ class CoreResultLedgerTest {
         long sourceSequence = Math.max(1, appliedCommandCount);
         // 仅为独立结果生成稳定指纹的 ADJUST_BALANCE 探针
         CoreMessage command = checkpoint(new UUID(appliedCommandCount, resultIdentity), sourceSequence, 1);
-        return new CommandResultLedger.StoredResult(
+        return new CommandResultLog.StoredResult(
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), status, resultCode,
                 appliedCommandCount, response, retentionSequence);
     }
@@ -339,7 +339,7 @@ class CoreResultLedgerTest {
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 7, 0, 1001, 9_000, 99),
                 CoreStateQueryCodec.encodeCommandResultQuery(commandId));
     }
-    private static void storeResult(CommandResultLedger ledger, UUID id, CommandResultLedger.StoredResult result) {
+    private static void storeResult(CommandResultLog ledger, UUID id, CommandResultLog.StoredResult result) {
         ledger.storeOwnedResult(id, result.fingerprint(), result.status(), result.resultCode(),
                 result.appliedCommandCount(), result.responseData());
     }

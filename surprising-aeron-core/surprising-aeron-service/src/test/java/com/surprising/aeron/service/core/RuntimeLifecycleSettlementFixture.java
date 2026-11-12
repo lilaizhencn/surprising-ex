@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.settlement.ContractExpirySettlementService;
@@ -12,12 +12,12 @@ public final class RuntimeLifecycleSettlementFixture {
     private RuntimeLifecycleSettlementFixture() {}
 
     public static CoreSettlementProgressView applyRuntime(SettleInstrumentCommand command,
-            Iterable<Long> userIds, ActiveOrderIndex orders, TradingAccountRuntime runtime,
-            RuntimeIdentityRegistry identities) {
-        var work = ContractExpirySettlementService.prepare(null, command, userIds, orders, runtime, identities);
+            Iterable<Long> userIds, ActiveOrderIndex orders, AccountBook accountBook,
+            IdIndex identities) {
+        var work = ContractExpirySettlementService.prepare(null, command, userIds, orders, accountBook, identities);
         CoreTestCompletion.completeControlWork(work::poll);
         var result = work.result();
-        runtime.clearChangedKeys();
+        accountBook.clearChangedKeys();
         return result;
     }
 }

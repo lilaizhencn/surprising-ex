@@ -30,12 +30,12 @@ public class ReplySlotAllocationBenchmark {
     private final SinkSession session = new SinkSession();
     private final ClusterServiceEgress egress = new ClusterServiceEgress((cluster, target) -> session);
     private long sessionId;
-    private TradingCoreRuntime runtime;
+    private TradingCore tradingCore;
     private TradingCoreOwner processor;
     private TradingCoreOwner.ResponseSink publisher;
 
     @Setup public void setup() {
-        runtime = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
+        tradingCore = new TradingCore(ProductLine.LINEAR_PERPETUAL);
         processor = new TradingCoreOwner(ProductLine.LINEAR_PERPETUAL, (s, h, r, sequence) -> { });
         var cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
                 (proxy, method, args) -> switch (method.getName()) {
@@ -75,7 +75,7 @@ public class ReplySlotAllocationBenchmark {
             var message = decoder.decodeBorrowed(frame, 0, frame.capacity());
             var response = message.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                     CoreResultCode.NONE, i + 1, RESULT, 0, RESULT.length);
-            TradingCoreOwner.publishResponse(publisher, sessionId, message, response, runtime.committedCoreSequence());
+            TradingCoreOwner.publishResponse(publisher, sessionId, message, response, tradingCore.committedCoreSequence());
             message.releaseDecoderSlot();
         }
         egress.drainResponses();
@@ -83,7 +83,7 @@ public class ReplySlotAllocationBenchmark {
         return session.checksum;
     }
 
-    @TearDown public void close() { egress.clear(); runtime.close(); }
+    @TearDown public void close() { egress.clear(); tradingCore.close(); }
 
     private static final class SinkSession implements ClusterServiceEgress.SessionEgress {
         private long checksum;

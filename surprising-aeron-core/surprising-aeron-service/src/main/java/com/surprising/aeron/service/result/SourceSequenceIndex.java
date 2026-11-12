@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.result;
 
 import com.surprising.aeron.protocol.CommandSource;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import lombok.Getter;
@@ -13,7 +13,7 @@ public final class SourceSequenceIndex {
     private int[] sourceCodes;
     private long[] sourceIds;
     private long[] sequences;
-    private TradingCoreRuntime.SourceKey[] keys;
+    private TradingCore.SourceKey[] keys;
     private boolean[] occupied;
     /** 按首次出现顺序保存的来源代码。 */
     private int[] insertionSourceCodes;
@@ -26,17 +26,17 @@ public final class SourceSequenceIndex {
     private int insertionCount;
     @Accessors(fluent = true, chain = false)
     @Getter
-    private TradingCoreRuntime.SourceKey lastLookupKey;
+    private TradingCore.SourceKey lastLookupKey;
 
     /** 按初始条数选择二次幂表容量，建立数组后依次导入已有来源。 */
-    public SourceSequenceIndex(Map<TradingCoreRuntime.SourceKey, Long> initial) {
+    public SourceSequenceIndex(Map<TradingCore.SourceKey, Long> initial) {
         int expected = initial == null ? 0 : initial.size();
         int capacity = 16;
         while (capacity * LOAD_FACTOR < Math.max(1, expected)) capacity <<= 1;
         allocate(capacity);
         if (initial != null) {
-            for (Map.Entry<TradingCoreRuntime.SourceKey, Long> entry : initial.entrySet()) {
-                TradingCoreRuntime.SourceKey key = entry.getKey();
+            for (Map.Entry<TradingCore.SourceKey, Long> entry : initial.entrySet()) {
+                TradingCore.SourceKey key = entry.getKey();
                 put(key.source(), key.sourceId(), entry.getValue());
             }
         }
@@ -66,7 +66,7 @@ public final class SourceSequenceIndex {
         sourceCodes[slot] = source.wireCode();
         sourceIds[slot] = sourceId;
         sequences[slot] = sequence;
-        keys[slot] = new TradingCoreRuntime.SourceKey(source, sourceId);
+        keys[slot] = new TradingCore.SourceKey(source, sourceId);
         size++;
         ensureInsertionCapacity(insertionCount + 1);
         insertionSourceCodes[insertionCount] = source.wireCode();
@@ -74,7 +74,7 @@ public final class SourceSequenceIndex {
     }
 
     /** 使用调用方已有来源键写入，命中只更新序号，新键保留原键对象并追加首次出现顺序。 */
-    public void put(TradingCoreRuntime.SourceKey key, long sequence) {
+    public void put(TradingCore.SourceKey key, long sequence) {
         if (key == null) throw new IllegalArgumentException("source key is required");
         if (sequence < 0) throw new IllegalArgumentException("invalid source sequence");
         int slot = find(key.source(), key.sourceId());
@@ -96,8 +96,8 @@ public final class SourceSequenceIndex {
     }
 
     /** 按来源首次出现顺序创建独立可修改 LinkedHashMap。 */
-    public Map<TradingCoreRuntime.SourceKey, Long> snapshot() {
-        LinkedHashMap<TradingCoreRuntime.SourceKey, Long> result = new LinkedHashMap<>(Math.max(1, size));
+    public Map<TradingCore.SourceKey, Long> snapshot() {
+        LinkedHashMap<TradingCore.SourceKey, Long> result = new LinkedHashMap<>(Math.max(1, size));
         for (int index = 0; index < insertionCount; index++) {
             CommandSource source = CommandSource.fromWireCode(insertionSourceCodes[index]);
             long sourceId = insertionSourceIds[index];
@@ -112,7 +112,7 @@ public final class SourceSequenceIndex {
         for (int index = 0; index < insertionCount; index++) {
             CommandSource source = CommandSource.fromWireCode(insertionSourceCodes[index]);
             long sourceId = insertionSourceIds[index];
-            digest ^= TradingCoreRuntime.sourceSequenceDigest(
+            digest ^= TradingCore.sourceSequenceDigest(
                     keys[find(source, sourceId)], sequenceAt(source, sourceId));
         }
         return digest;
@@ -144,7 +144,7 @@ public final class SourceSequenceIndex {
         int[] oldSources = sourceCodes;
         long[] oldIds = sourceIds;
         long[] oldSequences = sequences;
-        TradingCoreRuntime.SourceKey[] oldKeys = keys;
+        TradingCore.SourceKey[] oldKeys = keys;
         boolean[] oldOccupied = occupied;
         allocate(oldSources.length << 1);
         for (int index = 0; index < oldSources.length; index++) {
@@ -164,7 +164,7 @@ public final class SourceSequenceIndex {
         sourceCodes = new int[capacity];
         sourceIds = new long[capacity];
         sequences = new long[capacity];
-        keys = new TradingCoreRuntime.SourceKey[capacity];
+        keys = new TradingCore.SourceKey[capacity];
         occupied = new boolean[capacity];
         if (insertionSourceCodes == null) {
             insertionSourceCodes = new int[Math.max(8, capacity >>> 1)];

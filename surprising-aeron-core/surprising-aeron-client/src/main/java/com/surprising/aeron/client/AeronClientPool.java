@@ -49,8 +49,8 @@ public final class AeronClientPool implements AutoCloseable {
     }
 
     @FunctionalInterface
-    public interface CommandAdmissionCallback {
-        void onAdmission(UUID commandId, TryCommandResult result);
+    public interface CommandOrderCheckCallback {
+        void onOrderCheck(UUID commandId, TryCommandResult result);
     }
 
     interface Session extends AutoCloseable {
@@ -276,7 +276,7 @@ public final class AeronClientPool implements AutoCloseable {
         if (request == null) {
             return TryCommandResult.BACK_PRESSURED;
         }
-        CompletableFuture<Long> admissionFuture = request.admissionFuture;
+        CompletableFuture<Long> orderCheckFuture = request.orderCheckFuture;
         long requestGeneration = request.generation();
         if (!agent.enqueue(request)) {
             agent.recycleUnqueued(request);
@@ -284,19 +284,19 @@ public final class AeronClientPool implements AutoCloseable {
         }
         long offerResult;
         try {
-            offerResult = admissionFuture.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
+            offerResult = orderCheckFuture.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException exception) {
             if (request.cancelBeforeOffer(requestGeneration)) {
                 return agent.sessionConnected() ? TryCommandResult.BUSY : TryCommandResult.NOT_READY;
             }
-            offerResult = admissionFuture.join();
+            offerResult = orderCheckFuture.join();
         } catch (InterruptedException exception) {
             boolean cancelled = request.cancelBeforeOffer(requestGeneration);
             Thread.currentThread().interrupt();
             if (cancelled) {
                 return TryCommandResult.BUSY;
             }
-            offerResult = admissionFuture.join();
+            offerResult = orderCheckFuture.join();
         } catch (java.util.concurrent.ExecutionException exception) {
             return TryCommandResult.UNAVAILABLE;
         }
@@ -308,13 +308,13 @@ public final class AeronClientPool implements AutoCloseable {
             UUID commandId,
             long userId,
             byte[] payload,
-            CommandAdmissionCallback callback) {
+            CommandOrderCheckCallback callback) {
         requireKind(type, WireMessageKind.COMMAND, "command");
         Objects.requireNonNull(commandId, "commandId");
         Objects.requireNonNull(callback, "callback");
         byte[] safePayload = requirePayload(payload);
         if (closed.get()) {
-            callback.onAdmission(commandId, TryCommandResult.CLOSED);
+            callback.onOrderCheck(commandId, TryCommandResult.CLOSED);
             return true;
         }
         AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
@@ -336,7 +336,7 @@ public final class AeronClientPool implements AutoCloseable {
             byte[][] payloads,
             int offset,
             int length,
-            CommandAdmissionCallback callback) {
+            CommandOrderCheckCallback callback) {
         Objects.requireNonNull(commandIds, "commandIds");
         Objects.requireNonNull(userIds, "userIds");
         Objects.requireNonNull(payloads, "payloads");
@@ -649,13 +649,13 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private Request oneWayCallbackRequest(CoreMessageType type, UUID commandId, long userId, byte[] payload,
-                                              CommandAdmissionCallback callback) {
+                                              CommandOrderCheckCallback callback) {
             return commandRequest(type, commandId, userId, payload, RequestMode.ONE_WAY_CALLBACK, callback);
         }
 
 
         private Request commandRequest(CoreMessageType type, UUID commandId, long userId, byte[] payload,
-                                       RequestMode mode, CommandAdmissionCallback callback) {
+                                       RequestMode mode, CommandOrderCheckCallback callback) {
             Request request = availableRequests.poll();
             if (request == null) {
                 return null;
@@ -1227,8 +1227,8 @@ public final class AeronClientPool implements AutoCloseable {
         private RequestMode mode;
         private CompletableFuture<CoreCommandOutcome> commandFuture;
         private CompletableFuture<CoreResponse> responseFuture;
-        private CompletableFuture<Long> admissionFuture;
-        private CommandAdmissionCallback admissionCallback;
+        private CompletableFuture<Long> orderCheckFuture;
+        private CommandOrderCheckCallback orderCheckCallback;
         private static final long PHASE_MASK = 3, QUEUED = 0, OFFERING = 1, CANCELLED = 2, COMPLETED = 3;
         private static final java.lang.invoke.VarHandle LIFECYCLE;
         static {
@@ -1248,7 +1248,7 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private void reset(CoreMessage message, UUID operationId, RequestMode mode,
-                           CommandAdmissionCallback admissionCallback, boolean preparedCorrelation) {
+                           CommandOrderCheckCallback orderCheckCallback, boolean preparedCorrelation) {
             this.message = message;
             this.correlationId = message == null ? 0 : message.header().correlationId();
             this.commandType = null;
@@ -1258,8 +1258,8 @@ public final class AeronClientPool implements AutoCloseable {
             this.commandFuture = mode == RequestMode.COMMAND_OUTCOME ? new CompletableFuture<>() : null;
             this.responseFuture = mode == RequestMode.COMMAND_RESPONSE || mode == RequestMode.QUERY
                     ? new CompletableFuture<>() : null;
-            this.admissionFuture = mode == RequestMode.ONE_WAY_FUTURE ? new CompletableFuture<>() : null;
-            this.admissionCallback = admissionCallback;
+            this.orderCheckFuture = mode == RequestMode.ONE_WAY_FUTURE ? new CompletableFuture<>() : null;
+            this.orderCheckCallback = orderCheckCallback;
             this.preparedCorrelation = preparedCorrelation;
             this.correlationClaimed = false;
             this.queueDeadlineNanos = 0;
@@ -1322,8 +1322,8 @@ public final class AeronClientPool implements AutoCloseable {
             if (!claimCompletion()) {
                 return;
             }
-            CompletableFuture<Long> future = admissionFuture;
-            CommandAdmissionCallback callback = admissionCallback;
+            CompletableFuture<Long> future = orderCheckFuture;
+            CommandOrderCheckCallback callback = orderCheckCallback;
             UUID commandId = operationId;
             if (future != null) {
                 future.complete(offerResult);
@@ -1354,13 +1354,13 @@ public final class AeronClientPool implements AutoCloseable {
             if (!claimCompletion()) {
                 return;
             }
-            CompletableFuture<Long> admission = admissionFuture;
+            CompletableFuture<Long> orderCheck = orderCheckFuture;
             CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
             CompletableFuture<CoreResponse> result = responseFuture;
-            CommandAdmissionCallback callback = admissionCallback;
+            CommandOrderCheckCallback callback = orderCheckCallback;
             UUID commandId = operationId;
-            if (admission != null) {
-                admission.complete(rejection.rawOfferResult());
+            if (orderCheck != null) {
+                orderCheck.complete(rejection.rawOfferResult());
             }
             if (outcome != null) {
                 outcome.complete(rejection);
@@ -1394,13 +1394,13 @@ public final class AeronClientPool implements AutoCloseable {
             if (!claimCompletion()) {
                 return;
             }
-            CompletableFuture<Long> admission = admissionFuture;
+            CompletableFuture<Long> orderCheck = orderCheckFuture;
             CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
             CompletableFuture<CoreResponse> result = responseFuture;
-            CommandAdmissionCallback callback = admissionCallback;
+            CommandOrderCheckCallback callback = orderCheckCallback;
             UUID commandId = operationId;
-            if (admission != null) {
-                admission.completeExceptionally(failure);
+            if (orderCheck != null) {
+                orderCheck.completeExceptionally(failure);
             }
             if (outcome != null) {
                 outcome.completeExceptionally(failure);
@@ -1438,8 +1438,8 @@ public final class AeronClientPool implements AutoCloseable {
             mode = null;
             commandFuture = null;
             responseFuture = null;
-            admissionFuture = null;
-            admissionCallback = null;
+            orderCheckFuture = null;
+            orderCheckCallback = null;
             queueDeadlineNanos = 0;
             deadlineNanos = 0;
         }
@@ -1452,10 +1452,10 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private static void invokeCallback(
-                CommandAdmissionCallback callback, UUID commandId, TryCommandResult result) {
+                CommandOrderCheckCallback callback, UUID commandId, TryCommandResult result) {
             if (callback != null) {
                 try {
-                    callback.onAdmission(commandId, result);
+                    callback.onOrderCheck(commandId, result);
                 } catch (RuntimeException ignored) {
                 }
             }

@@ -58,7 +58,7 @@ final class FundsReconciliation {
 
         processAccounts(config, gateway, progress, Role.USER, config.users);
         processAccounts(config, gateway, progress, Role.MAKER, config.makers);
-        if (progress.phase == Phase.TREASURY) processTreasury(config, gateway, progress);
+        if (progress.phase == Phase.TREASURY) processSystemFunds(config, gateway, progress);
         if (config.productLine == ProductLine.SPOT && progress.phase == Phase.INSURANCE) {
             progress.phase = Phase.VALIDATE;
             progress.save(config);
@@ -148,28 +148,28 @@ final class FundsReconciliation {
                 config.ledger.accountState(role, state.userId()), actual);
     }
 
-    private static void processTreasury(Config config, QueryGateway gateway, Progress progress) {
+    private static void processSystemFunds(Config config, QueryGateway gateway, Progress progress) {
         CoreResponse response = checked(gateway, progress, CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]);
         Map<StateKey, Long> actual = new HashMap<>();
-        for (var treasury : CoreStateQueryCodec.decodeTreasuryState(response.data())) {
-            String asset = normalized(treasury.asset(), "treasury asset");
+        for (var systemFunds : CoreStateQueryCodec.decodeTreasuryState(response.data())) {
+            String asset = normalized(systemFunds.asset(), "treasury asset");
             requireExpectedAsset(config, asset);
-            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_FEES), treasury.feeBalanceUnits());
-            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_INSURANCE), treasury.insuranceBalanceUnits());
-            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_DEFICIT), treasury.insuranceDeficitUnits());
-            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_LIQUIDATION_FEES),
-                    treasury.liquidationFeeBalanceUnits());
-            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_FUNDING_RESIDUAL),
-                    treasury.fundingResidualBalanceUnits());
-            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_ROUNDING_RESIDUAL),
-                    treasury.roundingResidualBalanceUnits());
-            putUnique(actual, StateKey.treasury(asset, Metric.TREASURY_CLEARING_PNL),
-                    treasury.clearingPnlBalanceUnits());
+            putUnique(actual, StateKey.systemFunds(asset, Metric.TREASURY_FEES), systemFunds.feeBalanceUnits());
+            putUnique(actual, StateKey.systemFunds(asset, Metric.TREASURY_INSURANCE), systemFunds.insuranceBalanceUnits());
+            putUnique(actual, StateKey.systemFunds(asset, Metric.TREASURY_DEFICIT), systemFunds.insuranceDeficitUnits());
+            putUnique(actual, StateKey.systemFunds(asset, Metric.TREASURY_LIQUIDATION_FEES),
+                    systemFunds.liquidationFeeBalanceUnits());
+            putUnique(actual, StateKey.systemFunds(asset, Metric.TREASURY_FUNDING_RESIDUAL),
+                    systemFunds.fundingResidualBalanceUnits());
+            putUnique(actual, StateKey.systemFunds(asset, Metric.TREASURY_ROUNDING_RESIDUAL),
+                    systemFunds.roundingResidualBalanceUnits());
+            putUnique(actual, StateKey.systemFunds(asset, Metric.TREASURY_CLEARING_PNL),
+                    systemFunds.clearingPnlBalanceUnits());
             long economic = Math.subtractExact(Math.addExact(Math.addExact(Math.addExact(Math.addExact(
-                    treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()), treasury.liquidationFeeBalanceUnits()),
-                    treasury.fundingResidualBalanceUnits()), treasury.roundingResidualBalanceUnits()),
-                    treasury.insuranceDeficitUnits());
-            economic = Math.addExact(economic, treasury.clearingPnlBalanceUnits());
+                    systemFunds.feeBalanceUnits(), systemFunds.insuranceBalanceUnits()), systemFunds.liquidationFeeBalanceUnits()),
+                    systemFunds.fundingResidualBalanceUnits()), systemFunds.roundingResidualBalanceUnits()),
+                    systemFunds.insuranceDeficitUnits());
+            economic = Math.addExact(economic, systemFunds.clearingPnlBalanceUnits());
             merge(progress.funds, asset, economic);
         }
         compareExact("Treasury", config.ledger.treasuryState(), actual);
@@ -436,7 +436,7 @@ final class FundsReconciliation {
 
     record StateKey(Role role, long userId, String asset, String instrumentId, Metric metric)
             implements Comparable<StateKey> {
-        static StateKey treasury(String asset, Metric metric) {
+        static StateKey systemFunds(String asset, Metric metric) {
             return new StateKey(Role.TREASURY, 0, asset, "-", metric);
         }
 

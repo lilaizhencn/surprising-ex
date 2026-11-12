@@ -8,11 +8,11 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.matcher.OrderBookSnapshotCodec;
-import com.surprising.aeron.service.result.CommandResultLedger;
-import com.surprising.aeron.service.retention.TerminalStateRetention;
+import com.surprising.aeron.service.result.CommandResultLog;
+import com.surprising.aeron.service.retention.CompletedOrderArchive;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotValidation.HeaderManifest;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.aeron.service.snapshot.state.CoreFeePolicySnapshotCodec;
@@ -37,8 +37,8 @@ public final class SectionedCoreSnapshotParser {
     static Components parse(byte[][] payloads, ProductLine expectedProductLine,
             com.surprising.aeron.config.LaneTopology deploymentTopology) {
         HeaderManifest manifest = SectionedCoreSnapshotValidation.parseHeader(payloads[0], expectedProductLine);
-        Map<TradingCoreRuntime.SourceKey, Long> sourceSequences = parseSources(payloads[1]);
-        Map<UUID, CommandResultLedger.StoredResult> commandResults = parseResults(payloads[2]);
+        Map<TradingCore.SourceKey, Long> sourceSequences = parseSources(payloads[1]);
+        Map<UUID, CommandResultLog.StoredResult> commandResults = parseResults(payloads[2]);
         OrderBookSnapshot matcherSnapshot = OrderBookSnapshotCodec.decode(payloads[3], deploymentTopology);
         TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[4], manifest.productLine());
         Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[5]);
@@ -56,7 +56,7 @@ public final class SectionedCoreSnapshotParser {
                 manifest, sourceSequences, matcherSnapshot, tradingState, feePolicies, pendingTransfers);
         long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
                 .order(ByteOrder.LITTLE_ENDIAN).getLong();
-        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
+        CompletedOrderArchive retention = CompletedOrderArchive.decode(payloads[7]);
         return new Components(manifest.productLine(), manifest.appliedCommandCount(),
                 commandResults, sourceSequences, matcherSnapshot, tradingState, feePolicies,
                 pendingTransfers, retention, accountLanes, manifest, checksum);
@@ -100,18 +100,18 @@ public final class SectionedCoreSnapshotParser {
     }
 
     /** 读取有上限的来源数并要求段长度精确匹配，逐项检查来源码、非负水位与重复键，按输入顺序保存。 */
-    private static Map<TradingCoreRuntime.SourceKey, Long> parseSources(byte[] payload) {
+    private static Map<TradingCore.SourceKey, Long> parseSources(byte[] payload) {
         ByteBuffer sources = wrap(payload);
-        int sourceCount = readCount(sources, TradingCoreRuntime.Limits.MAX_SOURCE_SEQUENCES, "source sequence");
+        int sourceCount = readCount(sources, TradingCore.Limits.MAX_SOURCE_SEQUENCES, "source sequence");
         if (sources.remaining() != (long) sourceCount * SectionedCoreSnapshotCodec.SOURCE_SEQUENCE_LENGTH) {
             throw new ProtocolException("invalid snapshot source section length");
         }
-        Map<TradingCoreRuntime.SourceKey, Long> sourceSequences = new LinkedHashMap<>();
+        Map<TradingCore.SourceKey, Long> sourceSequences = new LinkedHashMap<>();
         for (int index = 0; index < sourceCount; index++) {
             CommandSource source = CommandSource.fromWireCode(sources.getInt());
             long sourceId = sources.getLong();
             long sequence = sources.getLong();
-            if (sequence < 0 || sourceSequences.put(new TradingCoreRuntime.SourceKey(source, sourceId), sequence) != null) {
+            if (sequence < 0 || sourceSequences.put(new TradingCore.SourceKey(source, sourceId), sequence) != null) {
                 throw new ProtocolException("invalid snapshot source sequence");
             }
         }
@@ -119,10 +119,10 @@ public final class SectionedCoreSnapshotParser {
     }
 
     /** 读取有上限的幂等结果数，逐条解析并拒绝重复 UUID，完成后要求段内没有尾随垃圾。 */
-    private static Map<UUID, CommandResultLedger.StoredResult> parseResults(byte[] payload) {
+    private static Map<UUID, CommandResultLog.StoredResult> parseResults(byte[] payload) {
         ByteBuffer results = wrap(payload);
-        int resultCount = readCount(results, TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS, "result");
-        Map<UUID, CommandResultLedger.StoredResult> commandResults = new LinkedHashMap<>();
+        int resultCount = readCount(results, TradingCore.Limits.MAX_IDEMPOTENCY_RESULTS, "result");
+        Map<UUID, CommandResultLog.StoredResult> commandResults = new LinkedHashMap<>();
         for (int index = 0; index < resultCount; index++) {
             SnapshotResult result = readResult(results);
             if (commandResults.put(result.commandId(), result.value()) != null) {
@@ -157,7 +157,7 @@ public final class SectionedCoreSnapshotParser {
         byte[] responseData = new byte[responseLength];
         source.get(responseData);
         source.limit(limit);
-        return new SnapshotResult(commandId, new CommandResultLedger.StoredResult(
+        return new SnapshotResult(commandId, new CommandResultLog.StoredResult(
                 CommandFingerprint.fromBytes(fingerprint), status, resultCode, appliedCommandCount,
                 responseData, retentionSequence));
     }
@@ -185,33 +185,33 @@ public final class SectionedCoreSnapshotParser {
     }
 
     /** 解析一条幂等记录时使用的 UUID 与结果值配对，不是新执行业务产生的响应。 */
-    private record SnapshotResult(UUID commandId, CommandResultLedger.StoredResult value) {
+    private record SnapshotResult(UUID commandId, CommandResultLog.StoredResult value) {
     }
 
     /** 已经解码并完成组件配对的输入集合。保留状态与原生模块引用以及待移交的终态索引，可用于查看清单或准备、激活恢复运行时。 */
     record Components(
             ProductLine productLine,
             long appliedCommandCount,
-            Map<UUID, CommandResultLedger.StoredResult> commandResults,
-            Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
+            Map<UUID, CommandResultLog.StoredResult> commandResults,
+            Map<TradingCore.SourceKey, Long> sourceSequences,
             OrderBookSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, CoreFeePolicyState> feePolicies,
             Map<Long, TransferFundsCommand> pendingTransfers,
-            TerminalStateRetention retention,
+            CompletedOrderArchive retention,
             List<AccountLaneSnapshot> accountLanes,
             HeaderManifest manifest,
             long checksum) {
 
         /** 核对产品线和账户 Lane 清单与 Core 状态配对，准备尚未激活的候选运行时，恢复 Lane 元数据后激活订单簿并返回。 */
-        TradingCoreRuntime restore(ProductLine expectedProductLine,
+        TradingCore restore(ProductLine expectedProductLine,
                 com.surprising.aeron.config.CoreRuntimeConfiguration configuration, boolean activate) {
             requireProductLine(expectedProductLine);
-            TradingCoreRuntime candidate = null;
+            TradingCore candidate = null;
             try {
-                com.surprising.aeron.service.core.TradingAccountRuntime.validateAccountLaneSnapshotManifest(
+                com.surprising.aeron.service.core.AccountBook.validateAccountLaneSnapshotManifest(
                         accountLanes, manifest.appliedCommandCount(), tradingState, matcherSnapshot.topology());
-                candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount,
+                candidate = TradingCore.prepareRestore(productLine, appliedCommandCount,
                         commandResults, sourceSequences, tradingState, retention, matcherSnapshot,
                         manifest.projectionSequence(), feePolicies, pendingTransfers, configuration);
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.appliedCommandCount());

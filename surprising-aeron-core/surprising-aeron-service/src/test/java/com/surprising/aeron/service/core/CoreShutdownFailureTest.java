@@ -12,7 +12,7 @@ class CoreShutdownFailureTest {
     @Test
     void releasedFenceKeepsMatcherCaptureAliveAndRejectsAnotherCaptureUntilCompletion() throws Exception {
         var release = new CompletableFuture<Void>();
-        var core = new TradingCoreRuntime(ProductLine.SPOT);
+        var core = new TradingCore(ProductLine.SPOT);
         core.activate();
         try {
             var entered = new CompletableFuture<Void>();
@@ -34,7 +34,7 @@ class CoreShutdownFailureTest {
             core.snapshots.releaseSnapshotFence();
             assertThat(capture.toCompletableFuture()).isNotDone();
             assertThatThrownBy(() -> core.snapshots.beginSnapshot(102, deadline))
-                    .isInstanceOf(TradingCoreRuntime.SnapshotNotReadyException.class);
+                    .isInstanceOf(TradingCore.SnapshotNotReadyException.class);
             var command = new com.surprising.aeron.protocol.CoreMessage(
                     com.surprising.aeron.protocol.CoreMessageHeader.command(
                             com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE,
@@ -61,9 +61,9 @@ class CoreShutdownFailureTest {
 
     @Test void accountFailureStillStopsAllWorkers() {
         var laneFailure = new NoSuchMethodError("account worker failed");
-        var core = new TradingCoreRuntime(ProductLine.SPOT);
+        var core = new TradingCore(ProductLine.SPOT);
         core.activate();
-        var accounts = core.runtimeState();
+        var accounts = core.accountBook();
         Thread[] workers = new Thread[accounts.topology().accountLaneCount()];
         for (int lane = 0; lane < workers.length; lane++) workers[lane] = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(accounts)[lane].thread();
         try {

@@ -4,14 +4,14 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.service.account.AccountBalance;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.aeron.support.math.OptionContractMath;
 import lombok.AccessLevel;
@@ -23,24 +23,24 @@ public final class AdlService {
 
     /** 优先复用已经可回收的命令续步，初始化新 ADL 输入并返回给 Owner 轮询。 */
     public static AdlWork begin(AdlWork reuse, ExecuteAdlCommand command,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
+            AccountBook accountBook, IdIndex identities) {
+        if (command == null || accountBook == null || identities == null || !accountBook.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL apply");
         }
-        runtime.assertOwner();
-        var route = runtime.liquidationRoute(command.liquidationId());
+        accountBook.assertOwner();
+        var route = accountBook.liquidationRoute(command.liquidationId());
         if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
-        CoreInstrument instrument = runtime.requireInstrument(route.instrumentId());
+        CoreInstrument instrument = accountBook.requireInstrument(route.instrumentId());
         int symbolId = identities.symbolId(route.instrumentId());
-        MarkPrice mark = runtime.markPrice(symbolId);
+        MarkPrice mark = accountBook.markPrice(symbolId);
         if (mark == null || mark.priceSequence() != command.markPriceSequence())
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
         long positionKey = identities.positionKey(command.targetUserId(), instrument, command.positionSide());
         AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
-        work.prepare(command, runtime, instrument, mark, positionKey,
+        work.prepare(command, accountBook, instrument, mark, positionKey,
                 identities.assetId(instrument.settleAsset()));
-        work.fundingInProgress = runtime.treasury().fundingProgress(symbolId) != null;
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(route.userId()), work);
+        work.fundingInProgress = accountBook.systemFunds().fundingProgress(symbolId) != null;
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(route.userId()), work);
         return work;
     }
 
@@ -61,9 +61,9 @@ public final class AdlService {
         /** Owner 准备时捕获的该币对资金费切仓是否进行中，源校验据此拒绝冲突。 */
         private boolean fundingInProgress;
 
-        private void prepare(ExecuteAdlCommand command, TradingAccountRuntime runtime,
+        private void prepare(ExecuteAdlCommand command, AccountBook accountBook,
                 CoreInstrument instrument, MarkPrice mark, long positionKey, int settleAssetId) {
-            initializeLedgerCommand(runtime);
+            initializeLedgerCommand(accountBook);
             this.command = command;
 
             this.liquidation = null;
@@ -80,7 +80,7 @@ public final class AdlService {
         public Object apply(int ignored) {
             switch (phase) {
                 case CAPTURE -> {
-                    liquidation = runtime.liquidation(command.liquidationId());
+                    liquidation = accountBook.liquidation(command.liquidationId());
                     if (liquidation == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
                     if (liquidation.status() != CoreLiquidationState.Status.ADL_REQUIRED)
                         throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "ADL requires ADL state");
@@ -91,14 +91,14 @@ public final class AdlService {
                         throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
                 }
                 case TARGET -> {
-                    if (runtime.currentLaneOwns(command.targetUserId()))
-                        clearingUnits = applyAdlTarget(command, runtime, liquidation, instrument, mark,
+                    if (accountBook.currentLaneOwns(command.targetUserId()))
+                        clearingUnits = applyAdlTarget(command, accountBook, liquidation, instrument, mark,
                                 positionKey, settleAssetId);
-                    if (runtime.currentLaneOwns(liquidation.userId()) && runtime.currentLaneOwns(command.targetUserId()))
-                        completeAdlLiquidation(command, runtime);
+                    if (accountBook.currentLaneOwns(liquidation.userId()) && accountBook.currentLaneOwns(command.targetUserId()))
+                        completeAdlLiquidation(command, accountBook);
                 }
                 case SOURCE -> {
-                    if (runtime.currentLaneOwns(liquidation.userId())) completeAdlLiquidation(command, runtime);
+                    if (accountBook.currentLaneOwns(liquidation.userId())) completeAdlLiquidation(command, accountBook);
                 }
                 default -> throw new IllegalStateException("ADL account operation outside dispatch phase");
             }
@@ -110,31 +110,31 @@ public final class AdlService {
         public boolean getAsBoolean() {
             if (phase == Phase.DONE) return true;
             if (phase == Phase.CAPTURE) {
-                if (!runtime.pollControlLanes()) return false;
+                if (!accountBook.pollControlLanes()) return false;
                 phase = Phase.TARGET;
-                runtime.dispatchControlLanes(runtime.topology().accountLaneMask(command.targetUserId()), this);
+                accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(command.targetUserId()), this);
                 return false;
             }
             if (phase == Phase.TARGET) {
-                if (!runtime.pollControlLanes()) return false;
-                long sourceLaneMask = runtime.topology().accountLaneMask(liquidation.userId());
-                if (runtime.topology().accountLaneMask(command.targetUserId()) != sourceLaneMask) {
+                if (!accountBook.pollControlLanes()) return false;
+                long sourceLaneMask = accountBook.topology().accountLaneMask(liquidation.userId());
+                if (accountBook.topology().accountLaneMask(command.targetUserId()) != sourceLaneMask) {
                     phase = Phase.SOURCE;
-                    runtime.dispatchControlLanes(sourceLaneMask, this);
+                    accountBook.dispatchControlLanes(sourceLaneMask, this);
                     return false;
                 }
                 phase = Phase.ACCOUNTS;
             }
             if (phase == Phase.SOURCE) {
-                if (!runtime.pollControlLanes()) return false;
+                if (!accountBook.pollControlLanes()) return false;
                 phase = Phase.ACCOUNTS;
             }
             if (phase == Phase.ACCOUNTS) {
-                runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
-                runtime.requireRevisionCapacity();
-                runtime.dispatchLedgerCommand(this);
+                accountBook.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
+                accountBook.requireRevisionCapacity();
+                accountBook.dispatchLedgerCommand(this);
                 requireLedgerAccepted();
-                runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
                 phase = Phase.DONE;
                 liquidation = null;
                 command = null;
@@ -146,7 +146,7 @@ public final class AdlService {
         }
 
         /** 账本消费目标账户的资金差额，完成清算对手项和亏空抵减。 */
-        @Override protected void applyLedger(TreasuryRuntime ledger) {
+        @Override protected void applyLedger(SystemFunds ledger) {
             long nextDeficit = Math.subtractExact(ledger.insuranceDeficit(settleAssetId), command.coveredUnits());
             long nextClearing = Math.addExact(ledger.clearingPnl(settleAssetId), clearingUnits);
             ledger.setInsurance(settleAssetId, ledger.insurance(settleAssetId), nextDeficit);
@@ -155,10 +155,10 @@ public final class AdlService {
 
     }
 
-    private static long applyAdlTarget(ExecuteAdlCommand command, TradingAccountRuntime runtime,
+    private static long applyAdlTarget(ExecuteAdlCommand command, AccountBook accountBook,
             RiskScanner.LiquidationOrder liquidation, CoreInstrument instrument, MarkPrice mark,
             long positionKey, int settleAssetId) {
-        Position position = runtime.position(positionKey);
+        Position position = accountBook.position(positionKey);
         if (position == null || position.marginMode() != command.marginMode()
                 || position.signedQuantitySteps() != command.expectedSignedQuantitySteps()
                 || position.entryPriceTicks() != command.expectedEntryPriceTicks()
@@ -177,7 +177,7 @@ public final class AdlService {
         long nextQuantity = remainingAbs == 0 ? 0
                 : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
         long releasedMargin = com.surprising.instrument.api.math.PerpetualContractMath.proportionalUnits(position.positionMarginUnits(), command.closeQuantitySteps(), currentAbs);
-        AccountBalance balance = runtime.balance(command.targetUserId(), settleAssetId);
+        AccountBalance balance = accountBook.balance(command.targetUserId(), settleAssetId);
         if (balance == null) {
             throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
         }
@@ -199,15 +199,15 @@ public final class AdlService {
                 Math.addExact(position.realizedPnlUnits(),
                         instrument.contractType().isOption() ? 0 : coverCapacity),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin));
-        runtime.replaceBalance(nextBalance);
-        runtime.replacePosition(positionKey, nextPosition);
-        runtime.advanceUserRevision(command.targetUserId());
+        accountBook.replaceBalance(nextBalance);
+        accountBook.replacePosition(positionKey, nextPosition);
+        accountBook.advanceUserRevision(command.targetUserId());
         return clearingUnits;
     }
 
     /** 归零则完成，否则继续保留 ADL_REQUIRED，执行价格和已收费用保持原记录。 */
-    private static void completeAdlLiquidation(ExecuteAdlCommand command, TradingAccountRuntime runtime) {
-        RiskScanner.LiquidationOrder current = runtime.liquidation(command.liquidationId());
+    private static void completeAdlLiquidation(ExecuteAdlCommand command, AccountBook accountBook) {
+        RiskScanner.LiquidationOrder current = accountBook.liquidation(command.liquidationId());
         long nextDeficit = Math.subtractExact(current.deficitUnits(), command.coveredUnits());
         CoreLiquidationState.Status nextStatus = nextDeficit == 0
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
@@ -217,7 +217,7 @@ public final class AdlService {
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0);
-        runtime.replaceLiquidation(nextLiquidation);
+        accountBook.replaceLiquidation(nextLiquidation);
     }
 
 }

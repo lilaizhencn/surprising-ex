@@ -121,7 +121,7 @@ class CoreProductLineArchitectureContractTest {
      * 对本产品合约构造到期结算请求，交割和期权规则允许，其余规则给 PRODUCT_LINE_UNSUPPORTED；准入能力由产品规则判定。
      */
     @Test
-    void lifecycleSettlementAdmissionIsOwnedByTheProductRule() {
+    void lifecycleSettlementOrderCheckIsOwnedByTheProductRule() {
         for (ProductLine /* 当前要验证规则及生命周期能力的产品线 */ line : ProductLine.values()) {
             // 该产品线唯一规则实现，其他线合约应拒绝
             ProductTradingRules rules = ProductTradingRules.forProductLine(line);

@@ -40,16 +40,16 @@ class CoreRuntimeConfigurationTest {
     @Test void explicitConfigurationSurvivesActivationAndSnapshotRecovery() {
         var configuration = bind(Map.of("surprising.aeron.max-pending-matching", "64"));
         String previous = System.setProperty("surprising.aeron.max-pending-matching", "INVALID_LOW_PRIORITY_VALUE");
-        try (var runtime = new com.surprising.aeron.service.core.TradingCoreRuntime(
+        try (var runtime = new com.surprising.aeron.service.core.TradingCore(
                 com.surprising.product.api.ProductLine.SPOT, com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY, configuration)) {
             runtime.activate();
-            assertThat(runtime.runtimeState().accountLanesStarted()).isTrue();
+            assertThat(runtime.accountBook().accountLanesStarted()).isTrue();
             byte[] snapshot = runtime.snapshot(1);
             try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decode(snapshot,
                     com.surprising.product.api.ProductLine.SPOT, configuration,
                     com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
                 assertThat(restored.configuration()).isSameAs(configuration);
-                assertThat(restored.runtimeState().topology()).isEqualTo(runtime.runtimeState().topology());
+                assertThat(restored.accountBook().topology()).isEqualTo(runtime.accountBook().topology());
             }
         } finally {
             if (previous == null) System.clearProperty("surprising.aeron.max-pending-matching");
@@ -59,18 +59,18 @@ class CoreRuntimeConfigurationTest {
 
     @Test void nodeRecoveryStaysPassiveUntilExplicitActivation() {
         var configuration = bind(Map.of());
-        try (var original = new com.surprising.aeron.service.core.TradingCoreRuntime(
+        try (var original = new com.surprising.aeron.service.core.TradingCore(
                 com.surprising.product.api.ProductLine.SPOT, com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY, configuration)) {
             byte[] snapshot = original.snapshot(7);
             try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decodePassive(snapshot,
                     com.surprising.product.api.ProductLine.SPOT, configuration,
                     com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
                 assertThat(restored.activated()).isFalse();
-                assertThat(restored.runtimeState().accountLanesStarted()).isFalse();
+                assertThat(restored.accountBook().accountLanesStarted()).isFalse();
                 restored.activate(TradingCpuAffinity.disabled());
                 assertThat(restored.configuration()).isSameAs(configuration);
                 assertThat(restored.activated()).isTrue();
-                assertThat(restored.runtimeState().accountLanesStarted()).isTrue();
+                assertThat(restored.accountBook().accountLanesStarted()).isTrue();
             }
         }
     }

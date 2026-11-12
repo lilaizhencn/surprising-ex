@@ -16,14 +16,14 @@ import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.core.RuntimeSnapshotBuilder;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.TradingRuntimeSnapshot;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.treasury.SystemFundsChange;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -48,14 +48,14 @@ class RuntimeDerivativeFillCalculatorTest {
      * @param leverage 本笔使用的百万分比杠杆
      * @param assetId 结算资产的运行时编号
      */
-    private static void applyFill(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    private static void applyFill(AccountBook accountBook, IdIndex identities,
             CoreInstrument instrument, Order order, long positionKey, long price, long quantity,
             boolean taker, long leverage, int assetId) {
         // 本笔直接成交记录系统费用和实际盈亏的临时差额，随后应用到测试财库。
-        var treasury = new RuntimeTreasuryDelta();
-        DerivativeTradeSettlementService.apply(runtime, runtime.accountLaneForUser(order.userId()), identities,
-                instrument, order, positionKey, price, quantity, taker, leverage, assetId, treasury, -1, -1);
-        treasury.apply(runtime.treasury());
+        var systemFunds = new SystemFundsChange();
+        DerivativeTradeSettlementService.apply(accountBook, accountBook.accountLaneForUser(order.userId()), identities,
+                instrument, order, positionKey, price, quantity, taker, leverage, assetId, systemFunds, -1, -1);
+        systemFunds.apply(accountBook.systemFunds());
     }
 
     /**
@@ -64,7 +64,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void takerCursorPreservesPerFillRoundingReversalAndRevisionCounts() {
         // 本用例共用的币对、资产及持仓身份字典。
-        var identities = new RuntimeIdentityRegistry();
+        var identities = new IdIndex();
         // 本用例使用的 U 本位永续规范币对。
         var instrument = instrument();
         // 当前永续币对的稠密编号。
@@ -75,9 +75,9 @@ class RuntimeDerivativeFillCalculatorTest {
         try (/* 逐笔写回成交的参照运行时，try 退出时关闭。 */ var sequential = runtimeWithPosition(instrumentId, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100);
              /* 先在游标计算、最后统一写回的对照运行时，try 退出时关闭。 */ var batched = runtimeWithPosition(instrumentId, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100)) {
             // 逐笔参照路径按原成交顺序记录的系统财务差额。
-            var expectedTreasury = new RuntimeTreasuryDelta();
+            var expectedSystemFunds = new SystemFundsChange();
             // 游标路径每笔立即生成的系统财务差额，最后统一应用。
-            var actualTreasury = new RuntimeTreasuryDelta();
+            var actualSystemFunds = new SystemFundsChange();
             // 本用例独占并在 finally 清理的连续成交游标。
             var cursor = new DerivativeTradeSettlementService.FillCursor();
             DerivativeTradeSettlementService.begin(cursor, batched, batched.accountLaneForUser(7), instrument, batched.order(11),
@@ -87,14 +87,14 @@ class RuntimeDerivativeFillCalculatorTest {
             try {
                 for (long /* 当前四笔成交序列中的实际价格刻度。 */ price : new long[]{111, 109, 113, 107}) {
                     DerivativeTradeSettlementService.apply(sequential, sequential.accountLaneForUser(7), identities, instrument, sequential.order(11),
-                            key, price, 1, true, 10_000_000, asset, expectedTreasury, 555, 999);
-                    cursor.applyNext(price, 1, true, actualTreasury);
+                            key, price, 1, true, 10_000_000, asset, expectedSystemFunds, 555, 999);
+                    cursor.applyNext(price, 1, true, actualSystemFunds);
                 }
                 assertThat(RuntimeSnapshotBuilder.capture(batched, 1)).as("intermediate scalar state must not escape").isEqualTo(before);
                 cursor.publish(batched, batched.accountLaneForUser(7), key, null);
             } finally { cursor.clear(); }
-            expectedTreasury.apply(sequential.treasury());
-            actualTreasury.apply(batched.treasury());
+            expectedSystemFunds.apply(sequential.systemFunds());
+            actualSystemFunds.apply(batched.systemFunds());
             assertThat(RuntimeSnapshotBuilder.capture(batched, 1)).isEqualTo(RuntimeSnapshotBuilder.capture(sequential, 1));
             assertThat(batched.position(key).signedQuantitySteps()).isEqualTo(-2);
             assertThat(batched.order(11).revision()).isEqualTo(5);
@@ -112,7 +112,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void abortedTakerCursorDoesNotPublishPartialStateOrLeakIntoNextUse() {
         // 本用例共用的币对、资产及持仓身份字典。
-        var identities = new RuntimeIdentityRegistry();
+        var identities = new IdIndex();
         // 本用例使用的 U 本位永续规范币对。
         var instrument = instrument();
         // 当前永续币对的稠密编号。
@@ -120,27 +120,27 @@ class RuntimeDerivativeFillCalculatorTest {
         int instrumentId = identities.symbolId(instrument.instrumentId()), asset = identities.assetId(instrument.settleAsset());
         // 逐笔与聚合对照使用的用户七持仓身份键。
         long key = identities.positionKey(7, instrument.instrumentId());
-        try (/* 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。 */ var runtime = runtime(instrumentId, asset, 200)) {
+        try (/* 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。 */ var accountBook = accountBook(instrumentId, asset, 200)) {
             // 本轮操作前捕获的内存状态快照，用来判断未发布计算是否泄漏到账户。
-            var before = RuntimeSnapshotBuilder.capture(runtime, 1);
+            var before = RuntimeSnapshotBuilder.capture(accountBook, 1);
             // 本用例独占并在 finally 清理的连续成交游标。
             var cursor = new DerivativeTradeSettlementService.FillCursor();
-            DerivativeTradeSettlementService.begin(cursor, runtime, runtime.accountLaneForUser(7), instrument, runtime.order(11),
+            DerivativeTradeSettlementService.begin(cursor, accountBook, accountBook.accountLaneForUser(7), instrument, accountBook.order(11),
                     key, 10_000_000, asset, 555, 999);
             try {
-                cursor.applyNext(100, 1, true, new RuntimeTreasuryDelta());
-                assertThatThrownBy(() -> cursor.applyNext(100, 2, true, new RuntimeTreasuryDelta()))
+                cursor.applyNext(100, 1, true, new SystemFundsChange());
+                assertThatThrownBy(() -> cursor.applyNext(100, 2, true, new SystemFundsChange()))
                         .isInstanceOf(IllegalArgumentException.class);
             } finally { cursor.clear(); }
-            assertThat(RuntimeSnapshotBuilder.capture(runtime, 1)).isEqualTo(before);
-            DerivativeTradeSettlementService.begin(cursor, runtime, runtime.accountLaneForUser(7), instrument, runtime.order(11),
+            assertThat(RuntimeSnapshotBuilder.capture(accountBook, 1)).isEqualTo(before);
+            DerivativeTradeSettlementService.begin(cursor, accountBook, accountBook.accountLaneForUser(7), instrument, accountBook.order(11),
                     key, 10_000_000, asset, 555, 999);
             try {
-                cursor.applyNext(100, 2, true, new RuntimeTreasuryDelta());
-                cursor.publish(runtime, runtime.accountLaneForUser(7), key, null);
+                cursor.applyNext(100, 2, true, new SystemFundsChange());
+                cursor.publish(accountBook, accountBook.accountLaneForUser(7), key, null);
             } finally { cursor.clear(); }
-            assertThat(runtime.order(11).executedQuantitySteps()).isEqualTo(2);
-            assertThat(runtime.user(7).revision()).isEqualTo(1);
+            assertThat(accountBook.order(11).executedQuantitySteps()).isEqualTo(2);
+            assertThat(accountBook.user(7).revision()).isEqualTo(1);
         }
     }
 
@@ -150,7 +150,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void opensLinearPositionAndPreservesExplainedLockedFunds() {
         // 本用例共用的币对、资产及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例使用的 U 本位永续规范币对。
         CoreInstrument instrument = instrument();
         // 辅助运行时订单使用的币对稠密编号。
@@ -160,27 +160,27 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingAccountRuntime runtime = runtime(symbolId, assetId, 200);
+        AccountBook accountBook = accountBook(symbolId, assetId, 200);
         // 本用例起点的两单位买入订单引用。
-        Order order = runtime.order(11);
+        Order order = accountBook.order(11);
 
-        applyFill(runtime, identities, instrument, order,
+        applyFill(accountBook, identities, instrument, order,
                 positionKey, 100, 2, true, 10_000_000, assetId);
-        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, 11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(accountBook, 11);
 
         // 成交后读取的权威持仓值，用于核对数量、均价、盈亏和保证金。
-        Position position = runtime.position(positionKey);
+        Position position = accountBook.position(positionKey);
         assertThat(position.signedQuantitySteps()).isEqualTo(2);
         assertThat(position.entryPriceTicks()).isEqualTo(100);
         assertThat(position.positionMarginUnits()).isEqualTo(20);
-        assertThat(runtime.reservation(11).reservedUnits()).isZero();
-        assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(978);
-        assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(20);
-        assertThat(runtime.reservation(11).reservedUnits() + position.positionMarginUnits())
-                .isEqualTo(runtime.balance(7, assetId).lockedUnits());
-        assertThat(runtime.treasury().fee(assetId)).isEqualTo(2);
-        assertThat(runtime.order(11).executedQuantitySteps()).isEqualTo(2);
-        assertThat(runtime.order(11).canceled()).isTrue();
+        assertThat(accountBook.reservation(11).reservedUnits()).isZero();
+        assertThat(accountBook.balance(7, assetId).availableUnits()).isEqualTo(978);
+        assertThat(accountBook.balance(7, assetId).lockedUnits()).isEqualTo(20);
+        assertThat(accountBook.reservation(11).reservedUnits() + position.positionMarginUnits())
+                .isEqualTo(accountBook.balance(7, assetId).lockedUnits());
+        assertThat(accountBook.systemFunds().fee(assetId)).isEqualTo(2);
+        assertThat(accountBook.order(11).executedQuantitySteps()).isEqualTo(2);
+        assertThat(accountBook.order(11).canceled()).isTrue();
     }
 
     /**
@@ -189,7 +189,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void rejectsInsufficientReservationBeforeAnyRuntimeMutation() {
         // 本用例共用的币对、资产及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例使用的 U 本位永续规范币对。
         CoreInstrument instrument = instrument();
         // 辅助运行时订单使用的币对稠密编号。
@@ -199,15 +199,15 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingAccountRuntime runtime = runtime(symbolId, assetId, 21);
+        AccountBook accountBook = accountBook(symbolId, assetId, 21);
         // 本轮操作前捕获的内存状态快照，用来判断未发布计算是否泄漏到账户。
-        TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
+        TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(accountBook, 1);
 
-        assertThatThrownBy(() -> applyFill(runtime, identities, instrument,
-                runtime.order(11), positionKey, 100, 2, true, 10_000_000, assetId))
+        assertThatThrownBy(() -> applyFill(accountBook, identities, instrument,
+                accountBook.order(11), positionKey, 100, 2, true, 10_000_000, assetId))
                 .isInstanceOf(CoreStateRejectedException.class);
 
-        assertThat(RuntimeSnapshotBuilder.capture(runtime, 1)).isEqualTo(before);
+        assertThat(RuntimeSnapshotBuilder.capture(accountBook, 1)).isEqualTo(before);
     }
 
     /**
@@ -216,7 +216,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void partiallyClosesPositionAndRealizesProfit() {
         // 本用例共用的币对、资产及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例使用的 U 本位永续规范币对。
         CoreInstrument instrument = instrument();
         // 辅助运行时订单使用的币对稠密编号。
@@ -226,25 +226,25 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingAccountRuntime runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+        AccountBook accountBook = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 1, false, 800, 120, 100);
 
-        applyFill(runtime, identities, instrument, runtime.order(11),
+        applyFill(accountBook, identities, instrument, accountBook.order(11),
                 positionKey, 110, 1, true, 10_000_000, assetId);
-        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, 11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(accountBook, 11);
 
         // 成交后读取的权威持仓值，用于核对数量、均价、盈亏和保证金。
-        Position position = runtime.position(positionKey);
+        Position position = accountBook.position(positionKey);
         assertThat(position.signedQuantitySteps()).isEqualTo(1);
         assertThat(position.entryPriceTicks()).isEqualTo(100);
         assertThat(position.realizedPnlUnits()).isEqualTo(10);
         assertThat(position.positionMarginUnits()).isEqualTo(10);
-        assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(918);
-        assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(10);
-        assertThat(runtime.treasury().fee(assetId)).isEqualTo(2);
-        assertThat(runtime.treasury().insurance(assetId)).isZero();
-        assertThat(runtime.treasury().clearingPnl(assetId)).isEqualTo(-10);
-        assertThat(runtime.treasury().insuranceDeficit(assetId)).isZero();
+        assertThat(accountBook.balance(7, assetId).availableUnits()).isEqualTo(918);
+        assertThat(accountBook.balance(7, assetId).lockedUnits()).isEqualTo(10);
+        assertThat(accountBook.systemFunds().fee(assetId)).isEqualTo(2);
+        assertThat(accountBook.systemFunds().insurance(assetId)).isZero();
+        assertThat(accountBook.systemFunds().clearingPnl(assetId)).isEqualTo(-10);
+        assertThat(accountBook.systemFunds().insuranceDeficit(assetId)).isZero();
     }
 
     /**
@@ -253,7 +253,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void addsMarginOnlyForTheNewQuantityAtItsFillPrice() {
         // 本用例共用的币对、资产及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例使用的 U 本位永续规范币对。
         CoreInstrument instrument = instrument();
         // 辅助运行时订单使用的币对稠密编号。
@@ -263,20 +263,20 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingAccountRuntime runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+        AccountBook accountBook = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.BUY, 1, false, 800, 40, 20);
 
-        applyFill(runtime, identities, instrument, runtime.order(11),
+        applyFill(accountBook, identities, instrument, accountBook.order(11),
                 positionKey, 120, 1, true, 10_000_000, assetId);
-        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, 11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(accountBook, 11);
 
         // 成交后读取的权威持仓值，用于核对数量、均价、盈亏和保证金。
-        Position position = runtime.position(positionKey);
+        Position position = accountBook.position(positionKey);
         assertThat(position.signedQuantitySteps()).isEqualTo(3);
         assertThat(position.positionMarginUnits()).isEqualTo(32);
-        assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(806);
-        assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(32);
-        assertThat(runtime.treasury().fee(assetId)).isEqualTo(2);
+        assertThat(accountBook.balance(7, assetId).availableUnits()).isEqualTo(806);
+        assertThat(accountBook.balance(7, assetId).lockedUnits()).isEqualTo(32);
+        assertThat(accountBook.systemFunds().fee(assetId)).isEqualTo(2);
     }
 
     /**
@@ -285,7 +285,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void reversesPositionAtFillPrice() {
         // 本用例共用的币对、资产及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例使用的 U 本位永续规范币对。
         CoreInstrument instrument = instrument();
         // 辅助运行时订单使用的币对稠密编号。
@@ -295,25 +295,25 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingAccountRuntime runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+        AccountBook accountBook = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, false, 800, 220, 200);
 
-        applyFill(runtime, identities, instrument, runtime.order(11),
+        applyFill(accountBook, identities, instrument, accountBook.order(11),
                 positionKey, 120, 3, true, 10_000_000, assetId);
-        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, 11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(accountBook, 11);
 
         // 成交后读取的权威持仓值，用于核对数量、均价、盈亏和保证金。
-        Position position = runtime.position(positionKey);
+        Position position = accountBook.position(positionKey);
         assertThat(position.signedQuantitySteps()).isEqualTo(-1);
         assertThat(position.entryPriceTicks()).isEqualTo(120);
         assertThat(position.realizedPnlUnits()).isEqualTo(40);
         assertThat(position.positionMarginUnits()).isEqualTo(12);
-        assertThat(runtime.balance(7, assetId).availableUnits()).isEqualTo(1_044);
-        assertThat(runtime.balance(7, assetId).lockedUnits()).isEqualTo(12);
-        assertThat(runtime.treasury().fee(assetId)).isEqualTo(4);
-        assertThat(runtime.treasury().insurance(assetId)).isZero();
-        assertThat(runtime.treasury().clearingPnl(assetId)).isEqualTo(-40);
-        assertThat(runtime.treasury().insuranceDeficit(assetId)).isZero();
+        assertThat(accountBook.balance(7, assetId).availableUnits()).isEqualTo(1_044);
+        assertThat(accountBook.balance(7, assetId).lockedUnits()).isEqualTo(12);
+        assertThat(accountBook.systemFunds().fee(assetId)).isEqualTo(4);
+        assertThat(accountBook.systemFunds().insurance(assetId)).isZero();
+        assertThat(accountBook.systemFunds().clearingPnl(assetId)).isEqualTo(-40);
+        assertThat(accountBook.systemFunds().insuranceDeficit(assetId)).isZero();
     }
 
     /**
@@ -322,7 +322,7 @@ class RuntimeDerivativeFillCalculatorTest {
     @Test
     void rejectsReduceOnlyReversalWithoutMutation() {
         // 本用例共用的币对、资产及持仓身份字典。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例使用的 U 本位永续规范币对。
         CoreInstrument instrument = instrument();
         // 辅助运行时订单使用的币对稠密编号。
@@ -332,15 +332,15 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingAccountRuntime runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+        AccountBook accountBook = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, true, 800, 220, 200);
         // 本轮操作前捕获的内存状态快照，用来判断未发布计算是否泄漏到账户。
-        TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
+        TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(accountBook, 1);
 
-        assertThatThrownBy(() -> applyFill(runtime, identities, instrument,
-                runtime.order(11), positionKey, 120, 3, true, 10_000_000, assetId))
+        assertThatThrownBy(() -> applyFill(accountBook, identities, instrument,
+                accountBook.order(11), positionKey, 120, 3, true, 10_000_000, assetId))
                 .isInstanceOf(CoreStateRejectedException.class);
-        assertThat(RuntimeSnapshotBuilder.capture(runtime, 1)).isEqualTo(before);
+        assertThat(RuntimeSnapshotBuilder.capture(accountBook, 1)).isEqualTo(before);
     }
 
     /**
@@ -349,16 +349,16 @@ class RuntimeDerivativeFillCalculatorTest {
      * @param assetId 结算资产的运行时编号
      * @param reservationUnits 测试订单起点可使用的预留金额
      */
-    private static TradingAccountRuntime runtime(int symbolId, int assetId, long reservationUnits) {
+    private static AccountBook accountBook(int symbolId, int assetId, long reservationUnits) {
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingAccountRuntime runtime = new TradingAccountRuntime();
-        runtime.putUser(new UserAccount(7));
-        runtime.putBalance(new AccountBalance(7, assetId, 800, 200));
-        runtime.putOrder(new Order(11, 7, symbolId, instrument(), CoreOrderSide.BUY, 100, false,
+        AccountBook accountBook = new AccountBook();
+        accountBook.putUser(new UserAccount(7));
+        accountBook.putBalance(new AccountBalance(7, assetId, 800, 200));
+        accountBook.putOrder(new Order(11, 7, symbolId, instrument(), CoreOrderSide.BUY, 100, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 0, 10_000, 2, 0, 2, false));
-        runtime.putReservation(CoreStateTestFixtures.reservation(11, 7, assetId, reservationUnits));
-        return runtime;
+        accountBook.putReservation(CoreStateTestFixtures.reservation(11, 7, assetId, reservationUnits));
+        return accountBook;
     }
 
     /**
@@ -373,20 +373,20 @@ class RuntimeDerivativeFillCalculatorTest {
      * @param locked 辅助运行时的起点冻结余额
      * @param reservationUnits 测试订单起点可使用的预留金额
      */
-    private static TradingAccountRuntime runtimeWithPosition(int symbolId, int assetId, long positionKey,
+    private static AccountBook runtimeWithPosition(int symbolId, int assetId, long positionKey,
                                                            CoreOrderSide side, long quantity, boolean reduceOnly,
                                                            long available, long locked, long reservationUnits) {
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingAccountRuntime runtime = new TradingAccountRuntime();
-        runtime.putUser(new UserAccount(7));
-        runtime.putBalance(new AccountBalance(7, assetId, available, locked));
-        runtime.putPosition(positionKey, new Position(7, symbolId, assetId, CoreMarginMode.CROSS,
+        AccountBook accountBook = new AccountBook();
+        accountBook.putUser(new UserAccount(7));
+        accountBook.putBalance(new AccountBalance(7, assetId, available, locked));
+        accountBook.putPosition(positionKey, new Position(7, symbolId, assetId, CoreMarginMode.CROSS,
                 CorePositionSide.NET, instrument(), 2, 100, 200, 0, 20));
-        runtime.putOrder(new Order(11, 7, symbolId, instrument(), side, 120, reduceOnly,
+        accountBook.putOrder(new Order(11, 7, symbolId, instrument(), side, 120, reduceOnly,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 0, 10_000, quantity, 0, quantity, false));
-        runtime.putReservation(CoreStateTestFixtures.reservation(11, 7, assetId, reservationUnits));
-        return runtime;
+        accountBook.putReservation(CoreStateTestFixtures.reservation(11, 7, assetId, reservationUnits));
+        return accountBook;
     }
 
     /**

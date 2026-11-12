@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreRiskSnapshot;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
 import java.util.List;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -15,7 +15,7 @@ import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.position.Position;
@@ -34,9 +34,9 @@ import com.surprising.aeron.service.query.RiskQueries;
  */
 class RuntimeRiskQueryServiceTest {
     /** 本测试运行时共用的币对、资产及持仓身份映射。 */
-    private final RuntimeIdentityRegistry ids = new RuntimeIdentityRegistry();
+    private final IdIndex ids = new IdIndex();
     /** 本测试直接准备账户、持仓、行情和风险缓存的运行时。 */
-    private final TradingAccountRuntime runtime = new TradingAccountRuntime();
+    private final AccountBook accountBook = new AccountBook();
 
     @Test
     void storedRiskUsesCapturedRatioAtInclusiveThresholds() {
@@ -75,9 +75,9 @@ class RuntimeRiskQueryServiceTest {
         // 故意不对应当前价格的旧风险记录，查询应重新算结果，但不能回写覆盖它。
         var old = new RiskMarginCalculator.Snapshot(7, ids.symbolId("1"), CorePositionSide.NET,
                 1, 900, 999, 888, 1_000_000);
-        runtime.putRiskSnapshot(key, old);
+        accountBook.putRiskSnapshot(key, old);
         // 查询前的运行时修订号，即时只读查询后必须保持相同。
-        long revision = runtime.revision();
+        long revision = accountBook.revision();
 
         // 当前行情下即时重算的单条风险查询结果，与后台扫描缓存分开检查。
         var risk = userRisk().getFirst();
@@ -92,8 +92,8 @@ class RuntimeRiskQueryServiceTest {
         assertThat(risk.equityUnits()).isEqualTo(inverse ? 9975 : 9800);
         assertThat(risk.marginRatioPpm()).isEqualTo(inverse ? 701 : 4081);
         assertThat(risk.status()).isEqualTo("NORMAL");
-        assertThat(runtime.riskSnapshot(key)).isEqualTo(old);
-        assertThat(runtime.revision()).isEqualTo(revision);
+        assertThat(accountBook.riskSnapshot(key)).isEqualTo(old);
+        assertThat(accountBook.revision()).isEqualTo(revision);
     }
 
     /**
@@ -111,7 +111,7 @@ class RuntimeRiskQueryServiceTest {
         var rows = userRisk();
         assertThat(rows).hasSize(3);
         assertThat(globalRisk()).isEqualTo(rows);
-        assertThat(runtime.riskSnapshotsForSnapshot()).isEmpty();
+        assertThat(accountBook.riskSnapshotsForSnapshot()).isEmpty();
         // 总钱包一万扣除逐仓保证金五百；两份全仓的浮盈亏合计为负二百加一百。
         for (var /* 当前检查的一条全仓风险行，两份全仓持仓必须共享相同钱包和组合权益。 */ row : rows.subList(0, 2)) {
             assertThat(row.walletBalanceUnits()).isEqualTo(9500);
@@ -152,7 +152,7 @@ class RuntimeRiskQueryServiceTest {
         assertThat(risk.equityUnits()).isZero();
         assertThat(risk.marginRatioPpm()).isEqualTo(Long.MAX_VALUE);
         assertThat(risk.status()).isEqualTo("LIQUIDATION");
-        assertThat(runtime.riskSnapshotsForSnapshot()).isEmpty();
+        assertThat(accountBook.riskSnapshotsForSnapshot()).isEmpty();
     }
 
     /**
@@ -162,12 +162,12 @@ class RuntimeRiskQueryServiceTest {
     void reproducesLiveBtcPositionWithExactSettlementUnits() {
         // 本用例使用的线性永续产品线。
         var product = ProductLine.LINEAR_PERPETUAL;
-        runtime.setMetadata(product, 1);
-        runtime.putUser(new UserAccount(product, 7, 1, CorePositionMode.ONE_WAY));
+        accountBook.setMetadata(product, 1);
+        accountBook.putUser(new UserAccount(product, 7, 1, CorePositionMode.ONE_WAY));
         // 固定 BTC 样本中 USDT 结算资产的运行时整数编号。
         // 本测试合约的运行时整数币对编号，持仓和行情以同一编号关联。
         int asset = ids.assetId("USDT"), symbol = ids.symbolId("604");
-        runtime.putBalance(new AccountBalance(7, asset, 9_843_770_736_865L, 152_130_614_718L));
+        accountBook.putBalance(new AccountBalance(7, asset, 9_843_770_736_865L, 152_130_614_718L));
         // 本持仓的合约与金额精度配置，决定 tick、数量步数如何换成结算金额。
         var instrument = CoreInstrument.from(product, new com.surprising.aeron.protocol.RegisterInstrumentCommand(
                 "604", "BTC", "USDT", "USDT", 100_000, 10_000_000, 100_000_000,
@@ -175,13 +175,13 @@ class RuntimeRiskQueryServiceTest {
                         10_000, (1_000_000_000_000L / (10_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (10_000)), 10_000, 5_000))),
                 200, 500, 0, -1, 0));
-        runtime.registerInstrument(instrument);
+        accountBook.registerInstrument(instrument);
         // 用户 7 当前合约净持仓的整数键，用来关联该持仓的风险记录。
         long key = ids.positionKey(7, "604");
-        runtime.putPosition(key, new Position(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
+        accountBook.putPosition(key, new Position(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
                 instrument, 182, 835866, 152127612, 1_688_800_000L, 152_130_614_718L));
-        runtime.putMarkPrice(new MarkPrice(symbol, instrument, 860931, 437900, 2000));
-        runtime.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(7, symbol, CorePositionSide.NET, 437798,
+        accountBook.putMarkPrice(new MarkPrice(symbol, instrument, 860931, 437900, 2000));
+        accountBook.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(7, symbol, CorePositionSide.NET, 437798,
                 10_475_817_151_583L, 479_915_800_000L, 78_463_385_000L, 7489));
         // 当前行情下即时重算的单条风险查询结果，与后台扫描缓存分开检查。
         var risk = userRisk().getFirst();
@@ -208,13 +208,13 @@ class RuntimeRiskQueryServiceTest {
 
     /** 单用户金额断言直接使用现有账户计算入口，并先固定本次市场输入。 */
     private List<CoreRiskSnapshotView> userRisk() {
-        return RiskQueries.userSnapshots(runtime, ids, 7,
-                MarketInputs.capture(runtime, ids, runtime.instrumentIdsForQuery()));
+        return RiskQueries.userSnapshots(accountBook, ids, 7,
+                MarketInputs.capture(accountBook, ids, accountBook.instrumentIdsForQuery()));
     }
 
     /** 汇总断言走真实查询协议，不能为冷测试保留另一份全 Lane 扫描。 */
     private List<CoreRiskSnapshotView> globalRisk() {
-        var state = RuntimeStateMaterializer.materialize(runtime, ids);
+        var state = SnapshotWriter.writeSnapshot(accountBook, ids);
         return new RuntimeTestStateTransitions().riskSnapshots(state, 0);
     }
 
@@ -223,9 +223,9 @@ class RuntimeRiskQueryServiceTest {
      * @param product 本轮要检查的产品线，决定合约类型、结算资产和盈亏公式
      */
     private void setup(ProductLine product) {
-        runtime.setMetadata(product, 1);
-        runtime.putUser(new UserAccount(product, 7, 1, CorePositionMode.ONE_WAY));
-        runtime.putBalance(new AccountBalance(7, ids.assetId(CoreStateTestFixtures.settleAsset(product)), 9000, 1000));
+        accountBook.setMetadata(product, 1);
+        accountBook.putUser(new UserAccount(product, 7, 1, CorePositionMode.ONE_WAY));
+        accountBook.putBalance(new AccountBalance(7, ids.assetId(CoreStateTestFixtures.settleAsset(product)), 9000, 1000));
     }
 
     /**
@@ -245,12 +245,12 @@ class RuntimeRiskQueryServiceTest {
                 CoreStateTestFixtures.instrument(product, name, "BTC", "USDT", asset));
         // 本测试合约的运行时整数币对编号，持仓和行情以同一编号关联。
         int symbol = ids.symbolId(name);
-        runtime.registerInstrument(instrument);
+        accountBook.registerInstrument(instrument);
         // 用户 7 当前合约净持仓的整数键，用来关联该持仓的风险记录。
         long key = ids.positionKey(7, name);
-        runtime.putPosition(key, new Position(7, symbol, ids.assetId(asset), mode, CorePositionSide.NET,
+        accountBook.putPosition(key, new Position(7, symbol, ids.assetId(asset), mode, CorePositionSide.NET,
                 instrument, quantity, 100, Math.abs(quantity) * 100, 0, margin));
-        runtime.putMarkPrice(new MarkPrice(symbol, instrument, mark, 100, 100, 2, 2000));
+        accountBook.putMarkPrice(new MarkPrice(symbol, instrument, mark, 100, 100, 2, 2000));
         return key;
     }
 }

@@ -147,13 +147,13 @@ public class DerivativeRiskBoundaryBenchmark {
         private long funds(TradingCoreState state) {
             long result = 0;
             for (var user : state.users().values()) result = Math.addExact(result, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
-            var treasury = state.treasuryState();
-            for (Map<String, Long> ledger : java.util.List.of(treasury.feeBalances(), treasury.insuranceBalances(),
-                    treasury.liquidationFeeBalances(), treasury.fundingResidualBalances(),
-                    treasury.roundingResidualBalances(), treasury.clearingPnlBalances())) {
+            var systemFunds = state.treasuryState();
+            for (Map<String, Long> ledger : java.util.List.of(systemFunds.feeBalances(), systemFunds.insuranceBalances(),
+                    systemFunds.liquidationFeeBalances(), systemFunds.fundingResidualBalances(),
+                    systemFunds.roundingResidualBalances(), systemFunds.clearingPnlBalances())) {
                 result = Math.addExact(result, ledger.getOrDefault(asset, 0L));
             }
-            return Math.subtractExact(result, treasury.insuranceDeficits().getOrDefault(asset, 0L));
+            return Math.subtractExact(result, systemFunds.insuranceDeficits().getOrDefault(asset, 0L));
         }
 
         @TearDown(Level.Trial)

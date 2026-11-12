@@ -26,7 +26,7 @@ import static org.mockito.Mockito.*;
 @EnabledIfEnvironmentVariable(named="MAINTENANCE_TEST_JDBC_URL",matches=".+")
 class MaintenanceIntegrationTest {
     private long sequence;
-    private TradingCoreRuntime state;
+    private TradingCore state;
     private ProductLine line;
     private final AtomicBoolean dropSettlementReply = new AtomicBoolean();
     private final AtomicBoolean dropGateReply = new AtomicBoolean();
@@ -307,7 +307,7 @@ class MaintenanceIntegrationTest {
     }
 
     private Fixture fixture(ProductLine product) throws Exception {
-        line=product; sequence=0; state=new TradingCoreRuntime(line);
+        line=product; sequence=0; state=new TradingCore(line);
         var type=ContractType.valueOf(line.contractTypeCode()); String asset=type.isInverse()?"BTC":"USDT";
         submit(1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                 "1", "BTC", "USDT", asset, 1, 1, type.isInverse()?1000:1,
@@ -361,7 +361,7 @@ class MaintenanceIntegrationTest {
         MaintenanceService newService() { return new MaintenanceService(properties,repository,actionRepository,gateway,new ObjectMapper(),new DataSourceTransactionManager(source)); }
         @Override public void close() { state.close(); }
     }
-    private void restartCore() { byte[] snapshot=state.snapshot(900); state.close(); state=TradingCoreRuntime.fromSnapshot(line,snapshot); }
+    private void restartCore() { byte[] snapshot=state.snapshot(900); state.close(); state=TradingCore.fromSnapshot(line,snapshot); }
     private void run(MaintenanceService service,long id) { int steps=0; while(service.get(id).status().equals("RUNNING")) { assertThat(++steps).isLessThan(150); service.tick(); } }
     private CoreResponse submit(long user,CoreMessageType type,byte[] bytes) { var response=apply(type,UUID.randomUUID(),user,bytes); assertThat(response.commandStatus()).as("%s",response.resultCode()).isEqualTo(ResponseStatus.APPLIED); return response; }
     private CoreResponse apply(CoreMessageType type,UUID id,long user,byte[] bytes) {
@@ -384,7 +384,7 @@ class MaintenanceIntegrationTest {
         var window = new com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow();
         boolean independent = state.prepareClusterPipelineScope(message, window);
         while (!independent && state.requiresOwnerLaneAccessForPreparation(message)
-                && !state.runtimeState().tryAcquireOwnerLaneAccess()) {
+                && !state.accountBook().tryAcquireOwnerLaneAccess()) {
             if (System.nanoTime() >= deadline) throw new AssertionError("Lane handoff timeout");
             Thread.onSpinWait();
         }
@@ -418,7 +418,7 @@ class MaintenanceIntegrationTest {
             }
             return response;
         } finally {
-            state.runtimeState().releaseOwnerLaneAccess();
+            state.accountBook().releaseOwnerLaneAccess();
         }
     }
 

@@ -36,13 +36,13 @@ class ActiveOrderIndexTest {
      */
     @Test void recycledMembershipDoesNotRetainPreviousUsersOrDisturbLiveRoutes() {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
-        var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.core.identity.IdIndex();
         // 本用例 Owner 活跃订单路由索引
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 用户七标的一的常驻 OPEN 订单，用作桶复用隔离对照
         var held = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY,
                 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
-        index.apply(1, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(held, identities, instrument("1")), identities);
+        index.apply(1, com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(held, identities, instrument("1")), identities);
         // 临时用户订单共用的标的二现货合约
         var otherInstrument = instrument("2");
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1_000_000; id < 1_001_000; id++) {
@@ -51,7 +51,7 @@ class ActiveOrderIndexTest {
             // 当前构造、转为运行时或更新的测试订单
             var order = new CoreOrderState(id, ProductLine.SPOT, user, "2", CoreOrderSide.SELL,
                     100, 1, 0, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(order, identities, otherInstrument), identities);
+            index.apply(id, com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(order, identities, otherInstrument), identities);
             assertThat(index.page(user, "2", 0, 10).orderIds()).containsExactly(id);
             index.apply(id, null, identities);
             index.apply(id, null, identities);
@@ -69,7 +69,7 @@ class ActiveOrderIndexTest {
      */
     @Test void completedBurstLeavesBoundedEmptyCachesAndNoIdentityEntries() throws Exception {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
-        var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.core.identity.IdIndex();
         // 本用例 Owner 活跃订单路由索引
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 本轮订单转运行时使用的现货合约
@@ -78,7 +78,7 @@ class ActiveOrderIndexTest {
             // 当前构造、转为运行时或更新的测试订单
             var order = new CoreOrderState(id, ProductLine.SPOT, id, "1", CoreOrderSide.BUY,
                     90, 1, 0, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(order, identities, instrument), identities);
+            index.apply(id, com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(order, identities, instrument), identities);
         }
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1; id <= 4_097; id++) index.apply(id, null, identities);
         assertThat(com.surprising.aeron.service.core.CoreStateTestFixtures.activeOrderCount(index)).isZero();
@@ -111,7 +111,7 @@ class ActiveOrderIndexTest {
         for (var /* 当前要验证删除幂等性的订单终态枚举项 */ status : CoreOrderStatus.values()) {
             if (!status.terminal()) continue;
             // 本用例原始身份表，用于冷订单转运行时及反向标的查询
-            var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
+            var identities = new com.surprising.aeron.service.core.identity.IdIndex();
             // 本用例 Owner 活跃订单路由索引
             var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
             // 本用例订单集合，终态测试为运行时数组，冷重建测试为按订单号映射
@@ -119,7 +119,7 @@ class ActiveOrderIndexTest {
             for (/* 当前构造三份对照订单的数组下标 */ int i = 0; i < orders.length; i++) {
                 // 当前构造、转为运行时或更新的测试订单
                 var order = new CoreOrderState(i + 1, ProductLine.SPOT, i < 2 ? 7 : 8, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
-                orders[i] = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
+                orders[i] = com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(
                         order, identities, instrument(order.instrumentId()));
                 index.apply(i + 1, orders[i], identities);
             }
@@ -149,7 +149,7 @@ class ActiveOrderIndexTest {
     @Test
     void boundedTurnoverKeepsStorageAndIndependentQueryCursors() throws Exception {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
-        var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.core.identity.IdIndex();
         // 本用例 Owner 活跃订单路由索引
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 反射取得活跃订单反向总表的字段
@@ -163,7 +163,7 @@ class ActiveOrderIndexTest {
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1; id <= 32; id++) {
             // 当前构造、转为运行时或更新的测试订单
             var order = new CoreOrderState(id, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
+            index.apply(id, com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(
                     order, identities, instrument(order.instrumentId())), identities);
         }
         // 滑动周转前的内部存储数组引用，之后应保持同一实例
@@ -172,7 +172,7 @@ class ActiveOrderIndexTest {
             index.apply(id - 32, null, identities);
             // 当前构造、转为运行时或更新的测试订单
             var order = new CoreOrderState(id, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
+            index.apply(id, com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(
                     order, identities, instrument(order.instrumentId())), identities);
         }
         assertThat(valuesField.get(entries)).isSameAs(storage);
@@ -192,13 +192,13 @@ class ActiveOrderIndexTest {
     @Test
     void runtimeUpdatesRetainRoutingOnlyAndRetireTerminalMembership() {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
-        var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.core.identity.IdIndex();
         // 本用例 Owner 活跃订单路由索引
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 尚未部分成交的原始 OPEN 冷订单
         var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
         // 当前构造、转为运行时或更新的测试订单
-        var order = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(initial, identities, instrument("1"));
+        var order = com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(initial, identities, instrument("1"));
         index.apply(1, order, identities);
         // 当前借出的轻量路由，或回收池中逐项验证的空路由
         var route = index.activeOrderRoute(1);
@@ -220,17 +220,17 @@ class ActiveOrderIndexTest {
     @Test
     void runtimeScopeChangesReplaceMembershipWithoutRetainingThePreviousParticipant() {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
-        var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.core.identity.IdIndex();
         // 本用例 Owner 活跃订单路由索引
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 首次原订单、第一份交集游标或第一页结果，按各用例对应角色使用
         var first = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
         // 替换用冷订单、另一对照订单或第二页结果
         var second = new CoreOrderState(1, ProductLine.SPOT, 8, "2", CoreOrderSide.SELL, 110, 10, 0, false, CoreOrderStatus.OPEN, 2);
-        index.apply(1, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
+        index.apply(1, com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(
                 first, identities, instrument(first.instrumentId())), identities);
         // 同订单号不同用户及标的的替代运行时状态，仅验证索引迁移
-        var replacement = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
+        var replacement = com.surprising.aeron.service.snapshot.state.SnapshotLoader.toRuntimeOrder(
                 second, identities, instrument(second.instrumentId()));
         index.apply(1, replacement, identities);
         assertThat(index.activeOrderRoute(1).userId()).isEqualTo(8);
@@ -288,22 +288,22 @@ class ActiveOrderIndexTest {
                 Map.of(7L, opening, 8L, reducing), instruments(ProductLine.LINEAR_PERPETUAL, "1"),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
-        var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
-        try (/* 投影出的冷交易运行时，结束时自动关闭 */ var runtime = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.project(before, identities)) {
+        var identities = new com.surprising.aeron.service.core.identity.IdIndex();
+        try (/* 投影出的冷交易运行时，结束时自动关闭 */ var accountBook = com.surprising.aeron.service.snapshot.state.SnapshotLoader.loadSnapshot(before, identities)) {
             // 账户 Lane 自己的订单准入索引，不是 Owner 轻量路由
             // 对买入、净仓、逐仓条件查询所得的账户准入汇总
-            var summary = runtime.onLane(11L, lane -> lane.admissionSummary(identities.symbolId("1"), 11, CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED));
+            var summary = accountBook.onLane(11L, lane -> lane.orderCheckSummary(identities.symbolId("1"), 11, CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED));
             assertThat(summary.pendingQuantity()).isEqualTo(5);
             assertThat(summary.reduceOnlyQuantity()).isZero();
             assertThat(summary.marginModeCount()).isEqualTo(1);
-            runtime.onLane(11L, lane -> {
-                var filled = CoreStateTestFixtures.filledOrder(runtime.order(7), 3, 2, 0, CoreOrderStatus.OPEN, 2);
+            accountBook.onLane(11L, lane -> {
+                var filled = CoreStateTestFixtures.filledOrder(accountBook.order(7), 3, 2, 0, CoreOrderStatus.OPEN, 2);
                 filled.executionValue(-1, 0); // 原夹具未提供累计成交额，保留同一哨兵。
-                runtime.replaceOrder(filled);
-                runtime.replaceOrder(runtime.order(8).withStatus(CoreOrderStatus.CANCELED, 2, -1, -1));
+                accountBook.replaceOrder(filled);
+                accountBook.replaceOrder(accountBook.order(8).withStatus(CoreOrderStatus.CANCELED, 2, -1, -1));
                 return null;
             });
-            summary = runtime.onLane(11L, lane -> lane.admissionSummary(identities.symbolId("1"), 11, CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED));
+            summary = accountBook.onLane(11L, lane -> lane.orderCheckSummary(identities.symbolId("1"), 11, CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED));
             assertThat(summary.pendingQuantity()).isEqualTo(2);
             assertThat(summary.reduceOnlyQuantity()).isZero();
             assertThat(summary.marginModeCount()).isZero();

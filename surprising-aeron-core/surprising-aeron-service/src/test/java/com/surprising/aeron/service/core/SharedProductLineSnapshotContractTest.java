@@ -60,7 +60,7 @@ class SharedProductLineSnapshotContractTest {
         CoreMessage funding = gateway(productLine, 1, USER_ID, CoreMessageType.ADJUST_BALANCE,
                 TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand(settleAsset(productLine), BALANCE_UNITS)));
-        try (/* 当前产品线的原始运行时，完成恢复比较后退出关闭。 */ TradingCoreRuntime original = new TradingCoreRuntime(productLine)) {
+        try (/* 当前产品线的原始运行时，完成恢复比较后退出关闭。 */ TradingCore original = new TradingCore(productLine)) {
             assertApplied(applyTerminal(original, operations(productLine, 1, CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(instrument(productLine), productLine))));
             if (productLine.isDerivative()) {
@@ -94,7 +94,7 @@ class SharedProductLineSnapshotContractTest {
             // 完成挂单撤单及生命周期命令后捕获的当前格式字节。
             byte[] snapshot = original.snapshot(800 + productLine.ordinal());
             // 完整解析快照得到的公开清单。
-            CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(productLine, snapshot);
+            CoreSnapshotManifest manifest = TradingCore.inspectSnapshot(productLine, snapshot);
             // 保存快照时的已应用 Core 水位，恢复前后取相同 Lane 清单边界。
             long laneFence = original.appliedCommandCount();
             // 保存快照时的运行时状态哈希。
@@ -107,11 +107,11 @@ class SharedProductLineSnapshotContractTest {
 
             assertThat(manifest.productLine()).isEqualTo(productLine);
             assertThat(manifest.schemaVersion()).isEqualTo(SectionedCoreSnapshotCodec.VERSION);
-            assertThatThrownBy(() -> TradingCoreRuntime.fromSnapshot(other(productLine), snapshot))
+            assertThatThrownBy(() -> TradingCore.fromSnapshot(other(productLine), snapshot))
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("product line");
 
-            try (/* 从同产品线字节恢复的独立运行时，资源退出时关闭。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
+            try (/* 从同产品线字节恢复的独立运行时，资源退出时关闭。 */ TradingCore restored = TradingCore.fromSnapshot(productLine, snapshot)) {
                 assertThat(restored.productLine()).isEqualTo(productLine);
                 assertThat(restored.tradingState()).isEqualTo(original.tradingState());
                 assertThat(restored.stateHash()).isEqualTo(stateHash);
@@ -138,7 +138,7 @@ class SharedProductLineSnapshotContractTest {
      * @param productLine 参数化场景当前使用的产品线
      * @param state 已应用相关测试命令的交易运行时
      */
-    private static void assertProductSpecificLifecycle(ProductLine productLine, TradingCoreRuntime state) {
+    private static void assertProductSpecificLifecycle(ProductLine productLine, TradingCore state) {
         if (productLine.isFundingProduct()) {
             // 当前测试的余额入账命令或资金费响应，所在方法明确对应业务。
             CoreResponse funding = applyTerminal(state, market(productLine, 2, CoreMessageType.APPLY_FUNDING,
@@ -263,7 +263,7 @@ class SharedProductLineSnapshotContractTest {
      * @param state 已应用相关测试命令的交易运行时
      * @param command 需要执行并推进到终态的完整 Core 命令
      */
-    private static CoreResponse applyTerminal(TradingCoreRuntime state, CoreMessage command) {
+    private static CoreResponse applyTerminal(TradingCore state, CoreMessage command) {
         // 当前命令的 apply 或直接轮询返回值，撮合未完成时继续等待终态。
         CoreResponse response = state.apply(command);
         // 直接命令轮询的五秒 nanoTime 截止点。
@@ -314,7 +314,7 @@ class SharedProductLineSnapshotContractTest {
      * @param state 已应用相关测试命令的交易运行时
      * @param asset 需要累计经济总额的一种资产名称
      */
-    private static long economicAssetUnits(TradingCoreRuntime state, String asset) {
+    private static long economicAssetUnits(TradingCore state, String asset) {
         // 单资产用户与系统子账的精确累计值。
         long total = state.tradingState().users().values().stream()
                 .map(/* 当前正在累加余额的用户状态。 */ user -> user.balances().get(asset))
@@ -322,13 +322,13 @@ class SharedProductLineSnapshotContractTest {
                 .mapToLong(/* 该用户在目标资产上的非空余额，累加可用及冻结。 */ balance -> Math.addExact(balance.availableUnits(), balance.lockedUnits()))
                 .reduce(0L, Math::addExact);
         // 包含本场景系统子账的财库只读状态。
-        var treasury = state.tradingState().treasuryState();
-        total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.insuranceBalances().getOrDefault(asset, 0L));
-        total = Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.liquidationFeeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.fundingResidualBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.roundingResidualBalances().getOrDefault(asset, 0L));
-        return Math.addExact(total, treasury.clearingPnlBalances().getOrDefault(asset, 0L));
+        var systemFunds = state.tradingState().treasuryState();
+        total = Math.addExact(total, systemFunds.feeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.insuranceBalances().getOrDefault(asset, 0L));
+        total = Math.subtractExact(total, systemFunds.insuranceDeficits().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.liquidationFeeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.fundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.roundingResidualBalances().getOrDefault(asset, 0L));
+        return Math.addExact(total, systemFunds.clearingPnlBalances().getOrDefault(asset, 0L));
     }
 }

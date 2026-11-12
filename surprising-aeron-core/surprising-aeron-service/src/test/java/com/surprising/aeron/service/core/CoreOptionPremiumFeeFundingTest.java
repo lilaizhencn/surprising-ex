@@ -25,9 +25,9 @@ class CoreOptionPremiumFeeFundingTest {
     @ParameterizedTest @ValueSource(booleans = {false, true})
     void betterSellFillPaysFeeFromPremiumWithoutLosingFunds(boolean restoreBeforeClose) {
         // 本测试首次创建的期权运行时，无论是否恢复都在 finally 关闭。
-        var original = new TradingCoreRuntime(ProductLine.OPTION);
+        var original = new TradingCore(ProductLine.OPTION);
         // 当前执行实例，必要时切换为快照恢复后的新实例。
-        TradingCoreRuntime runtime = original;
+        TradingCore tradingCore = original;
         try {
             // 固定期权参数、手续费、风险档和订单支持范围的注册命令。
             var registration = new RegisterInstrumentCommand(
@@ -36,18 +36,18 @@ class CoreOptionPremiumFeeFundingTest {
                             10_000, 100_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
                             List.of(new CoreRiskLimitBracket(1_000_000_000_000_000L, 100_000_000, 10_000, 5_000))),
                     200, 500, 1_800_000_000_000L, 0, 500_000, 1, true, true, true, 0b11, 0b1111, 1);
-            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.OPTION));
-            for (long /* 当前初始化钱包或核对终态的用户编号。 */ user : List.of(101L, 202L)) apply(runtime, CoreMessageType.ADJUST_BALANCE, user,
+            apply(tradingCore, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.OPTION));
+            for (long /* 当前初始化钱包或核对终态的用户编号。 */ user : List.of(101L, 202L)) apply(tradingCore, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", WALLET)));
-            apply(runtime, CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
+            apply(tradingCore, CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                     new ApplyMarkPriceCommand("1", 10_000, 500_000, 505_000, 1, 1_700_000_000_000L), ProductLine.OPTION));
-            place(runtime, 202, 1, CoreOrderSide.SELL, 10_010, CoreOrderType.LIMIT, false);
-            place(runtime, 101, 2, CoreOrderSide.BUY, 0, CoreOrderType.MARKET, false);
-            if (restoreBeforeClose) runtime = TradingCoreRuntime.fromSnapshot(ProductLine.OPTION, original.snapshot(71));
-            place(runtime, 202, 3, CoreOrderSide.BUY, 9_990, CoreOrderType.LIMIT, true);
-            place(runtime, 101, 4, CoreOrderSide.SELL, 0, CoreOrderType.MARKET, true);
+            place(tradingCore, 202, 1, CoreOrderSide.SELL, 10_010, CoreOrderType.LIMIT, false);
+            place(tradingCore, 101, 2, CoreOrderSide.BUY, 0, CoreOrderType.MARKET, false);
+            if (restoreBeforeClose) tradingCore = TradingCore.fromSnapshot(ProductLine.OPTION, original.snapshot(71));
+            place(tradingCore, 202, 3, CoreOrderSide.BUY, 9_990, CoreOrderType.LIMIT, true);
+            place(tradingCore, 101, 4, CoreOrderSide.SELL, 0, CoreOrderType.MARKET, true);
             // 平仓结束后用于核对金额和终态的交易业务视图。
-            var state = runtime.tradingState();
+            var state = tradingCore.tradingState();
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "USDT")).isEqualTo(WALLET - 300_000);
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(202L), "USDT")).isEqualTo(WALLET + 160_000);
             assertThat(state.treasuryState().feeBalances().get("USDT")).isEqualTo(140_000);
@@ -58,7 +58,7 @@ class CoreOptionPremiumFeeFundingTest {
             }
             assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "USDT") + CoreStateTestFixtures.totalUnits(state.users().get(202L), "USDT")
                     + state.treasuryState().feeBalances().get("USDT")).isEqualTo(2 * WALLET);
-        } finally { if (runtime != original) runtime.close(); original.close(); }
+        } finally { if (tradingCore != original) tradingCore.close(); original.close(); }
     }
 
     /**
@@ -71,8 +71,8 @@ class CoreOptionPremiumFeeFundingTest {
      * @param type 限价或市价订单类型
      * @param reduce 是否只允许减少已有持仓
      */
-    private void place(TradingCoreRuntime runtime, long user, long id, CoreOrderSide side, long price, CoreOrderType type, boolean reduce) {
-        apply(runtime, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+    private void place(TradingCore tradingCore, long user, long id, CoreOrderSide side, long price, CoreOrderType type, boolean reduce) {
+        apply(tradingCore, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
                 id, "1", side, price, 1, reduce, CoreMarginMode.CROSS, CorePositionSide.NET,
                 type, type == CoreOrderType.MARKET ? CoreTimeInForce.IOC : CoreTimeInForce.GTC, false, "option-fee-" + id)));
     }
@@ -84,25 +84,25 @@ class CoreOptionPremiumFeeFundingTest {
      * @param user 期权订单或余额调整所属用户编号
      * @param payload 已编码命令载荷
      */
-    private void apply(TradingCoreRuntime runtime, CoreMessageType type, long user, byte[] payload) {
+    private void apply(TradingCore tradingCore, CoreMessageType type, long user, byte[] payload) {
         // 本次递增后的源序号，用于请求头、时间和模拟位置。
         long seq = ++sequence;
         // 使用随机 UUID 构造的期权运营命令帧。
         var message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.OPTION,
                 CommandSource.OPERATIONS, 991, seq, user, 1_700_000_000_000L + seq, seq), payload);
         // 当前原始或续步完成后的命令响应。
-        var result = runtime.apply(message);
+        var result = tradingCore.apply(message);
         // 直接控制命令轮询的五秒纳秒截止点。
         long directDeadline = System.nanoTime() + 5_000_000_000L;
-        while (result == null && runtime.directCommand.active() && System.nanoTime() < directDeadline) {
-            result = runtime.directCommand.poll();
+        while (result == null && tradingCore.directCommand.active() && System.nanoTime() < directDeadline) {
+            result = tradingCore.directCommand.poll();
             if (result == null) Thread.onSpinWait();
         }
-        if (result == null && runtime.directCommand.active()) {
+        if (result == null && tradingCore.directCommand.active()) {
             throw new AssertionError("Direct command timed out: " + type);
         }
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING)
-            result = CoreTestCompletion.completeMatchingSynchronously(runtime, runtime.matchingSequence(message.header().commandId()),
+            result = CoreTestCompletion.completeMatchingSynchronously(tradingCore, tradingCore.matchingSequence(message.header().commandId()),
                     1_700_000_000_000L + seq, seq);
         assertThat(result.commandStatus()).as(type + " " + result.resultCode()).isEqualTo(ResponseStatus.APPLIED);
     }

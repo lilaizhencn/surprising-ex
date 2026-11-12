@@ -275,7 +275,7 @@
       94
     ],
     [
-      "com.surprising.aeron.service.order.AdmissionMatchingContinuation.get:81",
+      "com.surprising.aeron.service.order.AfterCheckMatchCallback.get:81",
       63
     ],
     [
@@ -307,11 +307,11 @@
       22
     ],
     [
-      "com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto:475",
+      "com.surprising.aeron.service.order.admission.RuntimeOrderCheck.resolveInto:475",
       18
     ],
     [
-      "com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.hashUtf8:1104",
+      "com.surprising.aeron.service.core.identity.IdIndex.hashUtf8:1104",
       17
     ],
     [
@@ -389,7 +389,7 @@
       26
     ],
     [
-      "com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.execute:143",
+      "com.surprising.aeron.service.order.admission.PlaceBatchCheckEvent.execute:143",
       18
     ],
     [
@@ -397,7 +397,7 @@
       17
     ],
     [
-      "com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.deterministicKey:1090",
+      "com.surprising.aeron.service.core.identity.IdIndex.deterministicKey:1090",
       17
     ],
     [
@@ -427,7 +427,7 @@
       151
     ],
     [
-      "com.surprising.aeron.service.order.AdmissionMatchingContinuation.get:81",
+      "com.surprising.aeron.service.order.AfterCheckMatchCallback.get:81",
       63
     ],
     [
@@ -447,11 +447,11 @@
       19
     ],
     [
-      "com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto:475",
+      "com.surprising.aeron.service.order.admission.RuntimeOrderCheck.resolveInto:475",
       18
     ],
     [
-      "com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.hashUtf8:1104",
+      "com.surprising.aeron.service.core.identity.IdIndex.hashUtf8:1104",
       17
     ],
     [
@@ -487,7 +487,7 @@
       12
     ],
     [
-      "com.surprising.aeron.service.treasury.RuntimeFundsAccumulator.add:66",
+      "com.surprising.aeron.service.treasury.FundsTotal.add:66",
       12
     ],
     [
@@ -566,7 +566,7 @@
       "samples": 7,
       "sampled_weight_bytes": 3491544
     },
-    "com/surprising/aeron/service/order/admission/PlaceBatchAdmissionEvent$PlaceBatchIntentSource$Decision": {
+    "com/surprising/aeron/service/order/admission/PlaceBatchCheckEvent$PlaceBatchIntentSource$Decision": {
       "samples": 6,
       "sampled_weight_bytes": 3145640
     },
@@ -574,7 +574,7 @@
       "samples": 3,
       "sampled_weight_bytes": 2097088
     },
-    "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission$Context": {
+    "com/surprising/aeron/service/order/admission/RuntimeOrderCheck$Context": {
       "samples": 3,
       "sampled_weight_bytes": 2097064
     },

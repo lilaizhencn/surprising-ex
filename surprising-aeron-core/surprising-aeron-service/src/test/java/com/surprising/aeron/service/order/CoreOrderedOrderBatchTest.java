@@ -33,9 +33,9 @@ import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.service.core.AccountLaneQueryTestSupport;
 import com.surprising.aeron.service.core.CoreFaults;
 import com.surprising.aeron.service.core.PipelinedExecutionExtension;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.TradingCore;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.matcher.OrderBookRouter;
 import com.surprising.product.api.ProductLine;
@@ -64,7 +64,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void cancelBatchRejectsTerminalOrderWithoutEnteringMatcherChunk() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             applyBalance(state, 1002, "BTC", 2, 2);
@@ -95,7 +95,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void singleCancelReleasesReservedFunds() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             assertThat(CoreTestCompletion.applyAsynchronously(state,
@@ -117,7 +117,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void cancelBatchCommitsInItsSettlementTaskAndKeepsDuplicateAndSnapshotResults() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
@@ -141,7 +141,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().orders().get(86_001L)).isNull();
             assertThat(state.tradingState().orders().get(86_002L)).isNull();
             assertThat(state.apply(cancel).data()).isEqualTo(result.data());
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
                 assertThat(restored.apply(cancel).data()).isEqualTo(result.data());
             }
@@ -155,7 +155,7 @@ class CoreOrderedOrderBatchTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void spotAmendReusesLockedFundsAndRejectsUnaffordableIncreaseBeforeMatching(boolean asynchronous) throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 1_000, 1);
             applyBalance(state, 1002, "BTC", 1, 2);
@@ -167,7 +167,7 @@ class CoreOrderedOrderBatchTest {
                             place(85_001, "funds-original", 1_000))))));
 
             // 继续准入前记录的账户所有权交接代数，完成后核对没有临时借走 Lane
-            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
+            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook());
             // 资金不足而预期被拒绝的改单消息
             CoreMessage rejectedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 5,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
@@ -185,7 +185,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().orders().get(85_000L)).isNotNull();
             assertThat(state.tradingState().orders().get(85_002L)).isNull();
 
-            handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
+            handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook());
             // 降价后能够复用原冻结资金的改单消息
             CoreMessage appliedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
@@ -194,7 +194,7 @@ class CoreOrderedOrderBatchTest {
             // 成功改单的 Core 终态响应
             CoreResponse applied = asynchronous ? CoreTestCompletion.applyAsynchronously(state, appliedCommand)
                     : drainBatch(state, appliedCommand);
-            if (asynchronous) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState()))
+            if (asynchronous) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook()))
                     .as("amend preflight and reservation stay on the permanent Lane").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(applied, 1)).isEqualTo(-1);
             assertThat(state.tradingState().orders().get(85_001L)).isNull();
@@ -207,7 +207,7 @@ class CoreOrderedOrderBatchTest {
                             new CancelOrderCommand(85_003))))));
             assertThat(state.tradingState().users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(1_000);
             assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }
@@ -220,7 +220,7 @@ class CoreOrderedOrderBatchTest {
     @org.junit.jupiter.api.Timeout(10)
     void spotAmendLaneFailureStopsTheBatchAndRecoversFromPriorSnapshotAndLog() throws Exception {
         // 本场景独立 Core 运行时，资源结束或 finally 中关闭
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore state = new TradingCore(ProductLine.SPOT);
         try {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000, 1);
@@ -246,20 +246,20 @@ class CoreOrderedOrderBatchTest {
             // 必须在提交批次之前注入故障，因为 Matcher 会直接发布给账户。
             // 若先等撮合结果再破坏余额，账户结算可能已经完成；这里让真实账户入账检查触发溢出。
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingAccountRuntime runtime = field(state, "runtimeState");
+            AccountBook accountBook = field(state, "accountBook");
             // 当前运行时的资产、品种、客户号及持仓身份字典
-            RuntimeIdentityRegistry identities = field(state, "identities");
+            IdIndex identities = field(state, "identities");
             // 故障注入是否临时取得 Owner 账户访问权，finally 只释放本次取得的一层
-            boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
+            boolean acquired = accountBook.accountLanesStarted() && !accountBook.ownerLaneAccess();
             try {
-                if (acquired) runtime.acquireOwnerLaneAccess();
-                runtime.putBalance(new com.surprising.aeron.service.account.AccountBalance(
+                if (acquired) accountBook.acquireOwnerLaneAccess();
+                accountBook.putBalance(new com.surprising.aeron.service.account.AccountBalance(
                         1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
                 // 这里故意破坏测试余额，随后清变更跟踪。
                 // 下一命令应在真实账户算术检查中失败，不能把这次注入当成业务余额调整。
-                runtime.clearChangedKeys();
+                accountBook.clearChangedKeys();
             } finally {
-                if (acquired) runtime.releaseOwnerLaneAccess();
+                if (acquired) accountBook.releaseOwnerLaneAccess();
             }
             assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             // 当前待完成命令的完整 Core 序号
@@ -280,7 +280,7 @@ class CoreOrderedOrderBatchTest {
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 7))).isInstanceOf(RuntimeException.class);
             assertThatThrownBy(state::snapshot).isInstanceOf(RuntimeException.class);
 
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, checkpoint)) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, checkpoint)) {
                 // 当前已收到或由完成回调交出的 Core 响应
                 CoreResponse response = drainBatch(restored, amend);
                 assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 1)).isEqualTo(-1);
@@ -300,17 +300,17 @@ class CoreOrderedOrderBatchTest {
                 long recoveredHash = trading.businessStateHash();
                 drainBatch(restored, amend); // 重复重放不能让同一成交再次结算
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(recoveredHash);
-                try (/* 已恢复状态再次快照并恢复出的 Core，用来检查结果稳定 */ TradingCoreRuntime again = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, restored.snapshot())) {
+                try (/* 已恢复状态再次快照并恢复出的 Core，用来检查结果稳定 */ TradingCore again = TradingCore.fromSnapshot(ProductLine.SPOT, restored.snapshot())) {
                     assertThat(again.tradingState().businessStateHash()).isEqualTo(recoveredHash);
                 }
             }
         } finally {
             // 故障工作线程关闭时仍会抛错；测试清理也要继续停止其他工作线程。
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingAccountRuntime runtime = field(state, "runtimeState");
+            AccountBook accountBook = field(state, "accountBook");
             org.assertj.core.api.Assertions.catchThrowable(state::close);
-            if (runtime != null) {
-                for (Object /* 本场景需要显式停止或放行的账户工作线程 */ worker : (Object[]) com.surprising.aeron.service.core.AccountLaneTestAccess.workers(runtime)) {
+            if (accountBook != null) {
+                for (Object /* 本场景需要显式停止或放行的账户工作线程 */ worker : (Object[]) com.surprising.aeron.service.core.AccountLaneTestAccess.workers(accountBook)) {
                     if (worker instanceof AutoCloseable /* 已经确认可关闭的工作线程对象，故障清理仍要停止其他线程 */ closeable) {
                         org.assertj.core.api.Assertions.catchThrowable(closeable::close);
                     }
@@ -343,7 +343,7 @@ class CoreOrderedOrderBatchTest {
         // 进入共享 maker 场景前的全局账户 Lane 配置，finally 按原值恢复
         String priorLanes = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "2");
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             applyBalance(state, 1002, "BTC", 4, 2);
@@ -375,7 +375,7 @@ class CoreOrderedOrderBatchTest {
                         assertThat(balance.lockedUnits()).isZero());
             }
             for (/* 当前正在检查是否已退休的订单编号 */ long orderId = 82_000; orderId <= 82_004; orderId++) assertThat(trading.orders().get(orderId)).isNull();
-            if (recovery) try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            if (recovery) try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
             }
         } finally {
@@ -390,8 +390,8 @@ class CoreOrderedOrderBatchTest {
      */
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void spotBatchPreservesEarlierFillProceedsForLaterItemAdmission(boolean asynchronous) throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+    void spotBatchPreservesEarlierFillProceedsForLaterItemOrderCheck(boolean asynchronous) throws Exception {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, "BTC", 1, 1);
             applyBalance(state, 1002, 2_000, 2);
@@ -407,11 +407,11 @@ class CoreOrderedOrderBatchTest {
                     UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(
                             new PlaceOrderBatchCommand(List.of(sell, buy))));
             // 继续准入前记录的账户所有权交接代数，完成后核对没有临时借走 Lane
-            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
+            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook());
             // 当前已收到或由完成回调交出的 Core 响应
             CoreResponse response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, batch)
                     : drainBatch(state, batch);
-            if (asynchronous) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState()))
+            if (asynchronous) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook()))
                     .as("sequential admission must not borrow Lane ownership").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
@@ -423,7 +423,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(trading.users().get(1001L).balances().get("USDT").availableUnits()).isZero();
             assertThat(trading.users().get(1002L).balances().get("USDT").availableUnits()).isEqualTo(1_000);
             assertThat(trading.users().get(1002L).balances().get("BTC").availableUnits()).isOne();
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
             }
         }
@@ -434,7 +434,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void spotPipelinedFatalAfterFillPreservesFundsAndRecoversBySnapshotReplay() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             applyBalance(state, 1002, "BTC", 1, 2);
@@ -464,18 +464,18 @@ class CoreOrderedOrderBatchTest {
                     FatalMatchingDivergenceException.class);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingAccountRuntime runtime = field(state, "runtimeState");
+            AccountBook accountBook = field(state, "accountBook");
             // 当前运行时的资产、品种、客户号及持仓身份字典
-            RuntimeIdentityRegistry identities = field(state, "identities");
+            IdIndex identities = field(state, "identities");
             // 字典解析出的 USDT 资产编号
             int quote = identities.assetId("USDT");
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.balance(1001, quote).availableUnits())).isEqualTo(8_100);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.balance(1001, quote).lockedUnits())).isEqualTo(900);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1002, () -> runtime.balance(1002, quote).availableUnits())).isEqualTo(1_000);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(84_000))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(84_001))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.balance(1001, quote).availableUnits())).isEqualTo(8_100);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.balance(1001, quote).lockedUnits())).isEqualTo(900);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1002, () -> accountBook.balance(1002, quote).availableUnits())).isEqualTo(1_000);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.order(84_000))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.order(84_001))).isNull();
             assertThatThrownBy(() -> state.apply(message)).isSameAs(divergence);
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, recovery)) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, recovery)) {
                 assertThat(TradingOrderBatchCodec.firstNonAppliedItem(drainBatch(restored, message), 2))
                         .isEqualTo(-1);
                 // 完成阶段导出的业务状态，供余额、预留及订单断言读取
@@ -493,7 +493,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void alternatingSingleOrdersAndBatchesReleaseContextsBeforeTheNextBatchResumes() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 1_000_000);
             for (/* 交替单笔和批量场景的当前轮次 */ int cycle = 0; cycle < 30; cycle++) {
@@ -528,7 +528,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void deferredCommandsAndRejectedBatchAdvanceBySequenceAcrossBothQueueHeads() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             // 按原输入先后排列的不同批次及普通命令列表
@@ -569,7 +569,7 @@ class CoreOrderedOrderBatchTest {
                     state.commandResults().get(commands.get(2).header().commandId()).responseData()).items())
                     .allSatisfy(/* 当前批量结果的一项，读取其状态、结果码、订单或成交明细 */ item -> assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED));
             for (/* 当前轮测试订单编号起点，用相邻编号避免跨轮冲突 */ long id = 82_001; id <= 82_005; id++) assertThat(state.tradingState().orders().get(id)).isNotNull();
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }
@@ -580,7 +580,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void deferredAllRejectedBatchStillPublishesItsTerminalBetweenAdjacentBatches() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             // 排在全拒绝撤单批次之前的成功下单消息
@@ -631,7 +631,7 @@ class CoreOrderedOrderBatchTest {
             // 当前要检查的资产可用与冻结余额
             var balance = state.tradingState().users().get(1001L).balances().get("USDT");
             assertThat(balance.availableUnits() + balance.lockedUnits()).isEqualTo(100_007);
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash())
                         .isEqualTo(state.tradingState().businessStateHash());
             }
@@ -643,7 +643,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void coalescesSameMatcherCancellationsAndPreservesRejectedItemOrder() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             // 放入四张订单之前保存的账户余额，用于检查最后全部解冻后恢复
@@ -696,7 +696,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().users().get(1001L).positions()).isEmpty();
             // 当前成功业务状态的恢复快照字节
             byte[] snapshot = state.snapshot();
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, snapshot)) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, snapshot)) {
                 assertThat(restored.tradingState().users().get(1001L).balances()).isEqualTo(before);
                 assertThat(restored.tradingState().businessStateHash())
                         .isEqualTo(state.tradingState().businessStateHash());
@@ -709,7 +709,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void asynchronousCancelBatchSubmitsLaterChunkAfterMissingOrder() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             for (/* 当前订单项、分片或账户表的遍历下标 */ int index = 0; index < 8; index++) {
@@ -752,7 +752,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void isolatesOverlappingBatchesUntilTheActiveBatchCompletes() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             // 前置活动批次的原命令 UUID
@@ -814,7 +814,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void defersSinglePlaceCompletionUntilTheActiveBatchCompletes() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             // 前置活动批次的原命令 UUID
@@ -895,7 +895,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void processesMaximumBatchesInInputOrder() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, Math.multiplyExact(PlaceOrderBatchCommand.MAX_ORDERS, 1_000L));
             // 最大项数原批次 UUID，重复与冲突请求继续使用同一值
@@ -951,7 +951,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void conservesFundsWhenABatchMatchesAnotherUser() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 2_000_000);
             applyBalance(state, 1002, "BTC", 2_000, 2);
@@ -985,8 +985,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(items).allSatisfy(/* 当前批量结果的一项，读取其状态、结果码、订单或成交明细 */ item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(items.getFirst().order()).isNull();
             assertThat(items.get(1).order().status()).isEqualTo("OPEN");
-            assertThat(state.terminalRetention().containsOrder(10_502, 1001, "batch-crossing-buy")).isTrue();
-            assertThat(state.terminalRetention().containsOrder(10_501, 1002, "batch-maker-sell")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(10_502, 1001, "batch-crossing-buy")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(10_501, 1002, "batch-maker-sell")).isTrue();
             assertThat(items.getFirst().executions()).hasSize(1);
             assertThat(items.get(1).executions()).isEmpty();
             assertThat(state.tradingState().orders().keySet()).containsExactly(10_503L);
@@ -1006,11 +1006,11 @@ class CoreOrderedOrderBatchTest {
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(duplicate.data()).containsExactly(response.data());
             assertThat(state.tradingState().businessStateHash()).isEqualTo(businessHash);
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(businessHash);
                 assertThat(restored.tradingState().orders().keySet()).containsExactly(10_503L);
-                assertThat(restored.terminalRetention().containsOrder(10_502, 1001, "batch-crossing-buy")).isTrue();
-                assertThat(restored.terminalRetention().containsOrder(10_501, 1002, "batch-maker-sell")).isTrue();
+                assertThat(restored.completedOrderArchive().containsOrder(10_502, 1001, "batch-crossing-buy")).isTrue();
+                assertThat(restored.completedOrderArchive().containsOrder(10_501, 1002, "batch-maker-sell")).isTrue();
                 // 用原消息重放返回的重复终态响应
                 CoreResponse replay = drainBatch(restored, takerBatch);
                 assertThat(replay.status()).isEqualTo(ResponseStatus.DUPLICATE);
@@ -1024,8 +1024,8 @@ class CoreOrderedOrderBatchTest {
      * 注册带名义价值档位的 U 本位永续品种，同批第二项必须看见首项占用并因超限拒绝；检查可用加冻结金额守恒，只有第一项保留预留。
      */
     @Test
-    void perpetualBatchAdmissionIncludesEarlierItemsAndConservesReservedFunds() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+    void perpetualBatchOrderCheckIncludesEarlierItemsAndConservesReservedFunds() {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             // 本测试注册的现货或 U 本位永续品种配置
             RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
                     "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -1084,7 +1084,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void laneBatchRejectionRollsBackProvisionalClientAndFundsBeforeOrderedItemsResume() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyLinearPerpetualInstrument(state);
             applyBalance(state, ProductLine.LINEAR_PERPETUAL, 1001, 1_000_000, 1);
             // 当前场景要推进的原批量消息
@@ -1104,7 +1104,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.pendingMatching().size()).isZero();
             // 当前成功业务状态的恢复快照字节
             byte[] snapshot = state.snapshot();
-            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
+            try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 assertThat(restored.tradingState().businessStateHash())
                         .isEqualTo(state.tradingState().businessStateHash());
             }
@@ -1116,7 +1116,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void keepsPriorItemsButFailsStickyAfterMatcherDivergence() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             // 当前需要检查终态缓存及重复请求的原 UUID
@@ -1153,9 +1153,9 @@ class CoreOrderedOrderBatchTest {
             // 随后要注入致命事实的原批次 UUID
             UUID fatalId = UUID.randomUUID();
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingAccountRuntime runtime = field(state, "runtimeState");
+            AccountBook accountBook = field(state, "accountBook");
             // 当前运行时的资产、品种、客户号及持仓身份字典
-            RuntimeIdentityRegistry identities = field(state, "identities");
+            IdIndex identities = field(state, "identities");
             // USDT 资产编号，供账户合法读取及预留资产断言
             int quoteAssetId = identities.assetId("USDT");
             // 进入故障批次前复制的各逻辑分片已应用序号
@@ -1185,7 +1185,7 @@ class CoreOrderedOrderBatchTest {
                 assertThat(state.commits.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
                 Thread.onSpinWait();
             }
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(11_004))).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.order(11_004))).isNotNull();
             // 等第二项已经准入并交给 Matcher 后再注入分歧。
             // 过早标记故障可能挡住该项预留，使后面的断言失去场景前提。
             assertThat(awaitMatching(state, fatalSequence).accepted()).isTrue();
@@ -1214,13 +1214,13 @@ class CoreOrderedOrderBatchTest {
                     .isSameAs(divergence);
             assertThat(CoreTestCompletion.takeMatchingResult(state, fatalSequence)).isNull();
             assertThat(claimedContext.hasMatchingCompletion()).isFalse();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(11_004))).isNotNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004))).isNotNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_005))).isNotNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004).assetId())).isEqualTo(quoteAssetId);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_005).assetId())).isEqualTo(quoteAssetId);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004).totalReservedUnits())).isEqualTo(1_000L);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_005).totalReservedUnits())).isEqualTo(1_000L);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.order(11_004))).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.reservation(11_004))).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.reservation(11_005))).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.reservation(11_004).assetId())).isEqualTo(quoteAssetId);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.reservation(11_005).assetId())).isEqualTo(quoteAssetId);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.reservation(11_004).totalReservedUnits())).isEqualTo(1_000L);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.reservation(11_005).totalReservedUnits())).isEqualTo(1_000L);
             assertThat(state.commandResults()).doesNotContainKey(fatalId);
             assertThat(state.pendingMatching().get(fatalSequence)).isNotNull();
             assertThat(state.pendingMatching().size()).isOne();
@@ -1228,7 +1228,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotHasPendingCommands()).isTrue();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeFatal);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> identities.findClientKeyValue(1001, "fatal-fourth"))).isNotZero();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> identities.findClientKeyValue(1001, "fatal-fourth"))).isNotZero();
         }
     }
 
@@ -1250,21 +1250,21 @@ class CoreOrderedOrderBatchTest {
      * 按用途收集财库各类余额、结算和游标查询结果，便于测试观察；只整理返回值，不是持久化恢复快照。
      * @param runtime 要观察财库返回值的账户运行时
      */
-    private static Map<String, Object> treasurySnapshot(TradingAccountRuntime runtime) {
+    private static Map<String, Object> systemFundsSnapshot(AccountBook accountBook) {
         // 当前运行时财库查询入口
-        var treasury = runtime.treasury();
+        var systemFunds = accountBook.systemFunds();
         return Map.ofEntries(
-                Map.entry("fees", treasury.feeBalances()),
-                Map.entry("insurance", treasury.insuranceBalances()),
-                Map.entry("deficits", treasury.insuranceDeficits()),
-                Map.entry("liquidationFees", treasury.liquidationFeeBalances()),
-                Map.entry("fundingResiduals", treasury.fundingResidualBalances()),
-                Map.entry("roundingResiduals", treasury.roundingResidualBalances()),
-                Map.entry("clearingPnl", treasury.clearingPnlBalances()),
-                Map.entry("fundingSettlements", treasury.fundingSettlements()),
-                Map.entry("fundingProgress", treasury.fundingProgresses()),
-                Map.entry("lifecycleSettlements", treasury.lifecycleSettlements()),
-                Map.entry("lifecycleProgress", treasury.lifecycleProgresses()));
+                Map.entry("fees", systemFunds.feeBalances()),
+                Map.entry("insurance", systemFunds.insuranceBalances()),
+                Map.entry("deficits", systemFunds.insuranceDeficits()),
+                Map.entry("liquidationFees", systemFunds.liquidationFeeBalances()),
+                Map.entry("fundingResiduals", systemFunds.fundingResidualBalances()),
+                Map.entry("roundingResiduals", systemFunds.roundingResidualBalances()),
+                Map.entry("clearingPnl", systemFunds.clearingPnlBalances()),
+                Map.entry("fundingSettlements", systemFunds.fundingSettlements()),
+                Map.entry("fundingProgress", systemFunds.fundingProgresses()),
+                Map.entry("lifecycleSettlements", systemFunds.lifecycleSettlements()),
+                Map.entry("lifecycleProgress", systemFunds.lifecycleProgresses()));
     }
 
     /**
@@ -1286,7 +1286,7 @@ class CoreOrderedOrderBatchTest {
      * 按业务名称收集持仓用户、OI、触发、算法、强平、定时撤单、活动订单及 ADL 索引的浅层观察值。
      * @param state 当前场景要推进或读取的测试 Core 运行时
      */
-    private static Map<String, Map<String, Object>> allIndexSnapshots(TradingCoreRuntime state) throws Exception {
+    private static Map<String, Map<String, Object>> allIndexSnapshots(TradingCore state) throws Exception {
         return Map.ofEntries(
                 Map.entry("position-user", indexSnapshot(field(state, "positionUserIndex"))),
                 Map.entry("open-interest", indexSnapshot(field(state, "openInterestIndex"))),
@@ -1325,7 +1325,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void executesCancelAndAmendBatchesWithOrderedPerItemOutcomes() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
 
@@ -1372,7 +1372,7 @@ class CoreOrderedOrderBatchTest {
     @org.junit.jupiter.api.Timeout(10)
     void amendPartialMatcherFailureMustFailStickyBeforeRecordingBusinessRejection() throws Exception {
         // 本场景独立 Core 运行时，资源结束或 finally 中关闭
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore state = new TradingCore(ProductLine.SPOT);
         // 阻塞工作线程的放行门闩，finally 必须放行
         var release = new java.util.concurrent.CountDownLatch(1);
         try {
@@ -1414,14 +1414,14 @@ class CoreOrderedOrderBatchTest {
             // 在真实 Matcher 到账户事件的边界注入。
             // 一旦命令已有直达结算事件，Owner 另传的令牌就不是该路径的权威事实。
             // 等待真实改单准入及直达事件建立的两秒截止点
-            long admissionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            long orderCheckDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
             while (state.pendingMatching().get(sequence).orderBatch.itemSettlementEvent == null) {
                 // 当前仍在队列中的批次命令槽
                 var pending = state.pendingMatching().get(sequence);
                 if (!pending.orderBatch.activated())
                     state.batches().activateOrderBatch(pending.orderBatch, pending, true);
-                state.runtimeState().assertAccountLanesHealthy();
-                if (System.nanoTime() >= admissionDeadline) throw new AssertionError("amend admission timeout");
+                state.accountBook().assertAccountLanesHealthy();
+                if (System.nanoTime() >= orderCheckDeadline) throw new AssertionError("amend admission timeout");
                 Thread.onSpinWait();
             }
             // 已经派发并等待准入或结算的真实事件
@@ -1446,10 +1446,10 @@ class CoreOrderedOrderBatchTest {
 
             assertThat(divergence).isInstanceOf(
                     FatalMatchingDivergenceException.class);
-            assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 1001, () -> state.runtimeState().order(12_101)).status())
+            assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 1001, () -> state.accountBook().order(12_101)).status())
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
-            assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 1001, () -> state.runtimeState().order(12_102))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 1001, () -> state.runtimeState().order(12_103))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 1001, () -> state.accountBook().order(12_102))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(state.accountBook(), 1001, () -> state.accountBook().order(12_103))).isNull();
             assertThat(state.pendingMatching().size()).isEqualTo(1);
             assertThat(state.commandResults()).doesNotContainKey(commandId);
             assertThat(state.pendingMatching().get(sequence)).isNotNull();
@@ -1458,7 +1458,7 @@ class CoreOrderedOrderBatchTest {
         } finally {
             release.countDown();
             org.assertj.core.api.Assertions.catchThrowable(state::close);
-            for (Object /* 本场景需要显式停止或放行的账户工作线程 */ worker : (Object[]) com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.runtimeState())) {
+            for (Object /* 本场景需要显式停止或放行的账户工作线程 */ worker : (Object[]) com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.accountBook())) {
                 if (worker instanceof AutoCloseable /* 已经确认可关闭的工作线程对象，故障清理仍要停止其他线程 */ closeable)
                     org.assertj.core.api.Assertions.catchThrowable(closeable::close);
             }
@@ -1470,12 +1470,12 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void amendBatchRejectsReplacementIdOnAnotherLaneBeforeCancelingOriginal() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             applyBalance(state, 1002, 10_000, 2);
-            assertThat(state.runtimeState().topology().accountLaneId(1001))
-                    .isNotEqualTo(state.runtimeState().topology().accountLaneId(1002));
+            assertThat(state.accountBook().topology().accountLaneId(1001))
+                    .isNotEqualTo(state.accountBook().topology().accountLaneId(1002));
             for (/* 当前订单项、分片或账户表的遍历下标 */ int index = 0; index < 2; index++) {
                 // 当前轮给另一用户创建的订单编号
                 // 当前需要核对资产或订单的参与账户用户编号
@@ -1510,7 +1510,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 1_000);
             drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
@@ -1518,7 +1518,7 @@ class CoreOrderedOrderBatchTest {
                             place(13_221, "final-original", 1_000))))));
             state.activate();
             // 当前运行时各账户 Lane 对象数组
-            Object[] lanes = field(state.runtimeState(), "accountLanes");
+            Object[] lanes = field(state.accountBook(), "accountLanes");
             // 安装守卫前保存的原账户表引用，finally 按对应位置恢复
             Object[] original = new Object[lanes.length];
             try {
@@ -1579,7 +1579,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void sequentialPlaceUsesEarlierFillProceedsOnPermanentLanes() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, "BTC", 1, 1);
             applyBalance(state, 1002, 2_000, 2);
@@ -1588,14 +1588,14 @@ class CoreOrderedOrderBatchTest {
                             linearOrder(98_300, "proceeds-maker", CoreOrderSide.BUY, 1_000, 1)))), 1002));
             state.activate();
             // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook());
             // 当前已收到或由完成回调交出的 Core 响应
             var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
                     UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             linearOrder(98_301, "sell-for-proceeds", CoreOrderSide.SELL, 1_000, 1),
                             linearOrder(98_302, "buy-with-proceeds", CoreOrderSide.BUY, 1_000, 1))))));
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook())).isEqualTo(handoff);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
             var trading = state.tradingState();
             assertThat(trading.orders().get(98_300L)).isNull();
@@ -1617,7 +1617,7 @@ class CoreOrderedOrderBatchTest {
         // 进入场景前的全局账户 Lane 配置，finally 恢复
         String previous = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "2");
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 1_000, 1);
             applyBalance(state, 1002, 2_000, 2);
@@ -1626,7 +1626,7 @@ class CoreOrderedOrderBatchTest {
                             new PlaceOrderBatchCommand(List.of(linearOrder(98_200, "other-account", CoreOrderSide.BUY, 2_000, 1)))), 1002));
             state.activate();
             // 当前运行时各账户 Lane 对象数组
-            Object[] lanes = field(state.runtimeState(), "accountLanes");
+            Object[] lanes = field(state.accountBook(), "accountLanes");
             // 需要安装读取守卫的订单、预留、用户、持仓及余额表字段名
             String[] names = {"orders", "reservations", "users", "positions", "balances"};
             // 按账户 Lane 与字段下标保存的原始表引用二维数组
@@ -1642,7 +1642,7 @@ class CoreOrderedOrderBatchTest {
                     }
                 }
                 // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
+                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook());
                 // 当前已收到或由完成回调交出的 Core 响应
                 var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
                         UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1664,7 +1664,7 @@ class CoreOrderedOrderBatchTest {
                 assertThat(TradingOrderBatchCodec.decodeResult(rejected.data()).items())
                         .extracting(CoreOrderBatchResult.Item::resultCode)
                         .containsExactly(CoreResultCode.DUPLICATE_ORDER_ID, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook())).isEqualTo(handoff);
             } finally {
                 for (/* 当前账户 Lane 数组下标 */ int lane = 0; lane < lanes.length; lane++) {
                     for (/* 当前订单项、分片或账户表的遍历下标 */ int index = 0; index < names.length; index++) {
@@ -1702,9 +1702,9 @@ class CoreOrderedOrderBatchTest {
             // 账户线程完成拒绝客户号查询后回传的两项键值 Future
             var clientKeys = new java.util.concurrent.CompletableFuture<long[]>();
             // 当前运行时账户工作线程数组
-            Object[] workers = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.runtimeState());
+            Object[] workers = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.accountBook());
             // 用户一千零一固定路由到的账户 Lane 编号
-            int laneId = state.runtimeState().topology().accountLaneId(1001);
+            int laneId = state.accountBook().topology().accountLaneId(1001);
             ((com.surprising.aeron.bootstrap.account.SettlementLaneWorker) workers[laneId]).submit(/* 在用户所属账户线程收到的 Lane，用于查询被拒订单的客户身份是否已释放 */ lane ->
                     clientKeys.complete(new long[]{
                             state.identities().findClientKeyValueInLane(lane, 1001, "lane-unaffordable"),
@@ -1721,8 +1721,8 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     @org.junit.jupiter.api.Timeout(10)
-    void amendBatchAdmissionReadsOnlyItsLaneAndRetainsTheEventUntilCollected() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+    void amendBatchOrderCheckReadsOnlyItsLaneAndRetainsTheEventUntilCollected() throws Exception {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 1_000);
             drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
@@ -1730,11 +1730,11 @@ class CoreOrderedOrderBatchTest {
                             place(13_201, "lane-amend-original", 1_000))))));
             state.activate();
             // 当前运行时各账户 Lane 对象数组
-            Object[] lanes = field(state.runtimeState(), "accountLanes");
+            Object[] lanes = field(state.accountBook(), "accountLanes");
             // 当前运行时账户工作线程数组
-            Object[] workers = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.runtimeState());
+            Object[] workers = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.accountBook());
             // 用户一千零一固定路由到的账户 Lane 编号
-            int laneId = state.runtimeState().topology().accountLaneId(1001);
+            int laneId = state.accountBook().topology().accountLaneId(1001);
             // 本场景需要显式停止或放行的账户工作线程
             var worker = (com.surprising.aeron.bootstrap.account.SettlementLaneWorker) workers[laneId];
             // 确认目标工作线程已经到达阻塞点的门闩
@@ -1773,10 +1773,10 @@ class CoreOrderedOrderBatchTest {
                 batch.addItem(13_202, 13_201, 13_202, amend);
                 state.batches().prepareOrderBatchItem(batch, batch.items.getFirst(), 1001, UUID.randomUUID());
                 // 已经派发并等待准入或结算的真实事件
-                var event = batch.replacementAdmissionEvent;
+                var event = batch.replacementOrderCheckEvent;
                 assertThat(event).isNotNull();
                 assertThat(event.complete()).isFalse();
-                assertThatThrownBy(() -> state.runtimeState().releaseReplacementAdmission(event))
+                assertThatThrownBy(() -> state.accountBook().releaseReplaceOrderCheck(event))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
                 // 确认另一账户 Lane 未被目标 Lane 阻塞的完成门闩
                 var independent = new java.util.concurrent.CountDownLatch(1);
@@ -1784,9 +1784,9 @@ class CoreOrderedOrderBatchTest {
                         .submit(/* 另一账户线程传入的 Lane；这里只报告门闩到达，不读取它 */ lane -> independent.countDown());
                 assertThat(independent.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
                 release.countDown();
-                awaitBatchAmendAdmission(state, event);
+                awaitBatchAmendOrderCheck(state, event);
                 assertThat(event.rejection()).isNull();
-                assertThat(event.admission().requiredReservationUnits()).isEqualTo(900);
+                assertThat(event.orderCheck().requiredReservationUnits()).isEqualTo(900);
                 state.batches().releaseOrderBatchPending(batch);
                 assertThat(event.complete()).isFalse();
 
@@ -1798,8 +1798,8 @@ class CoreOrderedOrderBatchTest {
                 rejected.addItem(13_203, 13_201, 13_203, new AmendOrderCommand(
                         13_201, 13_203, "unaffordable-lane", 1_100L, 1L, CoreTimeInForce.GTC, false));
                 state.batches().prepareOrderBatchItem(rejected, rejected.items.getFirst(), 1001, UUID.randomUUID());
-                assertThat(rejected.replacementAdmissionEvent).isSameAs(event);
-                awaitBatchAmendAdmission(state, event);
+                assertThat(rejected.replacementOrderCheckEvent).isSameAs(event);
+                awaitBatchAmendOrderCheck(state, event);
                 assertThat(event.rejection()).isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
                         .hasMessageContaining("insufficient");
                 state.batches().releaseOrderBatchPending(rejected);
@@ -1823,12 +1823,12 @@ class CoreOrderedOrderBatchTest {
      * @param state 当前场景要推进或读取的测试 Core 运行时
      * @param event 本场景已经派发的替换准入事件，等待完成但不在辅助方法内回收
      */
-    private static void awaitBatchAmendAdmission(TradingCoreRuntime state,
-            com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent event) {
+    private static void awaitBatchAmendOrderCheck(TradingCore state,
+            com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent event) {
         // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
         while (!event.complete()) {
-            state.runtimeState().assertAccountLanesHealthy();
+            state.accountBook().assertAccountLanesHealthy();
             if (System.nanoTime() >= deadline) throw new AssertionError("batch amend admission timeout");
             Thread.onSpinWait();
         }
@@ -1876,7 +1876,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void cancelIdentityAndPreparationNeverReadLaneOrderTables() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             applyBalance(state, 1002, 100_000, 2);
@@ -1891,7 +1891,7 @@ class CoreOrderedOrderBatchTest {
             // 入口校验之前的应用命令计数，拒绝后应保持不变
             long appliedBefore = state.appliedCommandCount();
             // 当前运行时各账户 Lane 对象数组
-            Object[] lanes = field(state.runtimeState(), "accountLanes");
+            Object[] lanes = field(state.accountBook(), "accountLanes");
             // 账户 Lane 中订单表字段的反射句柄
             var ordersField = lanes[0].getClass().getDeclaredField("orders");
             ordersField.setAccessible(true);
@@ -1918,27 +1918,27 @@ class CoreOrderedOrderBatchTest {
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_101)), 1001);
                 // 当前普通撤单消息的类型化解码输入
                 var decoded = com.surprising.aeron.service.order.OrderCommand.Decoded.decode(single);
-                state.admissions().validatePendingCancel(single, decoded);
-                assertThat(state.admissions().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.CANCEL, decoded))
+                state.orderChecks().validatePendingCancel(single, decoded);
+                assertThat(state.orderChecks().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.CANCEL, decoded))
                         .isEqualTo("1");
                 // 只用于查原单路由的普通改单消息
                 var amendSingle = command(CoreMessageType.AMEND_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(
                                 13_101, 13_103, "route-amend", 900L, 1L, CoreTimeInForce.GTC, false)), 1001);
-                assertThat(state.admissions().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.AMEND,
+                assertThat(state.orderChecks().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.AMEND,
                         com.surprising.aeron.service.order.OrderCommand.Decoded.decode(amendSingle)))
                         .isEqualTo("1");
                 // 只用于查原单路由的普通替换消息
                 var replaceSingle = command(CoreMessageType.REPLACE_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeReplaceOrder(new com.surprising.aeron.protocol.ReplaceOrderCommand(
                                 13_101, place(13_103, "route-replace", 900))), 1001);
-                assertThat(state.admissions().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.REPLACE,
+                assertThat(state.orderChecks().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.REPLACE,
                         com.surprising.aeron.service.order.OrderCommand.Decoded.decode(replaceSingle)))
                         .isEqualTo("1");
                 // 请求用户尝试撤对方订单的普通消息
                 var foreignSingle = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_102)), 1001);
-                assertThatThrownBy(() -> state.admissions().validatePendingCancel(foreignSingle,
+                assertThatThrownBy(() -> state.orderChecks().validatePendingCancel(foreignSingle,
                         com.surprising.aeron.service.order.OrderCommand.Decoded.decode(foreignSingle)))
                         .isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
                         .hasMessageContaining("another user");
@@ -2009,7 +2009,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void rejectsMixedUserCancelBatchBeforeAnyMutation() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             applyBalance(state, 1002, 100_000, 2);
@@ -2060,21 +2060,21 @@ class CoreOrderedOrderBatchTest {
     @Test
     void closeDoesNotRollBackAnInterruptedBatchAfterObservedMatcherFact() throws Exception {
         // 本场景独立 Core 运行时，资源结束或 finally 中关闭
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore state = new TradingCore(ProductLine.SPOT);
         applySpotInstrument(state);
         applyBalance(state, 1001, 20_000);
         // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-        TradingAccountRuntime runtime = field(state, "runtimeState");
+        AccountBook accountBook = field(state, "accountBook");
         // 当前运行时的资产、品种、客户号及持仓身份字典
-        RuntimeIdentityRegistry identities = field(state, "identities");
+        IdIndex identities = field(state, "identities");
         // USDT 资产编号，供账户合法读取及预留资产断言
         int quoteAssetId = identities.assetId("USDT");
         // 中断批次开始前的可用报价币数量
-        long availableBefore = AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.balance(1001, quoteAssetId).availableUnits());
+        long availableBefore = AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.balance(1001, quoteAssetId).availableUnits());
         // 中断批次开始前的冻结报价币数量
-        long lockedBefore = AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.balance(1001, quoteAssetId).lockedUnits());
+        long lockedBefore = AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.balance(1001, quoteAssetId).lockedUnits());
         // 执行当前批次前的运行时业务修订
-        long revisionBefore = runtime.revision();
+        long revisionBefore = accountBook.revision();
         // 批次开始前的持仓身份检查点，现货场景关闭后不应改变
         long identityBefore = identities.positionCheckpoint();
         // 当前需要检查终态缓存及重复请求的原 UUID
@@ -2101,16 +2101,16 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.commits.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
             Thread.onSpinWait();
         }
-        assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_001))).isNotNull();
+        assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.order(15_001))).isNotNull();
         assertThat(state.snapshotHasPendingCommands()).isTrue();
 
         state.close();
 
-        assertThat(runtime.order(15_001)).isNotNull();
-        assertThat(runtime.order(15_002)).isNull();
-        assertThat(runtime.balance(1001, quoteAssetId).availableUnits()).isLessThan(availableBefore);
-        assertThat(runtime.balance(1001, quoteAssetId).lockedUnits()).isGreaterThan(lockedBefore);
-        assertThat(runtime.revision()).isGreaterThan(revisionBefore);
+        assertThat(accountBook.order(15_001)).isNotNull();
+        assertThat(accountBook.order(15_002)).isNull();
+        assertThat(accountBook.balance(1001, quoteAssetId).availableUnits()).isLessThan(availableBefore);
+        assertThat(accountBook.balance(1001, quoteAssetId).lockedUnits()).isGreaterThan(lockedBefore);
+        assertThat(accountBook.revision()).isGreaterThan(revisionBefore);
         assertThat(identities.positionCheckpoint()).isEqualTo(identityBefore);
         assertThat(identities.findClientKeyValue(1001, "close-first")).isNotZero();
         assertThat(state.snapshotHasPendingCommands()).isFalse();
@@ -2122,14 +2122,14 @@ class CoreOrderedOrderBatchTest {
     @Test
     void rejectsUnsupportedRuntimeDomainBeforeItsFirstMutationDuringBatch() throws Exception {
         // 本场景独立 Core 运行时，资源结束或 finally 中关闭
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore state = new TradingCore(ProductLine.SPOT);
         try {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingAccountRuntime runtime = field(state, "runtimeState");
+            AccountBook accountBook = field(state, "accountBook");
             // 当前运行时的资产、品种、客户号及持仓身份字典
-            RuntimeIdentityRegistry identities = field(state, "identities");
+            IdIndex identities = field(state, "identities");
             // 品种一的永久编号
             int symbolId = identities.symbolId("1");
             // 当前场景要推进的原批量消息
@@ -2144,12 +2144,12 @@ class CoreOrderedOrderBatchTest {
             long sequence = state.matchingSequence(batch.header().commandId());
             awaitMatching(state, sequence);
 
-            assertThatThrownBy(() -> runtime.putMarkPrice(new MarkPrice(
-                    symbolId, runtime.instrument("1"), 50_000, 2, 2)))
+            assertThatThrownBy(() -> accountBook.putMarkPrice(new MarkPrice(
+                    symbolId, accountBook.instrument("1"), 50_000, 2, 2)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("order batch cannot mutate mark-price state");
 
-            assertThat(runtime.markPrice(symbolId)).isNull();
+            assertThat(accountBook.markPrice(symbolId)).isNull();
         } finally {
             state.close();
         }
@@ -2160,13 +2160,13 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void finalLaneMaskFailureStopsWithoutRollingBackObservedMatcherFact() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingAccountRuntime runtime = field(state, "runtimeState");
+            AccountBook accountBook = field(state, "accountBook");
             // 执行当前批次前的运行时业务修订
-            long revisionBefore = runtime.revision();
+            long revisionBefore = accountBook.revision();
             // 故障前的独立发布序号，失败不得错误前进
             long projectionBefore = state.realtimeExportSequence();
             // 故障注入前的已提交 Core 水位
@@ -2188,8 +2188,8 @@ class CoreOrderedOrderBatchTest {
 
             assertThat(failure).isInstanceOf(
                     FatalMatchingDivergenceException.class);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_201))).isNotNull();
-            assertThat(runtime.revision()).isGreaterThan(revisionBefore);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.order(15_201))).isNotNull();
+            assertThat(accountBook.revision()).isGreaterThan(revisionBefore);
             assertThatThrownBy(state::stateHash)
                     .hasMessageContaining("unfinished reservation or patch work");
             assertThatThrownBy(() -> com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
@@ -2206,7 +2206,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void pipelinedFatalAfterRealFillKeepsAppliedLaneStateForSnapshotLogRecovery() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyLinearPerpetualInstrument(state);
             applyBalance(state, ProductLine.LINEAR_PERPETUAL, 1001, 1_000_000, 1);
             applyBalance(state, ProductLine.LINEAR_PERPETUAL, 1002, 1_000_000, 2);
@@ -2218,9 +2218,9 @@ class CoreOrderedOrderBatchTest {
             assertThat(drainBatch(state, maker).status()).isEqualTo(ResponseStatus.APPLIED);
 
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingAccountRuntime runtime = field(state, "runtimeState");
+            AccountBook accountBook = field(state, "accountBook");
             // 当前运行时的资产、品种、客户号及持仓身份字典
-            RuntimeIdentityRegistry identities = field(state, "identities");
+            IdIndex identities = field(state, "identities");
             // 故障前持仓身份分配检查点，实际成交后的新身份不得回滚。
             long positionCheckpointBefore = identities.positionCheckpoint();
             // 故障前的独立发布序号，失败不得错误前进
@@ -2248,8 +2248,8 @@ class CoreOrderedOrderBatchTest {
                 Long makerPositionKey = identities.preparedPositionKey(1002, "1");
                 assertThat(takerPositionKey).isNotNull();
                 assertThat(makerPositionKey).isNotNull();
-                assertThat(runtime.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
-                assertThat(runtime.position(makerPositionKey).signedQuantitySteps()).isEqualTo(-1);
+                assertThat(accountBook.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
+                assertThat(accountBook.position(makerPositionKey).signedQuantitySteps()).isEqualTo(-1);
             });
             // 本轮等待捕获的致命分歧异常，故障后仍须返回同一实例
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
@@ -2266,13 +2266,13 @@ class CoreOrderedOrderBatchTest {
             Long makerPositionKey = identities.preparedPositionKey(1002, "1");
             assertThat(takerPositionKey).isNotNull();
             assertThat(makerPositionKey).isNotNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.position(takerPositionKey).signedQuantitySteps())).isEqualTo(1);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1002, () -> runtime.position(makerPositionKey).signedQuantitySteps())).isEqualTo(-1);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.position(takerPositionKey).signedQuantitySteps())).isEqualTo(1);
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1002, () -> accountBook.position(makerPositionKey).signedQuantitySteps())).isEqualTo(-1);
             assertThat(identities.positionCheckpoint()).isGreaterThan(positionCheckpointBefore);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_301))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_302))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(15_301))).isNull();
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(15_302))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.order(15_301))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.order(15_302))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.reservation(15_301))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(accountBook, 1001, () -> accountBook.reservation(15_302))).isNull();
             assertThat(state.realtimeExportSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(CoreTestCompletion.takeMatchingResult(state, sequence)).isNull();
@@ -2286,8 +2286,8 @@ class CoreOrderedOrderBatchTest {
      * 顺序批次首项已应用后注入致命结果，保存实际故障边界的分片水位；关闭后待槽及完成引用清空，但已经观察到的 Matcher 序号保持不变。
      */
     @Test
-    void fatalTeardownReleasesAdmissionWithoutErasingMatcherForensics() throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+    void fatalTeardownReleasesOrderCheckWithoutErasingMatcherForensics() throws Exception {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
             // 当前需要检查终态缓存及重复请求的原 UUID
@@ -2353,7 +2353,7 @@ class CoreOrderedOrderBatchTest {
      */
     @Test
     void rejectsProductLineMismatchBeforeAnyBatchMutation() {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             // 本次待测操作前导出的业务状态，用于检查入口拒绝没有改动
             TradingCoreState before = state.tradingState();
@@ -2385,24 +2385,24 @@ class CoreOrderedOrderBatchTest {
      * 依次检查 Matcher 只挂单拒绝和账户资金不足拒绝的清理，再追加快照恢复比较。
      */
     @Test
-    void sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutLaneHandoff() throws Exception {
-        sequentialNativeAndAdmissionRejectionsReleaseFunds(true);
+    void sequentialNativeAndOrderCheckRejectionsReleaseFundsWithoutLaneHandoff() throws Exception {
+        sequentialNativeAndOrderCheckRejectionsReleaseFunds(true);
     }
 
     /**
      * 检查相同两类单项拒绝的资金与客户作用域清理，不追加快照恢复。
      */
     @Test
-    void sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutRecovery() throws Exception {
-        sequentialNativeAndAdmissionRejectionsReleaseFunds(false);
+    void sequentialNativeAndOrderCheckRejectionsReleaseFundsWithoutRecovery() throws Exception {
+        sequentialNativeAndOrderCheckRejectionsReleaseFunds(false);
     }
 
     /**
      * 让卖出只挂单被 Matcher 拒绝，随后买入因没有报价资金被账户拒绝；检查原基础币全可用、无预留、其他用户挂单保留且不借走账户所有权，按参数决定恢复比较。
      * @param recovery 是否在同一业务场景结束后追加快照恢复比较
      */
-    private void sequentialNativeAndAdmissionRejectionsReleaseFunds(boolean recovery) throws Exception {
-        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+    private void sequentialNativeAndOrderCheckRejectionsReleaseFunds(boolean recovery) throws Exception {
+        try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, "BTC", 1, 1);
             applyBalance(state, 1002, 2000, 2);
@@ -2418,7 +2418,7 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             postOnly, place(97_002, "reject-funds", 1000)))));
             // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook());
             // 两项均拒绝但整批已完成的 Core 响应
             var result = CoreTestCompletion.applyAsynchronously(state, message);
             // 按原输入下标排列的批量单项结果列表
@@ -2427,14 +2427,14 @@ class CoreOrderedOrderBatchTest {
                     .containsExactly(ResponseStatus.REJECTED, ResponseStatus.REJECTED);
             assertThat(items).extracting(CoreOrderBatchResult.Item::resultCode)
                     .containsExactly(CoreResultCode.MATCHING_REJECTED, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.accountBook())).isEqualTo(handoff);
             // 两种拒绝全部完成后导出的请求用户状态
             var user = state.tradingState().users().get(1001L);
             assertThat(user.reservations()).isEmpty();
             assertThat(user.balances().get("BTC").availableUnits()).isOne();
             assertThat(user.balances().get("BTC").lockedUnits()).isZero();
             assertThat(state.tradingState().orders().get(97_000L)).isNotNull();
-            if (recovery) try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            if (recovery) try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }
@@ -2445,7 +2445,7 @@ class CoreOrderedOrderBatchTest {
      * @param state 当前场景要推进或读取的测试 Core 运行时
      * @param batch 已提交或待提交的整批原命令
      */
-    private static CoreResponse drainBatch(TradingCoreRuntime state, CoreMessage batch) {
+    private static CoreResponse drainBatch(TradingCore state, CoreMessage batch) {
         // 首次提交当前批次得到的响应，非 MATCHING_PENDING 时直接返回
         CoreResponse initial = state.apply(batch);
         if (initial.resultCode() != CoreResultCode.MATCHING_PENDING) return initial;
@@ -2460,7 +2460,7 @@ class CoreOrderedOrderBatchTest {
      * @param batch 已提交或待提交的整批原命令
      * @param sequence 指定命令完整 Core 序号
      */
-    private static CoreResponse drainBatchAfterFirst(TradingCoreRuntime state, CoreMessage batch, long sequence) {
+    private static CoreResponse drainBatchAfterFirst(TradingCore state, CoreMessage batch, long sequence) {
         // 回调捕获指定 Core 终态的单元素槽，等待循环读同一槽
         CoreResponse[] terminal = {null};
         // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
@@ -2484,7 +2484,7 @@ class CoreOrderedOrderBatchTest {
      * @param clusterPosition 本测试固定传给完成入口的日志位置
      */
     private static CoreResponse completeEventually(
-            TradingCoreRuntime state, long sequence,
+            TradingCore state, long sequence,
             com.surprising.aeron.service.matcher.OrderMatchingResult matching,
             long clusterTimestamp, long clusterPosition) {
         // 本轮已完成响应、序号列表或最后取得的终态，具体角色见所在方法
@@ -2516,7 +2516,7 @@ class CoreOrderedOrderBatchTest {
      * @param sequence 指定命令完整 Core 序号
      */
     private static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatching(
-            TradingCoreRuntime state, long sequence) {
+            TradingCore state, long sequence) {
         // 当前取得的同一 Matcher 事实，可能尚未完成账户结算
         com.surprising.aeron.service.matcher.OrderMatchingResult matching = null;
         // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
@@ -2566,7 +2566,7 @@ class CoreOrderedOrderBatchTest {
      * 通过异步完成入口注册本测试的现货品种一，并要求成功。
      * @param state 当前场景要推进或读取的测试 Core 运行时
      */
-    private static void applySpotInstrument(TradingCoreRuntime state) {
+    private static void applySpotInstrument(TradingCore state) {
         // 本测试注册的现货或 U 本位永续品种配置
         RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
                 "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
@@ -2581,7 +2581,7 @@ class CoreOrderedOrderBatchTest {
      * 注册带名义价值限制的 U 本位永续品种一，再按独立价格来源写初始标记价，两个命令都要求成功。
      * @param state 当前场景要推进或读取的测试 Core 运行时
      */
-    private static void applyLinearPerpetualInstrument(TradingCoreRuntime state) {
+    private static void applyLinearPerpetualInstrument(TradingCore state) {
         // 本测试注册的现货或 U 本位永续品种配置
         RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
                 "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -2623,7 +2623,7 @@ class CoreOrderedOrderBatchTest {
      * @param userId 业务命令所属测试用户
      * @param units 余额调整的最小单位数量
      */
-    private static void applyBalance(TradingCoreRuntime state, long userId, long units) {
+    private static void applyBalance(TradingCore state, long userId, long units) {
         applyBalance(state, userId, units, 1);
     }
 
@@ -2634,7 +2634,7 @@ class CoreOrderedOrderBatchTest {
      * @param units 余额调整的最小单位数量
      * @param sourceSequence 本测试来源的递增命令序号
      */
-    private static void applyBalance(TradingCoreRuntime state, long userId, long units, long sourceSequence) {
+    private static void applyBalance(TradingCore state, long userId, long units, long sourceSequence) {
         applyBalance(state, userId, "USDT", units, sourceSequence);
     }
 
@@ -2646,7 +2646,7 @@ class CoreOrderedOrderBatchTest {
      * @param units 余额调整的最小单位数量
      * @param sourceSequence 本测试来源的递增命令序号
      */
-    private static void applyBalance(TradingCoreRuntime state, long userId, String asset, long units,
+    private static void applyBalance(TradingCore state, long userId, String asset, long units,
                                      long sourceSequence) {
         assertThat(CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), sourceSequence,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units)), userId))
@@ -2661,7 +2661,7 @@ class CoreOrderedOrderBatchTest {
      * @param units 余额调整的最小单位数量
      * @param sourceSequence 本测试来源的递增命令序号
      */
-    private static void applyBalance(TradingCoreRuntime state, ProductLine productLine,
+    private static void applyBalance(TradingCore state, ProductLine productLine,
                                      long userId, long units, long sourceSequence) {
         assertThat(CoreTestCompletion.applyAsynchronously(state, command(productLine, CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(),
                 sourceSequence, TradingCommandCodec.encodeBalanceAdjustment(

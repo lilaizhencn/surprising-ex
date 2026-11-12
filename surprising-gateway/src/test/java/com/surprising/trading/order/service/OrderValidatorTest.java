@@ -114,7 +114,7 @@ class OrderValidatorTest {
     }
 
     @Test
-    void spotMarketOrderDefersBookBoundAndFundAdmissionToCoreWithoutAMarkPrice() {
+    void spotMarketOrderDefersBookBoundAndFundOrderCheckToCoreWithoutAMarkPrice() {
         OrderValidator validator = validator(spotMarketRule(), OptionalLong.empty(), 10_000L);
 
         var result = validator.validate(market(10L));

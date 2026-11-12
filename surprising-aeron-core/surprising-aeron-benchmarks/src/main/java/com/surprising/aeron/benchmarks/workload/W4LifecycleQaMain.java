@@ -300,11 +300,11 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                     expectedFunds.merge(balance.asset(),
                             Math.addExact(balance.availableUnits(), balance.lockedUnits()), Math::addExact)));
         }
-        for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
+        for (var systemFunds : CoreStateQueryCodec.decodeTreasuryState(
                 query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
-            expectedFunds.merge(treasury.asset(), Math.subtractExact(
-                    Math.addExact(treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()),
-                    treasury.insuranceDeficitUnits()), Math::addExact);
+            expectedFunds.merge(systemFunds.asset(), Math.subtractExact(
+                    Math.addExact(systemFunds.feeBalanceUnits(), systemFunds.insuranceBalanceUnits()),
+                    systemFunds.insuranceDeficitUnits()), Math::addExact);
         }
         rows.add("MAKER_TREASURY_BASELINE_CAPTURED users=" + makerUserIds);
     }
@@ -805,17 +805,17 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                     actual.merge(balance.asset(), total, Math::addExact);
                 }
             }
-            for (var treasury : CoreStateQueryCodec.decodeTreasuryState(
+            for (var systemFunds : CoreStateQueryCodec.decodeTreasuryState(
                     query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]))) {
-                if (treasury.feeBalanceUnits() != 0) {
+                if (systemFunds.feeBalanceUnits() != 0) {
                     feeLedgerObserved = true;
                 }
-                fees.put(treasury.asset(), treasury.feeBalanceUnits());
-                insurance.put(treasury.asset(), treasury.insuranceBalanceUnits());
-                deficits.put(treasury.asset(), treasury.insuranceDeficitUnits());
-                actual.merge(treasury.asset(), Math.subtractExact(
-                        Math.addExact(treasury.feeBalanceUnits(), treasury.insuranceBalanceUnits()),
-                        treasury.insuranceDeficitUnits()), Math::addExact);
+                fees.put(systemFunds.asset(), systemFunds.feeBalanceUnits());
+                insurance.put(systemFunds.asset(), systemFunds.insuranceBalanceUnits());
+                deficits.put(systemFunds.asset(), systemFunds.insuranceDeficitUnits());
+                actual.merge(systemFunds.asset(), Math.subtractExact(
+                        Math.addExact(systemFunds.feeBalanceUnits(), systemFunds.insuranceBalanceUnits()),
+                        systemFunds.insuranceDeficitUnits()), Math::addExact);
             }
             long hashAfter = CoreStateQueryCodec.decodeStateHash(
                     queryResponse(CoreMessageType.BUSINESS_STATE_HASH_QUERY, 0, new byte[0]).data());

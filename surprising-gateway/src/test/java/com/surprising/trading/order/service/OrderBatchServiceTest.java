@@ -87,7 +87,7 @@ class OrderBatchServiceTest {
     }
 
     @Test
-    void mapsTerminalConflictAdmissionBackpressureAndUnknownWithoutFallback() {
+    void mapsTerminalConflictOrderCheckBackpressureAndUnknownWithoutFallback() {
         UUID commandId = UUID.fromString("55555555-5555-5555-5555-555555555555");
         OrderService.CommandExecution conflict = new OrderService.CommandExecution(
                 commandId, List.of(7001L), new CoreCommandOutcome.Terminal(new CoreResponse(

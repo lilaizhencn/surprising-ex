@@ -354,7 +354,7 @@ public final class DerivativeMixedWorkload {
                 TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)), orders.size()));
     }
 
-    private static long[] completedLaneOperations(TradingCoreRuntime state) {
+    private static long[] completedLaneOperations(TradingCore state) {
         long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
         long[] completed = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics()).accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
@@ -366,13 +366,13 @@ public final class DerivativeMixedWorkload {
     private static long totalFunds(TradingCoreState state, String asset) {
         long total = 0;
         for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
-        CoreTreasuryState treasury = state.treasuryState();
-        for (Map<String, Long> ledger : List.of(treasury.feeBalances(), treasury.insuranceBalances(),
-                treasury.liquidationFeeBalances(), treasury.fundingResidualBalances(),
-                treasury.roundingResidualBalances(), treasury.clearingPnlBalances())) {
+        CoreTreasuryState systemFunds = state.treasuryState();
+        for (Map<String, Long> ledger : List.of(systemFunds.feeBalances(), systemFunds.insuranceBalances(),
+                systemFunds.liquidationFeeBalances(), systemFunds.fundingResidualBalances(),
+                systemFunds.roundingResidualBalances(), systemFunds.clearingPnlBalances())) {
             total = Math.addExact(total, ledger.getOrDefault(asset, 0L));
         }
-        return Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(asset, 0L));
+        return Math.subtractExact(total, systemFunds.insuranceDeficits().getOrDefault(asset, 0L));
     }
 
     private static void requireNonNegative(AssetBalance balance) {

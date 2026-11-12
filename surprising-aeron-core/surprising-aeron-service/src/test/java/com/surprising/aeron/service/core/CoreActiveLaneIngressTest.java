@@ -30,7 +30,7 @@ class CoreActiveLaneIngressTest {
     void ordinaryIngressReturnsBeforeBlockedLaneAndCompletesFundsAndTradesWithoutOwnerAccountReads(ProductLine line) throws Exception {
         // 确保 finally 放行被阻塞账户任务的门闩
         var release = new CountDownLatch(1);
-        try (/* 自动关闭的真实交易 Core */ var core = new TradingCoreRuntime(line)) {
+        try (/* 自动关闭的真实交易 Core */ var core = new TradingCore(line)) {
             // 当前产品线对应的币对或合约类型
             var type = ContractType.valueOf(line.contractTypeCode());
             applied(core, message(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
@@ -47,34 +47,34 @@ class CoreActiveLaneIngressTest {
                             : new ApplyMarkPriceCommand("1", 100, 1, TIME), line)));
             // 要通过命令应用的第二版费率配置
             var fee = new UpsertFeePolicyCommand(51, 2, 1, "1", 300, 700, 0, true, TIME, 0);
-            assertThatThrownBy(() -> core.runtimeState.upsertFeePolicy(fee))
+            assertThatThrownBy(() -> core.accountBook.upsertFeePolicy(fee))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("configuration Lane 0");
             applied(core, message(core, CoreMessageType.UPSERT_FEE_POLICY, 0,
                     TradingCommandCodec.encodeUpsertFeePolicy(fee)));
             // 成功应用费率后的配置修订号，重复或陈旧请求不应增加它
-            long configuredRevision = core.runtimeState.revision();
+            long configuredRevision = core.accountBook.revision();
             applied(core, message(core, CoreMessageType.UPSERT_FEE_POLICY, 0,
                     TradingCommandCodec.encodeUpsertFeePolicy(fee)));
-            assertThat(core.runtimeState.revision()).isEqualTo(configuredRevision);
+            assertThat(core.accountBook.revision()).isEqualTo(configuredRevision);
             // 故意提交旧版本的费率配置命令，用来验证版本拒绝与修订不变
             var stale = message(core, CoreMessageType.UPSERT_FEE_POLICY, 0,
                     TradingCommandCodec.encodeUpsertFeePolicy(new UpsertFeePolicyCommand(
                             51, 1, 1, "1", 300, 700, 0, true, TIME, 0)));
             assertThat(complete(core, stale, core.apply(stale)).resultCode()).isEqualTo(CoreResultCode.STALE_FEE_POLICY_VERSION);
-            assertThat(core.runtimeState.revision()).isEqualTo(configuredRevision);
+            assertThat(core.accountBook.revision()).isEqualTo(configuredRevision);
             // 本产品用于余额和交易结算的资产代码
             String asset = type.isInverse() ? "BTC" : "USDT";
             // 账户任务已进入阻塞处的门闩
             var entered = new CountDownLatch(1);
-            assertThat(core.runtimeState.dispatchAccountQuery(core.runtimeState.topology().accountLaneMask(1), /* 被派发账户查询的任务参数，测试闭包不读取该参数 */ lane -> {
+            assertThat(core.accountBook.dispatchAccountQuery(core.accountBook.topology().accountLaneMask(1), /* 被派发账户查询的任务参数，测试闭包不读取该参数 */ lane -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("blocked Lane timeout"); }
                 catch (/* 阻塞账户任务收到的中断，转成断言失败 */ InterruptedException failure) { throw new AssertionError(failure); }
             })).isTrue();
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             // 命令开始前保存的账户交接代次，跨线程保护期间应保持不变
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
-            try (/* 禁止 Owner 直接访问账户状态的检查器 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
+            try (/* 禁止 Owner 直接访问账户状态的检查器 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 // 这里不手动开启异步命令作用域，实际激活状态本身就应选择工作线程路径。
                 // 在所属 Lane 阻塞时从普通入口交入的余额调整命令
                 var adjustment = message(core, CoreMessageType.ADJUST_BALANCE, 1,
@@ -99,7 +99,7 @@ class CoreActiveLaneIngressTest {
                 // 余额不足请求最终得到的拒绝响应
                 var rejection = complete(core, failed, core.apply(failed));
                 assertThat(rejection.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
             }
             // 移出跨线程读取保护后导出的挂单用户状态
             var maker = CoreTestCompletion.userState(core, 7);
@@ -129,7 +129,7 @@ class CoreActiveLaneIngressTest {
      * @param id 限价单业务订单 ID
      * @param side 要构造的买卖方向
      */
-    private CoreMessage place(TradingCoreRuntime core, long user, long id, CoreOrderSide side) {
+    private CoreMessage place(TradingCore core, long user, long id, CoreOrderSide side) {
         return message(core, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(
                 new PlaceOrderCommand(id, "1", side, 100, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "active-" + id)));
@@ -140,7 +140,7 @@ class CoreActiveLaneIngressTest {
      * @param core 本场景真实激活的交易运行时
      * @param message 需要执行或等待终态的原命令
      */
-    private void applied(TradingCoreRuntime core, CoreMessage message) {
+    private void applied(TradingCore core, CoreMessage message) {
         // 普通入口得到并交给完成助手等待的初始响应
         var response = complete(core, message, core.apply(message));
         assertThat(response.commandStatus()).as("%s: %s", message.header().messageType(), response.resultCode()).isEqualTo(ResponseStatus.APPLIED);
@@ -152,7 +152,7 @@ class CoreActiveLaneIngressTest {
      * @param message 需要执行或等待终态的原命令
      * @param response 普通入口已经返回的初始结果，可能尚需异步完成
      */
-    private CoreResponse complete(TradingCoreRuntime core, CoreMessage message, CoreResponse response) {
+    private CoreResponse complete(TradingCore core, CoreMessage message, CoreResponse response) {
         // 贯穿直接控制和撮合等待的同一个五秒截止时间
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (core.directCommand.active()) {
@@ -181,7 +181,7 @@ class CoreActiveLaneIngressTest {
      * @param user 命令目标用户 ID
      * @param payload 与命令类型对应的业务载荷
      */
-    private CoreMessage message(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private CoreMessage message(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 本次新分配的来源序号和 UUID 后半部
         long seq = ++sequence;
         return new CoreMessage(CoreMessageHeader.command(type, new UUID(987, seq), core.productLine,

@@ -4,7 +4,7 @@ import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport;
 import com.surprising.aeron.service.core.TradingCoreOwner;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -76,7 +76,7 @@ public class ClusteredBatchTradingBenchmark {
     /** 异步 Lane 完成后才恢复提交上下文：覆盖普通单、改单和批量撤单的服务回调路径。 */
     @Benchmark
     public long laneCompletionContextHandoff(Workload workload, Counters counters) {
-        return decodedBatchAdmissionAndSettlement(workload, counters);
+        return decodedBatchOrderCheckAndSettlement(workload, counters);
     }
     /** Shared non-crossing maker liquidity plus alternating-instrumentId batches exercises price scopes and prefix commits. */
     @Benchmark
@@ -137,7 +137,7 @@ public class ClusteredBatchTradingBenchmark {
      * The maker accumulates same-instrumentId orders before taker/close waves, exercising STP and close capacity.
      */
     @Benchmark
-    public long decodedBatchAdmissionAndSettlement(Workload workload, Counters counters) {
+    public long decodedBatchOrderCheckAndSettlement(Workload workload, Counters counters) {
         batchAmendRoundTripTrades(workload, counters);
         return batchPlaceCancelWithMetrics(workload, counters);
     }
@@ -165,7 +165,7 @@ public class ClusteredBatchTradingBenchmark {
     public long singleOrderSettlementReuse(Workload workload, Counters counters) {
         for (int round = 0; round < 2; round++) {
             workload.runRoundTripTrades();
-            if (workload.service.state().runtimeState().pendingReservations().pendingReservationCount() != 0)
+            if (workload.service.state().accountBook().pendingReservations().pendingReservationCount() != 0)
                 throw new IllegalStateException("reservation turnover retained pending users");
             counters.acceptedBusinessOperations += 1024;
             counters.terminalBusinessOperations += 1024;
@@ -653,7 +653,7 @@ public class ClusteredBatchTradingBenchmark {
             int rounds = 0;
             do {
                 if (++rounds > 1024) throw new IllegalStateException("risk continuation did not finish");
-                var scan = service.state().runtimeState().firstRiskIncompleteScan();
+                var scan = service.state().accountBook().firstRiskIncompleteScan();
                 if (batchRisk && scan != null) {
                     var continuation = new CoreRiskScanContinuation(
                             service.state().identities().instrumentId(scan.symbolId()), scan.priceSequence(), scan.lastUserId());
@@ -665,7 +665,7 @@ public class ClusteredBatchTradingBenchmark {
                             TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
                 }
                 drain();
-            } while (service.state().runtimeState().firstIncompleteRiskScan() != null);
+            } while (service.state().accountBook().firstIncompleteRiskScan() != null);
             // Empty continuation must not pause otherwise idle account workers either.
             send(command(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
@@ -675,9 +675,9 @@ public class ClusteredBatchTradingBenchmark {
 
         public void runFinalizationFailure() throws Exception {
             var owner = service.state();
-            var runtime = owner.runtimeState();
+            var accountBook = owner.accountBook();
             int assetId = owner.identities().assetId("USDT");
-            var before = readAccountAtRest(1000, () -> runtime.balance(1000, assetId));
+            var before = readAccountAtRest(1000, () -> accountBook.balance(1000, assetId));
             long available = before == null ? 0 : before.availableUnits();
             long locked = before == null ? 0 : before.lockedUnits();
             var request = command(CoreMessageType.ADJUST_BALANCE, 1000,
@@ -700,7 +700,7 @@ public class ClusteredBatchTradingBenchmark {
             controlWork.set(owner.directCommand, (java.util.function.BooleanSupplier) () -> {
                 if (!business.getAsBoolean()) return false;
                 // Deliberate capacity fault: this sentinel must be cleared before dispatch.
-                owner.admissions().queuedMatching.addAll(java.util.Collections.nCopies(
+                owner.orderChecks().queuedMatching.addAll(java.util.Collections.nCopies(
                             owner.pendingMatching().capacity() + 1, null));
                 return true;
             });
@@ -711,7 +711,7 @@ public class ClusteredBatchTradingBenchmark {
             } while (result == null);
             if (result.status() != ResponseStatus.REJECTED || result.resultCode() != CoreResultCode.MATCHING_BACKPRESSURE)
                 throw new IllegalStateException("terminal capacity failure was not rejected");
-            var after = readAccountAtRest(1000, () -> runtime.balance(1000, assetId));
+            var after = readAccountAtRest(1000, () -> accountBook.balance(1000, assetId));
             if ((after == null ? 0 : after.availableUnits()) != available
                     || (after == null ? 0 : after.lockedUnits()) != locked)
                 throw new IllegalStateException("terminal failure changed account funds");
@@ -719,24 +719,24 @@ public class ClusteredBatchTradingBenchmark {
         }
 
         public void runAlgoRollbackFailure() {
-            var runtime = service.state().runtimeState();
-            var before = readAccountAtRest(1000, () -> runtime.algoOrder(9_000_000));
-            long runtimeRevision = runtime.revision();
+            var accountBook = service.state().accountBook();
+            var before = readAccountAtRest(1000, () -> accountBook.algoOrder(9_000_000));
+            long runtimeRevision = accountBook.revision();
             long revision = before.revision() + 1;
             var next = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
                     9_000_000, before.revision(), 0, 0, "", 1, revision, 0);
             long terminalBefore = terminal;
             singleResponses = true;
             expectSingleRejection = true;
-            runtime.setMetadata(productLine, Long.MAX_VALUE);
+            accountBook.setMetadata(productLine, Long.MAX_VALUE);
             try {
                 send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000,
                         com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(next)));
                 drain();
-                if (terminal != terminalBefore + 1 || !before.equals(readAccountAtRest(1000, () -> runtime.algoOrder(9_000_000))))
+                if (terminal != terminalBefore + 1 || !before.equals(readAccountAtRest(1000, () -> accountBook.algoOrder(9_000_000))))
                     throw new IllegalStateException("failed algo update was not restored");
             } finally {
-                runtime.setMetadata(productLine, runtimeRevision);
+                accountBook.setMetadata(productLine, runtimeRevision);
                 expectSingleRejection = false;
                 singleResponses = false;
             }
@@ -748,7 +748,7 @@ public class ClusteredBatchTradingBenchmark {
             try {
                 for (int i = 0; i < 64; i++) {
                     long id = 9_000_000L + i;
-                    var current = readAccountAtRest(1000 + i, () -> service.state().runtimeState().algoOrder(id));
+                    var current = readAccountAtRest(1000 + i, () -> service.state().accountBook().algoOrder(id));
                     long revision = current == null ? 1 : current.revision() + 1;
                     com.surprising.aeron.protocol.CoreAlgoOrderCommand algo;
                     if (current == null) {
@@ -835,7 +835,7 @@ public class ClusteredBatchTradingBenchmark {
                     drain();
                     if (partialFirst && phase == 5) for (int user = 0; user < maxInFlight; user++) {
                         long id = firstOrders[user];
-                        var trigger = readAccountAtRest(1000 + user, () -> service.state().runtimeState().triggerOrder(id));
+                        var trigger = readAccountAtRest(1000 + user, () -> service.state().accountBook().triggerOrder(id));
                         if (trigger == null || trigger.status() != CoreTriggerOrderStatus.PENDING)
                             throw new IllegalStateException("partial close canceled protective trigger");
                     }
@@ -844,7 +844,7 @@ public class ClusteredBatchTradingBenchmark {
                     throw new IllegalStateException("trigger terminal mismatch");
                 if (automaticClose) for (int user = 0; user < maxInFlight; user++) {
                     long id = firstOrders[user];
-                    var trigger = readAccountAtRest(1000 + user, () -> service.state().runtimeState().triggerOrder(id));
+                    var trigger = readAccountAtRest(1000 + user, () -> service.state().accountBook().triggerOrder(id));
                     if (trigger == null || trigger.status() != CoreTriggerOrderStatus.CANCELED)
                         throw new IllegalStateException("closed position trigger must retain canceled identity: " + id);
                 }
@@ -1081,13 +1081,13 @@ public class ClusteredBatchTradingBenchmark {
         /** 功能核对先排空命令，再临时接管账户读取；不绕过活动 Lane 所有权。 */
         private <T> T readAccountAtRest(long userId, java.util.function.Supplier<T> read) {
             drain();
-            var runtime = service.state().runtimeState();
-            boolean acquired = !runtime.ownerLaneAccess();
-            if (acquired) runtime.acquireOwnerLaneAccess();
+            var accountBook = service.state().accountBook();
+            boolean acquired = !accountBook.ownerLaneAccess();
+            if (acquired) accountBook.acquireOwnerLaneAccess();
             try {
-                return runtime.onLane(userId, ignored -> read.get());
+                return accountBook.onLane(userId, ignored -> read.get());
             } finally {
-                if (acquired) runtime.releaseOwnerLaneAccess();
+                if (acquired) accountBook.releaseOwnerLaneAccess();
             }
         }
 
@@ -1185,7 +1185,7 @@ public class ClusteredBatchTradingBenchmark {
                     throw new IllegalStateException("Lane metrics exposed mutable snapshot arrays");
                 }
                 byte[] snapshot = service.state().snapshot();
-                try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
+                try (TradingCore restored = TradingCore.fromSnapshot(productLine, snapshot)) {
                     if (restored.tradingState().businessStateHash() != state.businessStateHash()
                             || !restored.tradingState().clientOrderIndex().equals(state.clientOrderIndex())) {
                         throw new IllegalStateException("snapshot recovery mismatch");

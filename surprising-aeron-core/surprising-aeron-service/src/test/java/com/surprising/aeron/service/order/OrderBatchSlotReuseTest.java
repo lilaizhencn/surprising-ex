@@ -16,7 +16,7 @@ class OrderBatchSlotReuseTest {
     /**
      * 两个批次从同一活跃订单捕获各自独立副本；清理复用第一批只更新第一份副本，第二批和活跃订单均保持原值。
      */
-    @Test void admissionReceiptBelongsToItsItemAndSurvivesOtherBatchesAndReuse() {
+    @Test void orderCheckReceiptBelongsToItsItemAndSurvivesOtherBatchesAndReuse() {
         // 第一批上下文或其首项对象，具体类型见声明
         var first = new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool(1, 4096));
         // 第二批独立上下文

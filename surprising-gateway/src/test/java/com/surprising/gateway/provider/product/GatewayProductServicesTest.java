@@ -126,7 +126,7 @@ class GatewayProductServicesTest {
 
     @ParameterizedTest
     @EnumSource(value = CoreCommandOutcome.NotAcceptedReason.class, names = "NOT_CONNECTED", mode = EnumSource.Mode.EXCLUDE)
-    void otherAdmissionFailuresAreNotRetried(CoreCommandOutcome.NotAcceptedReason reason) {
+    void otherOrderCheckFailuresAreNotRetried(CoreCommandOutcome.NotAcceptedReason reason) {
         var failure = new CoreCommandOutcome.NotAcceptedException(new CoreCommandOutcome.NotAccepted(reason, -1));
         when(account.query(eq(CoreMessageType.LANE_METRICS_QUERY), any(UUID.class), any(byte[].class)))
                 .thenThrow(new CompletionException(failure));

@@ -12,14 +12,14 @@ public final class AccountLaneTestAccess {
             return field.get(target);
         } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
     }
-    public static long handoffEpoch(TradingAccountRuntime runtime) {
-        return (long) field(field(runtime, "laneLifecycle"), "handoffEpoch");
+    public static long handoffEpoch(AccountBook accountBook) {
+        return (long) field(field(accountBook, "laneLifecycle"), "handoffEpoch");
     }
-    public static SettlementLaneWorker[] workers(TradingAccountRuntime runtime) {
-        return (SettlementLaneWorker[]) field(field(runtime, "laneLifecycle"), "workers");
+    public static SettlementLaneWorker[] workers(AccountBook accountBook) {
+        return (SettlementLaneWorker[]) field(field(accountBook, "laneLifecycle"), "workers");
     }
-    public static void ownerAccess(TradingAccountRuntime runtime, boolean access) {
-        Object lifecycle = field(runtime, "laneLifecycle");
+    public static void ownerAccess(AccountBook accountBook, boolean access) {
+        Object lifecycle = field(accountBook, "laneLifecycle");
         try {
             var ownerAccess = lifecycle.getClass().getDeclaredField("ownerHasAccess");
             ownerAccess.setAccessible(true);
@@ -27,7 +27,7 @@ public final class AccountLaneTestAccess {
         } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
     }
     @SuppressWarnings("unchecked")
-    public static AtomicReference<Throwable> failure(TradingAccountRuntime runtime) {
-        return (AtomicReference<Throwable>) field(field(runtime, "laneLifecycle"), "failure");
+    public static AtomicReference<Throwable> failure(AccountBook accountBook) {
+        return (AtomicReference<Throwable>) field(field(accountBook, "laneLifecycle"), "failure");
     }
 }

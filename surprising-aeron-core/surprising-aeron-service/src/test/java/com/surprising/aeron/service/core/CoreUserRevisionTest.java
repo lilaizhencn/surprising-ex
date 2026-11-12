@@ -42,8 +42,8 @@ class CoreUserRevisionTest {
      * @param reverse 第二组是否反向成交以平掉第一组持仓
      */
     @ParameterizedTest @ValueSource(booleans = {false, true})
-    void admissionFillAndTerminalReleaseKeepTheirExactRevisionCounts(boolean reverse) {
-        try (/* 本用例实际执行并导出提交状态的交易运行时 */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+    void orderCheckFillAndTerminalReleaseKeepTheirExactRevisionCounts(boolean reverse) {
+        try (/* 本用例实际执行并导出提交状态的交易运行时 */ var core = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             send(core, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
                     new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -106,7 +106,7 @@ class CoreUserRevisionTest {
      * @param user 原命令所属用户，配置命令可为零
      * @param payload 原业务命令已编码载荷
      */
-    private void send(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private void send(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 为原消息递增的来源序号，同时组成固定 UUID 和关联号
         long id = ++sequence;
         // 本次带固定产品线与时间的原业务消息

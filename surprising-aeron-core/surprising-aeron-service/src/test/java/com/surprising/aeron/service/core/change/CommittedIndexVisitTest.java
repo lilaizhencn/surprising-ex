@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core.change;
 
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
@@ -12,10 +12,10 @@ import static org.assertj.core.api.Assertions.*;
 class CommittedIndexVisitTest {
     @Test
     void directAndBorrowedLaneCompletedOrdersUpdateIndexesUntilTheCommitClearsThem() {
-        try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
-            var state = core.runtimeState();
+        try (var core = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
+            var state = core.accountBook();
             var identities = core.identities();
-            var indexes = CoreStateTestFixtures.factIndexes(core);
+            var indexes = CoreStateTestFixtures.bizIndex(core);
             int symbol = identities.symbolId("1");
             indexes.activeOrders().apply(11, CoreStateTestFixtures.order(11, 7, symbol, 2), identities);
             seedPosition(indexes, identities, 21);
@@ -23,7 +23,7 @@ class CommittedIndexVisitTest {
             assertThat(indexes.openInterest().totals()).isNotEmpty();
             state.orderChanges().put(11, null);
             state.positionChanges().put(21, null);
-            state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
+            state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
             state.applyChangedIndexes();
             assertThat(indexes.activeOrders().page(7, "1", Long.MAX_VALUE, 10).orderIds()).isEmpty();
             assertThat(indexes.openInterest().totals()).isEmpty();
@@ -44,21 +44,21 @@ class CommittedIndexVisitTest {
             for (long key : new long[]{40, 43})
                 seedPosition(indexes, identities, key);
             for (int repeat = 0; repeat < 2; repeat++) {
-                state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
+                state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
                 state.applyChangedIndexes();
                 assertThat(indexes.activeOrders().page(7, "1", Long.MAX_VALUE, 10).orderIds()).isEmpty();
                 assertThat(indexes.openInterest().totals()).isEmpty();
                 assertThat(indexes.positionUsers().higherUserId("1", 0)).isZero();
             }
             state.clearChangedKeys();
-            state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
+            state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
             state.applyChangedIndexes();
             assertThat(firstOrders.containsKey(999)).isTrue();
             assertThat(firstPositions.containsKey(998)).isTrue();
         }
     }
-    private static void seedPosition(com.surprising.aeron.service.core.index.RuntimeFactIndexes indexes,
-            com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities, long key) {
+    private static void seedPosition(com.surprising.aeron.service.core.index.BizIndex indexes,
+            com.surprising.aeron.service.core.identity.IdIndex identities, long key) {
         var changes = new StateChangeBuffer.Positions();
         changes.putIndexed(key, null, true, new Position.IndexValue(7, "1", "USDT", CorePositionSide.NET, 5));
         indexes.applyPositions(changes, identities, null);

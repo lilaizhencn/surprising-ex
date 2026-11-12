@@ -2,7 +2,7 @@ package com.surprising.aeron.service.snapshot.state;
 
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Map;
@@ -40,7 +40,7 @@ public final class CoreTransferSnapshotCodec {
                 var command = new com.surprising.aeron.protocol.TransferFundsCommand(r.number(2),
                         SnapshotEnumCodes.readProductLine(r.integer(3)), SnapshotEnumCodes.readProductLine(r.integer(4)),
                         r.text(5), r.text(6), r.text(7), r.number(8), r.text(9), r.text(10), r.number(11), r.number(12));
-                if (transfers.size() >= com.surprising.aeron.service.treasury.TreasuryRuntime.MAX_PENDING_TRANSFERS
+                if (transfers.size() >= com.surprising.aeron.service.treasury.SystemFunds.MAX_PENDING_TRANSFERS
                         || transfers.put(command.transferId(), command) != null)
                     throw new ProtocolException("invalid/duplicate pending transfer snapshot");
             }

@@ -2,8 +2,8 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.core.identity.IdIndex;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import static com.surprising.aeron.service.funding.FundingSettlementService.*;
 
 /**
@@ -19,25 +19,25 @@ public final class RuntimePerpetualFundingFixture {
      */
     public static FundingResult simulate(TradingCoreState before, ApplyFundingCommand command,
                                          Iterable<Long> indexedUserIds,
-                                         RuntimeIdentityRegistry identities) {
+                                         IdIndex identities) {
         if (before == null || command == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual funding simulation");
         }
         // 从旧状态新投影出的独立可变运行时，不替换被测实例。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
         // 本次模拟使用的用户索引来源。
         Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
-        return applyRuntime(command, users, runtime, identities);
+        return applyRuntime(command, users, accountBook, identities);
     }
 
     /** 在测试拥有的运行时推进真实资金费工作，返回原计算结果。 */
     public static FundingResult applyRuntime(ApplyFundingCommand command, Iterable<Long> userIds,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+            AccountBook accountBook, IdIndex identities) {
         var work = com.surprising.aeron.service.funding.FundingSettlementService.prepare(
-                null, command, userIds, runtime, identities);
+                null, command, userIds, accountBook, identities);
         com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work::poll);
         var result = work.result();
-        runtime.clearChangedKeys();
+        accountBook.clearChangedKeys();
         return result;
     }
 }

@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.account;
 
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import java.util.Arrays;
 import lombok.Getter;
 import lombok.experimental.Accessors;
@@ -32,7 +32,7 @@ public final class ClientOrderIdRegistry {
     @Accessors(fluent = true, chain = false)
     @Getter
     private volatile int publishedCount;
-    private RuntimeIdentityRegistry releasingClientIdentities;
+    private IdIndex releasingClientIdentities;
     private long releasingClientUser;
     /** 常驻的客户别名释放回调，避免每个终态订单新建捕获对象。 */
     private final LongProcedure releaseClientIdentity = this::releaseClientIdentity;
@@ -98,7 +98,7 @@ public final class ClientOrderIdRegistry {
     }
 
     /** 借用身份字典及用户编号，遍历该订单的全部客户别名并释放引用。 */
-    public void releaseOrderClientIdentities(RuntimeIdentityRegistry identities, long orderId, long userId) {
+    public void releaseOrderClientIdentities(IdIndex identities, long orderId, long userId) {
         assertOwner();
         if (releasingClientIdentities != null)
             throw new IllegalStateException("nested terminal client identity release");

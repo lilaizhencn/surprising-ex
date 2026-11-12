@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.product.api.ProductLine;
 import java.util.Objects;
@@ -318,7 +318,7 @@ public final class Order {
     public long positionIdentityKey() {
         long key = cachedPositionKey;
         if (key == 0) {
-            key = RuntimeIdentityRegistry.positionIdentityKey(userId, instrument.instrumentId(), positionSide);
+            key = IdIndex.positionIdentityKey(userId, instrument.instrumentId(), positionSide);
             cachedPositionKey = key;
         }
         return key;
@@ -329,7 +329,7 @@ public final class Order {
             OrderCommand.ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
         if (target == null) { target = new Order(); target.commandSlotValue = true; }
         if (!target.commandSlotValue) throw new IllegalStateException("order is not a command slot");
-        initializeAdmission(target, product, userId, intent, commandId, symbolId, timestamp, position);
+        initializeOrderCheck(target, product, userId, intent, commandId, symbolId, timestamp, position);
         target.mutable = false;
         return target;
     }
@@ -341,11 +341,11 @@ public final class Order {
             throw new IllegalArgumentException("invalid pooled order admission");
         if (target == null) { target = new Order(); target.pooledAuthority = true; }
         if (!target.pooledAuthority || target.commandSlotValue) throw new IllegalStateException("order is not a Lane pool value");
-        initializeAdmission(target, product, userId, intent, commandId, symbolId, timestamp, position);
+        initializeOrderCheck(target, product, userId, intent, commandId, symbolId, timestamp, position);
         return target;
     }
 
-    private static void initializeAdmission(Order target, ProductLine product, long userId,
+    private static void initializeOrderCheck(Order target, ProductLine product, long userId,
             OrderCommand.ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
         if (intent == null || commandId == null || product == null || userId <= 0 || symbolId < 0 || timestamp < 0 || position < 0)
             throw new IllegalArgumentException("invalid order admission");

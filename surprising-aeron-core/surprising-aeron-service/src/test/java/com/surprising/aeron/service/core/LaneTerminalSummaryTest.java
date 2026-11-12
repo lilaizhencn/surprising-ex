@@ -15,7 +15,7 @@ class LaneTerminalSummaryTest {
      */
     @Test void mixedBatchRetainsOnlyTerminalsAfterSummaryGrowthAndReuse() {
         // 接收测试发布结果的独立冷运行时，不启动账户线程
-        var state = new TradingAccountRuntime();
+        var state = new AccountBook();
         // 本测试反复准备发布和清空的 Lane 变化缓冲
         var changes = new AccountPartitionCommit.Delta();
         // 偶数取消订单应触发的终态 ID 列表
@@ -49,13 +49,13 @@ class LaneTerminalSummaryTest {
      */
     @Test void publishedOpenTerminalAndRemovedOrdersRemainCorrectAcrossReuse() {
         // 接收测试发布结果的独立冷运行时，不启动账户线程
-        var state = new TradingAccountRuntime();
+        var state = new AccountBook();
         // 本测试反复准备发布和清空的 Lane 变化缓冲
         var changes = new AccountPartitionCommit.Delta();
         // 本轮终态回调记录的 ID 列表，每轮使用前清空
         var retained = new ArrayList<Long>();
         // 固定终态接收回调，只记录订单 ID
-        TradingAccountRuntime.TerminalOrderSink sink =
+        AccountBook.TerminalOrderSink sink =
                 (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId,
                         /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId) -> retained.add(orderId);
         // 作为各状态派生来源的订单十一 OPEN 值
@@ -87,7 +87,7 @@ class LaneTerminalSummaryTest {
      */
     @Test void preparedPublicationVisitsTerminalOrdersWithoutLaneSummary() {
         // 接收测试发布结果的独立冷运行时，不启动账户线程
-        var state = new TradingAccountRuntime();
+        var state = new AccountBook();
         // 本测试反复准备发布和清空的 Lane 变化缓冲
         var changes = new AccountPartitionCommit.Delta();
         changes.putOrder(11, CoreStateTestFixtures.order(11, 7, 5, 10).withStatus(CoreOrderStatus.CANCELED, 2, -1, -1));

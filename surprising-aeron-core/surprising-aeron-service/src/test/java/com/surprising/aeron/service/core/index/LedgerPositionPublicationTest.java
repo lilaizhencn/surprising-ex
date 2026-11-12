@@ -8,14 +8,14 @@ import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.LedgerControlTestSupport;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -33,7 +33,7 @@ class LedgerPositionPublicationTest {
      * @param treasuryScope 本轮是否先安排一条未发布的 Treasury 控制命令
      */
     @ParameterizedTest @ValueSource(booleans = {false, true})
-    void positionOnlyControlValidationRollsBackWithAndWithoutTreasuryScope(boolean treasuryScope) throws Exception {
+    void positionOnlyControlValidationRollsBackWithAndWithoutSystemFundsScope(boolean systemFundsScope) throws Exception {
         // 本用例隔离的 U 本位永续产品线
         var product = ProductLine.LINEAR_PERPETUAL;
         // 本用例注册的标的一 U 本位永续合约
@@ -56,14 +56,14 @@ class LedgerPositionPublicationTest {
                 java.util.Map.of("1", instrument), com.surprising.aeron.model.CoreRiskState.empty(),
                 CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例资产、标的和持仓的原身份表
-        var ids = new RuntimeIdentityRegistry();
+        var ids = new IdIndex();
         // 本用例真实账本接管的持仓用户索引
         var users = new PositionUserIndex(initial);
         // 本用例真实账本接管的未平仓量索引
         var oi = new OpenInterestIndex(initial);
         // 本用例真实账本接管的 ADL 持仓索引
         var adl = new AdlPositionIndex(initial, ids);
-        try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var accountRuntime = RuntimeStateProjector.project(initial, ids)) {
+        try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var accountRuntime = SnapshotLoader.loadSnapshot(initial, ids)) {
             var runtime = accountRuntime;
             runtime.bindFactIndexes(indexes(initial, ids, users, oi, adl), ids);
             // 用户七标的一净仓的已准备确定性身份键
@@ -72,7 +72,7 @@ class LedgerPositionPublicationTest {
             int symbol = ids.symbolId("1");
             runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             for (/* 本次控制删除、校验与回滚的轮次，共两轮 */ int round = 0; round < 2; round++) {
-                if (treasuryScope) {
+                if (systemFundsScope) {
                     // 可选的本次资金费暂存账本命令，初始化时绑定原运行时
                     var command = /* 只用于验证控制范围资金费暂存回滚的账本命令，实例初始化时接入当前运行时。 */ new SystemLedgerCommand() {
                         // 实例创建时绑定当前运行时及账本控制范围，再允许派发。
@@ -81,7 +81,7 @@ class LedgerPositionPublicationTest {
                          * 把本次未发布控制范围的资金费暂存设为九，供随后验证回滚归零。
                          * @param ledger 本次控制命令可写的权威 Treasury 账本
                          */
-                        @Override protected void applyLedger(TreasuryRuntime ledger) { ledger.setFundingSettlement(symbol, 9); }
+                        @Override protected void applyLedger(SystemFunds ledger) { ledger.setFundingSettlement(symbol, 9); }
                     };
                     runtime.dispatchLedgerCommand(command);
                 }
@@ -96,7 +96,7 @@ class LedgerPositionPublicationTest {
                 assertThat(oi.openInterestSteps("1")).isEqualTo(10);
                 assertThat(users.usersAfter("1", 0)).containsExactly(7L);
                 assertThat(adl.value(key).signedQuantitySteps()).isEqualTo(10);
-                assertThat(runtime.treasury().fundingSettlement(symbol)).isZero();
+                assertThat(runtime.systemFunds().fundingSettlement(symbol)).isZero();
             }
         }
     }
@@ -108,7 +108,7 @@ class LedgerPositionPublicationTest {
         // 用于投影运行时的原始产品线冷状态
         var initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         // 本用例资产、标的和持仓的原身份表
-        var ids = new RuntimeIdentityRegistry();
+        var ids = new IdIndex();
         // 本用例真实账本接管的持仓用户索引
         var users = new PositionUserIndex(initial);
         // 本用例真实账本接管的未平仓量索引
@@ -117,9 +117,9 @@ class LedgerPositionPublicationTest {
         var adl = new AdlPositionIndex(initial, ids);
         // 本用例各派生索引共用的事实应用入口
         var indexes = indexes(initial, ids, users, oi, adl);
-        try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var runtime = RuntimeStateProjector.project(initial, ids)) {
-            runtime.bindFactIndexes(indexes, ids);
-            runtime.bindLedgerPositionOwner();
+        try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var accountBook = SnapshotLoader.loadSnapshot(initial, ids)) {
+            accountBook.bindFactIndexes(indexes, ids);
+            accountBook.bindLedgerPositionOwner();
             assertThat(oi.openInterestSteps("1")).isZero();
             assertThat(users.higherUserId("1", 0)).isZero();
             assertThat(adl.positions("USDT", 2)).isEmpty();
@@ -139,7 +139,7 @@ class LedgerPositionPublicationTest {
             changes.clear();
             assertThat(adl.positions("USDT", 3)).hasSize(3);
             // 后续未发布控制范围的持仓旧字段记录
-            var undo = new RuntimeFactIndexes.PositionUndo();
+            var undo = new BizIndex.PositionUndo();
             changes.putIndexed(101, null, true, position(1, CorePositionSide.LONG, -30));
             changes.putIndexed(102, null, true, null);
             indexes.applyPositions(changes, ids, undo);
@@ -177,9 +177,9 @@ class LedgerPositionPublicationTest {
      * @param oi 本用例未平仓量业务索引
      * @param adl 本用例 ADL 持仓业务索引
      */
-    private static RuntimeFactIndexes indexes(TradingCoreState initial, RuntimeIdentityRegistry ids,
+    private static BizIndex indexes(TradingCoreState initial, IdIndex ids,
             PositionUserIndex users, OpenInterestIndex oi, AdlPositionIndex adl) {
-        return new RuntimeFactIndexes(users, oi, new TriggerOrderIndex(initial), new AlgoOrderIndex(initial),
+        return new BizIndex(users, oi, new TriggerOrderIndex(initial), new AlgoOrderIndex(initial),
                 new LiquidationIndex(initial), new CancelAllAfterIndex(initial), new ActiveOrderIndex(initial), adl);
     }
 

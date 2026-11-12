@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.snapshot;
 
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -13,9 +13,9 @@ class SectionedSnapshotBudgetTest {
     /** 使用真实冻结状态和 Matcher 模块，验证剩余预算在嵌套编码前拒绝。 */
     @Test
     void writerPassesRemainingBudgetToMatcherBeforeEncoding() throws Exception {
-        try (var core = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (var core = new TradingCore(ProductLine.SPOT)) {
             core.activate();
-            var accounts = core.runtimeState();
+            var accounts = core.accountBook();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (!accounts.tryAcquireOwnerLaneAccess()) {
                 if (System.nanoTime() >= deadline) throw new AssertionError("lane handoff timed out");
@@ -25,7 +25,7 @@ class SectionedSnapshotBudgetTest {
                 var state = core.tradingState();
                 var fees = core.feePolicies();
                 var transfers = core.pendingTransfers();
-                long hash = TradingCoreRuntime.canonicalBusinessStateHash(state.businessStateHash(), fees, transfers);
+                long hash = TradingCore.canonicalBusinessStateHash(state.businessStateHash(), fees, transfers);
                 var matcher = core.snapshots.captureMatcherSnapshot(19, 0, hash, state, List.of())
                         .toCompletableFuture().get(5, TimeUnit.SECONDS);
                 var changedFees = java.util.Map.of(1L, new com.surprising.aeron.model.CoreFeePolicyState(

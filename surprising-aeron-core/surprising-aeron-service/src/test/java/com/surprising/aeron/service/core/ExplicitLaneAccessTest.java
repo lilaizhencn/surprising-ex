@@ -2,8 +2,8 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.account.AccountBalance;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.core.identity.IdIndex;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -22,41 +22,41 @@ class ExplicitLaneAccessTest {
      */
     @ParameterizedTest @EnumSource(ProductLine.class)
     void explicitLaneRejectsOtherRuntimeOtherUserAndActiveOwner(ProductLine product) throws Exception {
-        try (/* 本次真正持有用户七余额并启动账户工作线程的运行时 */ var runtime = RuntimeStateProjector.project(TradingCoreState.empty(product), new RuntimeIdentityRegistry());
-             /* 同产品线另一独立运行时，用来构造跨实例 Lane */ var other = RuntimeStateProjector.project(TradingCoreState.empty(product), new RuntimeIdentityRegistry())) {
+        try (/* 本次真正持有用户七余额并启动账户工作线程的运行时 */ var accountBook = SnapshotLoader.loadSnapshot(TradingCoreState.empty(product), new IdIndex());
+             /* 同产品线另一独立运行时，用来构造跨实例 Lane */ var other = SnapshotLoader.loadSnapshot(TradingCoreState.empty(product), new IdIndex())) {
             // 原运行时用户七所属的实际账户 Lane
-            var lane = runtime.accountLaneForUser(7);
+            var lane = accountBook.accountLaneForUser(7);
             // 另一运行时用户七的 Lane，编号相同也不能当成原实例使用
             var foreign = other.accountLaneForUser(7);
-            assertThatThrownBy(() -> runtime.requireLaneAccess(foreign, 7)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> runtime.enterLaneCommandScope(foreign)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> runtime.order(foreign, 1)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> runtime.reservation(foreign, 1)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> runtime.position(foreign, 1)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> accountBook.requireLaneAccess(foreign, 7)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> accountBook.enterLaneCommandScope(foreign)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> accountBook.order(foreign, 1)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> accountBook.reservation(foreign, 1)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> accountBook.position(foreign, 1)).isInstanceOf(IllegalStateException.class);
             // 从八开始寻找路由到另一 Lane 的用户候选
             long otherLaneUser = 8;
-            while (runtime.accountLaneId(otherLaneUser) == runtime.accountLaneId(7)) otherLaneUser++;
+            while (accountBook.accountLaneId(otherLaneUser) == accountBook.accountLaneId(7)) otherLaneUser++;
             // 最终确定的另一 Lane 用户，供异步断言捕获
             final long foreignUser = otherLaneUser;
-            assertThatThrownBy(() -> runtime.requireLaneAccess(lane, foreignUser)).isInstanceOf(IllegalStateException.class);
-            runtime.putBalance(new AccountBalance(7, 0, 100, 0));
-            runtime.clearChangedKeys();
-            runtime.startAccountLanes();
-            assertThatThrownBy(() -> runtime.accountLaneForUser(7)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> runtime.order(lane, 1)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> runtime.position(lane, 1)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> accountBook.requireLaneAccess(lane, foreignUser)).isInstanceOf(IllegalStateException.class);
+            accountBook.putBalance(new AccountBalance(7, 0, 100, 0));
+            accountBook.clearChangedKeys();
+            accountBook.startAccountLanes();
+            assertThatThrownBy(() -> accountBook.accountLaneForUser(7)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> accountBook.order(lane, 1)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> accountBook.position(lane, 1)).isInstanceOf(IllegalStateException.class);
             // 真实账户查询执行结束后通知测试线程的门闩
             var done = new CountDownLatch(1);
             // 把账户查询线程的异常交回测试线程的原子槽
             var failure = new AtomicReference<Throwable>();
-            assertThat(runtime.dispatchAccountQuery(1L << lane.laneId(), /* 查询调度实际进入的原运行时所属 Lane */ actual -> {
+            assertThat(accountBook.dispatchAccountQuery(1L << lane.laneId(), /* 查询调度实际进入的原运行时所属 Lane */ actual -> {
                 try {
-                    runtime.readAccountLane(actual, /* 在受保护的账户读取作用域内提供的 Lane，只允许读取它负责的用户 */ scoped -> {
+                    accountBook.readAccountLane(actual, /* 在受保护的账户读取作用域内提供的 Lane，只允许读取它负责的用户 */ scoped -> {
                         assertThat(scoped).isSameAs(lane);
-                        assertThat(runtime.balance(scoped, 7, 0).availableUnits()).isEqualTo(100);
-                        assertThatThrownBy(() -> runtime.balance(scoped, foreignUser, 0))
+                        assertThat(accountBook.balance(scoped, 7, 0).availableUnits()).isEqualTo(100);
+                        assertThatThrownBy(() -> accountBook.balance(scoped, foreignUser, 0))
                                 .isInstanceOf(IllegalStateException.class);
-                        assertThatThrownBy(() -> runtime.requireLaneAccess(foreign, 7))
+                        assertThatThrownBy(() -> accountBook.requireLaneAccess(foreign, 7))
                                 .isInstanceOf(IllegalStateException.class);
                         return null;
                     });
@@ -65,7 +65,7 @@ class ExplicitLaneAccessTest {
             })).isTrue();
             assertThat(done.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(failure.get()).isNull();
-            runtime.assertAccountLanesHealthy();
+            accountBook.assertAccountLanesHealthy();
         }
     }
 }

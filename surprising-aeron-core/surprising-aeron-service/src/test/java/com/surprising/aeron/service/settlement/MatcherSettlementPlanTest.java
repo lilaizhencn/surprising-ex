@@ -13,9 +13,9 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.DirectMatcherTestInputs;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.matcher.OrderBookEngine;
@@ -41,17 +41,17 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void directFactsCannotStartOrPublishWithoutAReservedMatcherSlot() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var accountBook = new AccountBook()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
+            var identities = new IdIndex();
             // 固定测试币对一对应的稠密编号。
             int symbol = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
-            runtime.putOrder(original);
+            accountBook.putOrder(original);
             // 当前需要预约、发布、收集并回收的撮合结算事件。
-            var event = runtime.prepareDirectCancellation(1, 21, 11, new java.util.UUID(1, 2),
+            var event = accountBook.prepareDirectCancellation(1, 21, 11, new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             assertThatThrownBy(event::beginMatcherPublication).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> event.publishDirectNativeResult(nativeResult(
@@ -65,8 +65,8 @@ class MatcherSettlementPlanTest {
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
             event.completeMatcherPublication();
-            assertThat(collect(runtime, event)).isTrue();
-            runtime.releaseMatcherSettlement(event);
+            assertThat(collect(accountBook, event)).isTrue();
+            accountBook.releaseMatcherSettlement(event);
         }
     }
 
@@ -83,30 +83,30 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void matcherPublicationWaitsForReadinessBeforeApplyingAccounts() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var accountBook = new AccountBook()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
+            var identities = new IdIndex();
             // 固定测试币对一对应的稠密编号。
             int symbol = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
-            runtime.putOrder(original);
+            accountBook.putOrder(original);
             // 当前需要预约、发布、收集并回收的撮合结算事件。
-            var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
+            var event = accountBook.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             event.reserveMatcherPublication();
             event.beginMatcherPublication();
             assertThat(event.ready()).isFalse();
             assertThat(event.completedLaneMask()).isZero();
-            assertThat(collect(runtime, event)).isFalse();
+            assertThat(collect(accountBook, event)).isFalse();
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
             event.completeMatcherPublication();
             assertThat(event.complete()).isTrue();
-            assertThat(collect(runtime, event)).isTrue();
-            assertThat(runtime.order(11)).isSameAs(original);
-            runtime.releaseMatcherSettlement(event);
+            assertThat(collect(accountBook, event)).isTrue();
+            assertThat(accountBook.order(11)).isSameAs(original);
+            accountBook.releaseMatcherSettlement(event);
         }
     }
 
@@ -115,22 +115,22 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void matcherPublishedFactsRetireInAccountOrder() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var accountBook = new AccountBook()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
+            var identities = new IdIndex();
             // 固定测试币对一对应的稠密编号。
             int symbol = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
-            runtime.putOrder(original);
+            accountBook.putOrder(original);
             // 同账户先行 Core 序号对应的前缀结算事件。
-            var first = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
+            var first = accountBook.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             first.reserveMatcherPublication();
             first.beginMatcherPublication();
             // 同账户后行 Core 序号对应的后缀事件，不能越过未完成前缀。
-            var suffix = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
+            var suffix = accountBook.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
             suffix.reserveMatcherPublication();
             suffix.beginMatcherPublication();
@@ -141,11 +141,11 @@ class MatcherSettlementPlanTest {
             first.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
             first.completeMatcherPublication();
-            assertThat(collect(runtime, first)).isTrue();
-            runtime.releaseMatcherSettlement(first);
-            assertThat(collect(runtime, suffix)).isTrue();
-            runtime.releaseMatcherSettlement(suffix);
-            assertThat(runtime.order(11)).isSameAs(original);
+            assertThat(collect(accountBook, first)).isTrue();
+            accountBook.releaseMatcherSettlement(first);
+            assertThat(collect(accountBook, suffix)).isTrue();
+            accountBook.releaseMatcherSettlement(suffix);
+            assertThat(accountBook.order(11)).isSameAs(original);
         }
     }
 
@@ -163,17 +163,17 @@ class MatcherSettlementPlanTest {
         var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         // 执行事件发布和完成通知的实际测试线程，退出时有界等待结束。
         Thread matcher = null;
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var accountBook = new AccountBook()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
+            var identities = new IdIndex();
             // 固定测试币对一对应的稠密编号。
             int symbol = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
-            runtime.putOrder(original);
+            accountBook.putOrder(original);
             // 当前需要预约、发布、收集并回收的撮合结算事件。
-            var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
+            var event = accountBook.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             event.reserveMatcherPublication();
             // 传输释放回调应能看到已准备的事件元数据，
@@ -195,10 +195,10 @@ class MatcherSettlementPlanTest {
             assertThat(signalling.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             assertThat(failure.get()).isNull();
             assertThat(event.ready()).isTrue();
-            assertThat(collect(runtime, event)).isTrue();
-            runtime.releaseMatcherSettlement(event);
+            assertThat(collect(accountBook, event)).isTrue();
+            accountBook.releaseMatcherSettlement(event);
             // 从事件池再次借到的同一对象，用于检查新代字段未被旧线程覆盖。
-            var reused = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
+            var reused = accountBook.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
             assertThat(reused).isSameAs(event);
             finishSignal.countDown();
@@ -211,9 +211,9 @@ class MatcherSettlementPlanTest {
             reused.reserveMatcherPublication();
             reused.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 2, List.of()), 2, 3, 4, 11, 2, 0);
-            reused.execute(runtime.accountLane(runtime.topology().accountLaneId(21)));
-            assertThat(collect(runtime, reused)).isTrue();
-            runtime.releaseMatcherSettlement(reused);
+            reused.execute(accountBook.accountLane(accountBook.topology().accountLaneId(21)));
+            assertThat(collect(accountBook, reused)).isTrue();
+            accountBook.releaseMatcherSettlement(reused);
         } finally {
             finishSignal.countDown();
             if (matcher != null) matcher.join(5_000);
@@ -225,14 +225,14 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void settlementPublicationFailureReachesOwnerInsteadOfLeavingDeadMatcher() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime();
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var accountBook = new AccountBook();
              /* 用例实际启动并自动关闭的 Matcher 管线，用于检查故障传播。 */ var pipeline = new com.surprising.aeron.service.matcher.OrderBookRouter.ShardPipeline(0, 256, null)) {
             pipeline.start(null, TradingCpuAffinity.disabled());
             // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = new TradeSettlement();
             event.batchStorage(1);
             event.prepareDirect(1, 1, 0, 0, new java.util.UUID(1, 2), 0,
-                    runtime, new RuntimeIdentityRegistry(), 1, List.of(), null);
+                    accountBook, new IdIndex(), 1, List.of(), null);
             event.reserveMatcherPublication();
             event.matcherCompletionRoute(/* 释放回调传入的 Matcher 分片编号；这些测试回调不读取编号。 */ shard -> {
                 throw new IllegalStateException("settlement publication failed");
@@ -274,28 +274,28 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void rejectedDirectCancelLeavesOrderUnchangedWithoutInstrumentMetadata() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var accountBook = new AccountBook()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
+            var identities = new IdIndex();
             // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
-            runtime.putOrder(original);
+            accountBook.putOrder(original);
             // 本事件命令 UUID，供原生结果证据匹配。
             var id = new java.util.UUID(1, 2);
             // 当前需要预约、发布、收集并回收的撮合结算事件。
-            var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), id, 0, identities, 10, 20);
+            var event = accountBook.prepareDirectCancellation(1, original.userId(), original.orderId(), id, 0, identities, 10, 20);
             event.reserveMatcherPublication();
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     instrumentId, 1, List.of()), 1, 1, 2, 11, 1, 0);
-            event.execute(runtime.accountLane(runtime.topology().accountLaneId(21)));
+            event.execute(accountBook.accountLane(accountBook.topology().accountLaneId(21)));
             assertThat(event.complete()).isTrue();
             assertThat(event.plan().orderCount()).isZero();
-            collect(runtime, event);
-            assertThat(runtime.order(11)).isSameAs(original);
-            runtime.releaseMatcherSettlement(event);
+            collect(accountBook, event);
+            assertThat(accountBook.order(11)).isSameAs(original);
+            accountBook.releaseMatcherSettlement(event);
         }
     }
 
@@ -307,20 +307,20 @@ class MatcherSettlementPlanTest {
     void directEventCannotRecycleBeforeReservedNonTradingLanesConsumeTheirTickets() throws Exception {
         // 用例显式使用的四账户 Lane 路由拓扑。
         var topology = new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime(topology)) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var accountBook = new AccountBook(topology)) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
+            var identities = new IdIndex();
             // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.registerInstrument(instrument());
             // 当前构建或事件输入的主动买单。
             var taker = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
-            runtime.putOrder(taker);
+            accountBook.putOrder(taker);
             // 本事件命令 UUID，供原生结果证据匹配。
             var id = new java.util.UUID(1, 2);
             // 当前需要预约、发布、收集并回收的撮合结算事件。
-            var event = runtime.prepareDirectMatcherSettlement(1, 15, taker, null, 1, id, 0,
+            var event = accountBook.prepareDirectMatcherSettlement(1, 15, taker, null, 1, id, 0,
                     identities, 1, 1, List.of(), null);
             // 本次无成交订单实际涉及的账户 Lane 编号。
             int actual = topology.accountLaneId(21);
@@ -328,11 +328,11 @@ class MatcherSettlementPlanTest {
             var waiting = new java.util.concurrent.CountDownLatch(3);
             // 释放非成交 Lane 阻塞回调的门闩，finally 保证放行。
             var release = new java.util.concurrent.CountDownLatch(1);
-            runtime.startAccountLanes();
-            runtime.releaseOwnerLaneAccess();
+            accountBook.startAccountLanes();
+            accountBook.releaseOwnerLaneAccess();
             try {
                 for (/* 当前需阻塞的账户 Lane 下标，实际参与 Lane 被排除。 */ int lane = 0; lane < 4; lane++) if (lane != actual)
-                    runtime.submitAccountCommand(lane, /* 阻塞回调收到的账户 Lane，本回调只等待门闩，不读写账户。 */ ignored -> {
+                    accountBook.submitAccountCommand(lane, /* 阻塞回调收到的账户 Lane，本回调只等待门闩，不读写账户。 */ ignored -> {
                         waiting.countDown();
                         awaitPublicationLatch(release);
                     });
@@ -351,7 +351,7 @@ class MatcherSettlementPlanTest {
                 // 单调时钟计算的有界等待截止点，超时让测试失败。
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
                 while ((event.completedLaneMask() & (1L << actual)) == 0) {
-                    runtime.assertAccountLanesHealthy();
+                    accountBook.assertAccountLanesHealthy();
                     if (System.nanoTime() >= deadline) throw new AssertionError("active Lane did not settle");
                     Thread.onSpinWait();
                 }
@@ -362,14 +362,14 @@ class MatcherSettlementPlanTest {
             // 单调时钟计算的有界等待截止点，超时让测试失败。
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
             while (!event.complete()) {
-                runtime.assertAccountLanesHealthy();
+                accountBook.assertAccountLanesHealthy();
                 if (System.nanoTime() >= deadline) throw new AssertionError("reserved Lane tickets did not drain");
                 Thread.onSpinWait();
             }
-            assertThat(collect(runtime, event)).isTrue();
-            runtime.releaseMatcherSettlement(event);
+            assertThat(collect(accountBook, event)).isTrue();
+            accountBook.releaseMatcherSettlement(event);
             // 从事件池再次借到的同一对象，用于检查新代字段未被旧线程覆盖。
-            var reused = runtime.prepareDirectMatcherSettlement(2, 15, taker, null, 1, id, 0,
+            var reused = accountBook.prepareDirectMatcherSettlement(2, 15, taker, null, 1, id, 0,
                     identities, 2, 2, List.of(), null);
             assertThat(reused).isSameAs(event);
             assertThat(reused.ready()).isFalse();
@@ -405,36 +405,36 @@ class MatcherSettlementPlanTest {
     @Test
     void reusedNativePlanValidatesCurrentLaneMakerState() {
         var topology = new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (var runtime = new TradingAccountRuntime(topology)) {
-            var identities = new RuntimeIdentityRegistry();
+        try (var accountBook = new AccountBook(topology)) {
+            var identities = new IdIndex();
             int symbol = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
-            runtime.putOrder(order(10, 20, symbol, CoreOrderSide.SELL, 5));
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.registerInstrument(instrument());
+            accountBook.putOrder(order(10, 20, symbol, CoreOrderSide.SELL, 5));
             long takerUser = 21;
             while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
             var taker = order(11, takerUser, symbol, CoreOrderSide.BUY, 3);
-            runtime.putOrder(taker);
+            accountBook.putOrder(taker);
             var slot = new TradeSettlement.Plan();
             var result = nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                     List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false)));
-            slot.buildDirectNative(1, taker, instrument(), result, runtime);
-            var lane = runtime.accountLaneForUser(20);
+            slot.buildDirectNative(1, taker, instrument(), result, accountBook);
+            var lane = accountBook.accountLaneForUser(20);
             slot.clearReferences();
             var currentMaker = order(10, 20, symbol, CoreOrderSide.SELL, 1);
-            runtime.putOrder(currentMaker);
-            slot.buildDirectNative(2, taker, instrument(), result, runtime);
-            var changes = runtime.acquireMatcherSettlementChanges(1L << lane.laneId());
+            accountBook.putOrder(currentMaker);
+            slot.buildDirectNative(2, taker, instrument(), result, accountBook);
+            var changes = accountBook.acquireMatcherSettlementChanges(1L << lane.laneId());
             changes.directPositionIdentities = true;
-            runtime.enterMatcherSettlementScope(lane, changes);
+            accountBook.enterMatcherSettlementScope(lane, changes);
             try {
-                assertThatThrownBy(() -> slot.validateDirectLane(lane, runtime, identities, instrument()))
+                assertThatThrownBy(() -> slot.validateDirectLane(lane, accountBook, identities, instrument()))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds Lane maker");
             } finally {
-                runtime.exitMatcherSettlementScope(lane, changes);
-                runtime.releaseMatcherSettlementChanges(changes);
+                accountBook.exitMatcherSettlementScope(lane, changes);
+                accountBook.releaseMatcherSettlementChanges(changes);
             }
-            assertThat(runtime.order(10)).isSameAs(currentMaker);
+            assertThat(accountBook.order(10)).isSameAs(currentMaker);
             assertThat(currentMaker.remainingQuantitySteps()).isOne();
             assertThat(taker.remainingQuantitySteps()).isEqualTo(3);
         }
@@ -444,24 +444,24 @@ class MatcherSettlementPlanTest {
     @Test
     void pooledPlanSwitchesFromDeepMakerLaneIndexBackToOneFillWithoutStaleLinks() {
         var topology = new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (var runtime = new TradingAccountRuntime(topology)) {
-            var identities = new RuntimeIdentityRegistry();
+        try (var accountBook = new AccountBook(topology)) {
+            var identities = new IdIndex();
             int symbol = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.registerInstrument(instrument());
             long takerUser = 21;
             while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
             var taker = order(11, takerUser, symbol, CoreOrderSide.BUY, 20);
             var events = new java.util.ArrayList<MatcherResult.MatcherEvent>();
             for (int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10, 20, 100, 1, false, false));
             var slot = new TradeSettlement.Plan();
-            slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1, events), runtime);
+            slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1, events), accountBook);
             int makerLane = topology.accountLaneId(20), count = 0;
             for (int event = slot.firstMatcherEvent(makerLane); event >= 0; event = slot.nextMatcherEvent(event, makerLane)) count++;
             assertThat(count).isEqualTo(9);
             slot.clearReferences();
             slot.buildDirectNative(2, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 2,
-                    List.of(MatcherEventFixtures.trade(10, 20, 100, 1, false, false))), runtime);
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 1, false, false))), accountBook);
             assertThat(slot.firstMatcherEvent(makerLane)).isZero();
             assertThat(slot.nextMatcherEvent(0, makerLane)).isEqualTo(-1);
             assertThat(slot.tradeCount()).isOne();
@@ -471,24 +471,24 @@ class MatcherSettlementPlanTest {
     /** 缩小批次有效前缀后，尾部异代计划不能参与本代读取。 */
     @Test
     void smallerBatchReusesCapacityAndIgnoresStaleTailPlans() {
-        try (var runtime = new TradingAccountRuntime()) {
-            var identities = new RuntimeIdentityRegistry();
+        try (var accountBook = new AccountBook()) {
+            var identities = new IdIndex();
             int symbol = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.registerInstrument(instrument());
             var event = new TradeSettlement();
             var storage = event.batchStorage(20);
             long userId = 21;
-            long laneMask = runtime.topology().accountLaneMask(userId);
+            long laneMask = accountBook.topology().accountLaneMask(userId);
             storage.plans[0].buildDirectNativeCancellation(1, userId, 11,
-                    nativeResult(CommandResultCode.SUCCESS, symbol, 1, List.of()), runtime);
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 1, List.of()), accountBook);
             storage.plans[1].buildDirectNativeCancellation(99, userId, 12,
-                    nativeResult(CommandResultCode.SUCCESS, symbol, 99, List.of()), runtime);
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 99, List.of()), accountBook);
             storage.instruments[0] = instrument();
             assertThat(event.batchStorage(1)).isSameAs(storage);
             storage.admittedOrders[0] = order(11, userId, symbol, CoreOrderSide.BUY, 1);
             var commandId = new java.util.UUID(1, 2);
-            event.prepareDirect(1, laneMask, 1, 1, commandId, 0, runtime, identities, 1, List.of(), null);
+            event.prepareDirect(1, laneMask, 1, 1, commandId, 0, accountBook, identities, 1, List.of(), null);
             event.reserveMatcherPublication();
             event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, symbol, 1, List.of()),
                     1, 1, 2, 11, 1, 0);
@@ -501,13 +501,13 @@ class MatcherSettlementPlanTest {
     /** 同一原生计划槽在成交、撤单、成交之间复用，不保留旧订单或撤单前缀。 */
     @Test
     void singleCommandSlotReusesPlanWithoutLeakingPriorOrdersOrCancellations() {
-        try (var runtime = new TradingAccountRuntime()) {
-            var identities = new RuntimeIdentityRegistry();
+        try (var accountBook = new AccountBook()) {
+            var identities = new IdIndex();
             int symbol = identities.symbolId("1");
             var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             var slot = new TradeSettlement.Plan();
             slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1,
-                    List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), runtime);
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), accountBook);
             long[] cancellations = {12};
             slot.acceptedPreCancellations(cancellations, 1);
             cancellations[0] = 999;
@@ -516,13 +516,13 @@ class MatcherSettlementPlanTest {
             assertThat(slot.matcherEventCount()).isZero();
             assertThat(slot.preCancellationCount()).isZero();
             slot.buildDirectNativeCancellation(2, 21, 22,
-                    nativeResult(CommandResultCode.SUCCESS, symbol, 2, List.of()), runtime);
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 2, List.of()), accountBook);
             assertThat(slot.orderCount()).isOne();
             assertThat(slot.orderId(0)).isEqualTo(22);
             assertThat(slot.tradeCount()).isZero();
             assertThat(slot.matcherEventCount()).isZero();
             slot.buildDirectNative(3, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 3,
-                    List.of(MatcherEventFixtures.trade(10, 20, 100, 1, false, false))), runtime);
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 1, false, false))), accountBook);
             assertThat(slot.coreSequence()).isEqualTo(3);
             assertThat(slot.orderCount()).isEqualTo(2);
             assertThat(slot.orderId(0)).isEqualTo(11);
@@ -535,13 +535,13 @@ class MatcherSettlementPlanTest {
     /** 原生单项构建直接填充既有计划槽，保存 taker、maker 身份和成交数。 */
     @Test
     void nativeSingleItemUsesPooledPlanForTakerAndMaker() {
-        try (var runtime = new TradingAccountRuntime()) {
-            var identities = new RuntimeIdentityRegistry();
+        try (var accountBook = new AccountBook()) {
+            var identities = new IdIndex();
             int symbol = identities.symbolId("1");
             var slot = new TradeSettlement.Plan();
             slot.buildDirectNative(1, order(11, 21, symbol, CoreOrderSide.BUY, 3), instrument(),
                     nativeResult(CommandResultCode.SUCCESS, symbol, 1,
-                            List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), runtime);
+                            List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), accountBook);
             assertThat(slot.orderCount()).isEqualTo(2);
             assertThat(slot.orderId(0)).isEqualTo(11);
             assertThat(slot.orderId(1)).isEqualTo(10);
@@ -552,16 +552,16 @@ class MatcherSettlementPlanTest {
     /** 原语订单前缀在计划清空后失效，复用时只暴露新一代有效数量。 */
     @Test
     void primitiveOrderPrefixTracksClearAndReuse() {
-        try (var runtime = new TradingAccountRuntime()) {
+        try (var accountBook = new AccountBook()) {
             var slot = new TradeSettlement.Plan();
             slot.buildDirectNativeCancellation(1, 21, 11,
-                    nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), runtime);
+                    nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), accountBook);
             assertThat(slot.orderCount()).isOne();
             assertThat(slot.orderId(0)).isEqualTo(11);
             slot.clearReferences();
             assertThat(slot.orderCount()).isZero();
             slot.buildDirectNativeCancellation(2, 21, 22,
-                    nativeResult(CommandResultCode.SUCCESS, 1, 2, List.of()), runtime);
+                    nativeResult(CommandResultCode.SUCCESS, 1, 2, List.of()), accountBook);
             assertThat(slot.orderCount()).isOne();
             assertThat(slot.orderId(0)).isEqualTo(22);
         }
@@ -570,10 +570,10 @@ class MatcherSettlementPlanTest {
     /** 保留替换撤单在前，只复制已接受的撤单前缀，忽略缓冲尾部。 */
     @Test
     void acceptedCancellationsAppendInExecutionOrderAndIgnoreUnusedTail() {
-        try (var runtime = new TradingAccountRuntime()) {
+        try (var accountBook = new AccountBook()) {
             var slot = new TradeSettlement.Plan();
             slot.buildDirectNativeCancellation(1, 21, 11,
-                    nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), runtime);
+                    nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), accountBook);
             slot.acceptedReplacementCancellation(10);
             long[] cancellations = {11, 13, 999};
             slot.acceptedPreCancellations(cancellations, 2);
@@ -590,30 +590,30 @@ class MatcherSettlementPlanTest {
     /** 单笔或重复成交超过 taker 总剩余量都在构建时拒绝，不修改账户权威订单。 */
     @Test
     void nativeFactsRejectSingleAndRepeatedTakerOverfillBeforeLaneApplication() {
-        try (var runtime = new TradingAccountRuntime()) {
-            var identities = new RuntimeIdentityRegistry();
+        try (var accountBook = new AccountBook()) {
+            var identities = new IdIndex();
             int symbol = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
+            accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            accountBook.registerInstrument(instrument());
             var maker = order(10, 20, symbol, CoreOrderSide.SELL, 5);
             var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
-            runtime.putOrder(maker);
-            runtime.putOrder(taker);
+            accountBook.putOrder(maker);
+            accountBook.putOrder(taker);
             var slot = new TradeSettlement.Plan();
             assertThatThrownBy(() -> slot.buildDirectNative(1, taker, instrument(),
                     nativeResult(CommandResultCode.SUCCESS, symbol, 1,
-                            List.of(MatcherEventFixtures.trade(10, 20, 100, 4, false, false))), runtime))
+                            List.of(MatcherEventFixtures.trade(10, 20, 100, 4, false, false))), accountBook))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds admitted taker quantity");
             assertThatThrownBy(() -> slot.buildDirectNative(1, taker, instrument(),
                     nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                             List.of(MatcherEventFixtures.trade(10, 20, 100, 2, false, false),
-                                    MatcherEventFixtures.trade(10, 20, 100, 2, false, false))), runtime))
+                                    MatcherEventFixtures.trade(10, 20, 100, 2, false, false))), accountBook))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds admitted taker quantity");
             slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1,
-                    List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), runtime);
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), accountBook);
             assertThat(slot.tradeCount()).isOne();
-            assertThat(runtime.order(10)).isSameAs(maker);
-            assertThat(runtime.order(11)).isSameAs(taker);
+            assertThat(accountBook.order(10)).isSameAs(maker);
+            assertThat(accountBook.order(11)).isSameAs(taker);
             assertThat(maker.remainingQuantitySteps()).isEqualTo(5);
             assertThat(taker.remainingQuantitySteps()).isEqualTo(3);
         }
@@ -650,9 +650,9 @@ class MatcherSettlementPlanTest {
     private static CoreInstrument instrument() {
         return INSTRUMENT;
     }
-    private static boolean collect(TradingAccountRuntime runtime, TradeSettlement event) {
-        if (!runtime.pollMatcherFinancialSettlement(event)) return false;
-        return runtime.collectMatcherSettlement(event, null, null, null);
+    private static boolean collect(AccountBook accountBook, TradeSettlement event) {
+        if (!accountBook.pollMatcherFinancialSettlement(event)) return false;
+        return accountBook.collectMatcherSettlement(event, null, null, null);
     }
 
 }

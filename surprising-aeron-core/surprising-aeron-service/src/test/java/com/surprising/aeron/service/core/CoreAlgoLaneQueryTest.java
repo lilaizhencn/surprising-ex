@@ -26,12 +26,12 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
-import com.surprising.aeron.service.retention.TerminalStateRetention;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.retention.CompletedOrderArchive;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
@@ -77,24 +77,24 @@ class CoreAlgoLaneQueryTest {
         // 包含两个用户、三个算法父单及保留子订单的测试业务状态。
         var state = preparedState(false);
         // 冷投影使用的运行时身份映射，不与在线账户查询共享实体状态。
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 由同一业务状态生成的冷运行时，直接查询它以构造协议字节参照，结束时关闭。 */ var cold = RuntimeStateProjector.project(state, identities); /* 本用例激活的在线核心，查询结果必须通过所属 Lane 返回，结束时释放工作资源。 */ var core = initial(state)) {
+        var identities = new IdIndex();
+        try (/* 由同一业务状态生成的冷运行时，直接查询它以构造协议字节参照，结束时关闭。 */ var cold = SnapshotLoader.loadSnapshot(state, identities); /* 本用例激活的在线核心，查询结果必须通过所属 Lane 返回，结束时释放工作资源。 */ var core = initial(state)) {
             // 冷运行时按 502、501、503 顺序汇总的父单视图，用于核对在线编码结果。
             var expected = List.of(OperationalQueries.algoOrder(cold, 502),
                     OperationalQueries.algoOrder(cold, 501), OperationalQueries.algoOrder(cold, 503));
             core.activate();
             var alias = state.algoOrders().get(501L).clientAlgoOrderId();
-            assertThat(AccountLaneQueryTestSupport.read(core.runtimeState(), 1,
-                    () -> core.runtimeState().hasAlgoClient(1, alias))).isTrue();
-            assertThat(AccountLaneQueryTestSupport.read(core.runtimeState(), 7,
-                    () -> core.runtimeState().hasAlgoClient(7, alias))).isFalse();
+            assertThat(AccountLaneQueryTestSupport.read(core.accountBook(), 1,
+                    () -> core.accountBook().hasAlgoClient(1, alias))).isTrue();
+            assertThat(AccountLaneQueryTestSupport.read(core.accountBook(), 7,
+                    () -> core.accountBook().hasAlgoClient(7, alias))).isFalse();
             assertThat(core.activeOrderIndex().activeOrderRoute(102)).isNull();
             assertThat(core.activeOrderIndex().activeOrderRoute(104)).isNull();
             // 查询前账户所有权交接计数，查询后不能因 Owner 读账户而增加。
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
-            assertThat(java.util.Arrays.stream(TradingAccountRuntime.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
+            assertThat(java.util.Arrays.stream(AccountBook.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
                     .doesNotContain("publishedAlgoOrders");
-            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 assertThat(query(core, 0, 0, "", 0, 10).data()).isEqualTo(CoreAlgoOrderCodec.encodeList(expected));
                 assertThat(CoreAlgoOrderCodec.decodeList(query(core, 1, 0, "", 0, 10).data()))
                         .extracting(CoreAlgoOrderView::algoOrderId).containsExactly(501L, 503L);
@@ -115,7 +115,7 @@ class CoreAlgoLaneQueryTest {
                 assertThat(partial.activeQuantitySteps()).isEqualTo(6);
                 assertThat(partial.activeChildOrderCount()).isOne();
             }
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(state);
             core.assertClusterCallbackComplete();
         }
@@ -128,7 +128,7 @@ class CoreAlgoLaneQueryTest {
     void missingAndMalformedQueriesKeepTheirProtocolAndDoNotPoisonNextQuery() throws Exception {
         try (/* 本用例激活的在线核心，查询结果必须通过所属 Lane 返回，结束时释放工作资源。 */ var core = initial(preparedState(false))) {
             core.activate();
-            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 assertThat(CoreAlgoOrderCodec.decodeList(query(core, 0, 999, "", 0, 10).data())).isEmpty();
                 assertThat(CoreAlgoOrderCodec.decodeList(query(core, 99, 0, "", 0, 10).data())).isEmpty();
                 // 只有一个字节的畸形查询消息，应被拒绝且不影响后续合法查询。
@@ -148,7 +148,7 @@ class CoreAlgoLaneQueryTest {
     void scanLimitIsGlobalAcrossSelectedParentsAndFollowingSingleParentStillWorks() throws Exception {
         try (/* 本用例激活的在线核心，查询结果必须通过所属 Lane 返回，结束时释放工作资源。 */ var core = initial(preparedState(true))) {
             core.activate();
-            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 // 跨两个父单列举的查询，合计子单扫描项超限。
                 var request = message(CoreAlgoOrderCodec.encodeQuery(0, 0, "", 0, 10));
                 assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
@@ -179,13 +179,13 @@ class CoreAlgoLaneQueryTest {
             core.activate();
             // 确认阻塞回调已经进入所属账户 Lane 的门闩，避免阻塞尚未发生就发送查询。
             var entered = new CountDownLatch(1);
-            assertThat(core.runtimeState.dispatchAccountQuery(core.runtimeState.topology().accountLaneMask(1), /* 用户 1 所属的账户 Lane，在此回调里等待放行以构造真实慢消费者。 */ lane -> {
+            assertThat(core.accountBook.dispatchAccountQuery(core.accountBook.topology().accountLaneMask(1), /* 用户 1 所属的账户 Lane，在此回调里等待放行以构造真实慢消费者。 */ lane -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("blocked Lane timeout"); }
                 catch (/* 阻塞回调等待时收到的中断，保留原因并使测试失败。 */ InterruptedException failure) { throw new AssertionError(failure); }
             })).isTrue();
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 // 慢 Lane 尚未放行时提交的父单查询，用来检查 Owner 可先返回。
                 var request = message(CoreAlgoOrderCodec.encodeQuery(0, 0, "", 0, 10));
                 assertThat(core.apply(request).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
@@ -274,9 +274,9 @@ class CoreAlgoLaneQueryTest {
      * 从给定业务状态创建尚未激活的核心运行时，查询测试自行激活并在结束时关闭。
      * @param state 测试预先准备的用户、订单、币对和算法父单业务状态
      */
-    private TradingCoreRuntime initial(TradingCoreState state) {
-        return new TradingCoreRuntime(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
-                new TerminalStateRetention(), null, 0, Map.of(), Map.of());
+    private TradingCore initial(TradingCoreState state) {
+        return new TradingCore(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
+                new CompletedOrderArchive(), null, 0, Map.of(), Map.of());
     }
 
     /**
@@ -288,7 +288,7 @@ class CoreAlgoLaneQueryTest {
      * @param due 调度时间筛选上界，0 表示不限定该条件
      * @param limit 最多返回的算法父单条数
      */
-    private CoreResponse query(TradingCoreRuntime core, long user, long algo, String symbol, long due, int limit) {
+    private CoreResponse query(TradingCore core, long user, long algo, String symbol, long due, int limit) {
         // 按本次筛选条件编码的查询消息，用于同步入口或异步等待。
         var request = message(CoreAlgoOrderCodec.encodeQuery(user, algo, symbol, due, limit));
         assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
@@ -304,7 +304,7 @@ class CoreAlgoLaneQueryTest {
      * @param request 已经提交的查询消息，用其命令编号核对关联清理
      * @param id 内部异步查询编号，必须非零且只消费一次
      */
-    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, java.util.UUID id) {
+    private CoreResponse await(TradingCore core, CoreMessage request, java.util.UUID id) {
         assertThat(core.bookQueries.hasPendingQuery(id)).isTrue();
         // 使用单调时钟计算的五秒等待上限，不参与任何业务时间判断。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

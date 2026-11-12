@@ -13,17 +13,17 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
-import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
+import com.surprising.aeron.service.core.index.BizIndex;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.snapshot.state.*;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -52,30 +52,30 @@ class ParallelRiskScanTest {
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = source(CoreMarginMode.ISOLATED, 12);
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
-        var ids = new RuntimeIdentityRegistry();
-        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
+        var ids = new IdIndex();
+        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var accountBook = SnapshotLoader.loadSnapshot(source, ids, TOPOLOGY)) {
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            runtime.bindFactIndexes(new RuntimeFactIndexes(index, new OpenInterestIndex(source),
+            accountBook.bindFactIndexes(new BizIndex(index, new OpenInterestIndex(source),
                     new com.surprising.aeron.service.core.index.TriggerOrderIndex(source),
                     new com.surprising.aeron.service.core.index.AlgoOrderIndex(source),
                     new com.surprising.aeron.service.core.index.LiquidationIndex(source),
                     new com.surprising.aeron.service.core.index.CancelAllAfterIndex(source),
                     new com.surprising.aeron.service.core.index.ActiveOrderIndex(source),
                     new AdlPositionIndex(source, ids)), ids);
-            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
-            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), accountBook, ids);
+            accountBook.startAccountLanes(); accountBook.bindLedgerPositionOwner();
             // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
-            var work = new RiskScanner(budget, index, runtime, ids);
-            for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; runtime.firstRiskIncompleteScan() != null; page++) {
+            var work = new RiskScanner(budget, index, accountBook, ids);
+            for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; accountBook.firstRiskIncompleteScan() != null; page++) {
                 assertThat(page).isLessThan(4096);
                 if (page != 0) work.resetForCommand(budget);
                 await(work::poll);
                 assertThat(work.completedWork()).isBetween(1, budget);
             }
-            runtime.close();
+            accountBook.close();
             // 扫描结束后的业务物化结果，用来核对风险条数、编号和账户资金事实。
-            var complete = RuntimeStateMaterializer.materialize(runtime, ids);
+            var complete = SnapshotWriter.writeSnapshot(accountBook, ids);
             assertThat(complete.riskState().snapshots()).hasSize(source.users().size());
             assertThat(complete.riskState().liquidations()).hasSize(source.users().size());
             assertThat(complete.riskState().nextLiquidationId()).isEqualTo(source.users().size() + 1L);
@@ -110,19 +110,19 @@ class ParallelRiskScanTest {
      */
     private TradingCoreState scanAllLanes(TradingCoreState source) {
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
-        var ids = new RuntimeIdentityRegistry();
-        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
+        var ids = new IdIndex();
+        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var accountBook = SnapshotLoader.loadSnapshot(source, ids, TOPOLOGY)) {
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
-            runtime.startAccountLanes();
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), accountBook, ids);
+            accountBook.startAccountLanes();
             // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
-            var work = new RiskScanner(TOPOLOGY.accountLaneCount(), index, runtime, ids);
+            var work = new RiskScanner(TOPOLOGY.accountLaneCount(), index, accountBook, ids);
             while (!work.poll()) {
                 Thread.onSpinWait();
             }
-            runtime.close();
-            return RuntimeStateMaterializer.materialize(runtime, ids);
+            accountBook.close();
+            return SnapshotWriter.writeSnapshot(accountBook, ids);
         }
     }
 
@@ -134,15 +134,15 @@ class ParallelRiskScanTest {
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = source(CoreMarginMode.CROSS, 2);
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
-        var ids = new RuntimeIdentityRegistry();
-        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
+        var ids = new IdIndex();
+        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var accountBook = SnapshotLoader.loadSnapshot(source, ids, TOPOLOGY)) {
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
-            runtime.startAccountLanes();
-            run(runtime, ids, index, TOPOLOGY.accountLaneCount());
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), accountBook, ids);
+            accountBook.startAccountLanes();
+            run(accountBook, ids, index, TOPOLOGY.accountLaneCount());
             // 只完成首批工作量的检查点，每条 Lane 都应留下进行中的用户。
-            var partial = RuntimeStateMaterializer.materialize(runtime, ids);
+            var partial = SnapshotWriter.writeSnapshot(accountBook, ids);
             assertThat(partial.riskState().scans().get(SYMBOL).laneProgress()).hasSize(TOPOLOGY.accountLaneCount())
                     .allMatch(/* 逐条检查的 Lane 进度，应保留未完成用户及对应的组合累计金额。 */ cursor -> cursor.userId() > 0 && !cursor.complete());
             // 把扫描检查点编码成快照再恢复的业务状态。
@@ -150,34 +150,34 @@ class ParallelRiskScanTest {
                     ProductLine.LINEAR_PERPETUAL);
             assertThat(restoredState).isEqualTo(partial);
             // 恢复运行时重新建立的身份映射，不依赖恢复前整数键恰好相同。
-            var restoredIds = new RuntimeIdentityRegistry();
-            try (/* 从快照恢复状态投影的第二个运行时，与原运行时应用同样的行情和预算。 */ var restored = RuntimeStateProjector.project(restoredState, restoredIds, TOPOLOGY)) {
+            var restoredIds = new IdIndex();
+            try (/* 从快照恢复状态投影的第二个运行时，与原运行时应用同样的行情和预算。 */ var restored = SnapshotLoader.loadSnapshot(restoredState, restoredIds, TOPOLOGY)) {
                 restored.startAccountLanes();
                 // 恢复状态上的持仓用户索引，使用恢复后的身份映射。
                 var restoredIndex = new PositionUserIndex(restoredState, TOPOLOGY);
-                var previousProgress = runtime.riskScan(ids.findSymbolIdValue(1)).laneProgress();
-                RiskMarginCalculator.applyMarkPriceRuntime(mark(2, 70), runtime, ids);
-                assertThat(runtime.riskScan(ids.findSymbolIdValue(1)).laneProgress()).isSameAs(previousProgress);
+                var previousProgress = accountBook.riskScan(ids.findSymbolIdValue(1)).laneProgress();
+                RiskMarginCalculator.applyMarkPriceRuntime(mark(2, 70), accountBook, ids);
+                assertThat(accountBook.riskScan(ids.findSymbolIdValue(1)).laneProgress()).isSameAs(previousProgress);
                 RiskMarginCalculator.applyMarkPriceRuntime(mark(2, 70), restored, restoredIds);
                 // 循环交替使用的 1、3、7 项预算，让不同 Lane 和用户阶段反复跨页。
                 int[] budgets = {1, 3, 7};
-                for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; page < 128 && runtime.firstRiskIncompleteScan() != null; page++) {
+                for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; page < 128 && accountBook.firstRiskIncompleteScan() != null; page++) {
                     // 本页从交替预算数组选出的工作量上限。
                     int budget = budgets[page % budgets.length];
-                    assertThat(run(runtime, ids, index, budget)).isBetween(1, budget);
+                    assertThat(run(accountBook, ids, index, budget)).isBetween(1, budget);
                     run(restored, restoredIds, restoredIndex, budget);
                     // 原运行时推进本页后的业务状态，作为恢复路径参照。
-                    var expected = RuntimeStateMaterializer.materialize(runtime, ids);
+                    var expected = SnapshotWriter.writeSnapshot(accountBook, ids);
                     // 恢复运行时推进相同预算后的业务状态，必须与参照完全相同。
-                    var actual = RuntimeStateMaterializer.materialize(restored, restoredIds);
+                    var actual = SnapshotWriter.writeSnapshot(restored, restoredIds);
                     assertThat(actual).isEqualTo(expected);
                     assertThat(actual.businessStateHash()).isEqualTo(expected.businessStateHash());
                     assertThat(actual.users()).isEqualTo(source.users());
                     assertThat(actual.treasuryState()).isEqualTo(source.treasuryState());
                 }
-                assertThat(runtime.firstRiskIncompleteScan()).isNull();
+                assertThat(accountBook.firstRiskIncompleteScan()).isNull();
                 // 扫描结束后的业务物化结果，用来核对风险条数、编号和账户资金事实。
-                var complete = RuntimeStateMaterializer.materialize(runtime, ids);
+                var complete = SnapshotWriter.writeSnapshot(accountBook, ids);
                 assertThat(complete.riskState().snapshots()).hasSize(2 * TOPOLOGY.accountLaneCount());
                 assertThat(complete.riskState().snapshots().values()).allMatch(/* 最终检查的单条风险记录，价格序号必须更新为新价格版本。 */ risk -> risk.priceSequence() == 2);
                 assertThat(complete.riskState().liquidations()).hasSize(2 * TOPOLOGY.accountLaneCount());
@@ -214,35 +214,35 @@ class ParallelRiskScanTest {
         source = new TradingCoreState(source.productLine(), source.revision() + 1, users, source.orders(),
                 source.instruments(), source.riskState(), source.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
-        var ids = new RuntimeIdentityRegistry();
-        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
-            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_000L), runtime, ids);
-            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 120), runtime, ids);
-            runtime.startAccountLanes();
-            run(runtime, ids, new PositionUserIndex(source, TOPOLOGY), TOPOLOGY.accountLaneCount());
+        var ids = new IdIndex();
+        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var accountBook = SnapshotLoader.loadSnapshot(source, ids, TOPOLOGY)) {
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_000L), accountBook, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 120), accountBook, ids);
+            accountBook.startAccountLanes();
+            run(accountBook, ids, new PositionUserIndex(source, TOPOLOGY), TOPOLOGY.accountLaneCount());
             // 从初始账户中选出的一个用户，用它模拟扫描中途盈利平仓。
             long userId = source.users().keySet().iterator().next();
             // BTC 当前扫描记录，确认选中用户的 Lane 已累加到二百单位浮盈。
-            var scan = runtime.riskScan(ids.symbolId(SYMBOL));
+            var scan = accountBook.riskScan(ids.symbolId(SYMBOL));
             assertThat(scan.laneProgress().get(TOPOLOGY.accountLaneId(userId)).unrealizedPnlUnits()).isEqualTo(200);
             // 按平仓结算后的实际形态更新账户：200 盈利进入钱包，BTC 持仓消失，ETH 仍在。
-            runtime.acquireOwnerLaneAccess();
+            accountBook.acquireOwnerLaneAccess();
             try {
-                runtime.replaceBalance(new AccountBalance(userId, ids.assetId("USDT"), 300, 0));
-                com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, ids.preparedPositionKey(userId, SYMBOL), userId);
-                runtime.advanceUserRevision(userId);
+                accountBook.replaceBalance(new AccountBalance(userId, ids.assetId("USDT"), 300, 0));
+                com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(accountBook, ids.preparedPositionKey(userId, SYMBOL), userId);
+                accountBook.advanceUserRevision(userId);
             } finally {
-                runtime.releaseOwnerLaneAccess();
+                accountBook.releaseOwnerLaneAccess();
             }
             // 模拟平仓且用户版本变化后的业务检查点，后续索引据此重建。
-            var changed = RuntimeStateMaterializer.materialize(runtime, ids);
+            var changed = SnapshotWriter.writeSnapshot(accountBook, ids);
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(changed, TOPOLOGY);
-            for (int page = 0; page < 8 && runtime.firstRiskIncompleteScan() != null; page++)
-                run(runtime, ids, index, 2 * TOPOLOGY.accountLaneCount());
-            assertThat(runtime.firstRiskIncompleteScan()).isNull();
+            for (int page = 0; page < 8 && accountBook.firstRiskIncompleteScan() != null; page++)
+                run(accountBook, ids, index, 2 * TOPOLOGY.accountLaneCount());
+            assertThat(accountBook.firstRiskIncompleteScan()).isNull();
             // 继续估值后的结果，ETH 风险权益应等于已含平仓利润的钱包三百单位。
-            var state = RuntimeStateMaterializer.materialize(runtime, ids);
+            var state = SnapshotWriter.writeSnapshot(accountBook, ids);
             assertThat(state.riskState().snapshots().get(userId + ":2").equityUnits()).isEqualTo(300);
         }
     }
@@ -275,44 +275,44 @@ class ParallelRiskScanTest {
         source = new TradingCoreState(source.productLine(), source.revision() + 1, users, source.orders(),
                 source.instruments(), source.riskState(), source.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
-        var ids = new RuntimeIdentityRegistry();
-        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
-            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 100), runtime, ids);
-            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_001L), runtime, ids);
+        var ids = new IdIndex();
+        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var accountBook = SnapshotLoader.loadSnapshot(source, ids, TOPOLOGY)) {
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 100), accountBook, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_001L), accountBook, ids);
             // 共享调度先给 BTC、再给 ETH 两个单位，保留两币对的未完成组合累计。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            run(runtime, ids, index, 2 * TOPOLOGY.accountLaneCount());
-            run(runtime, ids, index, 2 * TOPOLOGY.accountLaneCount());
-            assertThat(runtime.riskScan(ids.symbolId("2")).laneProgress())
+            run(accountBook, ids, index, 2 * TOPOLOGY.accountLaneCount());
+            run(accountBook, ids, index, 2 * TOPOLOGY.accountLaneCount());
+            assertThat(accountBook.riskScan(ids.symbolId("2")).laneProgress())
                     .allMatch(/* 逐条检查的 Lane 进度，应保留未完成用户及对应的组合累计金额。 */ cursor -> cursor.userId() > 0 && cursor.unrealizedPnlUnits() == 0);
-            assertThat(runtime.riskScan(ids.symbolId(SYMBOL)).laneProgress())
+            assertThat(accountBook.riskScan(ids.symbolId(SYMBOL)).laneProgress())
                     .allMatch(cursor -> cursor.userId() > 0 && !cursor.complete());
-            assertThat(RuntimeStateMaterializer.materialize(runtime, ids).riskState().liquidations()).isEmpty();
+            assertThat(SnapshotWriter.writeSnapshot(accountBook, ids).riskState().liquidations()).isEmpty();
             // ETH 扫描已经累计完两个持仓，此时 BTC 新价格只更新 BTC 扫描入口。
-            RiskMarginCalculator.applyMarkPriceRuntime(mark(2, 120), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(2, 120), accountBook, ids);
             // ETH 尚在分批估值、BTC 已刷新价格时保存的业务状态检查点。
-            var checkpoint = RuntimeStateMaterializer.materialize(runtime, ids);
+            var checkpoint = SnapshotWriter.writeSnapshot(accountBook, ids);
             // 把扫描检查点编码成快照再恢复的业务状态。
             var restoredState = TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(checkpoint),
                     ProductLine.LINEAR_PERPETUAL);
             // 恢复运行时重新建立的身份映射，不依赖恢复前整数键恰好相同。
-            var restoredIds = new RuntimeIdentityRegistry();
-            try (/* 从快照恢复状态投影的第二个运行时，与原运行时应用同样的行情和预算。 */ var restored = RuntimeStateProjector.project(restoredState, restoredIds, TOPOLOGY)) {
+            var restoredIds = new IdIndex();
+            try (/* 从快照恢复状态投影的第二个运行时，与原运行时应用同样的行情和预算。 */ var restored = SnapshotLoader.loadSnapshot(restoredState, restoredIds, TOPOLOGY)) {
                 // 恢复状态上的持仓用户索引，使用恢复后的身份映射。
                 var restoredIndex = new PositionUserIndex(restoredState, TOPOLOGY);
                 // 两币对共用真实调度预算，每页只允许每 Lane 一个单位，原状态与恢复状态消耗相同。
-                for (int page = 0; page < 32 && runtime.firstRiskIncompleteScan() != null; page++) {
-                    int work = run(runtime, ids, index, TOPOLOGY.accountLaneCount());
+                for (int page = 0; page < 32 && accountBook.firstRiskIncompleteScan() != null; page++) {
+                    int work = run(accountBook, ids, index, TOPOLOGY.accountLaneCount());
                     assertThat(work).isBetween(1, TOPOLOGY.accountLaneCount());
                     assertThat(run(restored, restoredIds, restoredIndex, TOPOLOGY.accountLaneCount())).isEqualTo(work);
-                    assertThat(RuntimeStateMaterializer.materialize(restored, restoredIds))
-                            .isEqualTo(RuntimeStateMaterializer.materialize(runtime, ids));
+                    assertThat(SnapshotWriter.writeSnapshot(restored, restoredIds))
+                            .isEqualTo(SnapshotWriter.writeSnapshot(accountBook, ids));
                 }
                 // 扫描结束后的业务物化结果，用来核对风险条数、编号和账户资金事实。
-                var complete = RuntimeStateMaterializer.materialize(runtime, ids);
-                assertThat(runtime.firstRiskIncompleteScan()).isNull();
+                var complete = SnapshotWriter.writeSnapshot(accountBook, ids);
+                assertThat(accountBook.firstRiskIncompleteScan()).isNull();
                 assertThat(restored.firstRiskIncompleteScan()).isNull();
-                assertThat(runtime.riskScan(ids.symbolId("2")).riskComplete()).isTrue();
+                assertThat(accountBook.riskScan(ids.symbolId("2")).riskComplete()).isTrue();
                 assertThat(complete.riskState().snapshots().values()).hasSize(2 * TOPOLOGY.accountLaneCount())
                         .allMatch(/* 最终逐条检查的风险快照，组合权益都应使用更新后的三百单位。 */ snapshot -> snapshot.equityUnits() == 300);
                 assertThat(complete.riskState().liquidations()).isEmpty();
@@ -328,18 +328,18 @@ class ParallelRiskScanTest {
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = source(CoreMarginMode.ISOLATED, 1);
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
-        var ids = new RuntimeIdentityRegistry();
-        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
+        var ids = new IdIndex();
+        try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var accountBook = SnapshotLoader.loadSnapshot(source, ids, TOPOLOGY)) {
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
-            runtime.setNextLiquidationId(Long.MAX_VALUE - 1);
-            runtime.startAccountLanes();
-            assertThatThrownBy(() -> run(runtime, ids, index, TOPOLOGY.accountLaneCount()))
+            RiskMarginCalculator.applyMarkPriceRuntime(mark(1, 80), accountBook, ids);
+            accountBook.setNextLiquidationId(Long.MAX_VALUE - 1);
+            accountBook.startAccountLanes();
+            assertThatThrownBy(() -> run(accountBook, ids, index, TOPOLOGY.accountLaneCount()))
                     .isInstanceOf(ArithmeticException.class);
-            assertThat(runtime.nextLiquidationId()).isEqualTo(Long.MAX_VALUE - 1);
-            runtime.close();
-            assertThat(RuntimeStateMaterializer.materialize(runtime, ids).riskState().liquidations()).isEmpty();
+            assertThat(accountBook.nextLiquidationId()).isEqualTo(Long.MAX_VALUE - 1);
+            accountBook.close();
+            assertThat(SnapshotWriter.writeSnapshot(accountBook, ids).riskState().liquidations()).isEmpty();
         }
     }
 
@@ -350,10 +350,10 @@ class ParallelRiskScanTest {
      * @param index 按币对及 Lane 定位持仓用户的索引
      * @param budget 本批允许的工作量，小预算用来验证跨页继续而非一次处理完整用户
      */
-    private static int run(TradingAccountRuntime runtime, RuntimeIdentityRegistry ids, PositionUserIndex index, int budget) {
+    private static int run(AccountBook accountBook, IdIndex ids, PositionUserIndex index, int budget) {
 
         // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
-        var work = new RiskScanner(budget, index, runtime, ids);
+        var work = new RiskScanner(budget, index, accountBook, ids);
         await(work::poll);
         return work.completedWork();
     }

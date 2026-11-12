@@ -19,14 +19,14 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.FundsStateHash;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -116,7 +116,7 @@ class CoreRiskStateTest {
         // 测试状态转换应用本次标记价后得到的状态，用来检查估值和强平计划。
         TradingCoreState marked = reducer.applyMarkPrice(state, markCommand);
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         RuntimeStateParityChecker.assertMatches(marked, identities,
                 RuntimeDerivativeRiskFixture.simulateMarkPrice(
                         state, markCommand, identities));
@@ -227,26 +227,26 @@ class CoreRiskStateTest {
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
         state = withPosition(state, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, 100, 1_000, 0, 100));
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(state, identities);
         // 应用标记价前的全局修订号，用来确认行情登记只增加一次修订。
-        long revisionBefore = runtime.revision();
+        long revisionBefore = accountBook.revision();
 
         RiskMarginCalculator.applyMarkPriceRuntime(
                 new ApplyMarkPriceCommand("1", 80, 1, 1_700_000_000_000L),
-                runtime, identities);
+                accountBook, identities);
 
-        assertThat(runtime.revision()).isEqualTo(revisionBefore + 1);
-        assertThat(runtime.riskScan(identities.symbolId("1")).riskComplete()).isFalse();
+        assertThat(accountBook.revision()).isEqualTo(revisionBefore + 1);
+        assertThat(accountBook.riskScan(identities.symbolId("1")).riskComplete()).isFalse();
         // 用户 7 的合约 1 持仓在运行时中的整数键，用来检查风险记录何时生成。
         long positionKey = identities.preparedPositionKey(7, "1");
-        assertThat(runtime.riskSnapshot(positionKey)).isNull();
+        assertThat(accountBook.riskSnapshot(positionKey)).isNull();
 
         RuntimeDerivativeRiskFixture.continueRiskBudget(64,
-                new PositionUserIndex(state, runtime.topology()), runtime, identities);
+                new PositionUserIndex(state, accountBook.topology()), accountBook, identities);
 
-        assertThat(runtime.riskSnapshot(positionKey)).isNotNull();
+        assertThat(accountBook.riskSnapshot(positionKey)).isNotNull();
     }
 
     /**
@@ -258,29 +258,29 @@ class CoreRiskStateTest {
         var state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument("1"));
         state = reducer.registerInstrument(state, instrument("2"));
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
-        var identities = new RuntimeIdentityRegistry();
+        var identities = new IdIndex();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        var runtime = RuntimeStateProjector.project(state, identities);
+        var accountBook = SnapshotLoader.loadSnapshot(state, identities);
         for (/* 本轮需要登记行情并安排风险扫描的测试币对编号。 */ String instrumentId : List.of("1", "2"))
-            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 100, 1, 1000), runtime, identities);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 100, 1, 1000), accountBook, identities);
         // 调度器首先选中的币对整数编号，完成后会立刻再次刷新它的行情。
-        int first = runtime.firstRiskIncompleteScan().symbolId();
+        int first = accountBook.firstRiskIncompleteScan().symbolId();
         // 另一份尚未访问的币对编号，应该优先于刚刷新的已完成币对。
         int other = first == identities.symbolId("1") ? identities.symbolId("2") : identities.symbolId("1");
         RuntimeDerivativeRiskFixture.continueRiskBudget(1,
-                new PositionUserIndex(state, runtime.topology()), runtime, identities);
-        assertThat(runtime.riskScan(first).riskComplete()).isTrue();
-        RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(identities.instrumentId(first), 100, 2, 1001), runtime, identities);
-        assertThat(runtime.firstRiskIncompleteScan().symbolId()).as("a refreshed completed instrumentId must go behind unvisited work").isEqualTo(other);
+                new PositionUserIndex(state, accountBook.topology()), accountBook, identities);
+        assertThat(accountBook.riskScan(first).riskComplete()).isTrue();
+        RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(identities.instrumentId(first), 100, 2, 1001), accountBook, identities);
+        assertThat(accountBook.firstRiskIncompleteScan().symbolId()).as("a refreshed completed instrumentId must go behind unvisited work").isEqualTo(other);
         // 保留当前扫描顺序和调度修订号的运行时状态物化结果。
-        var materialized = RuntimeStateMaterializer.materialize(runtime, identities);
+        var materialized = SnapshotWriter.writeSnapshot(accountBook, identities);
         // 将本次检查点编码成快照后再解码的状态，用来核对恢复结果。
         var restored = TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(materialized), ProductLine.LINEAR_PERPETUAL);
         assertThat(restored.businessStateHash()).isEqualTo(materialized.businessStateHash());
         // 快照恢复后重新建立的身份映射，不能假定整数编号与恢复前相同。
-        var restoredIds = new RuntimeIdentityRegistry();
+        var restoredIds = new IdIndex();
         // 恢复状态重新投影出的运行时，用业务币对编号核对下一份待扫描任务。
-        var restoredRuntime = RuntimeStateProjector.project(restored, restoredIds);
+        var restoredRuntime = SnapshotLoader.loadSnapshot(restored, restoredIds);
         assertThat(restoredIds.instrumentId(restoredRuntime.firstRiskIncompleteScan().symbolId())).isEqualTo(identities.instrumentId(other));
         assertThat(restored.riskState().scans().get(identities.instrumentId(first)).lastScheduledRevision()).isPositive();
     }
@@ -296,18 +296,18 @@ class CoreRiskStateTest {
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
         state = withPosition(state, new CorePositionState("2", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, 100, 1000, 0, 100));
         // 本用例的币对、资产和持仓身份映射，用来读取运行时状态。
-        var ids = new RuntimeIdentityRegistry();
+        var ids = new IdIndex();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        var runtime = RuntimeStateProjector.project(state, ids);
-        RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 1, 1, 1000), runtime, ids);
+        var accountBook = SnapshotLoader.loadSnapshot(state, ids);
+        RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 1, 1, 1000), accountBook, ids);
         // 与运行时拓扑一致的持仓用户索引，续扫不枚举无持仓账户。
-        var positions = new PositionUserIndex(state, runtime.topology());
+        var positions = new PositionUserIndex(state, accountBook.topology());
         for (/* 模拟币对 1 连续行情刷新的次数，同时作为递增价格序号。 */ int i = 1; i <= 4; i++) {
-            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("1", 100, i, 1000+i), runtime, ids);
-            RuntimeDerivativeRiskFixture.continueRiskBudget(64, positions, runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand("1", 100, i, 1000+i), accountBook, ids);
+            RuntimeDerivativeRiskFixture.continueRiskBudget(64, positions, accountBook, ids);
         }
         // 风险处理后的运行时物化结果，便于按业务编号核对强平与资金事实。
-        var result = RuntimeStateMaterializer.materialize(runtime, ids);
+        var result = SnapshotWriter.writeSnapshot(accountBook, ids);
         assertThat(result.riskState().liquidations().values()).anySatisfy(/* 断言正在检查的强平记录，要求其中包含目标用户在目标币对的计划。 */ liquidation -> {
             assertThat(liquidation.userId()).isEqualTo(7);
             assertThat(liquidation.instrumentId()).isEqualTo("2");
@@ -328,19 +328,19 @@ class CoreRiskStateTest {
         // 风险扫描前的资金哈希，处理结束后必须相同。
         long funds = FundsStateHash.compute(state);
         // 本用例的币对、资产和持仓身份映射，用来读取运行时状态。
-        var ids = new RuntimeIdentityRegistry();
+        var ids = new IdIndex();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        var runtime = RuntimeStateProjector.project(state, ids);
+        var accountBook = SnapshotLoader.loadSnapshot(state, ids);
         // 从初始持仓构造的用户索引，供分批风险扫描定位真正需要估值的账户。
-        var positions = new PositionUserIndex(state, runtime.topology());
+        var positions = new PositionUserIndex(state, accountBook.topology());
         for (/* 本轮需要登记行情并安排风险扫描的测试币对编号。 */ String instrumentId : List.of("1", "4", "2"))
-            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 1, 1, 1000), runtime, ids);
+            RiskMarginCalculator.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 1, 1, 1000), accountBook, ids);
         // 这次共享预算实际消耗的工作项数量，不能超过 64。
-        int work = RuntimeDerivativeRiskFixture.continueRiskBudget(64, positions, runtime, ids);
+        int work = RuntimeDerivativeRiskFixture.continueRiskBudget(64, positions, accountBook, ids);
         assertThat(work).isBetween(3,64);
-        assertThat(runtime.firstRiskIncompleteScan()).isNull();
+        assertThat(accountBook.firstRiskIncompleteScan()).isNull();
         // 风险处理后的运行时物化结果，便于按业务编号核对强平与资金事实。
-        var result = RuntimeStateMaterializer.materialize(runtime, ids);
+        var result = SnapshotWriter.writeSnapshot(accountBook, ids);
         assertThat(FundsStateHash.compute(result)).isEqualTo(funds);
         assertThat(result.riskState().liquidations().values()).anySatisfy(/* 断言正在检查的强平记录，要求其中包含目标用户在目标币对的计划。 */ liquidation -> {
             assertThat(liquidation.userId()).isEqualTo(7);
@@ -550,25 +550,25 @@ class CoreRiskStateTest {
         // 测试状态转换的当前参照结果，每批继续后都与运行时比对。
         TradingCoreState first = reducer.applyMarkPrice(state, command);
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
-        runtime.startAccountLanes();
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(state, identities);
+        accountBook.startAccountLanes();
         try {
-            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, runtime, identities);
-            assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
+            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, accountBook, identities);
+            assertThat(SnapshotWriter.writeSnapshot(accountBook, identities))
                     .isEqualTo(first);
-            RuntimeStateParityChecker.assertMatches(first, identities, runtime);
+            RuntimeStateParityChecker.assertMatches(first, identities, accountBook);
 
             while (!first.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)) {
                 // 本批继续扫描开始前的参照状态，状态转换和运行时都从同一业务进度推进。
                 TradingCoreState before = first;
                 first = reducer.continueRiskScan(before, 64);
-                RuntimeTestStateTransitions.applyRiskContinuation(before, 64, runtime, identities);
-                RuntimeStateParityChecker.assertMatches(first, identities, runtime);
+                RuntimeTestStateTransitions.applyRiskContinuation(before, 64, accountBook, identities);
+                RuntimeStateParityChecker.assertMatches(first, identities, accountBook);
             }
         } finally {
-            runtime.close();
+            accountBook.close();
         }
         assertThat(first.riskState().snapshots()).hasSize(260);
         assertThat(first.riskState().liquidations()).isEmpty();
@@ -592,22 +592,22 @@ class CoreRiskStateTest {
         // 测试状态转换逐批给出的参照结果，包含确定顺序的强平编号。
         TradingCoreState authoritative = reducer.applyMarkPrice(state, command);
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
-        runtime.startAccountLanes();
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(state, identities);
+        accountBook.startAccountLanes();
         try {
-            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, runtime, identities);
-            RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
+            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, accountBook, identities);
+            RuntimeStateParityChecker.assertMatches(authoritative, identities, accountBook);
             while (!authoritative.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)) {
                 // 本批继续扫描开始前的参照状态，状态转换和运行时都从同一业务进度推进。
                 TradingCoreState before = authoritative;
                 authoritative = reducer.continueRiskScan(before, 7);
-                RuntimeTestStateTransitions.applyRiskContinuation(before, 7, runtime, identities);
-                RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
+                RuntimeTestStateTransitions.applyRiskContinuation(before, 7, accountBook, identities);
+                RuntimeStateParityChecker.assertMatches(authoritative, identities, accountBook);
             }
         } finally {
-            runtime.close();
+            accountBook.close();
         }
         assertThat(authoritative.riskState().liquidations()).hasSize(32);
         assertThat(authoritative.riskState().nextLiquidationId()).isEqualTo(33);
@@ -633,11 +633,11 @@ class CoreRiskStateTest {
         // 测试状态转换接收新价格后的结果，用来比对运行时保留的扫描进度。
         TradingCoreState after = reducer.applyMarkPrice(state, latest);
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        TradingAccountRuntime runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
+        AccountBook accountBook = RuntimeDerivativeRiskFixture.simulateMarkPrice(
                 state, latest, identities);
-        RuntimeStateParityChecker.assertMatches(after, identities, runtime);
+        RuntimeStateParityChecker.assertMatches(after, identities, accountBook);
         assertThat(after.riskState().scans().get("1").scanStartPriceSequence()).isEqualTo(1);
         assertThat(after.riskState().scans().get("1").priceSequence()).isEqualTo(2);
         assertThat(after.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)).isFalse();

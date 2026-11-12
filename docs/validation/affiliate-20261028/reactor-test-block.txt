@@ -25,10 +25,10 @@
 [ERROR]   location: variable u of type com.surprising.aeron.service.account.CoreUserState
 [ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[391,29] cannot find symbol
 [ERROR]   symbol:   method enterAsynchronousCommandScope()
-[ERROR]   location: class com.surprising.aeron.service.core.TradingAccountRuntime
+[ERROR]   location: class com.surprising.aeron.service.core.AccountBook
 [ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[422,33] cannot find symbol
 [ERROR]   symbol:   method exitAsynchronousCommandScope()
-[ERROR]   location: class com.surprising.aeron.service.core.TradingAccountRuntime
+[ERROR]   location: class com.surprising.aeron.service.core.AccountBook
 [ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[430,217] cannot find symbol
 [ERROR]   symbol:   method totalUnits(java.lang.String)
 [ERROR]   location: variable u of type com.surprising.aeron.service.account.CoreUserState

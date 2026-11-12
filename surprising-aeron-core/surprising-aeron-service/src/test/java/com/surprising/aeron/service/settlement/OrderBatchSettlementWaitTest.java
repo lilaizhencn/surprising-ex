@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -14,16 +14,16 @@ class OrderBatchSettlementWaitTest {
      */
     @Test
     void incompleteItemCannotBeCollectedOrRecycled() throws Exception {
-        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingAccountRuntime()) {
-            runtime.beginOrderBatchMutationScope();
+        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var accountBook = new AccountBook()) {
+            accountBook.beginOrderBatchMutationScope();
             // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
             var event = incompleteEvent();
-            assertThatThrownBy(() -> runtime.collectOrderBatchMatcherSettlement(event, null))
+            assertThatThrownBy(() -> accountBook.collectOrderBatchMatcherSettlement(event, null))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("not ready");
             assertThat(event.complete()).isFalse();
-            assertThatThrownBy(() -> runtime.releaseMatcherSettlement(event))
+            assertThatThrownBy(() -> accountBook.releaseMatcherSettlement(event))
                     .hasMessageContaining("cannot recycle an incomplete");
-            runtime.endOrderBatchMutationScope();
+            accountBook.endOrderBatchMutationScope();
         }
     }
 

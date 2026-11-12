@@ -40,20 +40,20 @@ class CoreTransferLaneLifecycleTest {
     void laneOwnsIdentityDebitCompletionAndPagedQueriesAcrossProducts(ProductLine product) throws Exception {
         // 与源不同的目标产品线
         ProductLine destination = product == ProductLine.SPOT ? ProductLine.LINEAR_PERPETUAL : ProductLine.SPOT;
-        try (/* 持有源用户和待完成记录的实际运行时 */ var source = new TradingCoreRuntime(product); /* 持有收款用户22的目标运行时 */ var target = new TradingCoreRuntime(destination)) {
+        try (/* 持有源用户和待完成记录的实际运行时 */ var source = new TradingCore(product); /* 持有收款用户22的目标运行时 */ var target = new TradingCore(destination)) {
             // 第一个源用户，固定为7
             // 递增选择的第二用户，直到路由到另一账户 Lane
             long first = 7, second = 8;
-            while (source.runtimeState.topology().accountLaneId(second) == source.runtimeState.topology().accountLaneId(first)) second++;
+            while (source.accountBook.topology().accountLaneId(second) == source.accountBook.topology().accountLaneId(first)) second++;
             deposit(source, first, 100); deposit(source, second, 200);
             // 进入守卫前的所有权交接轮次，结束时要求不变
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(source.runtimeState);
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(source.accountBook);
             // 业务ID91、金额30的第一用户划转
             var a = transfer(product, destination, 91, first, 30);
             // 业务ID92、金额10的第二用户划转
             var b = transfer(product, destination, 92, second, 10);
-            try (/* 既有 Owner 账户读取守卫，限定实际命令和查询执行边界 */ var guard = new OwnerAccountReadGuard(source.runtimeState)) {
-                assertThatThrownBy(() -> source.runtimeState.pendingTransfer(91))
+            try (/* 既有 Owner 账户读取守卫，限定实际命令和查询执行边界 */ var guard = new OwnerAccountReadGuard(source.accountBook)) {
+                assertThatThrownBy(() -> source.accountBook.pendingTransfer(91))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("Account Lane");
                 // 第一条转出请求，同对象重试检查请求去重
                 var out = command(source, CoreMessageType.TRANSFER_OUT, first, TradingCommandCodec.encodeTransferFunds(a));
@@ -76,7 +76,7 @@ class CoreTransferLaneLifecycleTest {
                 assertThat(apply(source, command(source, CoreMessageType.TRANSFER_OUT, first,
                         TradingCommandCodec.encodeTransferFunds(transfer(product, destination, 93, first, 71)))).resultCode())
                         .isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-                assertThat(source.runtimeState.pendingTransferUser(93)).isZero();
+                assertThat(source.accountBook.pendingTransferUser(93)).isZero();
                 for (var /* 本轮入账或完成的原划转参数 */ transfer : List.of(a, b)) {
                     // 目标产品用户22的转入请求
                     var credit = command(target, CoreMessageType.TRANSFER_IN, 22, TradingCommandCodec.encodeTransferFunds(transfer));
@@ -91,14 +91,14 @@ class CoreTransferLaneLifecycleTest {
                             TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(transfer.transferId()))))
                             .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                     // 首次完成后保存的修订，重复完成后要求保持不变
-                    long revision = source.runtimeState.revision();
+                    long revision = source.accountBook.revision();
                     assertThat(apply(source, command(source, CoreMessageType.COMPLETE_TRANSFER, transfer.sourceUserId(),
                             TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(transfer.transferId()))))
                             .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                    assertThat(source.runtimeState.revision()).isEqualTo(revision);
+                    assertThat(source.accountBook.revision()).isEqualTo(revision);
                 }
                 assertThat(query(source, 256)).isEmpty();
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(source.runtimeState)).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(source.accountBook)).isEqualTo(handoff);
             }
             // 完成后的第一源用户只读视图，余额70
             var firstUser = CoreTestCompletion.userState(source, first);
@@ -135,7 +135,7 @@ class CoreTransferLaneLifecycleTest {
      * @param user 命令所属用户或划转源用户
      * @param amount 资金整数数量
      */
-    private void deposit(TradingCoreRuntime core, long user, long amount) {
+    private void deposit(TradingCore core, long user, long amount) {
         assertThat(apply(core, command(core, CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", amount))))
                 .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
@@ -146,7 +146,7 @@ class CoreTransferLaneLifecycleTest {
      * @param core 本次操作的实际交易运行时
      * @param message 交给异步完成帮助器的原请求
      */
-    private CoreResponse apply(TradingCoreRuntime core, CoreMessage message) {
+    private CoreResponse apply(TradingCore core, CoreMessage message) {
         return CoreTestCompletion.applyAsynchronously(core, message);
     }
 
@@ -157,7 +157,7 @@ class CoreTransferLaneLifecycleTest {
      * @param user 命令所属用户或划转源用户
      * @param payload 完整原命令载荷
      */
-    private CoreMessage command(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private CoreMessage command(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 本测试刚分配的命令或查询身份
         long id = ++sequence;
         return new CoreMessage(CoreMessageHeader.command(type, new UUID(941, id), core.productLine,
@@ -169,7 +169,7 @@ class CoreTransferLaneLifecycleTest {
      * @param core 本次操作的实际交易运行时
      * @param limit 有限页最大条数
      */
-    private List<TransferFundsCommand> query(TradingCoreRuntime core, int limit) {
+    private List<TransferFundsCommand> query(TradingCore core, int limit) {
         // 本测试刚分配的命令或查询身份
         long id = ++sequence;
         // 本次有限页查询原请求

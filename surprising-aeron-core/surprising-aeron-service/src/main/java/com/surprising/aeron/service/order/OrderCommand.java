@@ -32,10 +32,10 @@ import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.adl.AdlService;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.funding.FundingSettlementService;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -48,7 +48,7 @@ import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import com.surprising.aeron.service.settlement.ContractExpirySettlementService;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
@@ -98,23 +98,23 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     @Getter
     @Setter
     Order realtimeTakerOrder;
-    private final AdmissionState admissionState = new AdmissionState();
+    private final OrderCheckState orderCheckState = new OrderCheckState();
     private final MatchingTasks matchingTasks = new MatchingTasks(this);
     private final SettlementState settlementState = new SettlementState();
     private final CommitControlState commitControl = new CommitControlState();
 
-    static final class AdmissionState {
+    static final class OrderCheckState {
         List<Long> preMatchingCancellationOrderIds = List.of();
-        ReplacementAdmission admission;
-        OrderCommand.PlaceAdmissionEvent placeAdmission;
-        boolean placeAdmissionOwnerCollected;
+        ReplaceOrderCheck orderCheck;
+        OrderCommand.PlaceOrderCheckEvent placeOrderCheck;
+        boolean placeOrderCheckOwnerCollected;
         OrderCommand.ResolvedPlaceOrder realtimeResolvedTakerOrder;
-        Order triggerAdmissionOrder;
+        Order triggerOrderCheckOrder;
         com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger;
-        OrderCommand.ReplacementAdmissionEvent replacementAdmission;
+        OrderCommand.ReplaceOrderCheckEvent replacementOrderCheck;
         long deferredClusterTimestamp;
         long deferredClusterPosition;
-        TradingCoreRuntime.SourceKey deferredSourceKey;
+        TradingCore.SourceKey deferredSourceKey;
     }
 
     static final class MatchingTasks {
@@ -131,14 +131,14 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         OrderMatchingResult matchingResult;
         CoreResultCode matchingRejection;
         List<CancellationOrder> matcherPreCancellations = List.of();
-        final AdmissionMatchingContinuation admissionMatching;
-        final ControlMatchingContinuation controlMatching;
-        final OrderMatchingContinuation orderMatching;
+        final AfterCheckMatchCallback orderCheckMatching;
+        final ControlMatchCallback controlMatching;
+        final OrderMatchCallback orderMatching;
 
         MatchingTasks(OrderCommand ownerSlot) {
-            this.admissionMatching = new AdmissionMatchingContinuation(ownerSlot);
-            this.controlMatching = new ControlMatchingContinuation(ownerSlot);
-            this.orderMatching = new OrderMatchingContinuation(ownerSlot);
+            this.orderCheckMatching = new AfterCheckMatchCallback(ownerSlot);
+            this.controlMatching = new ControlMatchCallback(ownerSlot);
+            this.orderMatching = new OrderMatchCallback(ownerSlot);
         }
     }
 
@@ -168,11 +168,11 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         com.surprising.aeron.service.liquidation.LiquidationService.ExecutionWork reusableLiquidationWork;
         com.surprising.aeron.service.liquidation.LiquidationService.ExecutionCheck liquidationCheck;
         ContractExpirySettlementService.SettlementWork reusableSettlementWork;
-        final SettlementControlContinuation settlementControl = new SettlementControlContinuation();
-        final LiquidationExecutionContinuation liquidationExecutionControl = new LiquidationExecutionContinuation();
+        final SettlementCallback settlementControl = new SettlementCallback();
+        final LiquidationCallback liquidationExecutionControl = new LiquidationCallback();
     }
 
-    public List<Long> preMatchingCancellationOrderIds() { return admissionState.preMatchingCancellationOrderIds; }
+    public List<Long> preMatchingCancellationOrderIds() { return orderCheckState.preMatchingCancellationOrderIds; }
     public boolean ledgerDispatchClosed() { return settlementState.ledgerDispatchClosed; }
     public void ledgerDispatchClosed(boolean ledgerDispatchClosed) { settlementState.ledgerDispatchClosed = ledgerDispatchClosed; }
     int cachedMatcherShard() { return matchingTasks.cachedMatcherShard; }
@@ -199,14 +199,14 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
             case PLACE -> first = decodedCommand.placeOrder().orderId();
             case CANCEL -> first = decodedCommand.cancelOrder().orderId();
             case REPLACE, AMEND -> {
-                OrderCommand.ReplacementAdmission value = admissionState.admission;
+                OrderCommand.ReplaceOrderCheck value = orderCheckState.orderCheck;
                 if (value != null) {
                     first = value.originalOrderId();
                     second = value.command().orderId();
                 }
             }
             case TRIGGER -> {
-                if (admissionState.triggerAdmissionOrder != null) first = admissionState.triggerAdmissionOrder.orderId();
+                if (orderCheckState.triggerOrderCheckOrder != null) first = orderCheckState.triggerOrderCheckOrder.orderId();
             }
             default -> { }
         }
@@ -232,16 +232,16 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     public void transferLaneResponseOwnership() { settlementState.laneResultTarget.transferResponseOwnership(); }
 
     /** 准备槽内固定的准入等待任务，Matcher 先等 Lane 收据再决定拒绝、先撤或调用原下单任务，避免每次分配捕获 lambda。 */
-    java.util.function.Supplier<?> gateAdmission(TradingCoreRuntime owner,
-            OrderCommand.PlaceAdmissionEvent admission, int matcherShard,
+    java.util.function.Supplier<?> gateOrderCheck(TradingCore owner,
+            OrderCommand.PlaceOrderCheckEvent orderCheck, int matcherShard,
             com.surprising.aeron.service.settlement.TradeSettlement settlement,
             java.util.function.Supplier<?> original) {
-        matchingTasks.admissionMatching.prepare(owner, admission, matcherShard, settlement, original);
-        return matchingTasks.admissionMatching;
+        matchingTasks.orderCheckMatching.prepare(owner, orderCheck, matcherShard, settlement, original);
+        return matchingTasks.orderCheckMatching;
     }
 
     /** 准备本槽普通下单任务，只接受一种已准入订单表示并保留结算事件租约。 */
-    java.util.function.Supplier<?> preparePlaceMatching(TradingCoreRuntime owner,
+    java.util.function.Supplier<?> preparePlaceMatching(TradingCore owner,
             int matcherShard, long userId,
             OrderCommand.ResolvedPlaceOrder resolvedOrder,
             TradeSettlement direct) {
@@ -250,21 +250,21 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     /** 准备顺序批量中已冻结的 Order 输入，Matcher 直接消费该项租约，不重建独立撮合 DTO。 */
-    java.util.function.Supplier<?> prepareAdmittedPlaceMatching(TradingCoreRuntime owner,
+    java.util.function.Supplier<?> prepareAdmittedPlaceMatching(TradingCore owner,
             int matcherShard, long userId, Order admittedOrder, TradeSettlement direct) {
         matchingTasks.orderMatching.preparePlace(owner, matcherShard, userId, null, admittedOrder, direct);
         return matchingTasks.orderMatching;
     }
 
     /** 保存撤单身份及直达结算目标到本槽固定任务，不在 Owner 准备阶段撤订单簿。 */
-    java.util.function.Supplier<?> prepareCancelMatching(TradingCoreRuntime owner,
+    java.util.function.Supplier<?> prepareCancelMatching(TradingCore owner,
             int matcherShard, long orderId, long userId, String instrumentId, TradeSettlement direct) {
         matchingTasks.orderMatching.prepareCancel(owner, matcherShard, orderId, userId, instrumentId, direct);
         return matchingTasks.orderMatching;
     }
 
     /** 保存旧单号、替换准入和直达结算目标，执行时先处理共同的前置撤单，再由适配器执行撤旧下新。 */
-    java.util.function.Supplier<?> prepareReplaceMatching(TradingCoreRuntime owner,
+    java.util.function.Supplier<?> prepareReplaceMatching(TradingCore owner,
             int matcherShard, long orderId, long userId,
             long originalOrderId, String instrumentId, OrderCommand.ResolvedPlaceOrder replacement,
             TradeSettlement direct) {
@@ -279,7 +279,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     /** 准备按既定顺序执行控制撤单的固定任务，要求 Owner 和列表非空，返回本槽同一个 Supplier。 */
-    java.util.function.Supplier<?> prepareControlMatching(TradingCoreRuntime owner,
+    java.util.function.Supplier<?> prepareControlMatching(TradingCore owner,
             List<CancellationOrder> orders) {
         matchingTasks.controlMatching.prepare(owner, orders);
         return matchingTasks.controlMatching;
@@ -287,7 +287,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /** 按当前列表顺序执行原生前置撤单，接受时记入直达事件。 */
     exchange.core2.core.common.MatcherResult applyMatcherPreCancellations(
-            TradingCoreRuntime owner, int shard, long logicalOrderId, TradeSettlement target) {
+            TradingCore owner, int shard, long logicalOrderId, TradeSettlement target) {
         for (int index = 0; index < matchingTasks.matcherPreCancellations.size(); index++) {
             var cancellation = matchingTasks.matcherPreCancellations.get(index);
             var result = owner.matchingAdapter().cancelDirectPrefix(command.header().submittedAtEpochMillis(),
@@ -354,7 +354,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 要求正序号、命令类消息和必需输入非空，清旧生命周期后绑定命令、指纹、解码及先撤列表，重置本次提交边界和业务阶段。 */
     OrderCommand initialize(long sequence, Operation operation, CoreMessage command,
                                CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
-                               OrderCommand.Decoded decodedCommand, OrderCommand.ReplacementAdmission admission) {
+                               OrderCommand.Decoded decodedCommand, OrderCommand.ReplaceOrderCheck orderCheck) {
         if (sequence <= 0 || operation == null || command == null || preMatchingCancellationOrderIds == null
                 || fingerprint == null || decodedCommand == null
                 || command.header().kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
@@ -368,18 +368,18 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         this.operation = operation;
         this.command = command;
         this.fingerprint = fingerprint;
-        admissionState.preMatchingCancellationOrderIds = retainCancellationIds(preMatchingCancellationOrderIds);
+        orderCheckState.preMatchingCancellationOrderIds = retainCancellationIds(preMatchingCancellationOrderIds);
         this.decodedCommand = decodedCommand;
-        admissionState.admission = admission;
+        orderCheckState.orderCheck = orderCheck;
         commitControl.commitFenceTimestamp = 0;
         commitControl.commitFenceClusterPosition = 0;
         commitControl.commitFenceEstablished = false;
         settlementState.settlementContinuation = null;
         clearPlaceReferences();
-        admissionState.replacementAdmission = null;
+        orderCheckState.replacementOrderCheck = null;
         settlementState.settlementPlan = null;
-        admissionState.triggerAdmissionOrder = null;
-        admissionState.sourceTrigger = null;
+        orderCheckState.triggerOrderCheckOrder = null;
+        orderCheckState.sourceTrigger = null;
         matchingTasks.matchingLifecycle = MatchingTasks.MATCHING_ADMITTED;
         clearDeferredMatching();
         crossShardCancellationStarted = false;
@@ -393,7 +393,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /** 更新先撤订单号列表并返回同一槽，复用不可变 primitive 列表，其余按规则复制。 */
     OrderCommand withPreMatchingCancellations(List<Long> orderIds) {
-        admissionState.preMatchingCancellationOrderIds = retainCancellationIds(orderIds);
+        orderCheckState.preMatchingCancellationOrderIds = retainCancellationIds(orderIds);
         return this;
     }
 
@@ -407,8 +407,8 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     /** 替换可空的解析准入结果并返回同一槽，不重做准入或读取账户。 */
-    OrderCommand withAdmission(OrderCommand.ReplacementAdmission nextAdmission) {
-        admissionState.admission = nextAdmission;
+    OrderCommand withOrderCheck(OrderCommand.ReplaceOrderCheck nextOrderCheck) {
+        orderCheckState.orderCheck = nextOrderCheck;
         return this;
     }
 
@@ -426,18 +426,18 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 返回保留的 Core 序号，槽已回收后也可能仍保留旧值。 */
     public long sequence() { return coreSequence; }
     /** 返回可空的改撤等已解析准入信息。 */
-    public OrderCommand.ReplacementAdmission matchingAdmission() { return admissionState.admission; }
+    public OrderCommand.ReplaceOrderCheck matchingOrderCheck() { return orderCheckState.orderCheck; }
     /** 返回替换操作绑定的 Lane 准入事件。 */
-    com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent replacementAdmission() { return admissionState.replacementAdmission; }
+    com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent replacementOrderCheck() { return orderCheckState.replacementOrderCheck; }
     /** 只允许 AMEND/REPLACE 首次绑定非空替换准入事件，重复或操作不符拒绝。 */
-    void replacementAdmission(com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent event) {
-        if (event == null || admissionState.replacementAdmission != null || operation != Operation.AMEND && operation != Operation.REPLACE)
+    void replacementOrderCheck(com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent event) {
+        if (event == null || orderCheckState.replacementOrderCheck != null || operation != Operation.AMEND && operation != Operation.REPLACE)
             throw new IllegalStateException("invalid replacement admissionState.admission slot");
-        admissionState.replacementAdmission = event;
+        orderCheckState.replacementOrderCheck = event;
     }
     /** 取走替换准入事件并清该引用，把后续使用责任交给调用方。 */
-    com.surprising.aeron.service.order.OrderCommand.ReplacementAdmissionEvent takeReplacementAdmission() {
-        var value = admissionState.replacementAdmission; admissionState.replacementAdmission = null; return value;
+    com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent takeReplaceOrderCheck() {
+        var value = orderCheckState.replacementOrderCheck; orderCheckState.replacementOrderCheck = null; return value;
     }
     /** 返回此命令保留的可空结算事件。 */
     public com.surprising.aeron.service.settlement.TradeSettlement settlementEvent() {
@@ -452,8 +452,8 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 返回与当前事件配套的结算计划引用。 */
     public com.surprising.aeron.service.settlement.TradeSettlement.Plan settlementPlan() { return settlementState.settlementPlan; }
     /** 返回普通下单的 Lane 准入事件。 */
-    public OrderCommand.PlaceAdmissionEvent placeAdmission() {
-        return admissionState.placeAdmission;
+    public OrderCommand.PlaceOrderCheckEvent placeOrderCheck() {
+        return orderCheckState.placeOrderCheck;
     }
     /** 返回是否仍保留结算事件引用。 */
     public boolean hasLaneContinuation() {
@@ -465,40 +465,40 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         return settlementState.settlementContinuation.complete();
     }
     /** 取出普通下单准入事件并清引用。 */
-    OrderCommand.PlaceAdmissionEvent takePlaceAdmission() {
-        OrderCommand.PlaceAdmissionEvent value = admissionState.placeAdmission;
-        admissionState.placeAdmission = null;
+    OrderCommand.PlaceOrderCheckEvent takePlaceOrderCheck() {
+        OrderCommand.PlaceOrderCheckEvent value = orderCheckState.placeOrderCheck;
+        orderCheckState.placeOrderCheck = null;
         return value;
     }
     /** 只允许 PLACE 首次绑定非空准入事件，其他操作或重复绑定拒绝。 */
-    public void placeAdmission(OrderCommand.PlaceAdmissionEvent event) {
-        if (event == null || admissionState.placeAdmission != null || operation != Operation.PLACE) {
+    public void placeOrderCheck(OrderCommand.PlaceOrderCheckEvent event) {
+        if (event == null || orderCheckState.placeOrderCheck != null || operation != Operation.PLACE) {
             throw new IllegalStateException("invalid place admissionState.admission continuation");
         }
-        admissionState.placeAdmission = event;
+        orderCheckState.placeOrderCheck = event;
     }
     /** 返回 Owner 是否已收集本次下单准入收据。 */
-    boolean placeAdmissionOwnerCollected() { return admissionState.placeAdmissionOwnerCollected; }
+    boolean placeOrderCheckOwnerCollected() { return orderCheckState.placeOrderCheckOwnerCollected; }
     /** 标记下单准入已由 Owner 收集，不在此重新读 Lane。 */
-    void markPlaceAdmissionOwnerCollected() { admissionState.placeAdmissionOwnerCollected = true; }
+    void markPlaceOrderCheckOwnerCollected() { orderCheckState.placeOrderCheckOwnerCollected = true; }
     /** 返回为实时推送保留的准入订单引用。 */
-    public OrderCommand.ResolvedPlaceOrder realtimeResolvedTakerOrder() { return admissionState.realtimeResolvedTakerOrder; }
+    public OrderCommand.ResolvedPlaceOrder realtimeResolvedTakerOrder() { return orderCheckState.realtimeResolvedTakerOrder; }
     /** 保存可空实时准入订单引用，不复制对象。 */
-    public void realtimeResolvedTakerOrder(OrderCommand.ResolvedPlaceOrder order) { admissionState.realtimeResolvedTakerOrder = order; }
+    public void realtimeResolvedTakerOrder(OrderCommand.ResolvedPlaceOrder order) { orderCheckState.realtimeResolvedTakerOrder = order; }
     /** 返回触发续步已经冻结的源触发单收据，避免再回读 Lane 客户端索引。 */
-    public com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger() { return admissionState.sourceTrigger; }
+    public com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger() { return orderCheckState.sourceTrigger; }
     /** 首次绑定非空源触发单收据，重复绑定立即拒绝。 */
     public void sourceTrigger(com.surprising.aeron.model.CoreTriggerOrderState value) {
-        if (value == null || admissionState.sourceTrigger != null) throw new IllegalStateException("trigger receipt already bound");
-        admissionState.sourceTrigger = value;
+        if (value == null || orderCheckState.sourceTrigger != null) throw new IllegalStateException("trigger receipt already bound");
+        orderCheckState.sourceTrigger = value;
     }
     /** 返回触发子单已经完成准入的订单引用。 */
-    public Order triggerAdmissionOrder() { return admissionState.triggerAdmissionOrder; }
+    public Order triggerOrderCheckOrder() { return orderCheckState.triggerOrderCheckOrder; }
     /** 只允许 TRIGGER 且尚无准入收据时保存冻结订单，Matcher 直接消费同一租约。 */
-    void triggerAdmission(Order order) {
-        if (operation != Operation.TRIGGER || order == null || admissionState.triggerAdmissionOrder != null)
+    void triggerOrderCheck(Order order) {
+        if (operation != Operation.TRIGGER || order == null || orderCheckState.triggerOrderCheckOrder != null)
             throw new IllegalStateException("invalid trigger admissionState.admission");
-        admissionState.triggerAdmissionOrder = order;
+        orderCheckState.triggerOrderCheckOrder = order;
 
     }
     /** 按阶段标签判断是否已到提交 Matcher 或更后阶段，不探查实际传输队列。 */
@@ -541,15 +541,15 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         operation = null;
         command = null;
         fingerprint = null;
-        admissionState.preMatchingCancellationOrderIds = List.of();
+        orderCheckState.preMatchingCancellationOrderIds = List.of();
         decodedCommand = null;
-        admissionState.admission = null;
+        orderCheckState.orderCheck = null;
         settlementState.settlementContinuation = null;
         clearPlaceReferences();
-        admissionState.replacementAdmission = null;
+        orderCheckState.replacementOrderCheck = null;
         settlementState.settlementPlan = null;
-        admissionState.triggerAdmissionOrder = null;
-        admissionState.sourceTrigger = null;
+        orderCheckState.triggerOrderCheckOrder = null;
+        orderCheckState.sourceTrigger = null;
         clearLiquidationReferences();
         realtimeTakerOrder = null;
         matchingTasks.matchingLifecycle = MatchingTasks.MATCHING_ADMITTED;
@@ -558,13 +558,13 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     /** 只允许从 ADMITTED 转为 DEFERRED，保存日志时间、位置和非空来源键，等待已有批量边界先完成。 */
-    void deferMatching(long clusterTimestamp, long clusterPosition, TradingCoreRuntime.SourceKey sourceKey) {
+    void deferMatching(long clusterTimestamp, long clusterPosition, TradingCore.SourceKey sourceKey) {
         if (matchingTasks.matchingLifecycle != MatchingTasks.MATCHING_ADMITTED || sourceKey == null) {
             throw new IllegalStateException("invalid deferred matching transition");
         }
-        admissionState.deferredClusterTimestamp = clusterTimestamp;
-        admissionState.deferredClusterPosition = clusterPosition;
-        admissionState.deferredSourceKey = sourceKey;
+        orderCheckState.deferredClusterTimestamp = clusterTimestamp;
+        orderCheckState.deferredClusterPosition = clusterPosition;
+        orderCheckState.deferredSourceKey = sourceKey;
         matchingTasks.matchingLifecycle = MatchingTasks.MATCHING_DEFERRED;
     }
     /** 只允许从 DEFERRED 回到 ADMITTED，同时清延后元数据，再由外层重新提交。 */
@@ -584,17 +584,17 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 要求仍处于延后阶段后返回原 Cluster 时间。 */
     long deferredClusterTimestamp() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return admissionState.deferredClusterTimestamp;
+        return orderCheckState.deferredClusterTimestamp;
     }
     /** 要求仍处于延后阶段后返回原日志位置。 */
     long deferredClusterPosition() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return admissionState.deferredClusterPosition;
+        return orderCheckState.deferredClusterPosition;
     }
     /** 要求延后阶段后返回原来源键。 */
-    TradingCoreRuntime.SourceKey deferredSourceKey() {
+    TradingCore.SourceKey deferredSourceKey() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return admissionState.deferredSourceKey;
+        return orderCheckState.deferredSourceKey;
     }
 
     /** 要求分片非负后保存，不在此检查拓扑上界。 */
@@ -827,7 +827,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         commitControl.commitContextActive = false;
         matchingTasks.matchingRejection = null;
         clearPlaceReferences();
-        admissionState.replacementAdmission = null;
+        orderCheckState.replacementOrderCheck = null;
         matchingTasks.matchingLifecycle = MatchingTasks.MATCHING_ADMITTED;
         clearDeferredMatching();
         matchingTasks.cachedMatcherShard = -1;
@@ -835,7 +835,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     private void clearMatchingControlContinuations() {
-        matchingTasks.admissionMatching.clear();
+        matchingTasks.orderCheckMatching.clear();
         commitControl.settlementControl.clear();
         commitControl.liquidationExecutionControl.clear();
         matchingTasks.orderMatching.clear();
@@ -921,7 +921,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
                 }
             }
             if (validCount == 0) {
-                response = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+                response = TradingCore.EMPTY_RESPONSE_DATA;
                 prepared = true;
                 return;
             }
@@ -947,9 +947,9 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
             }
         }
 
-        private final com.surprising.aeron.service.result.OrderRuntimeSource[] sources = {
-                new com.surprising.aeron.service.result.OrderRuntimeSource(),
-                new com.surprising.aeron.service.result.OrderRuntimeSource()
+        private final com.surprising.aeron.service.result.OrderSource[] sources = {
+                new com.surprising.aeron.service.result.OrderSource(),
+                new com.surprising.aeron.service.result.OrderSource()
         };
 
         /** 返回当前响应存储引用，移交租约后为空。 */
@@ -987,9 +987,9 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     private void clearPlaceReferences() {
-        admissionState.placeAdmission = null;
-        admissionState.placeAdmissionOwnerCollected = false;
-        admissionState.realtimeResolvedTakerOrder = null;
+        orderCheckState.placeOrderCheck = null;
+        orderCheckState.placeOrderCheckOwnerCollected = false;
+        orderCheckState.realtimeResolvedTakerOrder = null;
     }
 
     private void clearLiquidationReferences() {
@@ -998,20 +998,20 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     private void clearDeferredMatching() {
-        admissionState.deferredClusterTimestamp = 0;
-        admissionState.deferredClusterPosition = 0;
-        admissionState.deferredSourceKey = null;
+        orderCheckState.deferredClusterTimestamp = 0;
+        orderCheckState.deferredClusterPosition = 0;
+        orderCheckState.deferredSourceKey = null;
     }
 
 public static final class Direct {
     /** 创建槽时绑定的唯一所属 Owner，跨命令复用。 */
-    private final TradingCoreRuntime owner;
+    private final TradingCore owner;
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
     private CoreMessage command;
     /** 本轮完整命令指纹，供幂等及终态保留核对。 */
     private CommandFingerprint fingerprint;
-    private TradingCoreRuntime.SourceKey sourceKey;
+    private TradingCore.SourceKey sourceKey;
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
     private long commitFenceTimestamp;
@@ -1065,7 +1065,7 @@ public static final class Direct {
     private LiquidationService.ResolutionWork reusableResolutionWork;
     private RiskScanner reusableRiskCoordinator;
 
-    public Direct(TradingCoreRuntime owner) {
+    public Direct(TradingCore owner) {
         this.owner = Objects.requireNonNull(owner);
         accountControlWork = () -> {
             if (!accountControl.getAsBoolean()) return false;
@@ -1076,7 +1076,7 @@ public static final class Direct {
 
     /** 拒绝覆盖仍占用的槽，保存非空命令、指纹及来源，再记下业务时间、日志位置与回滚检查点。 */
     public void initialize(CoreMessage command, CommandFingerprint fingerprint,
-            TradingCoreRuntime.SourceKey sourceKey, long timestamp, long position,
+            TradingCore.SourceKey sourceKey, long timestamp, long position,
             long beforeRevision,
             long checkpoint, long identityCheckpoint) {
         if (active) throw new IllegalStateException("direct command slot is occupied");
@@ -1151,7 +1151,7 @@ public static final class Direct {
     public RiskScanner reusableRiskScanCoordinator(int maxUsers) {
         if (reusableRiskCoordinator == null) {
             reusableRiskCoordinator = new RiskScanner(
-                    maxUsers, owner.positionUserIndex(), owner.runtimeState(), owner.identities());
+                    maxUsers, owner.positionUserIndex(), owner.accountBook(), owner.identities());
         } else {
             reusableRiskCoordinator.resetForCommand(maxUsers);
         }
@@ -1161,35 +1161,35 @@ public static final class Direct {
     /** 准备所属用户的余额调整账户任务，并安装固定轮询函数。 */
     public void deferBalanceAdjustment(long userId, String asset, long deltaUnits) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareBalanceAdjustment(owner.runtimeState(), owner.identities(), userId, asset, deltaUnits);
+        accountControl.prepareBalanceAdjustment(owner.accountBook(), owner.identities(), userId, asset, deltaUnits);
         controlWork = accountControlWork;
     }
 
     /** 准备所属用户的转出账户任务，完成和变化判断沿用账户任务自身回执。 */
     public void deferTransferOut(long userId, TransferFundsCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareTransferOut(owner.runtimeState(), owner.identities(), userId, command);
+        accountControl.prepareTransferOut(owner.accountBook(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
     /** 准备所属用户的划转完成任务，后续轮询成功且有变化时请求发布。 */
     public void deferTransferComplete(long userId, long transferId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareTransferCompletion(owner.runtimeState(), userId, transferId);
+        accountControl.prepareTransferCompletion(owner.accountBook(), userId, transferId);
         controlWork = accountControlWork;
     }
 
     /** 准备杠杆变更账户任务，是否发生变化由账户回执判断。 */
     public void deferLeverageChange(long userId, UpdateLeverageCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareLeverageChange(owner.runtimeState(), owner.identities(), userId, command);
+        accountControl.prepareLeverageChange(owner.accountBook(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
     /** 准备持仓模式变更账户任务，是否发生变化由账户回执判断。 */
     public void deferPositionModeChange(long userId, UpdatePositionModeCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.preparePositionModeChange(owner.runtimeState(), userId, command);
+        accountControl.preparePositionModeChange(owner.accountBook(), userId, command);
         controlWork = accountControlWork;
     }
 
@@ -1197,7 +1197,7 @@ public static final class Direct {
     public void deferPositionMarginAdjustment(long userId,
                                        AdjustPositionMarginCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.preparePositionMarginAdjustment(owner.runtimeState(), owner.identities(), userId, command);
+        accountControl.preparePositionMarginAdjustment(owner.accountBook(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
@@ -1208,8 +1208,8 @@ public static final class Direct {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         triggerControl.prepareMutation(userId, mutation, triggerOrderId, arg1, arg2, arg3,
                 flag, text);
-        owner.runtimeState().dispatchControlLanes(
-                1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
+        owner.accountBook().dispatchControlLanes(
+                1L << owner.accountBook().topology().accountLaneId(userId), triggerControl);
         controlWork = triggerControl;
     }
 
@@ -1220,8 +1220,8 @@ public static final class Direct {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         triggerControl.prepareTriggerUpsert(userId, trigger, symbolId, positionKey,
                 instrumentSettled);
-        owner.runtimeState().dispatchControlLanes(
-                1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
+        owner.accountBook().dispatchControlLanes(
+                1L << owner.accountBook().topology().accountLaneId(userId), triggerControl);
         controlWork = triggerControl;
     }
 
@@ -1232,8 +1232,8 @@ public static final class Direct {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         triggerControl.prepareTriggerUpsert(userId, first, symbolId, positionKey, instrumentSettled);
         triggerControl.secondTrigger = second;
-        owner.runtimeState().dispatchControlLanes(
-                1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
+        owner.accountBook().dispatchControlLanes(
+                1L << owner.accountBook().topology().accountLaneId(userId), triggerControl);
         controlWork = triggerControl;
     }
 
@@ -1242,8 +1242,8 @@ public static final class Direct {
             int symbolId, long clusterTimestamp) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         triggerControl.prepareAlgoUpsert(userId, algo, symbolId, clusterTimestamp);
-        owner.runtimeState().dispatchControlLanes(
-                1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
+        owner.accountBook().dispatchControlLanes(
+                1L << owner.accountBook().topology().accountLaneId(userId), triggerControl);
         controlWork = triggerControl;
     }
 
@@ -1270,11 +1270,11 @@ public static final class Direct {
         }
         if (status != ResponseStatus.APPLIED
                 && (owner.commits.publication.dirty()
-                || owner.runtimeState().revision() != beforeRevision
-                || owner.runtimeState().hasUncommittedCommandChanges())) {
+                || owner.accountBook().revision() != beforeRevision
+                || owner.accountBook().hasUncommittedCommandChanges())) {
             if (controlWork == null) {
                 owner.commits.publication.clearBatchState();
-                controlWork = owner.runtimeState().beginCommandRollback(
+                controlWork = owner.accountBook().beginCommandRollback(
                         checkpoint, Math.incrementExact(owner.appliedCommandCount()));
             }
             if (!controlWork.getAsBoolean()) return null;
@@ -1352,9 +1352,9 @@ public static final class Direct {
         @Override public boolean getAsBoolean() {
             if (triggers == null) {
                 if (risk != null && !risk.poll()) return false;
-                if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
+                if (owner.accountBook().revision() != beforeRevision) owner.requestCommitPublication();
                 int remaining = maxUsers - (risk == null ? 0 : risk.completedWork());
-                var completedScan = owner.runtimeState().riskScan(symbolId);
+                var completedScan = owner.accountBook().riskScan(symbolId);
                 triggers = remaining > 0 && completedScan != null
                         && !completedScan.triggerComplete()
                         ? owner.pendingTriggerScan(instrumentId, remaining) : COMPLETE_CONTROL;
@@ -1433,30 +1433,30 @@ public static final class Direct {
 
         /** 在已选中的账户 Lane 执行触发单变更、单条或互斥对写入、算法单写入。 */
         @Override public Object apply(int ignoredLaneId) {
-            var runtime = owner.runtimeState();
+            var accountBook = owner.accountBook();
             return switch (kind) {
                 case MUTATION -> switch (mutation) {
-                    case CANCEL -> runtime.triggerOrders().cancelTriggerOrder(userId, triggerOrderId);
-                    case CLAIM -> runtime.triggerOrders().claimTriggerOrder(triggerOrderId, arg1, arg2, arg3);
-                    case COMPLETE -> runtime.triggerOrders().completeTriggerOrder(triggerOrderId,
+                    case CANCEL -> accountBook.triggerOrders().cancelTriggerOrder(userId, triggerOrderId);
+                    case CLAIM -> accountBook.triggerOrders().claimTriggerOrder(triggerOrderId, arg1, arg2, arg3);
+                    case COMPLETE -> accountBook.triggerOrders().completeTriggerOrder(triggerOrderId,
                             flag, arg1, text == null ? "" : text, arg2);
-                    case TRAILING -> runtime.triggerOrders().updateTrailingTriggerOrder(triggerOrderId,
+                    case TRAILING -> accountBook.triggerOrders().updateTrailingTriggerOrder(triggerOrderId,
                             arg1, arg2, arg3);
-                    case EXPIRE -> runtime.triggerOrders().expireTriggerOrder(triggerOrderId, arg1);
-                    case RETRY -> runtime.triggerOrders().retryTriggerOrder(triggerOrderId, arg1, arg2);
+                    case EXPIRE -> accountBook.triggerOrders().expireTriggerOrder(triggerOrderId, arg1);
+                    case RETRY -> accountBook.triggerOrders().retryTriggerOrder(triggerOrderId, arg1, arg2);
                 };
                 case TRIGGER_UPSERT -> {
-                    if (secondTrigger == null) runtime.triggerOrders().upsertTriggerOrder(userId, trigger, symbolId,
+                    if (secondTrigger == null) accountBook.triggerOrders().upsertTriggerOrder(userId, trigger, symbolId,
                             positionKey, instrumentSettled);
-                    else runtime.triggerOrders().placeOcoPair(userId, trigger, secondTrigger,
+                    else accountBook.triggerOrders().placeOcoPair(userId, trigger, secondTrigger,
                             symbolId, positionKey, instrumentSettled);
-                    yield secondTrigger == null ? runtime.triggerOrder(trigger.triggerOrderId()).view()
-                            : java.util.List.of(runtime.triggerOrder(trigger.triggerOrderId()).view(),
-                                    runtime.triggerOrder(secondTrigger.triggerOrderId()).view());
+                    yield secondTrigger == null ? accountBook.triggerOrder(trigger.triggerOrderId()).view()
+                            : java.util.List.of(accountBook.triggerOrder(trigger.triggerOrderId()).view(),
+                                    accountBook.triggerOrder(secondTrigger.triggerOrderId()).view());
                 }
                 case ALGO_UPSERT -> {
-                    runtime.upsertAlgoOrder(userId, algo, symbolId, arg1);
-                    yield runtime.algoOrder(algo.algoOrderId());
+                    accountBook.upsertAlgoOrder(userId, algo, symbolId, arg1);
+                    yield accountBook.algoOrder(algo.algoOrderId());
                 }
                 default -> throw new IllegalStateException("unknown trigger continuation");
             };
@@ -1464,9 +1464,9 @@ public static final class Direct {
 
         /** 等账户控制派发完成，读取该用户 Lane 回执。 */
         @Override public boolean getAsBoolean() {
-            if (!owner.runtimeState().pollControlLanes()) return false;
-            Object result = owner.runtimeState().controlLaneResult(
-                    owner.runtimeState().topology().accountLaneId(userId));
+            if (!owner.accountBook().pollControlLanes()) return false;
+            Object result = owner.accountBook().controlLaneResult(
+                    owner.accountBook().topology().accountLaneId(userId));
             if (kind == MUTATION) {
                 if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
             } else if (kind == TRIGGER_UPSERT) {
@@ -1774,7 +1774,7 @@ public static class ResolvedPlaceOrder {
 }
 
 /** 单笔下单与改单准入事件共用的 Lane 结果：完成位为 volatile，Owner 读到完成后才读取拒绝和平仓容量撤单。 */
-abstract static class AdmissionEvent extends ResolvedPlaceOrder {
+abstract static class OrderCheckEvent extends ResolvedPlaceOrder {
     long openInterestSteps;
 
     /** Lane 捕获的业务拒绝、算术或参数异常，完成后由 Owner 或 Matcher 读取。 */
@@ -1806,7 +1806,7 @@ abstract static class AdmissionEvent extends ResolvedPlaceOrder {
         return rejection == null ? closeCapacityCancellations : List.of();
     }
 
-    void clearBaseAdmission() {
+    void clearBaseOrderCheck() {
         clearResolvedOrder();
         openInterestSteps = 0;
         rejection = null;
@@ -1815,7 +1815,7 @@ abstract static class AdmissionEvent extends ResolvedPlaceOrder {
     }
 }
 
-public static final class PlaceAdmissionEvent extends AdmissionEvent implements AccountLaneCommand {
+public static final class PlaceOrderCheckEvent extends OrderCheckEvent implements AccountLaneCommand {
     @Accessors(fluent = true, chain = false)
     @Getter
     private long coreSequence;
@@ -1827,15 +1827,15 @@ public static final class PlaceAdmissionEvent extends AdmissionEvent implements 
     private long userId;
     private UUID commandId;
     /** Owner 固定并借用的不可变账本事实，供 Lane 检查资金费及到期结算冲突。 */
-    private TreasuryRuntime.SettlementStatus settlementStatus;
+    private SystemFunds.SettlementStatus settlementStatus;
     @Accessors(fluent = true, chain = false)
     @Getter
     private int assetId;
     @Accessors(fluent = true, chain = false)
     @Getter
     private int laneId;
-    private TradingAccountRuntime runtime;
-    private RuntimeIdentityRegistry identities;
+    private AccountBook accountBook;
+    private IdIndex identities;
     /** Owner 绑定的本命令价格事实，Lane 据此完成价格决策。 */
     private com.surprising.aeron.service.market.MarkPrice decisionMark;
     private FeePolicyBook decisionPolicies;
@@ -1856,15 +1856,15 @@ public static final class PlaceAdmissionEvent extends AdmissionEvent implements 
     }
 
     /** 校验已绑定路由并固定命令、用户、资产、目标 Lane 和账本事实，重置回执及消费标记，按产品规则决定是否等待 OI。 */
-    public OrderCommand.PlaceAdmissionEvent prepare(long coreSequence, long userId, UUID commandId,
-                                TreasuryRuntime.SettlementStatus settlementStatus,
+    public OrderCommand.PlaceOrderCheckEvent prepare(long coreSequence, long userId, UUID commandId,
+                                SystemFunds.SettlementStatus settlementStatus,
                                 int assetId, int laneId,
-                                TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+                                AccountBook accountBook, IdIndex identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0
                 || intent() == null || commandId == null
                 || symbolId() < 0 || assetId < 0 || settlementStatus == null
-                || laneId < 0 || runtime == null) {
+                || laneId < 0 || accountBook == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
         this.coreSequence = coreSequence;
@@ -1877,7 +1877,7 @@ public static final class PlaceAdmissionEvent extends AdmissionEvent implements 
         this.identities = identities;
         this.assetId = assetId;
         this.laneId = laneId;
-        this.runtime = runtime;
+        this.accountBook = accountBook;
         rejection = null;
         closeCapacityCancellations = List.of();
         completed = false;
@@ -1892,10 +1892,10 @@ public static final class PlaceAdmissionEvent extends AdmissionEvent implements 
         if (!matcherConsumed) {
             throw new IllegalStateException("cannot recycle a place admission before matcher handoff");
         }
-        clearBaseAdmission();
+        clearBaseOrderCheck();
         commandId = null;
         settlementStatus = null;
-        runtime = null;
+        accountBook = null;
         identities = null;
         decisionMark = null;
         decisionPolicies = null;
@@ -1905,25 +1905,25 @@ public static final class PlaceAdmissionEvent extends AdmissionEvent implements 
 
     /** 在目标 Lane 等账本输入就绪后，补决策、准备客户身份、计算预留和前置撤单，再写订单及冻结。可预期拒绝回退客户身份，最后记录分配计数并发布回执。 */
     public void execute(AccountPartition lane) {
-        if (lane.laneId() != runtime.topology().accountLaneId(userId)) {
+        if (lane.laneId() != accountBook.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place admission reached the wrong Account Lane");
         }
         long preparedClientKey = 0;
         try {
-            runtime.enterLaneCommandScope(lane);
+            accountBook.enterLaneCommandScope(lane);
             try {
                 boolean lifecycleSettled = settlementStatus.lifecycleSettled();
                 boolean fundingInProgress = settlementStatus.fundingInProgress();
                 if (!resolvedOrderInitialized())
-                    OrderAdmissionService.resolvePrepared(
+                    OrderCheckService.resolvePrepared(
                             this, decisionMark, decisionPolicies, userId, decisionTimestamp, lifecycleSettled);
-                preparedClientKey = RuntimeIdentityRegistry.clientKeyValue(
+                preparedClientKey = IdIndex.clientKeyValue(
                         identities.prepareClientKeyInLane(lane, userId, clientOrderId()));
                 long positionKey = identities.findPositionKeyValueInLane(
                         lane, userId, instrument(), positionSide());
                 int symbolId = symbolId();
-                long requiredReservation = OrderAdmissionService.requiredReservationPrepared(
-                        runtime, lane, userId, this, openInterestSteps,
+                long requiredReservation = OrderCheckService.requiredReservationPrepared(
+                        accountBook, lane, userId, this, openInterestSteps,
                         preparedClientKey, positionKey,
                         lifecycleSettled, fundingInProgress);
                 Position currentPosition = positionKey == 0 ? null : lane.position(positionKey);
@@ -1936,28 +1936,28 @@ public static final class PlaceAdmissionEvent extends AdmissionEvent implements 
                 }
                 closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId,
                         side(), matchingPriceTicks(), orderId(), orderId(), closeCapacityCancellations);
-                runtime.placeOrderInLane(lane, userId, this, commandId,
+                accountBook.placeOrderInLane(lane, userId, this, commandId,
                         requiredReservation, preparedClientKey, symbolId, assetId, coreSequence, null, timestamp, position);
             } finally {
-                runtime.exitLaneCommandScope(lane);
+                accountBook.exitLaneCommandScope(lane);
             }
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             identities.rollbackClientKeyInLane(lane, userId, clientOrderId(), preparedClientKey);
             rejection = failure;
         }
-        TradingAccountRuntime completionRuntime = runtime;
+        AccountBook completionRuntime = accountBook;
         lane.recordCommandOperation();
         completed = true;
-        completionRuntime.publishPlaceAdmissionReady(laneId, coreSequence);
+        completionRuntime.publishPlaceOrderCheckReady(laneId, coreSequence);
     }
 
     /** 清理从未正式交给账户 Lane 的已准备事件。Lane 已完成时必须走对应交接路径，不能直接丢弃。 */
     public void discard() {
         if (complete()) throw new IllegalStateException("completed place admission must be collected");
-        clearBaseAdmission();
+        clearBaseOrderCheck();
         commandId = null;
         settlementStatus = null;
-        runtime = null;
+        accountBook = null;
         identities = null;
         decisionMark = null;
         decisionPolicies = null;
@@ -1989,8 +1989,8 @@ public static final class PlaceAdmissionEvent extends AdmissionEvent implements 
                 ? CoreResultCode.fromRejectionCode(stateRejected.code())
                 : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
                 : CoreResultCode.INVALID_COMMAND;
-        target.admissionReceipt(orderId(), rejection == null, resultCode.wireCode());
-        if (rejection == null) target.addAdmissionCancellations(closeCapacityCancellations);
+        target.orderCheckReceipt(orderId(), rejection == null, resultCode.wireCode());
+        if (rejection == null) target.addOrderCheckCancellations(closeCapacityCancellations);
         // Owner 可能立即清空池化事件。
         // 消费位可见后 Matcher 只使用已捕获引用，不再读取事件字段。
         // 消费位发布后，Owner 可以回收本事件，不再访问事件字段。
@@ -2023,42 +2023,42 @@ public static final class PlaceAdmissionEvent extends AdmissionEvent implements 
     }
 }
 
-public static final class ReplacementAdmissionEvent extends AdmissionEvent implements AccountLaneCommand {
+public static final class ReplaceOrderCheckEvent extends OrderCheckEvent implements AccountLaneCommand {
     private long sequence, userId, originalOrderId;
     /** Owner 固定的 Matcher 分片，完成通知按此唤醒原撮合续步。 */
     private int matcherShard;
     private AmendOrderCommand amend;
     private ReplaceOrderCommand replace;
     /** Owner 固定的币对决策输入，Lane 读取后写入本事件继承的解析字段。 */
-    private OrderAdmissionService.Context decision;
-    private TradingAccountRuntime runtime;
-    private RuntimeIdentityRegistry identities;
-    private OrderCommand.ReplacementAdmission admission;
+    private OrderCheckService.Context decision;
+    private AccountBook accountBook;
+    private IdIndex identities;
+    private OrderCommand.ReplaceOrderCheck orderCheck;
 
     /** 要求改单和替换意图恰好提供一种，绑定原订单、用户、配置和 Matcher 分片，重置结果并按产品判断是否等待账本 OI。 */
-    public OrderCommand.ReplacementAdmissionEvent prepare(long sequence, long userId, long originalOrderId,
+    public OrderCommand.ReplaceOrderCheckEvent prepare(long sequence, long userId, long originalOrderId,
             AmendOrderCommand amend, ReplaceOrderCommand replace,
-            OrderAdmissionService.Context decision, int matcherShard,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+            OrderCheckService.Context decision, int matcherShard,
+            AccountBook accountBook, IdIndex identities) {
         if (sequence <= 0 || userId <= 0 || originalOrderId <= 0 || (amend == null) == (replace == null)
-                || decision == null || runtime == null || identities == null
-                || matcherShard < 0 || matcherShard >= runtime.topology().matchingEngineCount())
+                || decision == null || accountBook == null || identities == null
+                || matcherShard < 0 || matcherShard >= accountBook.topology().matchingEngineCount())
             throw new IllegalArgumentException("invalid replacement admission");
         this.sequence = sequence; this.userId = userId; this.originalOrderId = originalOrderId;
         this.amend = amend; this.replace = replace; this.decision = decision;
-        this.matcherShard = matcherShard; openInterestSteps = 0; this.runtime = runtime; this.identities = identities;
-        admission = null; rejection = null; completed = false; closeCapacityCancellations = List.of();
+        this.matcherShard = matcherShard; openInterestSteps = 0; this.accountBook = accountBook; this.identities = identities;
+        orderCheck = null; rejection = null; completed = false; closeCapacityCancellations = List.of();
         return this;
     }
 
     /** 在原单所属 Lane 核对原单存在、用户、OPEN 状态及可改单类型，解析新意图并排除原单占用计算预留。 */
     @Override public void execute(AccountPartition lane) {
-        TradingAccountRuntime completionRuntime = runtime;
+        AccountBook completionRuntime = accountBook;
         int completionShard = matcherShard;
         int completionLane = lane.laneId();
-        if (completionLane != runtime.topology().accountLaneId(userId))
+        if (completionLane != accountBook.topology().accountLaneId(userId))
             throw new IllegalStateException("replacement admission crossed Account Lane");
-        runtime.enterLaneCommandScope(lane);
+        accountBook.enterLaneCommandScope(lane);
         try {
             Order original = lane.order(originalOrderId);
             if (original == null) throw rejected("ORDER_NOT_FOUND", "order does not exist");
@@ -2067,17 +2067,17 @@ public static final class ReplacementAdmissionEvent extends AdmissionEvent imple
             if (amend != null && original.orderType() != CoreOrderType.LIMIT)
                 throw rejected("INVALID_COMMAND", "order is not amendable");
             PlaceOrderCommand command = replace == null ? amendCommand(original) : replace.replacement();
-            OrderAdmissionService.resolveInto(this, decision, userId, command);
+            OrderCheckService.resolveInto(this, decision, userId, command);
             long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
-            long required = OrderAdmissionService.requiredReplacementReservationPrepared(
-                    runtime, lane, userId, this, openInterestSteps,
+            long required = OrderCheckService.requiredReplacementReservationPrepared(
+                    accountBook, lane, userId, this, openInterestSteps,
                     original, identities.findClientKeyValueInLane(lane, userId, clientOrderId()), positionKey,
                     decision.lifecycleSettled(), decision.fundingInProgress());
-            if (amend != null && runtime.productLine() == com.surprising.product.api.ProductLine.SPOT) {
+            if (amend != null && accountBook.productLine() == com.surprising.product.api.ProductLine.SPOT) {
                 var reservation = lane.reservation(originalOrderId);
                 if (reservation == null || !reservationAsset().equals(identities.asset(reservation.assetId())))
                     throw new IllegalStateException("spot amend original reservation is missing or mismatched");
-                var balance = runtime.balance(userId, reservation.assetId());
+                var balance = accountBook.balance(userId, reservation.assetId());
                 if (balance == null || required > Math.addExact(balance.availableUnits(), reservation.reservedUnits()))
                     throw rejected("INSUFFICIENT_AVAILABLE_BALANCE", "available balance is insufficient for amended order");
             }
@@ -2092,16 +2092,16 @@ public static final class ReplacementAdmissionEvent extends AdmissionEvent imple
             closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId(),
                     side(), matchingPriceTicks(), originalOrderId, orderId(), closeCapacityCancellations);
             var user = lane.user(userId);
-            admission = new OrderCommand.ReplacementAdmission(userId, originalOrderId, original.revision(),
+            orderCheck = new OrderCommand.ReplaceOrderCheck(userId, originalOrderId, original.revision(),
                     user == null ? 0 : user.revision(), command, this, required);
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             rejection = failure;
-        } finally { runtime.exitLaneCommandScope(lane); }
+        } finally { accountBook.exitLaneCommandScope(lane); }
         // 完成位可见后 Owner 可能推进回收或复用。
         // 通知目标和分片必须提前捕获，发布后不再读取事件字段。
         lane.recordCommandOperation();
         completed = true;
-        completionRuntime.publishAccountAdmissionReadyShard(completionShard);
+        completionRuntime.publishAccountOrderCheckReadyShard(completionShard);
     }
 
     private PlaceOrderCommand amendCommand(Order original) {
@@ -2117,7 +2117,7 @@ public static final class ReplacementAdmissionEvent extends AdmissionEvent imple
     /** 返回本次改单命令的 Core 序号，准入结果和后续撮合沿用此序号。 */
     public long coreSequence() { return sequence; }
     /** 完成后返回新单、原单版本和账户版本组成的准入结果。 */
-    public OrderCommand.ReplacementAdmission admission() { requireComplete(); return admission; }
+    public OrderCommand.ReplaceOrderCheck orderCheck() { requireComplete(); return orderCheck; }
 
     /** 要求 Lane 已完成后清理事件。关联命令仍需先结束对解析输入的使用，不能因看到完成位就提前复用。 */
     @Override public void clear() {
@@ -2127,9 +2127,9 @@ public static final class ReplacementAdmissionEvent extends AdmissionEvent imple
 
     /** 清理意图、决策和结果引用并重置标记，供未投递清理或终态回收使用。 */
     public void discard() {
-        clearBaseAdmission();
-        amend = null; replace = null; decision = null; runtime = null; identities = null;
-        admission = null;
+        clearBaseOrderCheck();
+        amend = null; replace = null; decision = null; accountBook = null; identities = null;
+        orderCheck = null;
     }
 
     private void requireComplete() {
@@ -2140,12 +2140,12 @@ public static final class ReplacementAdmissionEvent extends AdmissionEvent imple
     }
 }
 
-public record ReplacementAdmission(long userId, long originalOrderId, long originalOrderRevision,
+public record ReplaceOrderCheck(long userId, long originalOrderId, long originalOrderRevision,
                                  long userRevision, PlaceOrderCommand command,
                                  OrderCommand.ResolvedPlaceOrder resolved,
                                  long requiredReservationUnits) {
 
-    public ReplacementAdmission {
+    public ReplaceOrderCheck {
         if (userId <= 0 || originalOrderId <= 0 || originalOrderRevision < 0 || userRevision < 0
                 || command == null || resolved == null
                 || requiredReservationUnits < 0 || command.orderId() != resolved.orderId()) {
@@ -2188,7 +2188,7 @@ public interface ResultTarget {
 
     /** 先处理本次变更命中的结果槽，按目标策略选 Lane 当前订单或变化缓冲终态后值，新编号缺失时再取原单。 */
     static void capture(OrderCommand.ResultTarget target, AccountPartitionCommit.Delta changes,
-                        RuntimeIdentityRegistry identities, AccountPartition lane) {
+                        IdIndex identities, AccountPartition lane) {
         for (int i = 0; i < target.resultCount(); i++) {
             long id = target.resultOrderId(i);
             long original = target.resultOriginalOrderId(i);
@@ -2209,7 +2209,7 @@ public interface ResultTarget {
 
     /** 仅补读尚未准备的结果槽，从所属 Lane 查询新编号或原单，不查询全局发布表。 */
     static void captureUnchanged(OrderCommand.ResultTarget target,
-                                 RuntimeIdentityRegistry identities, AccountPartition lane) {
+                                 IdIndex identities, AccountPartition lane) {
         for (int index = 0; index < target.resultCount(); index++) {
             if (target.resultPrepared(index)) continue;
             Order order = lane.order(target.resultOrderId(index));
@@ -2223,7 +2223,7 @@ public interface ResultTarget {
 
     /** 顺序批次结束后重新读取全部结果槽的 Lane 最终状态，纳入后续项对前面订单的影响，再准备整批响应。 */
     static void captureFinal(OrderCommand.ResultTarget target,
-                             RuntimeIdentityRegistry identities, AccountPartition lane) {
+                             IdIndex identities, AccountPartition lane) {
         for (int index = 0; index < target.resultCount(); index++) {
             Order order = lane.order(target.resultOrderId(index));
             long original = target.resultOriginalOrderId(index);

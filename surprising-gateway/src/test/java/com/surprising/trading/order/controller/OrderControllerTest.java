@@ -173,7 +173,7 @@ class OrderControllerTest {
 
     @ParameterizedTest
     @ValueSource(strings = { "ADMIN_ACTION", "CLOSED", "MAX_POSITION_EXCEEDED", "UNKNOWN" })
-    void mapsEveryRawAdmissionFailureTo503(String code) {
+    void mapsEveryRawOrderCheckFailureTo503(String code) {
         OrderService orderService = mock(OrderService.class);
         when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("NOT_ACCEPTED", code));
         OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
@@ -199,7 +199,7 @@ class OrderControllerTest {
     }
 
     @Test
-    void mapsMatchingPendingAdmissionAndQueryToAcceptedWithOriginalCommandIdentity() {
+    void mapsMatchingPendingOrderCheckAndQueryToAcceptedWithOriginalCommandIdentity() {
         OrderService orderService = mock(OrderService.class);
         OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-pending", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);

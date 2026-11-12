@@ -11,9 +11,9 @@ import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.command.DirectCommandDispatcher;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.position.Position;
@@ -41,7 +41,7 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
 
     private byte kind;
     /** 本续步关联的交易运行时，Owner 与账户分片通过既有控制派发交接。 */
-    private TradingAccountRuntime runtime;
+    private AccountBook accountBook;
     private long userId;
     private long nextRevision;
     /** 本续步是否已由 Owner 收集并完成，或划转完成路径无需派发。 */
@@ -71,102 +71,102 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
     private long positionKey;
     private AdjustPositionMarginCommand positionMarginCommand;
 
-    public AccountCommandService prepareBalanceAdjustment(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    public AccountCommandService prepareBalanceAdjustment(AccountBook accountBook, IdIndex identities,
                                                           long userId, String asset, long deltaUnits) {
-        if (runtime == null || identities == null || asset == null || asset.isBlank() || userId <= 0)
+        if (accountBook == null || identities == null || asset == null || asset.isBlank() || userId <= 0)
             throw new IllegalArgumentException("invalid account balance adjustment");
-        runtime.assertOwner();
+        accountBook.assertOwner();
         clear();
         this.kind = KIND_BALANCE;
-        this.runtime = runtime;
+        this.accountBook = accountBook;
         this.userId = userId;
         this.assetId = identities.assetId(AssetBalance.normalizeAsset(asset));
         this.deltaUnits = deltaUnits;
-        this.nextRevision = Math.incrementExact(runtime.revision());
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+        this.nextRevision = Math.incrementExact(accountBook.revision());
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), this);
         return this;
     }
 
-    public AccountCommandService prepareTransferOut(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    public AccountCommandService prepareTransferOut(AccountBook accountBook, IdIndex identities,
                                                     long userId, TransferFundsCommand command) {
-        if (runtime == null || identities == null || command == null || userId <= 0)
+        if (accountBook == null || identities == null || command == null || userId <= 0)
             throw new IllegalArgumentException("transfer inputs are required");
-        runtime.assertOwner();
-        validateTransferSource(runtime, userId, command);
-        long routedUser = runtime.pendingTransferUser(command.transferId());
+        accountBook.assertOwner();
+        validateTransferSource(accountBook, userId, command);
+        long routedUser = accountBook.pendingTransferUser(command.transferId());
         if (routedUser != 0 && routedUser != userId)
             throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
-        if (routedUser == 0 && !runtime.hasPendingTransferCapacity())
+        if (routedUser == 0 && !accountBook.hasPendingTransferCapacity())
             throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
         clear();
         this.kind = KIND_TRANSFER_OUT;
-        this.runtime = runtime;
+        this.accountBook = accountBook;
         this.userId = userId;
         this.transferCommand = command;
         this.assetId = identities.assetId(command.asset());
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), this);
         return this;
     }
 
-    public AccountCommandService prepareTransferCompletion(TradingAccountRuntime runtime, long userId, long transferId) {
-        if (runtime == null || userId <= 0 || transferId <= 0)
+    public AccountCommandService prepareTransferCompletion(AccountBook accountBook, long userId, long transferId) {
+        if (accountBook == null || userId <= 0 || transferId <= 0)
             throw new IllegalArgumentException("invalid transfer completion");
-        runtime.assertOwner();
-        long routed = runtime.pendingTransferUser(transferId);
+        accountBook.assertOwner();
+        long routed = accountBook.pendingTransferUser(transferId);
         if (routed != 0 && routed != userId)
             throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
         clear();
         this.kind = KIND_TRANSFER_COMPLETE;
-        this.runtime = runtime;
+        this.accountBook = accountBook;
         this.userId = userId;
         this.transferId = transferId;
         this.completed = routed == 0;
-        if (!this.completed) runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+        if (!this.completed) accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), this);
         return this;
     }
 
-    public AccountCommandService prepareLeverageChange(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    public AccountCommandService prepareLeverageChange(AccountBook accountBook, IdIndex identities,
                                                        long userId, UpdateLeverageCommand command) {
         clear();
         this.kind = KIND_LEVERAGE;
-        this.runtime = Objects.requireNonNull(runtime);
-        this.leverageKey = leverageKey(runtime, identities, userId, command);
+        this.accountBook = Objects.requireNonNull(accountBook);
+        this.leverageKey = leverageKey(accountBook, identities, userId, command);
         this.leverageCommand = command;
         this.symbolId = identities.symbolId(leverageKey.instrumentId());
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), this);
         return this;
     }
 
-    public AccountCommandService preparePositionModeChange(TradingAccountRuntime runtime, long userId,
+    public AccountCommandService preparePositionModeChange(AccountBook accountBook, long userId,
                                                            UpdatePositionModeCommand command) {
-        if (runtime == null || userId <= 0 || command == null)
+        if (accountBook == null || userId <= 0 || command == null)
             throw new IllegalArgumentException("invalid account position mode change");
-        runtime.assertOwner();
+        accountBook.assertOwner();
         clear();
         this.kind = KIND_POSITION_MODE;
-        this.runtime = runtime;
+        this.accountBook = accountBook;
         this.userId = userId;
         this.positionModeCommand = command;
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), this);
         return this;
     }
 
-    public AccountCommandService preparePositionMarginAdjustment(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    public AccountCommandService preparePositionMarginAdjustment(AccountBook accountBook, IdIndex identities,
                                                                  long userId, AdjustPositionMarginCommand command) {
         clear();
         this.kind = KIND_POSITION_MARGIN;
-        this.runtime = Objects.requireNonNull(runtime);
-        this.positionKey = positionMarginKey(runtime, identities, userId, command);
+        this.accountBook = Objects.requireNonNull(accountBook);
+        this.positionKey = positionMarginKey(accountBook, identities, userId, command);
         this.userId = userId;
         this.positionMarginCommand = command;
-        this.nextRevision = Math.incrementExact(runtime.revision());
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+        this.nextRevision = Math.incrementExact(accountBook.revision());
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), this);
         return this;
     }
 
     public void clear() {
         kind = 0;
-        runtime = null;
+        accountBook = null;
         userId = 0;
         nextRevision = 0;
         completed = false;
@@ -188,36 +188,36 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
     @Override public Object apply(int laneId) {
         return switch (kind) {
             case KIND_BALANCE -> {
-                adjustAccountBalance(runtime, userId, assetId, deltaUnits);
+                adjustAccountBalance(accountBook, userId, assetId, deltaUnits);
                 yield null;
             }
             case KIND_TRANSFER_OUT -> {
-                TransferFundsCommand transfer = prepareTransferOut(runtime, userId, transferCommand);
+                TransferFundsCommand transfer = prepareTransferOut(accountBook, userId, transferCommand);
                 if (transfer != null) {
-                    runtime.requireRevisionCapacity();
-                    debitTransferAccount(runtime, userId, assetId, transferCommand.amountUnits());
-                    runtime.putPendingTransfer(transfer);
-                    runtime.incrementCommandRevision();
+                    accountBook.requireRevisionCapacity();
+                    debitTransferAccount(accountBook, userId, assetId, transferCommand.amountUnits());
+                    accountBook.putPendingTransfer(transfer);
+                    accountBook.incrementCommandRevision();
                     changedOnLane = true;
                 }
                 yield null;
             }
             case KIND_TRANSFER_COMPLETE -> {
-                transferRemoved = completeTransfer(runtime, userId, transferId);
+                transferRemoved = completeTransfer(accountBook, userId, transferId);
                 yield null;
             }
             case KIND_LEVERAGE -> {
                 changedOnLane = updateAccountLeverage(
-                        runtime, runtime.accountLane(laneId), leverageKey, symbolId,
+                        accountBook, accountBook.accountLane(laneId), leverageKey, symbolId,
                         leverageCommand.leveragePpm(), leverageCommand.repriceCrossMargin());
                 yield null;
             }
             case KIND_POSITION_MODE -> {
-                changedOnLane = updateAccountPositionMode(runtime, userId, positionModeCommand);
+                changedOnLane = updateAccountPositionMode(accountBook, userId, positionModeCommand);
                 yield null;
             }
             case KIND_POSITION_MARGIN -> {
-                assetId = adjustAccountPositionMargin(runtime, userId, positionKey, positionMarginCommand);
+                assetId = adjustAccountPositionMargin(accountBook, userId, positionKey, positionMarginCommand);
                 yield null;
             }
             default -> throw new IllegalStateException("unknown account control task kind: " + kind);
@@ -225,43 +225,43 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
     }
 
     @Override public boolean getAsBoolean() {
-        runtime.assertOwner();
+        accountBook.assertOwner();
         if (completed) return true;
-        if (!runtime.pollControlLanes()) return false;
+        if (!accountBook.pollControlLanes()) return false;
         switch (kind) {
             case KIND_BALANCE -> {
-                runtime.markBalanceChanged(userId);
-                runtime.setMetadata(runtime.productLine(), nextRevision);
+                accountBook.markBalanceChanged(userId);
+                accountBook.setMetadata(accountBook.productLine(), nextRevision);
                 stateChanged = true;
             }
             case KIND_TRANSFER_OUT -> {
-                if (changedOnLane && runtime.accountLanesStarted())
-                    runtime.registerPendingTransferRoute(transferCommand.transferId(), userId);
+                if (changedOnLane && accountBook.accountLanesStarted())
+                    accountBook.registerPendingTransferRoute(transferCommand.transferId(), userId);
                 transferCommand = null;
                 stateChanged = true;
             }
             case KIND_TRANSFER_COMPLETE -> {
                 if (!transferRemoved) throw new IllegalStateException("pending transfer route has no Lane identity");
-                if (runtime.accountLanesStarted()) runtime.completePendingTransferRoute(transferId, userId);
+                if (accountBook.accountLanesStarted()) accountBook.completePendingTransferRoute(transferId, userId);
                 stateChanged = true;
             }
             case KIND_LEVERAGE -> {
                 if (changedOnLane) {
-                    runtime.recordLeverageChange(leverageKey, leverageCommand.leveragePpm());
-                    runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                    accountBook.recordLeverageChange(leverageKey, leverageCommand.leveragePpm());
+                    accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
                     stateChanged = true;
                 }
             }
             case KIND_POSITION_MODE -> {
                 if (changedOnLane) {
-                    runtime.markUserChanged(userId);
-                    runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                    accountBook.markUserChanged(userId);
+                    accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
                     stateChanged = true;
                 }
             }
             case KIND_POSITION_MARGIN -> {
-                runtime.recordUserSettlementChanges(userId, assetId, positionKey);
-                runtime.setMetadata(runtime.productLine(), nextRevision);
+                accountBook.recordUserSettlementChanges(userId, assetId, positionKey);
+                accountBook.setMetadata(accountBook.productLine(), nextRevision);
                 stateChanged = true;
             }
             default -> throw new IllegalStateException("unknown account control task kind: " + kind);
@@ -270,94 +270,94 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
         return true;
     }
 
-    private static void adjustAccountBalance(TradingAccountRuntime runtime, long userId, int assetId, long deltaUnits) {
-        AccountBalance current = runtime.balance(userId, assetId);
+    private static void adjustAccountBalance(AccountBook accountBook, long userId, int assetId, long deltaUnits) {
+        AccountBalance current = accountBook.balance(userId, assetId);
         long currentAvailable = current == null ? 0 : current.availableUnits();
         long nextAvailable = Math.addExact(currentAvailable, deltaUnits);
         if (nextAvailable < 0) throw new IllegalArgumentException("available balance cannot be negative");
-        UserAccount user = runtime.user(userId);
+        UserAccount user = accountBook.user(userId);
         long userRevision = user == null ? 1 : Math.incrementExact(user.revision());
         var mode = user == null ? com.surprising.aeron.protocol.CorePositionMode.ONE_WAY : user.positionMode();
         AccountBalance initialBalance = current == null ? new AccountBalance(userId, assetId, nextAvailable, 0) : null;
-        runtime.setUserState(userId, userRevision, mode);
-        if (initialBalance != null) runtime.putBalance(initialBalance);
-        else runtime.replaceBalance(userId, assetId, nextAvailable, current.lockedUnits());
+        accountBook.setUserState(userId, userRevision, mode);
+        if (initialBalance != null) accountBook.putBalance(initialBalance);
+        else accountBook.replaceBalance(userId, assetId, nextAvailable, current.lockedUnits());
     }
 
-    private static TransferFundsCommand prepareTransferOut(TradingAccountRuntime runtime, long userId,
+    private static TransferFundsCommand prepareTransferOut(AccountBook accountBook, long userId,
                                                            TransferFundsCommand command) {
-        validateTransferSource(runtime, userId, command);
-        TransferFundsCommand existing = runtime.pendingTransfer(command.transferId());
+        validateTransferSource(accountBook, userId, command);
+        TransferFundsCommand existing = accountBook.pendingTransfer(command.transferId());
         if (existing != null) {
             if (!existing.equals(command))
                 throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer identity contains different data");
             return null;
         }
-        if (!runtime.accountLanesStarted() && !runtime.hasPendingTransferCapacity())
+        if (!accountBook.accountLanesStarted() && !accountBook.hasPendingTransferCapacity())
             throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
         return command;
     }
 
-    private static void validateTransferSource(TradingAccountRuntime runtime, long userId, TransferFundsCommand command) {
-        if (runtime == null || command == null || userId <= 0)
+    private static void validateTransferSource(AccountBook accountBook, long userId, TransferFundsCommand command) {
+        if (accountBook == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid runtime transfer out");
-        runtime.assertOwner();
+        accountBook.assertOwner();
         if (userId != command.sourceUserId()) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer sender mismatch");
-        if (runtime.productLine() != command.sourceProductLine())
+        if (accountBook.productLine() != command.sourceProductLine())
             throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer source product line mismatch");
     }
 
-    private static void debitTransferAccount(TradingAccountRuntime runtime, long userId, int assetId, long amountUnits) {
-        AccountBalance balance = runtime.balance(userId, assetId);
+    private static void debitTransferAccount(AccountBook accountBook, long userId, int assetId, long amountUnits) {
+        AccountBalance balance = accountBook.balance(userId, assetId);
         if (balance == null || balance.availableUnits() < amountUnits)
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "transfer available balance is insufficient");
-        UserAccount user = runtime.requireUser(userId);
+        UserAccount user = accountBook.requireUser(userId);
         long userRevision = Math.incrementExact(user.revision());
         long nextAvailable = Math.subtractExact(balance.availableUnits(), amountUnits);
-        runtime.setUserState(userId, userRevision, user.positionMode());
-        runtime.replaceBalance(userId, assetId, nextAvailable, balance.lockedUnits());
+        accountBook.setUserState(userId, userRevision, user.positionMode());
+        accountBook.replaceBalance(userId, assetId, nextAvailable, balance.lockedUnits());
     }
 
-    public static boolean completeTransfer(TradingAccountRuntime runtime, long userId, long transferId) {
-        if (runtime == null || userId <= 0 || transferId <= 0) {
+    public static boolean completeTransfer(AccountBook accountBook, long userId, long transferId) {
+        if (accountBook == null || userId <= 0 || transferId <= 0) {
             throw new IllegalArgumentException("invalid runtime transfer completion");
         }
-        runtime.assertOwner();
-        if (!runtime.removePendingTransfer(transferId, userId)) return false;
-        runtime.incrementCommandRevision();
+        accountBook.assertOwner();
+        if (!accountBook.removePendingTransfer(transferId, userId)) return false;
+        accountBook.incrementCommandRevision();
         return true;
     }
 
-    public static boolean updateAccountPositionMode(TradingAccountRuntime runtime, long userId,
+    public static boolean updateAccountPositionMode(AccountBook accountBook, long userId,
                                                     UpdatePositionModeCommand command) {
-        if (!runtime.productLine().isDerivative())
+        if (!accountBook.productLine().isDerivative())
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "position mode requires derivative product line");
-        UserAccount current = runtime.user(userId);
+        UserAccount current = accountBook.user(userId);
         var currentMode = current == null ? com.surprising.aeron.protocol.CorePositionMode.ONE_WAY : current.positionMode();
         if (currentMode == command.positionMode()) return false;
-        if (runtime.hasOpenAccountExposure(userId))
+        if (accountBook.hasOpenAccountExposure(userId))
             throw new CoreStateRejectedException("POSITION_MODE_SWITCH_BLOCKED", "open positions or orders block position mode update");
-        Math.incrementExact(runtime.revision());
-        runtime.setUserState(userId, current == null ? 1 : Math.incrementExact(current.revision()),
+        Math.incrementExact(accountBook.revision());
+        accountBook.setUserState(userId, current == null ? 1 : Math.incrementExact(current.revision()),
                 command.positionMode());
         return true;
     }
 
-    static CoreLeverageKey leverageKey(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    static CoreLeverageKey leverageKey(AccountBook accountBook, IdIndex identities,
                                        long userId, UpdateLeverageCommand command) {
-        runtime.assertOwner();
+        accountBook.assertOwner();
         if (userId <= 0 || command == null || identities == null)
             throw new IllegalArgumentException("invalid runtime leverage update");
-        if (!runtime.productLine().isDerivative())
+        if (!accountBook.productLine().isDerivative())
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "leverage requires derivative product line");
-        CoreInstrument instrument = runtime.instrument(command.instrumentId());
+        CoreInstrument instrument = accountBook.instrument(command.instrumentId());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
         if (instrument.contractType().isOption())
             throw new CoreStateRejectedException("OPTION_LEVERAGE_UNSUPPORTED", "non-portfolio option margin is not leverage based");
         if (command.repriceCrossMargin()) {
             int symbolId = identities.symbolId(instrument.instrumentIdValue());
-            if (runtime.treasury().fundingProgress(symbolId) != null
-                    || runtime.treasury().lifecycleSettlement(symbolId) != 0)
+            if (accountBook.systemFunds().fundingProgress(symbolId) != null
+                    || accountBook.systemFunds().lifecycleSettlement(symbolId) != 0)
                 throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "position settlement blocks margin repricing");
             if (command.leveragePpm() > instrument.maxLeveragePpm())
                 throw new CoreStateRejectedException("LEVERAGE_EXCEEDS_INSTRUMENT_LIMIT", "leverage exceeds instrument maximum");
@@ -369,24 +369,24 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
         return new CoreLeverageKey(userId, instrument.instrumentId(), command.marginMode());
     }
 
-    static boolean updateAccountLeverage(TradingAccountRuntime runtime, AccountPartition lane, CoreLeverageKey key,
+    static boolean updateAccountLeverage(AccountBook accountBook, AccountPartition lane, CoreLeverageKey key,
                                          int symbolId, long leveragePpm, boolean repriceCrossMargin) {
-        if (repriceCrossMargin) return lowerCrossLeverage(runtime, key, symbolId, leveragePpm, lane);
-        Long current = runtime.leverage(key);
+        if (repriceCrossMargin) return lowerCrossLeverage(accountBook, key, symbolId, leveragePpm, lane);
+        Long current = accountBook.leverage(key);
         if (current != null && current.longValue() == leveragePpm) return false;
-        if (runtime.hasOpenLeverageExposure(key, symbolId))
+        if (accountBook.hasOpenLeverageExposure(key, symbolId))
             throw new CoreStateRejectedException("LEVERAGE_UPDATE_BLOCKED", "open orders or positions exist");
-        Math.incrementExact(runtime.revision());
-        runtime.putLeverage(key, leveragePpm);
+        Math.incrementExact(accountBook.revision());
+        accountBook.putLeverage(key, leveragePpm);
         return true;
     }
 
-    private static boolean lowerCrossLeverage(TradingAccountRuntime runtime, CoreLeverageKey key,
+    private static boolean lowerCrossLeverage(AccountBook accountBook, CoreLeverageKey key,
             int symbolId, long leveragePpm, AccountPartition lane) {
         if (key.marginMode() != com.surprising.aeron.protocol.CoreMarginMode.CROSS)
             throw new CoreStateRejectedException("LEVERAGE_REPRICE_REQUIRES_CROSS", "cross margin is required");
-        CoreInstrument instrument = runtime.instrument(key.instrumentId());
-        Long configured = runtime.leverage(key);
+        CoreInstrument instrument = accountBook.instrument(key.instrumentId());
+        Long configured = accountBook.leverage(key);
         long previous = configured == null ? instrument.maxLeveragePpm() : configured;
         if (configured != null && previous == leveragePpm) return false;
         if (leveragePpm > previous)
@@ -401,19 +401,19 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
                     throw new CoreStateRejectedException("LEVERAGE_UPDATE_BLOCKED", "cancel open orders before repricing margin");
             }
         }
-        Math.incrementExact(runtime.revision());
+        Math.incrementExact(accountBook.revision());
         var updatedKeys = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
         var positions = new java.util.ArrayList<Position>();
         long additional = 0;
         int assetId = -1;
-        var positionKeys = runtime.positionKeysForUserAndSymbolPrimitive(key.userId(), symbolId);
+        var positionKeys = accountBook.positionKeysForUserAndSymbolPrimitive(key.userId(), symbolId);
         for (int i = 0; i < positionKeys.size(); i++) {
             long positionKey = positionKeys.get(i);
             Position position = lane.positions.get(positionKey);
             if (position == null || position.marginMode() != key.marginMode() || position.signedQuantitySteps() == 0) continue;
-            if (runtime.activeLiquidation(key.userId(), symbolId, position.positionSide()) != null)
+            if (accountBook.activeLiquidation(key.userId(), symbolId, position.positionSide()) != null)
                 throw new CoreStateRejectedException("LEVERAGE_UPDATE_BLOCKED", "liquidation is in progress");
-            var mark = runtime.markPrice(symbolId);
+            var mark = accountBook.markPrice(symbolId);
             if (mark == null || mark.markPriceTicks() <= 0)
                 throw new CoreStateRejectedException("MARK_PRICE_UNAVAILABLE", "position margin requires a mark price");
             long quantity = Math.absExact(position.signedQuantitySteps());
@@ -437,43 +437,43 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
                     position.realizedPnlUnits(), margin));
         }
         if (!positions.isEmpty()) {
-            AccountBalance balance = runtime.balance(key.userId(), assetId);
+            AccountBalance balance = accountBook.balance(key.userId(), assetId);
             if (balance == null || balance.availableUnits() < additional)
                 throw new CoreStateRejectedException("INSUFFICIENT_BALANCE", "insufficient available funds for lower leverage");
             long nextAvailable = Math.subtractExact(balance.availableUnits(), additional);
             long nextLocked = Math.addExact(balance.lockedUnits(), additional);
-            UserAccount user = runtime.requireUser(key.userId());
+            UserAccount user = accountBook.requireUser(key.userId());
             long userRevision = Math.incrementExact(user.revision());
-            runtime.replaceBalance(key.userId(), assetId, nextAvailable, nextLocked);
+            accountBook.replaceBalance(key.userId(), assetId, nextAvailable, nextLocked);
             for (int index = 0; index < positions.size(); index++) {
-                runtime.replacePosition(updatedKeys.get(index), positions.get(index));
+                accountBook.replacePosition(updatedKeys.get(index), positions.get(index));
             }
-            runtime.setUserState(user.userId(), userRevision, user.positionMode());
+            accountBook.setUserState(user.userId(), userRevision, user.positionMode());
         }
-        runtime.putLeverage(key, leveragePpm);
+        accountBook.putLeverage(key, leveragePpm);
         return true;
     }
 
-    static long positionMarginKey(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    static long positionMarginKey(AccountBook accountBook, IdIndex identities,
                                   long userId, AdjustPositionMarginCommand command) {
-        if (runtime == null || identities == null || command == null || userId <= 0)
+        if (accountBook == null || identities == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid runtime position margin adjustment");
-        runtime.assertOwner();
+        accountBook.assertOwner();
         if (command.amountUnits() == 0)
             throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID", "only isolated position margin can be adjusted");
         String instrumentId = InstrumentId.requireValid(command.instrumentId());
-        CoreInstrument instrument = runtime.instrument(instrumentId);
+        CoreInstrument instrument = accountBook.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
         return identities.positionKey(userId, instrument, command.positionSide());
     }
 
-    static int adjustAccountPositionMargin(TradingAccountRuntime runtime, long userId, long positionKey,
+    static int adjustAccountPositionMargin(AccountBook accountBook, long userId, long positionKey,
                                            AdjustPositionMarginCommand command) {
-        Position position = runtime.position(positionKey);
+        Position position = accountBook.position(positionKey);
         if (position == null || position.signedQuantitySteps() == 0
                 || position.marginMode() != com.surprising.aeron.protocol.CoreMarginMode.ISOLATED || position.positionSide() != command.positionSide())
             throw new CoreStateRejectedException("POSITION_NOT_FOUND", "isolated position does not exist");
-        AccountBalance balance = runtime.balance(userId, position.assetId());
+        AccountBalance balance = accountBook.balance(userId, position.assetId());
         if (balance == null) throw new IllegalStateException("position margin balance is missing");
         long units = Math.absExact(command.amountUnits());
         long nextMargin;
@@ -495,11 +495,11 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
         Position nextPosition = new Position(position.userId(), position.symbolId(), position.assetId(),
                 position.marginMode(), position.positionSide(), position.instrument(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin);
-        UserAccount user = runtime.requireUser(userId);
+        UserAccount user = accountBook.requireUser(userId);
         long userRevision = Math.incrementExact(user.revision());
-        runtime.replaceBalance(userId, position.assetId(), nextAvailable, nextLocked);
-        runtime.replacePosition(positionKey, nextPosition);
-        runtime.setUserState(userId, userRevision, user.positionMode());
+        accountBook.replaceBalance(userId, position.assetId(), nextAvailable, nextLocked);
+        accountBook.replacePosition(positionKey, nextPosition);
+        accountBook.setUserState(userId, userRevision, user.positionMode());
         return position.assetId();
     }
 
@@ -509,7 +509,7 @@ public final class AccountCommandService implements IntFunction<Object>, Boolean
         private static final int CACHE_LINE_LONGS = 16;
         /** long 数组元素的 VarHandle，完成发布用 release、Owner 观察用 acquire。 */
         private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
-        private final TradingAccountRuntime owner;
+        private final AccountBook owner;
         private LaneControlTask[] tasks;
         private long[] completedLanes;
         /** 当前控制派发必须完成的分片位集合。 */

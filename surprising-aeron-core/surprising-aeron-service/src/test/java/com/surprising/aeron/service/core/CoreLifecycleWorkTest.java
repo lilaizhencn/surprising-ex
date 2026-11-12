@@ -43,8 +43,8 @@ class CoreLifecycleWorkTest {
     @Test
     void resumesAllWorkKindsFromSnapshotWithinBounds() {
         // 先构造含待办的运行时，再赋为快照恢复后的查询实例。
-        TradingCoreRuntime restored = stateWithLifecycleWork();
-        restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, restored.snapshot());
+        TradingCore restored = stateWithLifecycleWork();
+        restored = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, restored.snapshot());
 
         // 恢复后资金费进度查询响应。
         var funding = restored.apply(query(CoreMessageType.FUNDING_PROGRESS_QUERY,
@@ -66,7 +66,7 @@ class CoreLifecycleWorkTest {
     @Test
     void rejectsCrossLineWorkQueryBeforeSelection() {
         // 预先装入 U 本位待办的被查询运行时。
-        TradingCoreRuntime state = stateWithLifecycleWork();
+        TradingCore state = stateWithLifecycleWork();
         // 明确声明币本位永续的跨线查询参数。
         byte[] payload = CoreLiquidationWorkCodec.encodeQuery(ProductLine.INVERSE_PERPETUAL,
                 CoreLiquidationWorkView.Purpose.INSURANCE, 0, 1, 1_024);
@@ -84,7 +84,7 @@ class CoreLifecycleWorkTest {
      * @param purpose 本次查询的执行、保险或 ADL 用途
      * @param expectedLiquidationId 该用途首条返回记录应有的强平编号
      */
-    private static void assertBoundedExactlyOnce(TradingCoreRuntime state,
+    private static void assertBoundedExactlyOnce(TradingCore state,
                                                   CoreLiquidationWorkView.Purpose purpose,
                                                   long expectedLiquidationId) {
         // 当前用途最多一条待办的首个查询响应。
@@ -116,7 +116,7 @@ class CoreLifecycleWorkTest {
     /**
      * 构造 U 本位币对、标记价、三种强平待办以及未完成资金费和结算游标，再通过原测试恢复入口组装运行时。
      */
-    private static TradingCoreRuntime stateWithLifecycleWork() {
+    private static TradingCore stateWithLifecycleWork() {
         // 供生命周期进度和强平记录引用的 U 本位永续币对配置。
         CoreInstrument instrument = new CoreInstrument(
                 "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1,
@@ -136,13 +136,13 @@ class CoreLifecycleWorkTest {
                 Map.of("1", new CoreMarkPriceState("1", 60_000, 9, 1_000)),
                 Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4, CoreRiskState.defaultScanControl(), 0);
         // 保存预设资金费用户游标和到期撤单游标的财库状态。
-        CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), Map.of(), Map.of(),
+        CoreTreasuryState systemFunds = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), Map.of(), Map.of(),
                 Map.of("1", new CoreTreasuryState.FundingProgress(11, 100, 41, 60_000)),
                 Map.of("1", new CoreTreasuryState.LifecycleProgress(12, 60_000, false, 91, 0, 0)));
         // 用上述币对、风险及财库组装的旧交易状态，供恢复入口投影。
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(), Map.of(), Map.of("1", instrument), risk, treasury, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
-        return TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0,
+                Map.of(), Map.of(), Map.of("1", instrument), risk, systemFunds, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
+        return TradingCoreRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0,
                 Map.of(), Map.of(), trading);
     }
 

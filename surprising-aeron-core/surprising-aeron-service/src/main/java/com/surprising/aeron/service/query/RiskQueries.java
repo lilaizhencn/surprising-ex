@@ -8,8 +8,8 @@ import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
 import com.surprising.aeron.service.account.AccountBalance;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.Order;
@@ -39,17 +39,17 @@ public final class RiskQueries {
     private static final long PPM = 1_000_000L;
 
     /** 生产账户 Lane 的单用户入口，要求正用户编号和 Owner 已固定的市场输入，再按当前持仓计算风险结果。 */
-    public static List<CoreRiskSnapshotView> userSnapshots(TradingAccountRuntime runtime,
-            RuntimeIdentityRegistry identities, long userId, MarketInputs markets) {
+    public static List<CoreRiskSnapshotView> userSnapshots(AccountBook accountBook,
+            IdIndex identities, long userId, MarketInputs markets) {
         if (userId <= 0 || markets == null) throw new IllegalArgumentException("risk query Lane inputs are required");
         ArrayList<CoreRiskSnapshotView> result = new ArrayList<>();
-        if (runtime.positionCountForUser(userId) > OperationalQueries.MAX_INDEX_SCAN)
+        if (accountBook.positionCountForUser(userId) > OperationalQueries.MAX_INDEX_SCAN)
             throw new QueryTooLargeException();
         var values = new ArrayList<PositionValuation>();
         var cross = new java.util.HashMap<String, long[]>();
         var wallets = new java.util.HashMap<String, Long>();
-        for (long key : runtime.positionKeysForUser(userId)) {
-            Position position = runtime.position(key);
+        for (long key : accountBook.positionKeysForUser(userId)) {
+            Position position = accountBook.position(key);
             if (position == null || position.signedQuantitySteps() == 0) continue;
             if (values.size() >= OperationalQueries.MAX_QUERY_ENTITIES)
                 throw new QueryTooLargeException();
@@ -65,7 +65,7 @@ public final class RiskQueries {
                     ? OptionContractMath.optionMarketValueUnits(instrument, quantity, mark.markPriceTicks()) : pnl;
             long notional = CoreContractMath.notionalUnits(instrument, Math.absExact(quantity), mark.markPriceTicks());
             values.add(new PositionValuation(position, instrument, mark, pnl, maintenance, equityDelta, notional));
-            wallets.computeIfAbsent(instrument.settleAsset(), asset -> crossWalletBalance(runtime, identities, userId, asset, markets));
+            wallets.computeIfAbsent(instrument.settleAsset(), asset -> crossWalletBalance(accountBook, identities, userId, asset, markets));
             if (position.marginMode() == CoreMarginMode.CROSS) {
                 long[] totals = cross.computeIfAbsent(instrument.settleAsset(), asset -> new long[2]);
                 totals[0] = Math.addExact(totals[0], equityDelta);
@@ -101,10 +101,10 @@ public final class RiskQueries {
     }
 
     /** 生产 Lane 按 Owner 准备的整数持仓键读取目标用户仓位，核对路由用户一致，再用固定市场输入计算候选。 */
-    public static CoreAdlCandidateView adlCandidate(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    public static CoreAdlCandidateView adlCandidate(AccountBook accountBook, IdIndex identities,
             long userId, long positionKey, String asset, MarketInputs markets) {
         if (userId <= 0 || markets == null) throw new IllegalArgumentException("ADL query Lane inputs are required");
-        Position position = positionKey == 0 ? null : runtime.position(positionKey);
+        Position position = positionKey == 0 ? null : accountBook.position(positionKey);
         if (position == null) return null;
         if (position.userId() != userId) throw new IllegalStateException("ADL query position route differs");
         MarkPrice mark = markets.mark(position.symbolId());
@@ -120,7 +120,7 @@ public final class RiskQueries {
                 instrument.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
         long margin = position.marginMode() == CoreMarginMode.ISOLATED
-                ? position.positionMarginUnits() : totalBalance(runtime, userId, asset, markets);
+                ? position.positionMarginUnits() : totalBalance(accountBook, userId, asset, markets);
         long profitRate = ratio(profit, notional);
         long leverage = margin <= 0 ? Long.MAX_VALUE : ratio(notional, margin);
         long priority = multiplyDivideCapped(profitRate, leverage, PPM);
@@ -161,21 +161,21 @@ public final class RiskQueries {
     }
 
     private static long crossWalletBalance(
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId, String asset, MarketInputs markets) {
-        long wallet = totalBalance(runtime, userId, asset, markets);
-        if (runtime.reservationCountForUser(userId) > OperationalQueries.MAX_INDEX_SCAN) {
+            AccountBook accountBook, IdIndex identities, long userId, String asset, MarketInputs markets) {
+        long wallet = totalBalance(accountBook, userId, asset, markets);
+        if (accountBook.reservationCountForUser(userId) > OperationalQueries.MAX_INDEX_SCAN) {
             throw new QueryTooLargeException();
         }
-        for (long positionKey : runtime.positionKeysForUser(userId)) {
-            Position position = runtime.position(positionKey);
+        for (long positionKey : accountBook.positionKeysForUser(userId)) {
+            Position position = accountBook.position(positionKey);
             if (position != null && position.marginMode() == CoreMarginMode.ISOLATED
                     && identities.asset(position.assetId()).equals(asset)) {
                 wallet = Math.subtractExact(wallet, position.positionMarginUnits());
             }
         }
-        for (long orderId : runtime.reservationIdsForUser(userId)) {
-            OrderFundsReservation reservation = runtime.reservation(orderId);
-            Order order = runtime.order(orderId);
+        for (long orderId : accountBook.reservationIdsForUser(userId)) {
+            OrderFundsReservation reservation = accountBook.reservation(orderId);
+            Order order = accountBook.order(orderId);
             if (reservation != null && order != null && order.marginMode() == CoreMarginMode.ISOLATED
                     && identities.asset(reservation.assetId()).equals(asset)) {
                 wallet = Math.subtractExact(wallet, reservation.reservedUnits());
@@ -187,9 +187,9 @@ public final class RiskQueries {
 
     /** 按结算资产定位用户余额，缺少资产编号或余额记录时按 0，存在时返回可用与冻结金额之和并检查整数溢出。 */
     private static long totalBalance(
-            TradingAccountRuntime runtime, long userId, String asset, MarketInputs markets) {
+            AccountBook accountBook, long userId, String asset, MarketInputs markets) {
         Integer assetId = markets.assetIds.get(asset);
-        AccountBalance balance = assetId == null ? null : runtime.balance(userId, assetId);
+        AccountBalance balance = assetId == null ? null : accountBook.balance(userId, assetId);
         return balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
     }
 

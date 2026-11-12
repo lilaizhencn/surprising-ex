@@ -36,12 +36,12 @@ class CoreBusinessStateHashTest {
      */
     @ParameterizedTest @EnumSource(ProductLine.class)
     void hashesPoliciesAndTransfersInOneFenceAndResumesWorkers(ProductLine product) {
-        try (/* 本轮 PIPELINED 交易运行时，结束自动关闭 */ var core = new TradingCoreRuntime(product)) {
+        try (/* 本轮 PIPELINED 交易运行时，结束自动关闭 */ var core = new TradingCore(product)) {
             // 从八开始选择并确保属于另一 Lane 的第二用户
             // 首个用户七
             long first = 7, second = 8;
-            while (core.runtimeState.topology().accountLaneId(first)
-                    == core.runtimeState.topology().accountLaneId(second)) second++;
+            while (core.accountBook.topology().accountLaneId(first)
+                    == core.accountBook.topology().accountLaneId(second)) second++;
             apply(core, CoreMessageType.ADJUST_BALANCE, first,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
             apply(core, CoreMessageType.ADJUST_BALANCE, second,
@@ -68,39 +68,39 @@ class CoreBusinessStateHashTest {
             // 不含运行时额外政策及划转组合的冷状态业务哈希
             long base = core.tradingState().businessStateHash();
             // 将冷哈希、原政策及有序待完成划转按规范顺序组合的预期值
-            long expected = TradingCoreRuntime.canonicalBusinessStateHash(base, policies, orderedTransfers);
-            assertThat(expected).isNotEqualTo(TradingCoreRuntime.canonicalBusinessStateHash(base, policies, Map.of()));
-            assertThat(expected).isNotEqualTo(TradingCoreRuntime.canonicalBusinessStateHash(base, Map.of(), orderedTransfers));
-            assertThat(core.runtimeState.ownerLaneAccess()).isFalse();
-            assertThatThrownBy(() -> core.runtimeState.pendingTransfersSnapshot()).isInstanceOf(IllegalStateException.class);
+            long expected = TradingCore.canonicalBusinessStateHash(base, policies, orderedTransfers);
+            assertThat(expected).isNotEqualTo(TradingCore.canonicalBusinessStateHash(base, policies, Map.of()));
+            assertThat(expected).isNotEqualTo(TradingCore.canonicalBusinessStateHash(base, Map.of(), orderedTransfers));
+            assertThat(core.accountBook.ownerLaneAccess()).isFalse();
+            assertThatThrownBy(() -> core.accountBook.pendingTransfersSnapshot()).isInstanceOf(IllegalStateException.class);
             assertThat(core.stateHash()).isEqualTo(expected);
-            assertThat(core.runtimeState.ownerLaneAccess()).isFalse();
-            assertThatThrownBy(() -> core.runtimeState.pendingTransfersSnapshot()).isInstanceOf(IllegalStateException.class);
+            assertThat(core.accountBook.ownerLaneAccess()).isFalse();
+            assertThatThrownBy(() -> core.accountBook.pendingTransfersSnapshot()).isInstanceOf(IllegalStateException.class);
             assertThat(CoreTestCompletion.applyAsynchronously(core, command).status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(core.stateHash()).isEqualTo(expected);
 
-            while (!core.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            while (!core.accountBook.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
             // 调用前已经持有 Owner 访问权时的原交接代号，查询不得另作交接
-            long epoch = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
+            long epoch = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
             try {
                 assertThat(core.stateHash()).isEqualTo(expected);
-                assertThat(core.runtimeState.ownerLaneAccess()).isTrue();
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(epoch);
-            } finally { core.runtimeState.releaseOwnerLaneAccess(); }
+                assertThat(core.accountBook.ownerLaneAccess()).isTrue();
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(epoch);
+            } finally { core.accountBook.releaseOwnerLaneAccess(); }
 
             apply(core, CoreMessageType.COMPLETE_TRANSFER, first,
                     TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(101)));
             // 完成首笔划转后冷状态的基础业务哈希
             long completedBase = core.tradingState().businessStateHash();
             // 完成首笔后只组合剩余第二笔划转得到的预期哈希
-            long completedHash = TradingCoreRuntime.canonicalBusinessStateHash(completedBase, policies,
+            long completedHash = TradingCore.canonicalBusinessStateHash(completedBase, policies,
                     Map.of(102L, b));
             assertThat(core.stateHash()).isEqualTo(completedHash).isNotEqualTo(expected);
             // 读取后继续完成业务写入，检查查询已经把账户所有权还给工作线程。
             apply(core, CoreMessageType.ADJUST_BALANCE, first,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
             assertThat(core.stateHash()).isNotEqualTo(completedHash);
-            assertThat(core.runtimeState.ownerLaneAccess()).isFalse();
+            assertThat(core.accountBook.ownerLaneAccess()).isFalse();
             core.assertClusterCallbackComplete();
         }
     }
@@ -126,7 +126,7 @@ class CoreBusinessStateHashTest {
      * @param user 请求或划转所属用户
      * @param payload 已经按该消息类型编码的原载荷
      */
-    private void apply(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private void apply(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         assertThat(CoreTestCompletion.applyAsynchronously(core, command(core, type, user, payload)).commandStatus())
                 .isEqualTo(ResponseStatus.APPLIED);
     }
@@ -138,7 +138,7 @@ class CoreBusinessStateHashTest {
      * @param user 请求或划转所属用户
      * @param payload 已经按该消息类型编码的原载荷
      */
-    private CoreMessage command(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private CoreMessage command(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 为本次原命令递增的来源序号，同时组成 UUID 及关联号
         long id = ++sequence;
         return new CoreMessage(CoreMessageHeader.command(type, new UUID(954, id), core.productLine,

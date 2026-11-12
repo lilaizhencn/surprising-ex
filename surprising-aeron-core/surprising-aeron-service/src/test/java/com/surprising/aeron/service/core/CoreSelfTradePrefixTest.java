@@ -56,7 +56,7 @@ class CoreSelfTradePrefixTest {
     @ParameterizedTest @MethodSource("productsAndBatchRejection")
     void repeatedMixedSymbolBatchesKeepAssetMetadataAndReleaseBothUsersReservations(
             ProductLine line, boolean rejectDuplicate, boolean marketTaker) throws Exception {
-        try (/* 本轮交易运行时资源，结束自动关闭 */ var core = new TradingCoreRuntime(line)) {
+        try (/* 本轮交易运行时资源，结束自动关闭 */ var core = new TradingCore(line)) {
             // 按产品线选出的合约类型
             var type = ContractType.valueOf(line.contractTypeCode());
             for (String /* 当前注册或批次排列中的永久数字标的文本 */ symbol : new String[]{"1", "2"}) {
@@ -79,7 +79,7 @@ class CoreSelfTradePrefixTest {
             for (long /* 当前入账、下单或核对资金的用户 */ user : new long[]{7, 8}) for (String /* 当前初始化的 BTC、ETH 或 USDT 资产 */ asset : new String[]{"BTC", "ETH", "USDT"})
                 applied(core, message(core, CoreMessageType.ADJUST_BALANCE, user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, CAPITAL))));
-            try (/* 用来发现 Owner 越界读取账户正文的既有测试保护器 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 用来发现 Owner 越界读取账户正文的既有测试保护器 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 for (/* 两标的交替排列的当前批次轮次，共三轮 */ int cycle = 0; cycle < 3; cycle++) {
                     for (long /* 当前入账、下单或核对资金的用户 */ user : new long[]{7, 8}) {
                         // 当前用户本轮短期批次意图列表
@@ -138,7 +138,7 @@ class CoreSelfTradePrefixTest {
     void cancelBeforePlaceHandlesRestingAndAlreadyMatchedOwnOrders(ProductLine line, int priorFill) throws Exception {
         // 放行 maker 账户以继续消费旧成交和后续准入的门闩，退出路径确保放行
         var releaseMaker = new CountDownLatch(1);
-        try (/* 本轮交易运行时资源，结束自动关闭 */ var core = new TradingCoreRuntime(line)) {
+        try (/* 本轮交易运行时资源，结束自动关闭 */ var core = new TradingCore(line)) {
             // 按产品线选出的合约类型
             var type = ContractType.valueOf(line.contractTypeCode());
             applied(core, message(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
@@ -156,7 +156,7 @@ class CoreSelfTradePrefixTest {
             // 从八开始寻找与 maker 不同 Lane 的用户候选
             // 原挂卖单的用户七
             long maker = 7, candidate = 8;
-            while (core.runtimeState.accountLaneId(candidate) == core.runtimeState.accountLaneId(maker)) candidate++;
+            while (core.accountBook.accountLaneId(candidate) == core.accountBook.accountLaneId(maker)) candidate++;
             // 最终选定、与 maker 归属不同 Lane 的对手用户
             long taker = candidate;
             for (long /* 当前入账、下单或核对资金的用户 */ user : new long[]{maker, taker}) for (String /* 当前初始化的 BTC、ETH 或 USDT 资产 */ asset : new String[]{"BTC", "USDT"})
@@ -164,14 +164,14 @@ class CoreSelfTradePrefixTest {
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, CAPITAL))));
             applied(core, place(core, maker, 101, CoreOrderSide.SELL, 2));
             // 原下单后账户交接代号，测试轨迹不得新增 Owner 交接
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
             // 按 Core 序号收集各原在途命令终态状态的表
             Map<Long, ResponseStatus> terminals = new HashMap<>();
-            try (/* 用来发现 Owner 越界读取账户正文的既有测试保护器 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 用来发现 Owner 越界读取账户正文的既有测试保护器 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 if (priorFill > 0) {
                     // 通知 maker 阻塞查询已经进入所属 Lane 的门闩
                     var entered = new CountDownLatch(1);
-                    assertThat(core.runtimeState.dispatchAccountQuery(core.runtimeState.topology().accountLaneMask(maker), /* 正在执行 maker 阻塞查询的真实账户 Lane */ lane -> {
+                    assertThat(core.accountBook.dispatchAccountQuery(core.accountBook.topology().accountLaneMask(maker), /* 正在执行 maker 阻塞查询的真实账户 Lane */ lane -> {
                         entered.countDown();
                         try {
                             if (!releaseMaker.await(5, TimeUnit.SECONDS)) throw new AssertionError("maker Lane gate timed out");
@@ -210,7 +210,7 @@ class CoreSelfTradePrefixTest {
                 }
                 assertThat(terminals.get(nextSequence)).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(terminals.values()).allMatch(/* 每条已收集命令的最终业务状态，均应 APPLIED */ status -> status == ResponseStatus.APPLIED);
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
             } finally { releaseMaker.countDown(); }
             // 按资产把双方可用加冻结精确汇总的对照表
             Map<String, Long> totals = new HashMap<>();
@@ -240,7 +240,7 @@ class CoreSelfTradePrefixTest {
      * @param core 本产品线原运行时
      * @param message 当前待原样提交的原协议消息
      */
-    private CoreResponse submit(TradingCoreRuntime core, CoreMessage message) {
+    private CoreResponse submit(TradingCore core, CoreMessage message) {
         // 仅供这次原消息解码与独立准入准备的短期命令窗口
         var window = new OrderCommandQueue.IngressWindow();
         // 本条输入是否满足既有窗口内独立撮合准入条件
@@ -251,7 +251,7 @@ class CoreSelfTradePrefixTest {
                     window.decodedIfPresent(message), independent);
         } finally {
 
-            core.runtimeState.releaseOwnerLaneAccess();
+            core.accountBook.releaseOwnerLaneAccess();
         }
     }
 
@@ -260,7 +260,7 @@ class CoreSelfTradePrefixTest {
      * @param core 本产品线原运行时
      * @param message 当前待原样提交的原协议消息
      */
-    private void applied(TradingCoreRuntime core, CoreMessage message) {
+    private void applied(TradingCore core, CoreMessage message) {
         assertThat(CoreTestCompletion.applyAsynchronously(core, message).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
     }
     /**
@@ -271,7 +271,7 @@ class CoreSelfTradePrefixTest {
      * @param side 原订单买卖方向
      * @param quantity 原订单数量步数
      */
-    private CoreMessage place(TradingCoreRuntime core, long user, long id, CoreOrderSide side, long quantity) {
+    private CoreMessage place(TradingCore core, long user, long id, CoreOrderSide side, long quantity) {
         return message(core, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(
                 new PlaceOrderCommand(id, "1", side, 100, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prefix-" + id)));
@@ -283,7 +283,7 @@ class CoreSelfTradePrefixTest {
      * @param user 原请求所属用户
      * @param payload 本次原消息已编码载荷
      */
-    private CoreMessage message(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private CoreMessage message(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 为本条原消息递增的来源序号
         long next = ++sequence;
         return new CoreMessage(CoreMessageHeader.command(type, new UUID(424, next), core.productLine,

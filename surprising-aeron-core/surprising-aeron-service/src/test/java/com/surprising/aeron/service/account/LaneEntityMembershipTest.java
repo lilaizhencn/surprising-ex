@@ -3,7 +3,7 @@ package com.surprising.aeron.service.account;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.position.Position;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
@@ -17,7 +17,7 @@ class LaneEntityMembershipTest {
      */
     @Test
     void liveOrderAndReservationMembershipSurvivesUniqueIdChurnWithoutReplacingArrays() throws Exception {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new AccountBook()) {
             state.putUser(new UserAccount(7));
             state.putUser(new UserAccount(8));
             state.putOrder(CoreStateTestFixtures.order(1, 7, 1, 2));
@@ -27,9 +27,9 @@ class LaneEntityMembershipTest {
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
             var lane = state.onLane(7L, /* onLane 回调收到的所属 Lane，这里原样返回以便断言。 */ value -> value);
             // 用户七的活跃订单编号集合，核对原成员与回滚后的成员。
-            var orders = lane.admissionOrderIndex.activeOrderIdsByUser.get(7);
+            var orders = lane.orderCheckOrderIndex.activeOrderIdsByUser.get(7);
             // 用户七的预留编号集合或导出副本，分别用于底层复用和成员断言。
-            var reservations = lane.admissionOrderIndex.reservationIdsByUser.get(7);
+            var reservations = lane.orderCheckOrderIndex.reservationIdsByUser.get(7);
             // 首轮容量增长后保留下来的订单成员数组，用于后续身份比较。
             // 首轮容量增长后保留下来的预留成员数组。
             Object orderStorage = null, reservationStorage = null;
@@ -52,8 +52,8 @@ class LaneEntityMembershipTest {
                     com.surprising.aeron.service.core.CoreStateTestFixtures.deleteOrder(state, id);
                     CoreStateTestFixtures.deleteReservation(state, id, 7);
                 }
-                assertThat(lane.admissionOrderIndex.activeOrderIdsByUser.get(7)).isSameAs(orders);
-                assertThat(lane.admissionOrderIndex.reservationIdsByUser.get(7)).isSameAs(reservations);
+                assertThat(lane.orderCheckOrderIndex.activeOrderIdsByUser.get(7)).isSameAs(orders);
+                assertThat(lane.orderCheckOrderIndex.reservationIdsByUser.get(7)).isSameAs(reservations);
                 assertThat(membershipStorage(orders)).isSameAs(orderStorage);
                 assertThat(membershipStorage(reservations)).isSameAs(reservationStorage);
                 assertThat(orders.size()).isOne();
@@ -79,7 +79,7 @@ class LaneEntityMembershipTest {
      */
     @Test
     void rollbackRestoresRemovedMembershipAndDropsNewOrderAndReservation() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new AccountBook()) {
             state.putUser(new UserAccount(7));
             for (long /* 当前加入、移除或构造待回滚成员的订单编号。 */ id : new long[]{1, 2}) {
                 state.putOrder(CoreStateTestFixtures.order(id, 7, 1, 2));
@@ -98,7 +98,7 @@ class LaneEntityMembershipTest {
             });
             state.accountRollback().restoreLane(lane);
             // 用户七的活跃订单编号集合，核对原成员与回滚后的成员。
-            var orders = lane.admissionOrderIndex.activeOrderIdsByUser.get(7);
+            var orders = lane.orderCheckOrderIndex.activeOrderIdsByUser.get(7);
             // 用户七的预留编号集合或导出副本，分别用于底层复用和成员断言。
             var reservations = state.reservationIdsForUser(7);
             assertThat(orders.size()).isEqualTo(2);
@@ -130,19 +130,19 @@ class LaneEntityMembershipTest {
      */
     @Test
     void clientOrderIndexReusesItsPrimitiveTableAfterLastAliasRemoval() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new AccountBook()) {
             state.putUser(new UserAccount(7));
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
             var lane = state.onLane(7L, /* onLane 回调收到的所属 Lane，这里原样返回以便断言。 */ value -> value);
-            TradingAccountRuntime.putClientOrderIndex(lane, 7, 91, 11);
+            AccountBook.putClientOrderIndex(lane, 7, 91, 11);
             // 用户七客户身份键到订单编号的原语映射表。
             var clients = lane.clientIdentities.clientOrderIndex.get(7);
 
-            assertThat(TradingAccountRuntime.removeClientOrderIndex(lane, 7, 91)).isEqualTo(11);
+            assertThat(AccountBook.removeClientOrderIndex(lane, 7, 91)).isEqualTo(11);
             assertThat(lane.clientIdentities.clientOrderIndex.get(7)).isSameAs(clients);
             assertThat(clients.size()).isZero();
 
-            TradingAccountRuntime.putClientOrderIndex(lane, 7, 92, 12);
+            AccountBook.putClientOrderIndex(lane, 7, 92, 12);
             assertThat(lane.clientIdentities.clientOrderIndex.get(7)).isSameAs(clients);
         }
     }
@@ -159,14 +159,14 @@ class LaneEntityMembershipTest {
         var held = CoreStateTestFixtures.reservation(1, 7, 3, 13);
         lane.reservations.put(1, held);
         lane.markPendingReservation(1, 2);
-        TradingAccountRuntime.putClientOrderIndex(lane, 7, 0, 1);
+        AccountBook.putClientOrderIndex(lane, 7, 0, 1);
         // 用户七客户身份键到订单编号的原语映射表。
         var clients = lane.clientIdentities.clientOrderIndex.get(7);
         // Agrona long 键值表底层 entries 数组的反射字段。
         var entries = org.agrona.collections.Long2LongHashMap.class.getDeclaredField("entries");
         entries.setAccessible(true);
         // 开始周转前待完成序号表的底层数组。
-        Object pendingStorage = entries.get(lane.admissionOrderIndex.pendingReservationSequences);
+        Object pendingStorage = entries.get(lane.orderCheckOrderIndex.pendingReservationSequences);
         // 首轮允许增长后客户号表的底层数组，后续应持续复用。
         Object clientStorage = null;
         for (/* 订单与预留编号周转的当前轮次。 */ int round = 0; round < 1_001; round++) {
@@ -175,7 +175,7 @@ class LaneEntityMembershipTest {
             for (/* 当前加入、移除或构造待回滚成员的订单编号。 */ long id = first; id < first + 20; id++) {
                 lane.reservations.put(id, CoreStateTestFixtures.reservation(id, 7, 3, 5));
                 lane.markPendingReservation(id, 3L + round);
-                TradingAccountRuntime.putClientOrderIndex(lane, 7, id, id);
+                AccountBook.putClientOrderIndex(lane, 7, id, id);
             }
             if (round == 0) clientStorage = entries.get(clients); // 允许首轮按同时存活条数扩容，之后检查同一数组持续复用。
             assertThat(lane.pendingReservationCount()).isEqualTo(21);
@@ -184,10 +184,10 @@ class LaneEntityMembershipTest {
                 assertThat(lane.pendingReservationSequence(id)).isEqualTo(3L + round);
                 lane.completePendingReservation(id, 3L + round);
                 lane.reservations.remove(id);
-                assertThat(TradingAccountRuntime.removeClientOrderIndex(lane, 7, id)).isEqualTo(id);
+                assertThat(AccountBook.removeClientOrderIndex(lane, 7, id)).isEqualTo(id);
                 assertThat(lane.pendingReservationSequence(id)).isZero();
             }
-            assertThat(entries.get(lane.admissionOrderIndex.pendingReservationSequences)).isSameAs(pendingStorage);
+            assertThat(entries.get(lane.orderCheckOrderIndex.pendingReservationSequences)).isSameAs(pendingStorage);
             assertThat(entries.get(clients)).isSameAs(clientStorage);
             assertThat(clients.size()).isOne();
             assertThat(clients.get(0L)).isEqualTo(1);
@@ -206,19 +206,19 @@ class LaneEntityMembershipTest {
      */
     @Test
     void rollbackRestoresReassignedRemovedAndNewClientAliases() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new AccountBook()) {
             state.putUser(new UserAccount(7));
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
             var lane = state.onLane(7L, /* onLane 回调收到的所属 Lane，这里原样返回以便断言。 */ value -> value);
-            TradingAccountRuntime.putClientOrderIndex(lane, 7, 91, 11);
-            TradingAccountRuntime.putClientOrderIndex(lane, 7, 92, 12);
+            AccountBook.putClientOrderIndex(lane, 7, 91, 11);
+            AccountBook.putClientOrderIndex(lane, 7, 92, 12);
             state.clearChangedKeys();
             state.accountRollback().captureClientOrderBefore(7, 91);
             state.accountRollback().captureClientOrderBefore(7, 92);
             state.accountRollback().captureClientOrderBefore(7, 93);
-            TradingAccountRuntime.putClientOrderIndex(lane, 7, 91, 99);
-            TradingAccountRuntime.removeClientOrderIndex(lane, 7, 92);
-            TradingAccountRuntime.putClientOrderIndex(lane, 7, 93, 99);
+            AccountBook.putClientOrderIndex(lane, 7, 91, 99);
+            AccountBook.removeClientOrderIndex(lane, 7, 92);
+            AccountBook.putClientOrderIndex(lane, 7, 93, 99);
 
             state.accountRollback().restoreLane(lane);
 
@@ -241,21 +241,21 @@ class LaneEntityMembershipTest {
      */
     @Test
     void positionUpdatesPreserveMembershipAndOnlyFlatTransitionsChangeExposureIndex() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new AccountBook()) {
             state.putUser(new UserAccount(7));
             state.putPosition(11, position(7, 1, 10));
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
             var lane = state.onLane(7L, /* onLane 回调收到的所属 Lane，这里原样返回以便断言。 */ value -> value);
             // 用户全部持仓键集合，包含仍保留的零仓位记录。
-            var all = lane.admissionOrderIndex.positionKeysByUser.get(7);
+            var all = lane.orderCheckOrderIndex.positionKeysByUser.get(7);
             // 合约一按用户分组的非零持仓键索引。
-            var byUser = lane.admissionOrderIndex.positionKeysBySymbolAndUser.get(1);
+            var byUser = lane.orderCheckOrderIndex.positionKeysBySymbolAndUser.get(1);
             // 用户七在合约一有非零数量的持仓键数组。
             var open = byUser.get(7);
             for (long /* 本轮替换的非零持仓数量，正负方向变化不应重建成员容器。 */ quantity : new long[]{9, 5, -5, -1}) {
                 state.replacePosition(11, position(7, 1, quantity));
-                assertThat(lane.admissionOrderIndex.positionKeysByUser.get(7)).isSameAs(all);
-                assertThat(lane.admissionOrderIndex.positionKeysBySymbolAndUser.get(1)).isSameAs(byUser);
+                assertThat(lane.orderCheckOrderIndex.positionKeysByUser.get(7)).isSameAs(all);
+                assertThat(lane.orderCheckOrderIndex.positionKeysBySymbolAndUser.get(1)).isSameAs(byUser);
                 assertThat(byUser.get(7)).isSameAs(open);
                 assertThat(open.toArray()).containsExactly(11);
             }
@@ -264,19 +264,19 @@ class LaneEntityMembershipTest {
             assertThat(all.toArray()).containsExactlyInAnyOrder(11, 12);
             assertThat(open.toArray()).containsExactly(12);
             state.putPosition(11, position(7, 1, 3));
-            assertThat(lane.admissionOrderIndex.positionKeysByUser.get(7)).isSameAs(all);
+            assertThat(lane.orderCheckOrderIndex.positionKeysByUser.get(7)).isSameAs(all);
             assertThat(open.toArray()).containsExactlyInAnyOrder(11, 12);
             state.replacePosition(11, position(7, 2, 3));
             assertThat(open.toArray()).containsExactly(12);
-            assertThat(lane.admissionOrderIndex.positionKeysBySymbolAndUser.get(2).get(7).toArray()).containsExactly(11);
+            assertThat(lane.orderCheckOrderIndex.positionKeysBySymbolAndUser.get(2).get(7).toArray()).containsExactly(11);
             com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(state, 12, 7);
-            assertThat(lane.admissionOrderIndex.positionKeysBySymbolAndUser.get(1)).isNull();
+            assertThat(lane.orderCheckOrderIndex.positionKeysBySymbolAndUser.get(1)).isNull();
             state.replacePosition(11, position(7, 2, 0));
-            assertThat(lane.admissionOrderIndex.positionKeysBySymbolAndUser.get(2)).isNull();
-            assertThat(lane.admissionOrderIndex.positionKeysByUser.get(7)).isSameAs(all);
+            assertThat(lane.orderCheckOrderIndex.positionKeysBySymbolAndUser.get(2)).isNull();
+            assertThat(lane.orderCheckOrderIndex.positionKeysByUser.get(7)).isSameAs(all);
             assertThat(all.toArray()).containsExactly(11);
             com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(state, 11, 7);
-            assertThat(lane.admissionOrderIndex.positionKeysByUser.get(7)).isNull();
+            assertThat(lane.orderCheckOrderIndex.positionKeysByUser.get(7)).isNull();
         }
     }
 

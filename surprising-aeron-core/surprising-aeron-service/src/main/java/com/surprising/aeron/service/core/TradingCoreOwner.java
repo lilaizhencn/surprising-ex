@@ -52,10 +52,10 @@ public final class TradingCoreOwner {
     /** 恢复快照后由恢复运行时携带自己的拓扑。 */
     private final LaneTopology startupTopology;
     /** 当前权威交易运行时，由 Owner 线程访问，未启动或退出后为 null。 */
-    private TradingCoreRuntime state;
+    private TradingCore state;
     private OwnerLogContext logContext;
 
-    private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler;
+    private final TradingCore.MatchingCommitHandler matchingCommitHandler;
 
     private static final int DEADLINE_CHECK_MASK = 0x3FF;
     /** 仅 Owner 自增的分频计数器，线程中断检查不受此分频影响。 */
@@ -84,7 +84,7 @@ public final class TradingCoreOwner {
     /** 启动步骤 8：接入复制日志上下文。 */
     public void start(OwnerLogContext logContext) {
         this.logContext = logContext;
-        if (state == null) state = new TradingCoreRuntime(productLine, startupTopology, configuration);
+        if (state == null) state = new TradingCore(productLine, startupTopology, configuration);
         commandPipeline.reset();
         log.info("Aeron core role productLine={} role={}", productLine, logContext.role());
         realtimeBoundary.start(logContext.role(), logContext.position(), state);
@@ -145,7 +145,7 @@ public final class TradingCoreOwner {
             }
             if (!eligible) {
                 if (state.requiresOwnerLaneAccessForPreparation(next.command())
-                        && !state.runtimeState.tryAcquireOwnerLaneAccess()) break;
+                        && !state.accountBook.tryAcquireOwnerLaneAccess()) break;
                 commandPipeline.beginControl(next);
                 state.assertClusterCallbackComplete();
                 beginCapture(next.position(), next.timestamp());
@@ -153,7 +153,7 @@ public final class TradingCoreOwner {
                 commandPipeline.controlResponse(state.applyDecodedCommand(next.command(), next.timestamp(), next.position(),
                         window.decodedIfPresent(next.command()), false, next.fingerprint()));
                 commandPipeline.recordControlProgress();
-                boolean matching = TradingCoreRuntime.isMatchingCommand(next.command().header().messageType());
+                boolean matching = TradingCore.isMatchingCommand(next.command().header().messageType());
                 commandPipeline.rememberMatchingResponseSequence(matching ? state.matchingSequence(
                         next.command().header().commandIdMsb(), next.command().header().commandIdLsb()) : 0L);
                 pollControl();
@@ -170,7 +170,7 @@ public final class TradingCoreOwner {
             window.bindSequence(entry, sequence);
             entry.response = sequence == 0 ? result : null;
             admittedInputs++;
-            commandPipeline.recordAdmission();
+            commandPipeline.recordOrderCheck();
         }
 
         if (!commandPipeline.hasCommittingHead() && window.size() != 0) {
@@ -224,7 +224,7 @@ public final class TradingCoreOwner {
             if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
             if (last.sessionId != NO_SESSION_ID) offerResponse(last.sessionId, last.request, last.response);
             commandPipeline.finishHeadCommit();
-            state.runtimeState.releaseCompletedSequentialLaneStage();
+            state.accountBook.releaseCompletedSequentialLaneStage();
             committedCount++;
             advanceMatching = false;
         }
@@ -261,7 +261,7 @@ public final class TradingCoreOwner {
         if (activeControl.sessionId() != NO_SESSION_ID) {
             offerResponse(activeControl.sessionId(), request, commandPipeline.controlResponse());
         }
-        state.runtimeState.releaseOwnerLaneAccess();
+        state.accountBook.releaseOwnerLaneAccess();
         commandPipeline.finishControl();
         ingress.remove();
         if (commandPipeline.commandWindow().decodedIfPresent(request) != null)
@@ -304,7 +304,7 @@ public final class TradingCoreOwner {
                         + "/" + ingressHead.command().header().commandId())
                 + " matcherSubmissionDepth=" + state.matcherPipeline().submissionDepth()
                 + " matcherCompletionDepth=" + state.matcherPipeline().completionDepth()
-                + " controlLanes=" + state.runtimeState.controlLaneDiagnostics()
+                + " controlLanes=" + state.accountBook.controlLaneDiagnostics()
                 + " completionAvailable=" + ownerCompletionAvailable()
                 + " localMatchingWork=" + state.matchingProgress.hasLocalMatchingWork()
                 + " drainWork=" + state.matchingProgress.hasDrainWork();
@@ -411,7 +411,7 @@ public final class TradingCoreOwner {
 
     /** 只探测现有 Matcher 通知、撮合完成和 Lane 回执。 */
     boolean ownerCompletionAvailable() {
-        return state != null && (state.runtimeState.hasMatchingNotifications()
+        return state != null && (state.accountBook.hasMatchingNotifications()
                 || state.matcherPipeline().hasMatchingCompletions()
                 || state.hasCompletedLaneCommit());
     }
@@ -440,7 +440,7 @@ public final class TradingCoreOwner {
     public void finishCommands() { finishSnapshotPrefix(snapshotDeadline()); }
 
     /** 取得已启动运行时。引用仍归 Owner，不提供跨线程账户读取权限。 */
-    public TradingCoreRuntime state() {
+    public TradingCore state() {
         if (state == null) throw new IllegalStateException("clustered service is not started");
         return state;
     }
@@ -468,7 +468,7 @@ public final class TradingCoreOwner {
     }
 
     /** 先关闭旧运行时，再接入恢复结果并重新绑定实时状态。 */
-    private void replaceState(TradingCoreRuntime restored) {
+    private void replaceState(TradingCore restored) {
         state.close();
         state = restored;
         realtimeBoundary.rebindState(state);

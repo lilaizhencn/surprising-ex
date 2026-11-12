@@ -6,10 +6,10 @@ import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.service.adl.AdlService;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.liquidation.LiquidationService;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import java.util.Collection;
 import java.util.List;
 
@@ -23,9 +23,9 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param command 本次最终执行的强平命令，没有额外撤单回执
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingAccountRuntime simulateExecution(TradingCoreState before,
+    public static AccountBook simulateExecution(TradingCoreState before,
                                                         ExecuteLiquidationCommand command,
-                                                        RuntimeIdentityRegistry identities) {
+                                                        IdIndex identities) {
         return simulateExecution(before, command, List.of(), identities);
     }
 
@@ -36,16 +36,16 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param canceledOrders 本次 Matcher 已撤订单的业务记录，转换为撤单路由后交账户步骤解冻
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingAccountRuntime simulateExecution(TradingCoreState before,
+    public static AccountBook simulateExecution(TradingCoreState before,
                                                         ExecuteLiquidationCommand command,
                                                         Collection<CoreOrderState> canceledOrders,
-                                                        RuntimeIdentityRegistry identities) {
+                                                        IdIndex identities) {
         if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual liquidation simulation");
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        return applyExecutionRuntime(command, RuntimeTestStateTransitions.cancellationRoutes(canceledOrders), runtime, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
+        return applyExecutionRuntime(command, RuntimeTestStateTransitions.cancellationRoutes(canceledOrders), accountBook, identities);
     }
 
     /**
@@ -56,18 +56,18 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param nextCursorOrderId 这批撤单之后仍待撤的下一订单编号，继续撤单时必须为正
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingAccountRuntime simulateCancellationAdvance(TradingCoreState before,
+    public static AccountBook simulateCancellationAdvance(TradingCoreState before,
                                                                   ExecuteLiquidationCommand command,
                                                                   Collection<CoreOrderState> canceledOrders,
                                                                   long nextCursorOrderId,
-                                                                  RuntimeIdentityRegistry identities) {
+                                                                  IdIndex identities) {
         if (before == null || command == null || identities == null || nextCursorOrderId <= 0
                 || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation cancellation simulation");
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        return applyCancellationAdvanceRuntime(command, RuntimeTestStateTransitions.cancellationRoutes(canceledOrders), nextCursorOrderId, runtime, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
+        return applyCancellationAdvanceRuntime(command, RuntimeTestStateTransitions.cancellationRoutes(canceledOrders), nextCursorOrderId, accountBook, identities);
     }
 
     /**
@@ -76,15 +76,15 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param command 本次保险补亏或完成决议命令
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingAccountRuntime simulateResolution(TradingCoreState before,
+    public static AccountBook simulateResolution(TradingCoreState before,
                                                          ResolveLiquidationCommand command,
-                                                         RuntimeIdentityRegistry identities) {
+                                                         IdIndex identities) {
         if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution simulation");
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        return RuntimeDerivativeLiquidationFixture.applyResolution(command, runtime, identities,
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
+        return RuntimeDerivativeLiquidationFixture.applyResolution(command, accountBook, identities,
                 before.riskState().liquidations().keySet());
     }
 
@@ -94,47 +94,47 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param command 本次目标减仓并覆盖源强平亏空的 ADL 命令
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingAccountRuntime simulateAdl(TradingCoreState before, ExecuteAdlCommand command,
-                                                  RuntimeIdentityRegistry identities) {
+    public static AccountBook simulateAdl(TradingCoreState before, ExecuteAdlCommand command,
+                                                  IdIndex identities) {
         if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL simulation");
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        return RuntimeDerivativeLiquidationFixture.applyAdl(command, runtime, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
+        return RuntimeDerivativeLiquidationFixture.applyAdl(command, accountBook, identities);
     }
 
     /** 在测试侧推进实际强平工作，账户和账本计算仍由原生产实现完成。 */
-    public static TradingAccountRuntime applyExecutionRuntime(ExecuteLiquidationCommand command,
+    public static AccountBook applyExecutionRuntime(ExecuteLiquidationCommand command,
             Collection<com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder> orders,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+            AccountBook accountBook, IdIndex identities) {
         var work = com.surprising.aeron.service.liquidation.LiquidationService.beginExecution(
-                null, command, orders, 0, runtime, identities);
+                null, command, orders, 0, accountBook, identities);
         com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work);
-        return runtime;
+        return accountBook;
     }
 
-    public static TradingAccountRuntime applyCancellationAdvanceRuntime(ExecuteLiquidationCommand command,
+    public static AccountBook applyCancellationAdvanceRuntime(ExecuteLiquidationCommand command,
             Collection<com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder> orders,
-            long nextCursorOrderId, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+            long nextCursorOrderId, AccountBook accountBook, IdIndex identities) {
         if (nextCursorOrderId <= 0) throw new IllegalArgumentException("invalid liquidation cancellation cursor");
         var work = com.surprising.aeron.service.liquidation.LiquidationService.beginExecution(
-                null, command, orders, nextCursorOrderId, runtime, identities);
+                null, command, orders, nextCursorOrderId, accountBook, identities);
         com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work);
-        return runtime;
+        return accountBook;
     }
 
-    public static TradingAccountRuntime applyResolution(ResolveLiquidationCommand command,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
-        var work = LiquidationService.beginResolution(null, command, runtime, identities, candidateIds);
+    public static AccountBook applyResolution(ResolveLiquidationCommand command,
+            AccountBook accountBook, IdIndex identities, Iterable<Long> candidateIds) {
+        var work = LiquidationService.beginResolution(null, command, accountBook, identities, candidateIds);
         com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work);
-        return runtime;
+        return accountBook;
     }
 
-    public static TradingAccountRuntime applyAdl(ExecuteAdlCommand command,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        var work = AdlService.begin(null, command, runtime, identities);
+    public static AccountBook applyAdl(ExecuteAdlCommand command,
+            AccountBook accountBook, IdIndex identities) {
+        var work = AdlService.begin(null, command, accountBook, identities);
         com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work);
-        return runtime;
+        return accountBook;
     }
 }

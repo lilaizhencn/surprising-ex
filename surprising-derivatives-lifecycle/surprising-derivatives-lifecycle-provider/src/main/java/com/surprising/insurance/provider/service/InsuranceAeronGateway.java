@@ -42,12 +42,12 @@ public class InsuranceAeronGateway {
     }
 
     public long balance(String asset) {
-        return CoreStateQueryCodec.decodeTreasuryState(treasury()).stream()
+        return CoreStateQueryCodec.decodeTreasuryState(systemFunds()).stream()
                 .filter(value -> value.asset().equalsIgnoreCase(asset))
                 .mapToLong(value -> value.insuranceBalanceUnits()).findFirst().orElse(0L);
     }
 
-    public byte[] treasury() {
+    public byte[] systemFunds() {
         CoreResponse response = clients.query(CoreMessageType.TREASURY_STATE_QUERY, UUID.randomUUID(), 0, new byte[0]);
         if (response.status() != ResponseStatus.OK || response.resultCode() != CoreResultCode.NONE) {
             throw new IllegalStateException(response.resultCode() + ": Aeron treasury query failed");

@@ -112,10 +112,10 @@ public final class OrderCommandQueue {
     OrderCommand acquire(long sequence, OrderCommand.Operation operation, CoreMessage command,
                         com.surprising.aeron.protocol.CommandFingerprint fingerprint,
                         java.util.List<Long> preMatchingCancellationOrderIds,
-                        OrderCommand.Decoded decodedCommand, OrderCommand.ReplacementAdmission admission) {
+                        OrderCommand.Decoded decodedCommand, OrderCommand.ReplaceOrderCheck orderCheck) {
         OrderCommand context = contexts.claim(sequence);
         OrderCommand pending = context.initialize(sequence, operation, command, fingerprint,
-                preMatchingCancellationOrderIds, decodedCommand, admission);
+                preMatchingCancellationOrderIds, decodedCommand, orderCheck);
         if (context != pending) throw new IllegalStateException("command must use its claimed slot");
         return pending;
     }
@@ -1003,7 +1003,7 @@ public static final class PipelineState {
     }
 
     /** 记录一次入口准入进展，并按当前窗口大小更新观测峰值。 */
-    public void recordAdmission() {
+    public void recordOrderCheck() {
         commandProgress++;
         commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
     }

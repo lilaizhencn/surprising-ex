@@ -4,8 +4,8 @@ import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.account.AccountCommandService;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.core.identity.IdIndex;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
@@ -15,45 +15,45 @@ import org.openjdk.jmh.annotations.*;
 @Warmup(iterations = 3, time = 1) @Measurement(iterations = 3, time = 1)
 @Fork(value = 1, jvmArgsAppend = {"-Xms512m", "-Xmx512m", "-XX:+UseG1GC"})
 public class TransferLaneAllocationBenchmark {
-    private TradingAccountRuntime runtime;
-    private RuntimeIdentityRegistry identities;
+    private AccountBook accountBook;
+    private IdIndex identities;
     private final AccountCommandService task = new AccountCommandService();
     private final TransferFundsCommand command = new TransferFundsCommand(91, ProductLine.SPOT,
             ProductLine.LINEAR_PERPETUAL, "SPOT", "USDT_PERPETUAL", "USDT", 1, "benchmark", "", 7, 8);
     private long transfers;
 
     @Setup public void setup() {
-        identities = new RuntimeIdentityRegistry();
-        runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.SPOT), identities,
+        identities = new IdIndex();
+        accountBook = SnapshotLoader.loadSnapshot(TradingCoreState.empty(ProductLine.SPOT), identities,
                 new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256));
-        task.prepareBalanceAdjustment(runtime, identities, 7, "USDT", 1_000_000_000_000L);
+        task.prepareBalanceAdjustment(accountBook, identities, 7, "USDT", 1_000_000_000_000L);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!task.getAsBoolean()) {
             if (System.nanoTime() >= deadline) throw new IllegalStateException("balance setup timed out");
             Thread.onSpinWait();
         }
-        runtime.clearChangedKeys();
-        runtime.startAccountLanes();
+        accountBook.clearChangedKeys();
+        accountBook.startAccountLanes();
     }
 
     /** One direct control fence is active at a time; this is not the 256-window throughput workload. */
     @Benchmark @OperationsPerInvocation(2)
     public long debitAndComplete() {
-        task.prepareTransferOut(runtime, identities, 7, command);
+        task.prepareTransferOut(accountBook, identities, 7, command);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!task.getAsBoolean()) {
             if (System.nanoTime() >= deadline) throw new IllegalStateException("transfer debit timed out");
             Thread.onSpinWait();
         }
-        runtime.clearChangedKeys();
-        task.prepareTransferCompletion(runtime, 7, command.transferId());
+        accountBook.clearChangedKeys();
+        task.prepareTransferCompletion(accountBook, 7, command.transferId());
         while (!task.getAsBoolean()) {
             if (System.nanoTime() >= deadline) throw new IllegalStateException("transfer completion timed out");
             Thread.onSpinWait();
         }
-        runtime.clearChangedKeys();
+        accountBook.clearChangedKeys();
         return ++transfers;
     }
 
-    @TearDown public void close() { runtime.close(); }
+    @TearDown public void close() { accountBook.close(); }
 }

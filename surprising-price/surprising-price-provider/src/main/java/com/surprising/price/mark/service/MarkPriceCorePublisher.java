@@ -35,7 +35,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
     private final ExecutorService executor;
     private final ConcurrentHashMap<String, MarkPriceEvent> pendingBySymbol = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, MarkPriceEvent> inFlightByCommandId = new ConcurrentHashMap<>();
-    private final AeronClientPool.CommandAdmissionCallback admissionCallback = this::onAdmission;
+    private final AeronClientPool.CommandOrderCheckCallback orderCheckCallback = this::onOrderCheck;
     private final AtomicLong publishGeneration = new AtomicLong();
     private final AtomicLong nextFailureLogNanos = new AtomicLong();
     private final AtomicBoolean draining = new AtomicBoolean();
@@ -135,7 +135,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
             return true;
         }
         boolean queued = clients.commandOneWay(CoreMessageType.APPLY_MARK_PRICE, commandId, 0, payload,
-                admissionCallback);
+                orderCheckCallback);
         if (!queued) {
             inFlightByCommandId.remove(commandId, event);
         }
@@ -168,7 +168,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
                 .divide(event.markPrice(), 0, RoundingMode.HALF_UP).longValueExact();
     }
 
-    private void onAdmission(UUID commandId, AeronClientPool.TryCommandResult result) {
+    private void onOrderCheck(UUID commandId, AeronClientPool.TryCommandResult result) {
         MarkPriceEvent event = inFlightByCommandId.remove(commandId);
         if (event == null) {
             return;

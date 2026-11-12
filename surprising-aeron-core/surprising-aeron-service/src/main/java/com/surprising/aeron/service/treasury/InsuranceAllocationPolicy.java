@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.treasury;
 
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.risk.RiskScanner;
 import java.math.BigInteger;
@@ -32,12 +32,12 @@ public final class InsuranceAllocationPolicy {
     }
 
     /** 在已有账户 Lane 命令作用域读取对应强平记录，按上游配好的资产数组分组，跳过缺失、非保险阶段或币对对象不符项。 */
-    public static AllocationInputs prepareLaneAllocations(TradingAccountRuntime runtime, long[] ids,
+    public static AllocationInputs prepareLaneAllocations(AccountBook accountBook, long[] ids,
             int[] assetIds, CoreInstrument[] instruments) {
-        if (runtime.currentLaneCommandScope() == null) throw new IllegalStateException("insurance claim read requires Lane ownership");
+        if (accountBook.currentLaneCommandScope() == null) throw new IllegalStateException("insurance claim read requires Lane ownership");
         Map<Integer, ArrayList<RiskScanner.LiquidationOrder>> byAsset = new HashMap<>();
         for (int index = 0; index < ids.length; index++) {
-            RiskScanner.LiquidationOrder value = runtime.liquidation(ids[index]);
+            RiskScanner.LiquidationOrder value = accountBook.liquidation(ids[index]);
             CoreInstrument instrument = instruments[index];
             if (value == null || value.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED
                     || instrument == null || instrument != value.instrument()) continue;
@@ -47,7 +47,7 @@ public final class InsuranceAllocationPolicy {
     }
 
     /** 把各 Lane 已交接的索赔列表按资产拼到新输入容器，跳过空 Lane 输入，不复制索赔记录或重新去重。 */
-    public static Map<Long, Long> allocations(TreasuryRuntime ledger, AllocationInputs[] laneClaims) {
+    public static Map<Long, Long> allocations(SystemFunds ledger, AllocationInputs[] laneClaims) {
         Map<Integer, ArrayList<RiskScanner.LiquidationOrder>> merged = new HashMap<>();
         for (AllocationInputs inputs : laneClaims) if (inputs != null)
             // 当前资产需要分配的独占索赔列表，排序会改变列表顺序。
@@ -59,7 +59,7 @@ public final class InsuranceAllocationPolicy {
 
     /** 在账本中从 Lane 回执有效前缀收集索赔，按固定顺序计算目标份额。 */
     public static long resolve(RiskScanner.LiquidationOrder[] receipts, int count, long liquidationId,
-                                     int assetId, TreasuryRuntime ledger) {
+                                     int assetId, SystemFunds ledger) {
         ArrayList<RiskScanner.LiquidationOrder> claims = new ArrayList<>();
         for (int index = 0; index < count; index++) {
             RiskScanner.LiquidationOrder value = receipts[index];

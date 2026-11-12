@@ -4,7 +4,7 @@ import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.matcher.OrderBookSnapshot;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.order.OrderCommand;
@@ -15,13 +15,13 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.experimental.Accessors;
-import static com.surprising.aeron.service.core.TradingCoreRuntime.*;
+import static com.surprising.aeron.service.core.TradingCore.*;
 
 /** Owner 上的一致性快照流程：先建立屏障并收齐待撮合/待结算命令，再物化状态和哈希，捕获各 Matcher 原生模块，审计配对后同步编码并交出分段字节。线程与跨 Lane 读取权限沿用现有 Owner 边界。参数 owner：所属交易 Owner 运行时。 */
 @RequiredArgsConstructor
 public final class CoreSnapshotLifecycle {
     /** 所属交易 Owner 运行时，保存协作入口而不复制账户或订单状态。 */
-    final TradingCoreRuntime owner;
+    final TradingCore owner;
 
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -80,15 +80,15 @@ public final class CoreSnapshotLifecycle {
             throw new IllegalArgumentException("invalid snapshot fence");
         }
         if (owner.directCommand.active() || owner.commits.controlPending(owner.pendingMatching().firstSequence()))
-            throw new TradingCoreRuntime.SnapshotNotReadyException();
+            throw new TradingCore.SnapshotNotReadyException();
         if (snapshotFence != null) {
             if (snapshotFence.snapshotId == snapshotId) {
                 snapshotFence.deadlineNanos = Math.min(snapshotFence.deadlineNanos, deadlineNanos);
                 return;
             }
-            throw new TradingCoreRuntime.SnapshotNotReadyException();
+            throw new TradingCore.SnapshotNotReadyException();
         }
-        if (inFlightMatcherSnapshot.get() != null) throw new TradingCoreRuntime.SnapshotNotReadyException();
+        if (inFlightMatcherSnapshot.get() != null) throw new TradingCore.SnapshotNotReadyException();
         snapshotFence = new SnapshotFence(snapshotId, deadlineNanos);
     }
 
@@ -105,7 +105,7 @@ public final class CoreSnapshotLifecycle {
         }
         if (nowNanos >= fence.deadlineNanos) {
             releaseSnapshotFence();
-            throw new TradingCoreRuntime.SnapshotFenceTimeoutException();
+            throw new TradingCore.SnapshotFenceTimeoutException();
         }
         try {
             owner.matchingProgress.drainMatchingCompletions();
@@ -130,17 +130,17 @@ public final class CoreSnapshotLifecycle {
                     || owner.commits.publication.deferred() || owner.commits.publication.dirty()) {
                 throw new IllegalStateException("snapshot fence contains unfinished commands or patch work");
             }
-            owner.runtimeState().requireSnapshotFenceReady();
-            boolean acquired = owner.runtimeState().accountLanesStarted() && !owner.runtimeState().ownerLaneAccess();
+            owner.accountBook().requireSnapshotFenceReady();
+            boolean acquired = owner.accountBook().accountLanesStarted() && !owner.accountBook().ownerLaneAccess();
             try {
                 if (acquired) {
-                    while (!owner.runtimeState().tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+                    while (!owner.accountBook().tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
                 }
                 if (fence.snapshotState == null) {
                     fence.snapshotState = owner.tradingState();
-                    fence.feePolicies = owner.runtimeState().feePoliciesSnapshot();
-                    fence.pendingTransfers = owner.runtimeState().pendingTransfersSnapshot();
-                    long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
+                    fence.feePolicies = owner.accountBook().feePoliciesSnapshot();
+                    fence.pendingTransfers = owner.accountBook().pendingTransfersSnapshot();
+                    long businessStateHash = TradingCore.canonicalBusinessStateHash(
                             fence.snapshotState.businessStateHash(), fence.feePolicies, fence.pendingTransfers);
                     fence.businessStateHash = businessStateHash;
                 }
@@ -150,7 +150,7 @@ public final class CoreSnapshotLifecycle {
                             fence.snapshotId, fence.coreSequence, fence.businessStateHash,
                             fence.snapshotState, fence.snapshotState.orders().values().stream().filter(order -> order.status() == com.surprising.aeron.model.CoreOrderStatus.OPEN).toList());
                     if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
-                        throw new TradingCoreRuntime.SnapshotNotReadyException();
+                        throw new TradingCore.SnapshotNotReadyException();
                     }
                     fence.matcherSnapshot = matcherSnapshot.toCompletableFuture();
                     matcherSnapshot.whenComplete((ignored, failure) ->
@@ -170,7 +170,7 @@ public final class CoreSnapshotLifecycle {
                 snapshotFence = null;
                 return encoded;
             } finally {
-                if (acquired) owner.runtimeState().releaseOwnerLaneAccess();
+                if (acquired) owner.accountBook().releaseOwnerLaneAccess();
             }
         } catch (RuntimeException failure) {
             releaseSnapshotFence();

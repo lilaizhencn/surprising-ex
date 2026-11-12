@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.query;
 
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import java.math.BigInteger;
 import java.util.*;
 import org.agrona.collections.LongHashSet;
@@ -17,16 +17,16 @@ public record CommittedTradingActivity(long openOrders, long usersWithPositions,
             BigInteger longQuantitySteps, BigInteger shortQuantitySteps) {}
 
     /** Owner 必要时临时取得账户读取权，逐 Lane 汇总未完成挂单、非空持仓和待触发条件单，按币对编号排序结果。 */
-    public static CommittedTradingActivity capture(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long now) {
-        runtime.assertOwner();
-        boolean acquired = !runtime.ownerLaneAccess();
-        if (acquired) runtime.acquireOwnerLaneAccess();
+    public static CommittedTradingActivity capture(AccountBook accountBook, IdIndex identities, long now) {
+        accountBook.assertOwner();
+        boolean acquired = !accountBook.ownerLaneAccess();
+        if (acquired) accountBook.acquireOwnerLaneAccess();
         try {
             var values = new HashMap<Integer, Totals>();
             var users = new LongHashSet();
             long[] counts = new long[4];
-            for (int laneId = 0; laneId < runtime.accountLaneCount(); laneId++) {
-                runtime.onLaneReadOnly(laneId, lane -> {
+            for (int laneId = 0; laneId < accountBook.accountLaneCount(); laneId++) {
+                accountBook.onLaneReadOnly(laneId, lane -> {
                     lane.forEachOrderEntry((id, order) -> {
                         if (order.status().terminal() || order.remainingQuantitySteps() <= 0) return;
                         var t = values.computeIfAbsent(order.symbolId(), ignored -> new Totals());
@@ -56,7 +56,7 @@ public record CommittedTradingActivity(long openOrders, long usersWithPositions,
             instruments.sort(Comparator.comparing(Instrument::instrumentId));
             return new CommittedTradingActivity(counts[0], users.size(), counts[1], counts[2], counts[3], List.copyOf(instruments));
         } finally {
-            if (acquired) runtime.releaseOwnerLaneAccess();
+            if (acquired) accountBook.releaseOwnerLaneAccess();
         }
     }
 

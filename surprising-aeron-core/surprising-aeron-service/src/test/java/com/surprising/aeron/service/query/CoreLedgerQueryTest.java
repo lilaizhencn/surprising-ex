@@ -8,10 +8,10 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.OwnerAccountReadGuard;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.retention.TerminalStateRetention;
+import com.surprising.aeron.service.retention.CompletedOrderArchive;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -35,8 +35,8 @@ class CoreLedgerQueryTest {
      * 先通过命令给保险基金增加 250，再确认 Owner 直接读活动账本会失败；经异步查询应读到原账本余额且结果只能消费一次，账户交接计数不变。
      */
     @Test
-    void treasuryQueryReadsOriginalLedgerWithoutAccountHandoffAndConsumesResultOnce() throws Exception {
-        try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCoreRuntime(LINE)) {
+    void systemFundsQueryReadsOriginalLedgerWithoutAccountHandoffAndConsumesResultOnce() throws Exception {
+        try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCore(LINE)) {
             core.activate();
             // 通过正常复制命令给 USDT 保险基金增加 250 的测试消息。
             var adjustment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_INSURANCE_FUND,
@@ -45,10 +45,10 @@ class CoreLedgerQueryTest {
             assertThat(CoreTestCompletion.applyAsynchronously(core, adjustment).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             // USDT 的运行时资产编号，账本内联由 Owner 同步持有，可直接读取。
             int assetId = core.identities().assetId("USDT");
-            assertThat(core.runtimeState().treasury().insurance(assetId)).isEqualTo(250L);
+            assertThat(core.accountBook().systemFunds().insurance(assetId)).isEqualTo(250L);
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
-            try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook());
+            try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
                 // 本次查询消费到的最终响应，按场景核对成功、响应超限或页内容。
                 var response = query(core, CoreMessageType.TREASURY_STATE_QUERY, new byte[0]);
                 assertThat(response.status()).isEqualTo(ResponseStatus.OK);
@@ -58,7 +58,7 @@ class CoreLedgerQueryTest {
                             assertThat(asset.insuranceBalanceUnits()).isEqualTo(250);
                         });
             }
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook())).isEqualTo(handoff);
             core.assertClusterCallbackComplete();
         }
     }
@@ -100,8 +100,8 @@ class CoreLedgerQueryTest {
         try (var core = coreWithInitialState(state)) {
             core.activate();
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
-            try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook());
+            try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
                 for (long /* 本轮页起点，覆盖第一页、中间游标和末尾之后。 */ cursor : new long[]{0, 1, 3, 5}) {
                     for (int /* 本轮允许的工作页编码字节预算，与单项条数限制一起生效。 */ maxBytes : new int[]{256, 1_024}) {
                         // 指定工作类型、游标、一项上限和字节预算的页查询条件。
@@ -113,7 +113,7 @@ class CoreLedgerQueryTest {
                     }
                 }
             }
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook())).isEqualTo(handoff);
             core.assertClusterCallbackComplete();
         }
     }
@@ -165,8 +165,8 @@ class CoreLedgerQueryTest {
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {
             core.activate();
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
-            try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook());
+            try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.accountBook())) {
                 // 从游标 0 取得的第一页，应仅包含计划 1、建议赔付 18 且尚未结束。
                 var pageOne = insuranceQuery(core, 0);
                 assertThat(pageOne.complete()).isFalse();
@@ -183,8 +183,8 @@ class CoreLedgerQueryTest {
                     assertThat(claim.recommendedCoveredUnits()).isEqualTo(7);
                 });
             }
-            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
-            assertThat(core.runtimeState().treasuryForQuery(core.identities()).insuranceBalances()).containsEntry("USDT", 25L);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook())).isEqualTo(handoff);
+            assertThat(core.accountBook().systemFundsForQuery(core.identities()).insuranceBalances()).containsEntry("USDT", 25L);
             core.assertClusterCallbackComplete();
         }
     }
@@ -193,7 +193,7 @@ class CoreLedgerQueryTest {
      * 构造一万零一种手续费资产，财库查询应因响应过大被拒绝，随后保险查询仍能正常完成，账本不因单次超限失效。
      */
     @Test
-    void oversizedTreasuryResponseRejectsOnlyQueryAndLedgerStillCompletesNextQuery() {
+    void oversizedSystemFundsResponseRejectsOnlyQueryAndLedgerStillCompletesNextQuery() {
         // 一万零一种不同资产的手续费分账，用来超过财库响应的实体上限。
         var fees = new LinkedHashMap<String, Long>();
         for (/* 生成不同资产名称的下标，每个资产都放一单位手续费。 */ int asset = 0; asset < 10_001; asset++) fees.put("ASSET" + asset, 1L);
@@ -216,9 +216,9 @@ class CoreLedgerQueryTest {
      */
     @Test
     void coldReadFailureDoesNotPoisonOriginalFinancialLedger() {
-        try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCoreRuntime(LINE)) {
+        try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCore(LINE)) {
             core.activate();
-            assertThatThrownBy(() -> core.runtimeState().queryLedgerAtRest(/* 冷查询回调取得的账本，此处主动抛出异常来检查失败传播和后续查询可用性。 */ ledger -> {
+            assertThatThrownBy(() -> core.accountBook().queryLedgerAtRest(/* 冷查询回调取得的账本，此处主动抛出异常来检查失败传播和后续查询可用性。 */ ledger -> {
                 throw new IllegalArgumentException("invalid cold query");
             })).isInstanceOf(IllegalArgumentException.class).hasMessage("invalid cold query");
             assertThat(CoreStateQueryCodec.decodeTreasuryState(query(core, CoreMessageType.TREASURY_STATE_QUERY, new byte[0]).data()))
@@ -232,7 +232,7 @@ class CoreLedgerQueryTest {
      */
     @Test
     void liquidationWorkQueryExecutesAndReturnsResult() {
-        try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCoreRuntime(LINE)) {
+        try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCore(LINE)) {
             core.activate();
             // 固定的一项强平执行页查询，两次请求使用相同载荷但不同命令编号。
             var payload = CoreLiquidationWorkCodec.encodeQuery(new CoreLiquidationWorkView.Query(
@@ -260,7 +260,7 @@ class CoreLedgerQueryTest {
     @Test
     void closeClearsUnconsumedAccountLaneQueryResults() {
         // 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。
-        var core = new TradingCoreRuntime(LINE);
+        var core = new TradingCore(LINE);
         try {
             core.activate();
             // 已经构造的查询消息，用其命令 UUID 核对内部查询关联。
@@ -277,9 +277,9 @@ class CoreLedgerQueryTest {
      * 把给定业务状态装入尚未激活的核心运行时，让每个测试自行控制启动和关闭。
      * @param state 预先准备的用户、风险计划和财库业务状态
      */
-    private TradingCoreRuntime coreWithInitialState(TradingCoreState state) {
-        return new TradingCoreRuntime(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
-                new TerminalStateRetention(), null, 0, Map.of(), Map.of());
+    private TradingCore coreWithInitialState(TradingCoreState state) {
+        return new TradingCore(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
+                new CompletedOrderArchive(), null, 0, Map.of(), Map.of());
     }
 
     /**
@@ -287,7 +287,7 @@ class CoreLedgerQueryTest {
      * @param core 已经激活并负责投递与回收异步查询的核心运行时
      * @param cursor 上一页已消费的强平编号，当前页只取它后面的保险计划
      */
-    private CoreLiquidationWorkView insuranceQuery(TradingCoreRuntime core, long cursor) {
+    private CoreLiquidationWorkView insuranceQuery(TradingCore core, long cursor) {
         // 按传入游标编码的一项保险查询，字节预算固定为 1024。
         var payload = CoreLiquidationWorkCodec.encodeQuery(new CoreLiquidationWorkView.Query(
                 LINE, CoreLiquidationWorkView.Purpose.INSURANCE, cursor, 1, 1_024));
@@ -303,7 +303,7 @@ class CoreLedgerQueryTest {
      * @param type 本次查询的协议消息类型
      * @param payload 对应消息类型的编码查询载荷
      */
-    private CoreResponse query(TradingCoreRuntime core, CoreMessageType type, byte[] payload) {
+    private CoreResponse query(TradingCore core, CoreMessageType type, byte[] payload) {
         // 已经构造的查询消息，用其命令 UUID 核对内部查询关联。
         var message = message(type, payload);
         assertThat(core.requiresOwnerLaneAccessForPreparation(message)).isFalse();

@@ -3,8 +3,8 @@ package com.surprising.aeron.service.query;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.order.*;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import java.util.Map;
@@ -27,7 +27,7 @@ public final class MarketInputs {
     }
 
     /** Owner 逐币对捕获当前配置的查询副本与行情引用，跳过未知或重复币对，并记录可用的结算资产编号，让后续账户查询不受 Owner 配置更新影响。 */
-    public static MarketInputs capture(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+    public static MarketInputs capture(AccountBook accountBook, IdIndex identities,
             Iterable<String> instrumentIds) {
         var instruments = new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<CoreInstrument>();
         var marks = new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<MarkPrice>();
@@ -35,9 +35,9 @@ public final class MarketInputs {
         for (String instrumentId : instrumentIds) {
             Integer symbolId = identities.findSymbolId(instrumentId);
             if (symbolId == null || instruments.containsKey(symbolId)) continue;
-            CoreInstrument instrument = runtime.instrument(instrumentId);
+            CoreInstrument instrument = accountBook.instrument(instrumentId);
             instruments.put(symbolId, instrument == null ? null : instrument.captureForQuery());
-            marks.put(symbolId, runtime.markPrice(symbolId));
+            marks.put(symbolId, accountBook.markPrice(symbolId));
             Integer assetId = instrument == null ? null : identities.findAssetId(instrument.settleAsset());
             if (assetId != null) assets.put(instrument.settleAsset(), assetId);
         }

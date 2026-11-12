@@ -12,10 +12,10 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.core.*;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.Order;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
@@ -31,11 +31,11 @@ public class ActiveOrderIndexBenchmark {
     @Param({"1", "20"}) public int users;
     @Param({"1", "4"}) public int symbols;
     private ActiveOrderIndex index;
-    private RuntimeIdentityRegistry identities;
+    private IdIndex identities;
     private final Order[] open = new Order[20], terminal = new Order[20];
 
     @Setup public void setup() {
-        identities = new RuntimeIdentityRegistry();
+        identities = new IdIndex();
         index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
         var instruments = new CoreInstrument[symbols];
         for (int i = 0; i < symbols; i++) instruments[i] = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
@@ -49,7 +49,7 @@ public class ActiveOrderIndexBenchmark {
             var instrument = instruments[i % symbols];
             var order = new CoreOrderState(i + 1, ProductLine.LINEAR_PERPETUAL, i % users + 1, instrument.instrumentId(),
                     CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
-            open[i] = RuntimeStateProjector.toRuntimeOrder(order, identities, instrument);
+            open[i] = SnapshotLoader.toRuntimeOrder(order, identities, instrument);
             terminal[i] = open[i].withStatus(CoreOrderStatus.CANCELED, 2, -1, -1);
         }
     }

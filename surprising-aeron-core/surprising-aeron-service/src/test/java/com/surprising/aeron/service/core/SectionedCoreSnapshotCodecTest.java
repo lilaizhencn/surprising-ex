@@ -6,7 +6,7 @@ import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 
-import static com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport.matcherSnapshot;
+import static com.surprising.aeron.service.core.TradingCoreRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
@@ -28,7 +28,7 @@ import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.OrderBookEngine;
 import com.surprising.aeron.service.matcher.OrderBookSnapshot;
-import com.surprising.aeron.service.result.CommandResultLedger;
+import com.surprising.aeron.service.result.CommandResultLog;
 import com.surprising.aeron.service.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -74,15 +74,15 @@ class SectionedCoreSnapshotCodecTest {
                 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
         });
         // 保存指纹、响应和保留序号的人工结果。
-        CommandResultLedger.StoredResult stored = new CommandResultLedger.StoredResult(
+        CommandResultLog.StoredResult stored = new CommandResultLog.StoredResult(
                 fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, response, 4);
         // 准备配对并待编码的原始运行时。
-        TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1,
+        TradingCore original = TradingCoreRestoreTestSupport.restore(ProductLine.SPOT, 1,
                 Map.of(commandId, stored), Map.of(),
                 com.surprising.aeron.service.snapshot.state.TradingCoreState.empty(ProductLine.SPOT));
 
         // 从快照恢复的候选运行时，具体关闭范围见当前测试。
-        TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot());
+        TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, original.snapshot());
 
         assertThat(restored.commandResults().get(commandId).responseData()).containsExactly(response);
         assertThat(restored.commandResults().get(commandId).fingerprint()).isEqualTo(fingerprint);
@@ -96,7 +96,7 @@ class SectionedCoreSnapshotCodecTest {
     @Test
     void snapshotUsesDeterministicBoundedSectionOrder() {
         // 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore state = new TradingCore(ProductLine.SPOT);
         try {
             // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
             byte[] snapshot = state.snapshot(41);
@@ -132,7 +132,7 @@ class SectionedCoreSnapshotCodecTest {
     @Test
     void rejectsTruncationOversizeInvalidSectionMetadataChecksumAndTrailingGarbage() {
         // 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore state = new TradingCore(ProductLine.SPOT);
         try {
             // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
             byte[] snapshot = state.snapshot(42);
@@ -207,7 +207,7 @@ class SectionedCoreSnapshotCodecTest {
     @Test
     void rejectsMutationAndTruncationAtEverySectionBoundary() {
         // 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore state = new TradingCore(ProductLine.SPOT);
         try {
             // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
             byte[] snapshot = state.snapshot(48);
@@ -245,7 +245,7 @@ class SectionedCoreSnapshotCodecTest {
     @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
     void onlyCurrentSectionedDecoderAcceptsRecoveryInput(ProductLine product) {
         byte[] current;
-        try (var state = new TradingCoreRuntime(product)) {
+        try (var state = new TradingCore(product)) {
             current = state.snapshot(47);
         }
         for (int version = 0; version <= SectionedCoreSnapshotCodec.VERSION + 1; version++) {
@@ -272,7 +272,7 @@ class SectionedCoreSnapshotCodecTest {
     void rejectsMissingDuplicateAndMisroutedAccountLaneSectionsAfterChecksumRecomputation() {
         // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
         byte[] snapshot;
-        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             snapshot = state.snapshot(49);
         }
         // 第十段号被覆盖成九的错误克隆。
@@ -312,17 +312,17 @@ class SectionedCoreSnapshotCodecTest {
                     tradingState.orders().values());
         }
         // 只执行验证命令以取得幂等结果与消费水位的辅助运行时。
-        TradingCoreRuntime source = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore source = new TradingCore(ProductLine.SPOT);
         // 推进已应用 Core 数量的一条 CONTINUE_RISK_SCAN 命令。
         CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
                 UUID.fromString("00000000-0000-0000-0000-000000000043"), ProductLine.SPOT,
                 CommandSource.GATEWAY, 43, 1, 7, 1_000, 43), com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1)));
         assertThat(source.apply(increment).status()).isEqualTo(ResponseStatus.APPLIED);
         // 准备配对并待编码的原始运行时。
-        TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1,
+        TradingCore original = TradingCoreRestoreTestSupport.restore(ProductLine.SPOT, 1,
                 source.commandResults(), source.lastSourceSequences(), tradingState, matcherSnapshot);
         // 从快照恢复的候选运行时，具体关闭范围见当前测试。
-        TradingCoreRuntime restored = null;
+        TradingCore restored = null;
         try {
             // 通过生产冻结流程捕获并编码完整快照。
             byte[] first = original.snapshot(44);
@@ -371,7 +371,7 @@ class SectionedCoreSnapshotCodecTest {
         AtomicReference<CoreFaults.ActivationState> beforeActivation = new AtomicReference<>();
         CoreFaults.beforeActivation(/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ state ->
                 beforeActivation.set(CoreFaults.activationState(state)));
-        try (/* 从快照恢复的候选运行时，具体关闭范围见当前测试。 */ TradingCoreRuntime restored = SectionedCoreSnapshotCodec.decode(control, ProductLine.SPOT)) {
+        try (/* 从快照恢复的候选运行时，具体关闭范围见当前测试。 */ TradingCore restored = SectionedCoreSnapshotCodec.decode(control, ProductLine.SPOT)) {
             assertThat(beforeActivation.get()).isNotNull();
             assertThat(beforeActivation.get().allPassive()).isTrue();
             assertThat(CoreFaults.activationState(restored).allActivated()).isTrue();
@@ -388,7 +388,7 @@ class SectionedCoreSnapshotCodecTest {
         // 正常余额调整场景生成的控制快照输入。
         byte[] control = populatedSnapshot(90);
         // 保存故障注入钩子接到的尚未激活运行时引用。
-        AtomicReference<TradingCoreRuntime> candidate = new AtomicReference<>();
+        AtomicReference<TradingCore> candidate = new AtomicReference<>();
         // 恢复操作前符合特定名称过滤条件的活线程数量。
         long threadsBefore = recoveryConsumerThreadCount();
         CoreFaults.beforeActivation(/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ state -> {
@@ -412,7 +412,7 @@ class SectionedCoreSnapshotCodecTest {
      */
     @Test
     void pairedManifestExposesFencePositionSequencesHashesAndOutboxMetadata() {
-        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 推进已应用 Core 数量的一条 CONTINUE_RISK_SCAN 命令。
             CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
                     UUID.fromString("00000000-0000-0000-0000-000000000073"), ProductLine.SPOT,
@@ -431,7 +431,7 @@ class SectionedCoreSnapshotCodecTest {
             assertThat(snapshot).isNotNull();
 
             // 按当前产品线完整解析得到的公开快照清单。
-            CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(ProductLine.SPOT, snapshot);
+            CoreSnapshotManifest manifest = TradingCore.inspectSnapshot(ProductLine.SPOT, snapshot);
 
             assertThat(manifest.schemaVersion()).isEqualTo(SectionedCoreSnapshotCodec.VERSION);
             assertThat(manifest.snapshotId()).isEqualTo(73);
@@ -452,7 +452,7 @@ class SectionedCoreSnapshotCodecTest {
     void rejectsEveryPairedManifestMismatchAfterChecksumRecomputation() {
         // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
         byte[] snapshot;
-        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
                     UUID.fromString("00000000-0000-0000-0000-000000000074"), ProductLine.SPOT,
                     CommandSource.GATEWAY, 74, 1, 7, 1_000, 74), com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1)))).status())
@@ -485,7 +485,7 @@ class SectionedCoreSnapshotCodecTest {
     void rejectsWrongProductLineBeforeDecodingOtherSections() {
         // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
         byte[] snapshot;
-        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             snapshot = state.snapshot(75);
         }
 
@@ -519,7 +519,7 @@ class SectionedCoreSnapshotCodecTest {
     void checksumProtectsClusterTimestampAndPositionManifestFields() {
         // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
         byte[] snapshot;
-        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             snapshot = state.snapshot(76);
         }
 
@@ -556,7 +556,7 @@ class SectionedCoreSnapshotCodecTest {
                 new UUID(0, sequence), ProductLine.SPOT, CommandSource.GATEWAY, sequence, 1, 7,
                 1_000, sequence),
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
-        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 人工响应字节，余额辅助场景中则是直接命令的可空响应。
             var response = state.apply(adjustment);
             // 余额调整直接命令等待的五秒截止点。

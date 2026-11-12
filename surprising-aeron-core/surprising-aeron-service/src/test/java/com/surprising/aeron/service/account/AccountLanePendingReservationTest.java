@@ -23,7 +23,7 @@ class AccountLanePendingReservationTest {
         field.setAccessible(true);
         // 资产编号到用户金额表的实际内部索引。
         @SuppressWarnings("unchecked")
-        var assets = (IntObjectHashMap<LongLongHashMap>) field.get(lane.admissionOrderIndex);
+        var assets = (IntObjectHashMap<LongLongHashMap>) field.get(lane.orderCheckOrderIndex);
         // 首轮保存的资产零用户金额表，用于验证后续不更换容器。
         LongLongHashMap first = null;
         for (/* 当前周转的近 long 上限用户编号。 */ long user = Long.MAX_VALUE - 2048; user < Long.MAX_VALUE; user++) {

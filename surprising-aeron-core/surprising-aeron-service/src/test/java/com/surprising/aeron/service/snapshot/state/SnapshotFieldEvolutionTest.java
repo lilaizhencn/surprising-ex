@@ -76,16 +76,16 @@ class SnapshotFieldEvolutionTest {
     @Test
     void fundingProgressStoresOnlySettlementRateCursorAndFixedPrice() {
         var progress = new CoreTreasuryState.FundingProgress(11, 100, 41, 60_000);
-        var treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), Map.of(), Map.of(),
+        var systemFunds = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), Map.of(), Map.of(),
                 Map.of("1", progress), java.util.Map.of());
         var empty = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         var state = new TradingCoreState(empty.productLine(), 0, empty.users(), empty.orders(),
-                empty.instruments(), empty.riskState(), treasury, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
+                empty.instruments(), empty.riskState(), systemFunds, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         byte[] encoded = TradingStateSnapshotCodec.encode(state);
         assertThat(ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt()).isEqualTo(56);
         var root = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, Integer.BYTES, encoded.length));
-        var savedTreasury = new SnapshotFields.Reader(root.bytes(7));
-        var entries = new SnapshotFields.Reader(savedTreasury.bytes(10))
+        var savedSystemFunds = new SnapshotFields.Reader(root.bytes(7));
+        var entries = new SnapshotFields.Reader(savedSystemFunds.bytes(10))
                 .list(1, SnapshotFields.Reader::new);
         assertThat(entries).hasSize(1);
         var entry = entries.getFirst();

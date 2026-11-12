@@ -5,8 +5,8 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.AccountPartition;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.*;
@@ -15,7 +15,7 @@ import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.service.product.OptionTradingRules;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.treasury.SystemFundsChange;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
 import exchange.core2.core.common.MatcherEventType;
@@ -31,59 +31,59 @@ public final class DerivativeTradeSettlementService {
 
     /** 在线所属 Lane 入口：至多一次成交直接应用，多笔成交复用累加器。 */
     static void applyLane(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
-                          TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+                          AccountBook accountBook, IdIndex identities,
                           CoreInstrument instrument, int settleAssetId,
-                          RuntimeTreasuryDelta treasuryDelta,
+                          SystemFundsChange systemFundsChange,
                           long commitTimestamp, long commitPosition) {
-        if (plan == null || treasuryDelta == null || laneId < 0
-                || laneId >= runtime.topology().accountLaneCount()) {
+        if (plan == null || systemFundsChange == null || laneId < 0
+                || laneId >= accountBook.topology().accountLaneCount()) {
             throw new IllegalArgumentException("invalid perpetual matcher settlement plan");
         }
         Order localTaker = lane.order(takerOrderId);
         if (plan.tradeCount() <= 1) {
-            applyLaneDirect(takerOrderId, plan, lane, laneId, runtime, identities, instrument,
-                    settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
+            applyLaneDirect(takerOrderId, plan, lane, laneId, accountBook, identities, instrument,
+                    settleAssetId, systemFundsChange, commitTimestamp, commitPosition);
         } else {
-            applyLaneAccumulated(takerOrderId, plan, lane, laneId, runtime, identities, instrument,
-                    settleAssetId, treasuryDelta, commitTimestamp, commitPosition, localTaker);
+            applyLaneAccumulated(takerOrderId, plan, lane, laneId, accountBook, identities, instrument,
+                    settleAssetId, systemFundsChange, commitTimestamp, commitPosition, localTaker);
         }
         localTaker = lane.order(takerOrderId);
         if (localTaker != null) {
             if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
                     || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-                runtime.updateOrderStatusInLane(lane, localTaker.orderId(), CoreOrderStatus.CANCELED,
+                accountBook.updateOrderStatusInLane(lane, localTaker.orderId(), CoreOrderStatus.CANCELED,
                         Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition);
             }
-            TradeSettlement.releaseCanceledReservation(runtime, lane, localTaker);
+            TradeSettlement.releaseCanceledReservation(accountBook, lane, localTaker);
         }
     }
 
     /** maker 完全成交时释放预留，保留原事件顺序。 */
     private static void applyLaneDirect(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
-                                        TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+                                        AccountBook accountBook, IdIndex identities,
                                         CoreInstrument instrument, int settleAssetId,
-                                        RuntimeTreasuryDelta treasuryDelta,
+                                        SystemFundsChange systemFundsChange,
                                         long commitTimestamp, long commitPosition) {
         Order localTaker = lane.order(takerOrderId);
         for (int index = plan.firstMatcherEvent(laneId); index >= 0;
                 index = plan.nextMatcherEvent(index, laneId)) {
             MatcherEvent match = plan.matcherEvent(index);
             if (match.eventType() != MatcherEventType.TRADE
-                    || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
+                    || !plan.matcherEventTouchesLane(index, laneId, accountBook)) continue;
             if (localTaker != null) {
                 localTaker = TradeSettlement.requireOpen(lane, takerOrderId);
-                applyFill(runtime, lane, identities, instrument, localTaker, match.price(), match.size(), true,
-                        settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
+                applyFill(accountBook, lane, identities, instrument, localTaker, match.price(), match.size(), true,
+                        settleAssetId, systemFundsChange, commitTimestamp, commitPosition);
             }
             Order maker = lane.order(match.matchedOrderId());
             if (maker != null) {
                 maker = TradeSettlement.requireOpen(maker, maker.orderId());
                 boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
-                applyFill(runtime, lane, identities, instrument, maker, match.price(), match.size(), false,
-                        settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
+                applyFill(accountBook, lane, identities, instrument, maker, match.price(), match.size(), false,
+                        settleAssetId, systemFundsChange, commitTimestamp, commitPosition);
                 if (makerTerminal) {
-                    long releaseUnits = runtime.releaseTerminalReservationInLane(lane, maker, null);
-                    if (releaseUnits > 0) runtime.advanceUserRevision(lane, maker.userId());
+                    long releaseUnits = accountBook.releaseTerminalReservationInLane(lane, maker, null);
+                    if (releaseUnits > 0) accountBook.advanceUserRevision(lane, maker.userId());
                 }
             }
         }
@@ -91,26 +91,26 @@ public final class DerivativeTradeSettlementService {
 
     /** 借用当前 Lane 的连续成交累加器，按原事件顺序计算本地各订单，最后发布剩余游标。无论成功与否都清理暂存引用，已写回变化的回滚由外层负责。 */
     private static void applyLaneAccumulated(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
-                                             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+                                             AccountBook accountBook, IdIndex identities,
                                              CoreInstrument instrument, int settleAssetId,
-                                             RuntimeTreasuryDelta treasuryDelta,
+                                             SystemFundsChange systemFundsChange,
                                              long commitTimestamp, long commitPosition,
                                              Order localTaker) {
         DerivativeSettlementAccumulator accumulator =
                 lane.derivativeSettlementAccumulator();
-        accumulator.reset(runtime, lane, identities, instrument, settleAssetId, commitTimestamp, commitPosition);
+        accumulator.reset(accountBook, lane, identities, instrument, settleAssetId, commitTimestamp, commitPosition);
         try {
             for (int index = plan.firstMatcherEvent(laneId); index >= 0;
                     index = plan.nextMatcherEvent(index, laneId)) {
                 MatcherEvent match = plan.matcherEvent(index);
                 if (match.eventType() != MatcherEventType.TRADE
-                        || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
+                        || !plan.matcherEventTouchesLane(index, laneId, accountBook)) continue;
                 if (localTaker != null) {
-                    accumulator.apply(takerOrderId, true, match.price(), match.size(), treasuryDelta);
+                    accumulator.apply(takerOrderId, true, match.price(), match.size(), systemFundsChange);
                 }
                 Order maker = lane.order(match.matchedOrderId());
                 if (maker != null) {
-                    accumulator.apply(maker.orderId(), false, match.price(), match.size(), treasuryDelta);
+                    accumulator.apply(maker.orderId(), false, match.price(), match.size(), systemFundsChange);
                 }
             }
             accumulator.publish();
@@ -127,20 +127,20 @@ public final class DerivativeTradeSettlementService {
         private final LongLongHashMap isolatedLeverageByUser = new LongLongHashMap();
         private final java.util.ArrayDeque<FillCursor> free =
                 new java.util.ArrayDeque<>();
-        private TradingAccountRuntime runtime;
+        private AccountBook accountBook;
         /** 本轮累加器独占服务的账户 Lane，不共享给其他账户线程。 */
         private AccountPartition lane;
-        private RuntimeIdentityRegistry identities;
+        private IdIndex identities;
         private CoreInstrument instrument;
         private int settleAssetId;
         private long commitTimestamp;
         private long commitPosition;
 
         /** 保存本次单币对结算使用的所属 Lane、运行时、资产及业务元数据。不清空旧游标，调用方必须先结束并 clear 上一轮。 */
-        void reset(TradingAccountRuntime runtime, AccountPartition lane, RuntimeIdentityRegistry identities,
+        void reset(AccountBook accountBook, AccountPartition lane, IdIndex identities,
                    CoreInstrument instrument, int settleAssetId,
                    long commitTimestamp, long commitPosition) {
-            this.runtime = runtime;
+            this.accountBook = accountBook;
             this.lane = lane;
             this.identities = identities;
             this.instrument = instrument;
@@ -151,7 +151,7 @@ public final class DerivativeTradeSettlementService {
 
         /** 首次遇到订单时准备独占游标。 */
         void apply(long orderId, boolean taker, long price, long quantity,
-                   RuntimeTreasuryDelta treasury) {
+                   SystemFundsChange systemFunds) {
             FillCursor cursor = cursors.get(orderId);
             if (cursor == null) {
                 Order order = TradeSettlement.requireOpen(lane, orderId);
@@ -165,7 +165,7 @@ public final class DerivativeTradeSettlementService {
                     if (leverageByUser.containsKey(order.userId())) {
                         leverage = leverageByUser.get(order.userId());
                     } else {
-                        Long configured = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
+                        Long configured = accountBook.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
                         leverage = configured == null ? instrument.maxLeveragePpm() : configured;
                         leverageByUser.put(order.userId(), leverage);
                     }
@@ -173,12 +173,12 @@ public final class DerivativeTradeSettlementService {
                 long key = identities.preparedPositionKey(lane, order);
                 cursor = free.pollFirst();
                 if (cursor == null) cursor = new FillCursor();
-                begin(cursor, runtime, lane, instrument, order, key,
+                begin(cursor, accountBook, lane, instrument, order, key,
                         leverage, settleAssetId, commitTimestamp, commitPosition);
                 cursors.put(orderId, cursor);
                 activeOrderByUser.put(order.userId(), orderId);
             }
-            cursor.applyNext(price, quantity, taker, treasury);
+            cursor.applyNext(price, quantity, taker, systemFunds);
         }
 
         /** 把本轮仍保留的每个订单游标写回账户，不重复记入已经按笔记录的财务差额。不同用户的遍历顺序不作为撮合顺序。 */
@@ -196,7 +196,7 @@ public final class DerivativeTradeSettlementService {
             activeOrderByUser.clear();
             crossLeverageByUser.clear();
             isolatedLeverageByUser.clear();
-            runtime = null;
+            accountBook = null;
             lane = null;
             identities = null;
             instrument = null;
@@ -213,32 +213,32 @@ public final class DerivativeTradeSettlementService {
 
         /** 把游标最终累计结果写回所属 Lane，财务参数传空避免重复。 */
         private void publishCursor(FillCursor cursor) {
-            TradeSettlement.releaseCanceledReservation(runtime, lane, cursor.publish(runtime, lane, cursor.positionKey(), null));
+            TradeSettlement.releaseCanceledReservation(accountBook, lane, cursor.publish(accountBook, lane, cursor.positionKey(), null));
         }
     }
 
-    private static void applyFill(TradingAccountRuntime runtime, AccountPartition lane,
-                                  RuntimeIdentityRegistry identities, CoreInstrument instrument,
+    private static void applyFill(AccountBook accountBook, AccountPartition lane,
+                                  IdIndex identities, CoreInstrument instrument,
                                   Order order, long priceTicks, long quantitySteps,
-                                  boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta,
+                                  boolean taker, int settleAssetId, SystemFundsChange systemFundsChange,
                                        long commitTimestamp, long commitPosition) {
         long leverage = 0;
         if (!instrument.contractType().isOption()) {
-            Long configuredLeverage = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
+            Long configuredLeverage = accountBook.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
             leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
         }
-        apply(runtime, lane, identities, instrument, order,
+        apply(accountBook, lane, identities, instrument, order,
                 identities.preparedPositionKey(lane, order),
-                priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
+                priceTicks, quantitySteps, taker, leverage, settleAssetId, systemFundsChange, commitTimestamp, commitPosition);
     }
 
     /** 校验单笔成交、账户预留及余额归属，借用所属 Lane 的单笔游标计算并发布结果。 */
-    static void apply(TradingAccountRuntime runtime, AccountPartition lane, RuntimeIdentityRegistry identities,
+    static void apply(AccountBook accountBook, AccountPartition lane, IdIndex identities,
                       CoreInstrument instrument, Order order,
                       long positionKey, long fillPriceTicks, long fillQuantitySteps,
                       boolean taker, long leveragePpm, int settleAssetId,
-                      RuntimeTreasuryDelta treasuryDelta, long commitTimestamp, long commitPosition) {
-        if (runtime == null || identities == null || instrument == null || order == null || treasuryDelta == null
+                      SystemFundsChange systemFundsChange, long commitTimestamp, long commitPosition) {
+        if (accountBook == null || identities == null || instrument == null || order == null || systemFundsChange == null
                 || fillPriceTicks <= 0 || fillQuantitySteps <= 0
                 || !instrument.contractType().isOption() && leveragePpm <= 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("invalid perpetual fill arguments");
@@ -256,7 +256,7 @@ public final class DerivativeTradeSettlementService {
             throw new IllegalStateException("fill exceeds runtime order remaining quantity");
         }
         OrderFundsReservation reservation = lane.reservation(order.orderId());
-        AccountBalance balance = runtime.balance(lane, order.userId(), settleAssetId);
+        AccountBalance balance = accountBook.balance(lane, order.userId(), settleAssetId);
         if (reservation == null || balance == null || reservation.userId() != order.userId()
                 || reservation.assetId() != settleAssetId) {
             throw new IllegalStateException("runtime fill entities are missing: " + order.orderId());
@@ -266,15 +266,15 @@ public final class DerivativeTradeSettlementService {
             throw new IllegalStateException("runtime position owner mismatch: " + positionKey);
         }
 
-        MarkPrice riskMark = runtime.markPrice(lane, order.symbolId());
+        MarkPrice riskMark = accountBook.markPrice(lane, order.symbolId());
         if (instrument.contractType().isOption()) OptionTradingRules.requireRiskMark(riskMark);
-        runtime.requireLaneAccess(lane, order.userId());
+        accountBook.requireLaneAccess(lane, order.userId());
         FillCursor cursor = lane.singleFillCursor();
         try {
             cursor.reset(instrument, order, reservation, current, balance.availableUnits(),
                     balance.lockedUnits(), settleAssetId, riskMark);
             cursor.step(fillPriceTicks, fillQuantitySteps, taker, leveragePpm, commitTimestamp, commitPosition);
-            cursor.publish(runtime, lane, positionKey, treasuryDelta);
+            cursor.publish(accountBook, lane, positionKey, systemFundsChange);
         } finally { cursor.clear(); }
     }
 
@@ -291,7 +291,7 @@ public final class DerivativeTradeSettlementService {
         private long executedValueHigh, executedValueLow;
         private long timestamp, clusterPosition;
         /** feeTreasuryUnits：最近一笔成交对应的系统手续费变化，逐笔覆盖而非累计。clearingTreasuryUnits：最近一笔实际计入余额盈亏的反向系统清算变化，逐笔覆盖。 */
-        private long feeTreasuryUnits, clearingTreasuryUnits;
+        private long feeSystemFundsUnits, clearingSystemFundsUnits;
         private long positionKey, leveragePpm;
 
         /** 把当前订单、预留、持仓和余额起点装入游标，重置本轮成交次数。 */
@@ -325,31 +325,31 @@ public final class DerivativeTradeSettlementService {
             calculateInto(this, price, size, taker, leverage, timestamp, position);
         }
         /** 使用 begin 保存的杠杆和业务元数据累加一笔成交，并立刻按原事件顺序记入本笔费用及实际盈亏财务差额。 */
-        void applyNext(long price, long size, boolean taker, RuntimeTreasuryDelta treasury) {
+        void applyNext(long price, long size, boolean taker, SystemFundsChange systemFunds) {
             step(price, size, taker, leveragePpm, timestamp, clusterPosition);
             // 每笔立即记财务差额，保持与 maker 差额交错出现的原始成交顺序。
-            treasury.addFee(settleAssetId, feeTreasuryUnits);
-            treasury.addClearing(settleAssetId, clearingTreasuryUnits);
+            systemFunds.addFee(settleAssetId, feeSystemFundsUnits);
+            systemFunds.addClearing(settleAssetId, clearingSystemFundsUnits);
         }
         /** 返回 begin 为本聚合订单准备的持仓身份键。 */
         long positionKey() { return positionKey; }
         /** 有成交才把游标累计的预留、余额、持仓、订单和用户修订写回所属 Lane。 */
-        Order publish(TradingAccountRuntime runtime, AccountPartition lane, long positionKey, RuntimeTreasuryDelta treasury) {
+        Order publish(AccountBook accountBook, AccountPartition lane, long positionKey, SystemFundsChange systemFunds) {
             if (fills == 0) return null;
             CoreOrderStatus nextStatus = remaining == 0 ? CoreOrderStatus.FILLED : originalOrder.status();
             long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
-            runtime.updateReservationInLane(lane, originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
-            runtime.replaceBalance(lane, originalOrder.userId(), settleAssetId, available, locked);
-            runtime.updatePositionInLane(lane, positionKey, originalOrder.userId(), originalOrder.symbolId(), settleAssetId,
+            accountBook.updateReservationInLane(lane, originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
+            accountBook.replaceBalance(lane, originalOrder.userId(), settleAssetId, available, locked);
+            accountBook.updatePositionInLane(lane, positionKey, originalOrder.userId(), originalOrder.symbolId(), settleAssetId,
                     originalOrder.instrument(), quantity, entryPrice, entryValue,
                     realizedPnl, margin, originalOrder.marginMode(), originalOrder.positionSide());
-            Order nextOrder = runtime.updateOrderInLane(lane, originalOrder.orderId(), executed, remaining,
+            Order nextOrder = accountBook.updateOrderInLane(lane, originalOrder.orderId(), executed, remaining,
                     feeDelta, executedValueHigh, executedValueLow, nextStatus, orderRevision, timestamp, clusterPosition);
-            if (treasury != null) {
-                treasury.addFee(settleAssetId, feeTreasuryUnits);
-                treasury.addClearing(settleAssetId, clearingTreasuryUnits);
+            if (systemFunds != null) {
+                systemFunds.addFee(settleAssetId, feeSystemFundsUnits);
+                systemFunds.addClearing(settleAssetId, clearingSystemFundsUnits);
             }
-            runtime.advanceUserRevision(lane, originalOrder.userId(), fills);
+            accountBook.advanceUserRevision(lane, originalOrder.userId(), fills);
             return nextOrder;
         }
         /** 释放本轮币对、订单、预留和标记价引用，并清除成交数、持仓键及缓存杠杆。其余原语值在下次 reset 或 begin 覆盖，不提供账户回滚。 */
@@ -360,23 +360,23 @@ public final class DerivativeTradeSettlementService {
     }
 
     /** 为连续成交准备调用方独占游标，要求旧游标已清理。 */
-    static void begin(FillCursor cursor, TradingAccountRuntime runtime, AccountPartition lane, CoreInstrument instrument,
+    static void begin(FillCursor cursor, AccountBook accountBook, AccountPartition lane, CoreInstrument instrument,
                       Order order, long positionKey, long leverage, int assetId,
                       long timestamp, long position) {
-        if (cursor == null || runtime == null || instrument == null || order == null
+        if (cursor == null || accountBook == null || instrument == null || order == null
                 || order.symbolId() < 0 || !instrument.contractType().isOption() && leverage <= 0 || assetId < 0
                 || instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 || timestamp < -1 || position < -1 || timestamp >= 0 && position < 0) {
             throw new IllegalArgumentException("invalid perpetual fill cursor");
         }
         if (cursor.originalOrder != null) throw new IllegalStateException("perpetual fill cursor is still active");
-        AccountBalance balance = runtime.balance(lane, order.userId(), assetId);
+        AccountBalance balance = accountBook.balance(lane, order.userId(), assetId);
         OrderFundsReservation reservation = lane.reservation(order.orderId());
         if (balance == null || reservation == null || reservation.userId() != order.userId()
                 || reservation.assetId() != assetId) {
             throw new IllegalStateException("runtime fill entities are missing: " + order.orderId());
         }
-        MarkPrice mark = runtime.markPrice(lane, order.symbolId());
+        MarkPrice mark = accountBook.markPrice(lane, order.symbolId());
         if (instrument.contractType().isOption()) OptionTradingRules.requireRiskMark(mark);
         cursor.reset(instrument, order, reservation, lane.position(positionKey),
                 balance.availableUnits(), balance.lockedUnits(), assetId, mark);
@@ -534,8 +534,8 @@ public final class DerivativeTradeSettlementService {
                 state.executedValueLow, fillPriceTicks, fillQuantitySteps);
         state.fills = Math.incrementExact(state.fills);
         state.timestamp = commitTimestamp; state.clusterPosition = commitPosition;
-        state.feeTreasuryUnits = Math.negateExact(feeDelta);
-        state.clearingTreasuryUnits = Math.negateExact(appliedPnl);
+        state.feeSystemFundsUnits = Math.negateExact(feeDelta);
+        state.clearingSystemFundsUnits = Math.negateExact(appliedPnl);
     }
 
     private static long openingMarginForFill(CoreInstrument instrument,

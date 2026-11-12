@@ -51,7 +51,7 @@ class CrossShardCancellationTest {
         System.setProperty(property, "2");
         // 放行被阻塞 Matcher 的门闩，finally 兜底释放。
         var release = new CountDownLatch(1);
-        try (/* 本次线性永续测试运行时，退出 try 时关闭。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本次线性永续测试运行时，退出 try 时关闭。 */ var state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             // 第一组账户和挂单的品种字符串。
             String first = "37";
             // 第二组品种字符串，要求路由不同分片；追加 X 仅是原有搜索分支，数字品种解析不接受此前缀。
@@ -90,7 +90,7 @@ class CrossShardCancellationTest {
                 return Boolean.TRUE;
             });
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            try (/* 作用域内拦截 Owner 对五类账户表 get 的测试守卫，并检查 Owner 变更集合的写入线程，退出时恢复原容器。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {
+            try (/* 作用域内拦截 Owner 对五类账户表 get 的测试守卫，并检查 Owner 变更集合的写入线程，退出时恢复原容器。 */ var guard = new OwnerAccountReadGuard(state.accountBook)) {
                 // 强平批次的第一次 apply 返回，要求仍是 MATCHING_PENDING。
                 var pending = state.apply(batch);
                 assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
@@ -99,7 +99,7 @@ class CrossShardCancellationTest {
                 long checkDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 while (!state.pendingMatching().get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted()) {
                     if (System.nanoTime() >= checkDeadline) throw new AssertionError("liquidation Lane check timeout");
-                    state.matchingProgress.progressPlaceBatchAdmissions();
+                    state.matchingProgress.progressPlaceBatchOrderChecks();
                     Thread.onSpinWait();
                 }
                 assertThat(state.pendingMatching().get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted()).isTrue();
@@ -118,7 +118,7 @@ class CrossShardCancellationTest {
             }
             assertThat(state.tradingState().orders().get(1003L).status()).isEqualTo(com.surprising.aeron.model.CoreOrderStatus.CANCELED);
             assertThat(state.tradingState().orders().get(2003L).status()).isEqualTo(com.surprising.aeron.model.CoreOrderStatus.CANCELED);
-            if (recovery) try (/* 从批次执行前快照恢复的独立运行时，重放后比较哈希与用户状态。 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
+            if (recovery) try (/* 从批次执行前快照恢复的独立运行时，重放后比较哈希与用户状态。 */ var restored = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 applied(restored, batch);
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
                 assertThat(restored.tradingState().users()).isEqualTo(state.tradingState().users());
@@ -134,7 +134,7 @@ class CrossShardCancellationTest {
      * @param state 本次真实线性永续测试运行时
      * @param instrumentId 属于指定 Matcher 分片的数字字符串品种号
      */
-    private void register(TradingCoreRuntime state, String instrumentId) {
+    private void register(TradingCore state, String instrumentId) {
         applied(state, command(CoreMessageType.REGISTER_INSTRUMENT, 0,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                         instrumentId, "BTC", "USDT", "USDT", 1, 1, 1,
@@ -151,7 +151,7 @@ class CrossShardCancellationTest {
      * @param user 场景中的风险用户编号，另一方使用加一的编号
      * @param order 场景的订单编号基数，成交单与挂单分别使用后续编号
      */
-    private void seed(TradingCoreRuntime state, String instrumentId, long user, long order) {
+    private void seed(TradingCore state, String instrumentId, long user, long order) {
         applied(state, mark(instrumentId, 100, 1));
         applied(state, command(CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 110))));
@@ -190,7 +190,7 @@ class CrossShardCancellationTest {
      * 同步查询线性永续执行用途的强平工作，最多一百项并限制响应字节，解码协议结果。
      * @param state 本次真实线性永续测试运行时
      */
-    private CoreLiquidationWorkView work(TradingCoreRuntime state) {
+    private CoreLiquidationWorkView work(TradingCore state) {
         // 查询强平执行工作的一次完整协议消息。
         var query = command(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
                 CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL,
@@ -221,7 +221,7 @@ class CrossShardCancellationTest {
      * @param state 本次真实线性永续测试运行时
      * @param command 需要推进到 APPLIED 的完整 Core 命令
      */
-    private static void applied(TradingCoreRuntime state, CoreMessage command) {
+    private static void applied(TradingCore state, CoreMessage command) {
         // 经过测试完成器推进后返回的最终命令响应。
         var response = CoreTestCompletion.applyAsynchronously(state, command, TIME, command.header().sourceSequence());
         assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);

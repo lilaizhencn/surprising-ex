@@ -5,12 +5,12 @@ import com.surprising.aeron.service.order.*;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.service.account.AccountPartition;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.Order;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
+import com.surprising.aeron.service.treasury.SystemFundsChange;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.List;
@@ -27,15 +27,15 @@ public final class RuntimeDerivativeMatchFixture {
      * @param matches 用例直接构造的原生成交事件列表
      * @param identities 投影和成交共同使用的运行时身份字典
      */
-    public static TradingAccountRuntime simulate(TradingCoreState before, long takerOrderId,
+    public static AccountBook simulate(TradingCoreState before, long takerOrderId,
                                                List<MatcherEvent> matches,
-                                               RuntimeIdentityRegistry identities) {
+                                               IdIndex identities) {
         if (before == null || matches == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual match simulation");
         }
         // 由起点冷状态投影出的独立测试运行时。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        return applyRuntime(takerOrderId, matches, runtime, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
+        return applyRuntime(takerOrderId, matches, accountBook, identities);
     }
 
     /**
@@ -46,16 +46,16 @@ public final class RuntimeDerivativeMatchFixture {
      * @param matches 用例直接构造的原生成交事件列表
      * @param identities 投影和成交共同使用的运行时身份字典
      */
-    public static TradingAccountRuntime simulateTransition(TradingCoreState before, TradingCoreState expected,
+    public static AccountBook simulateTransition(TradingCoreState before, TradingCoreState expected,
                                                          long takerOrderId, List<MatcherEvent> matches,
-                                                         RuntimeIdentityRegistry identities) {
+                                                         IdIndex identities) {
         if (before == null || expected == null || identities == null
                 || expected.productLine() != before.productLine()) {
             throw new IllegalArgumentException("invalid perpetual match transition");
         }
         // 由起点冷状态投影出的独立测试运行时。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        return applyTransition(before, expected, takerOrderId, matches, runtime, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(before, identities);
+        return applyTransition(before, expected, takerOrderId, matches, accountBook, identities);
     }
 
     /**
@@ -67,18 +67,18 @@ public final class RuntimeDerivativeMatchFixture {
      * @param runtime 已经由起点投影且由当前测试持有的运行时
      * @param identities 投影和成交共同使用的运行时身份字典
      */
-    public static TradingAccountRuntime applyTransition(TradingCoreState before, TradingCoreState expected,
+    public static AccountBook applyTransition(TradingCoreState before, TradingCoreState expected,
                                                        long takerOrderId, List<MatcherEvent> matches,
-                                                       TradingAccountRuntime runtime,
-                                                       RuntimeIdentityRegistry identities) {
-        if (before == null || expected == null || runtime == null || identities == null
+                                                       AccountBook accountBook,
+                                                       IdIndex identities) {
+        if (before == null || expected == null || accountBook == null || identities == null
                 || !before.productLine().isDerivative()
                 || expected.productLine() != before.productLine()) {
             throw new IllegalArgumentException("invalid perpetual match transition");
         }
-        applyRuntime(takerOrderId, matches, runtime, identities);
-        runtime.setMetadata(expected.productLine(), expected.revision());
-        return runtime;
+        applyRuntime(takerOrderId, matches, accountBook, identities);
+        accountBook.setMetadata(expected.productLine(), expected.revision());
+        return accountBook;
     }
 
     /**
@@ -88,68 +88,68 @@ public final class RuntimeDerivativeMatchFixture {
      * @param runtime 当前所属交易运行时，具体读写边界由通用或 Lane 入口决定
      * @param identities 运行时资产及预准备持仓身份字典
      */
-    public static TradingAccountRuntime applyRuntime(long takerOrderId, List<MatcherEvent> matches,
-                                                   TradingAccountRuntime runtime,
-                                                   RuntimeIdentityRegistry identities) {
-        if (matches == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
+    public static AccountBook applyRuntime(long takerOrderId, List<MatcherEvent> matches,
+                                                   AccountBook accountBook,
+                                                   IdIndex identities) {
+        if (matches == null || accountBook == null || identities == null || !accountBook.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual match apply");
         }
-        runtime.assertOwner();
+        accountBook.assertOwner();
         // 本次主动订单的当前权威值，每笔应用前按既有入口重新读取。
-        Order taker = requireOpen(runtime, takerOrderId);
+        Order taker = requireOpen(accountBook, takerOrderId);
         if (matches.isEmpty() && !taker.timeInForce().immediate()
                 && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
-            return runtime;
+            return accountBook;
         }
         // 从运行时取得且与订单输入相同的规范币对对象。
-        CoreInstrument instrument = runtime.instrument(identities.instrumentId(taker.symbolId()));
+        CoreInstrument instrument = accountBook.instrument(identities.instrumentId(taker.symbolId()));
         if (instrument == null || instrument != taker.instrument()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
-        validateAndPrepare(takerOrderId, matches, runtime, identities);
+        validateAndPrepare(takerOrderId, matches, accountBook, identities);
         // 当前币对结算资产的稠密编号。
         int settleAssetId = identities.assetId(instrument.settleAsset());
         // 本次冷测试结算独占的系统资金差额缓冲。
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        SystemFundsChange systemFundsChange = new SystemFundsChange();
         for (/* 通用事件列表当前遍历下标。 */ int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
             // 当前原始 Matcher 事件，非 TRADE 跳过。
             MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
-            taker = requireOpen(runtime, takerOrderId);
+            taker = requireOpen(accountBook, takerOrderId);
             // 当前成交在允许读取边界内取得的对手订单值。
-            Order maker = requireOpen(runtime, match.matchedOrderId());
+            Order maker = requireOpen(accountBook, match.matchedOrderId());
             // 本笔数量是否正好耗尽 maker 当前剩余量。
             boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
             if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                     || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                 throw new IllegalStateException("runtime match does not match authoritative orders");
             }
-            applyFill(runtime, identities, instrument, taker, match.price(),
-                    match.size(), true, settleAssetId, treasuryDelta);
-            applyFill(runtime, identities, instrument, maker, match.price(),
-                    match.size(), false, settleAssetId, treasuryDelta);
+            applyFill(accountBook, identities, instrument, taker, match.price(),
+                    match.size(), true, settleAssetId, systemFundsChange);
+            applyFill(accountBook, identities, instrument, maker, match.price(),
+                    match.size(), false, settleAssetId, systemFundsChange);
             if (makerTerminal) {
                 // 终态订单仍可释放的订单预留金额，正数才额外推进用户修订。
-                long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
-                com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, maker.orderId());
-                if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
+                long releaseUnits = accountBook.reservation(maker.orderId()).reservedUnits();
+                com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(accountBook, maker.orderId());
+                if (releaseUnits > 0) accountBook.advanceUserRevision(maker.userId());
             }
         }
-        taker = runtime.order(takerOrderId);
+        taker = accountBook.order(takerOrderId);
         if (!taker.canceled() && (taker.timeInForce().immediate()
                 || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-            runtime.replaceOrder(terminal(taker));
+            accountBook.replaceOrder(terminal(taker));
         }
-        if (runtime.order(takerOrderId).canceled()) {
+        if (accountBook.order(takerOrderId).canceled()) {
             // 终态订单仍可释放的订单预留金额，正数才额外推进用户修订。
-            long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
-            com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, takerOrderId);
-            if (releaseUnits > 0) runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
+            long releaseUnits = accountBook.reservation(takerOrderId).reservedUnits();
+            com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(accountBook, takerOrderId);
+            if (releaseUnits > 0) accountBook.advanceUserRevision(accountBook.order(takerOrderId).userId());
         }
-        treasuryDelta.apply(runtime.treasury());
-        treasuryDelta.clear();
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-        return runtime;
+        systemFundsChange.apply(accountBook.systemFunds());
+        systemFundsChange.clear();
+        accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
+        return accountBook;
     }
 
     /**
@@ -160,19 +160,19 @@ public final class RuntimeDerivativeMatchFixture {
      * @param identities 运行时资产及预准备持仓身份字典
      */
     static void validateAndPrepare(long takerOrderId, List<MatcherEvent> matches,
-                                   TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+                                   AccountBook accountBook, IdIndex identities) {
         // 本次主动订单的当前权威值，每笔应用前按既有入口重新读取。
-        Order taker = requireOpen(runtime, takerOrderId);
-        validateMatches(runtime, taker, matches);
+        Order taker = requireOpen(accountBook, takerOrderId);
+        validateMatches(accountBook, taker, matches);
         // 从运行时取得且与订单输入相同的规范币对对象。
-        CoreInstrument instrument = runtime.instrument(identities.instrumentId(taker.symbolId()));
+        CoreInstrument instrument = accountBook.instrument(identities.instrumentId(taker.symbolId()));
         identities.positionKey(taker.userId(), instrument, taker.positionSide());
         for (/* 通用事件列表当前遍历下标。 */ int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
             // 当前原始 Matcher 事件，非 TRADE 跳过。
             MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
             // 当前成交在允许读取边界内取得的对手订单值。
-            Order maker = requireOpen(runtime, match.matchedOrderId());
+            Order maker = requireOpen(accountBook, match.matchedOrderId());
             identities.positionKey(maker.userId(), instrument, maker.positionSide());
         }
     }
@@ -183,7 +183,7 @@ public final class RuntimeDerivativeMatchFixture {
      * @param taker 已经读取并确认可成交的主动订单
      * @param matches 原始撮合事件列表，只有 TRADE 参与成交计算
      */
-    private static void validateMatches(TradingAccountRuntime runtime, Order taker,
+    private static void validateMatches(AccountBook accountBook, Order taker,
                                         List<MatcherEvent> matches) {
         // 逐成交扣减后主动订单的累计剩余量，仅用于提前校验。
         long takerRemaining = taker.remainingQuantitySteps();
@@ -199,7 +199,7 @@ public final class RuntimeDerivativeMatchFixture {
                 }
                 if (match.eventType() != MatcherEventType.TRADE) continue;
                 // 当前成交在允许读取边界内取得的对手订单值。
-                Order maker = requireOpen(runtime, match.matchedOrderId());
+                Order maker = requireOpen(accountBook, match.matchedOrderId());
                 if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                         || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                     throw new IllegalStateException("runtime match does not match authoritative orders");
@@ -232,21 +232,21 @@ public final class RuntimeDerivativeMatchFixture {
      * @param quantitySteps 本笔成交数量步长
      * @param taker 本笔是否为主动成交，用于选择费率
      * @param settleAssetId 结算资产的运行时编号
-     * @param treasuryDelta 当前 Lane 的系统财务差额接收槽
+     * @param systemFundsChange 当前 Lane 的系统财务差额接收槽
      */
-    private static void applyFill(TradingAccountRuntime runtime,
-                                  RuntimeIdentityRegistry identities, CoreInstrument instrument,
+    private static void applyFill(AccountBook accountBook,
+                                  IdIndex identities, CoreInstrument instrument,
                                   Order order, long priceTicks, long quantitySteps,
-                                  boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta) {
-        AccountPartition lane = runtime.accountLaneForUser(order.userId());
+                                  boolean taker, int settleAssetId, SystemFundsChange systemFundsChange) {
+        AccountPartition lane = accountBook.accountLaneForUser(order.userId());
         long leverage = 0;
         if (!instrument.contractType().isOption()) {
-            Long configuredLeverage = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
+            Long configuredLeverage = accountBook.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
             leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
         }
-        DerivativeTradeSettlementService.apply(runtime, lane, identities, instrument, order,
+        DerivativeTradeSettlementService.apply(accountBook, lane, identities, instrument, order,
                 identities.preparedPositionKey(lane, order),
-                priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, -1, -1);
+                priceTicks, quantitySteps, taker, leverage, settleAssetId, systemFundsChange, -1, -1);
     }
 
     /**
@@ -254,9 +254,9 @@ public final class RuntimeDerivativeMatchFixture {
      * @param runtime 当前所属交易运行时，具体读写边界由通用或 Lane 入口决定
      * @param orderId 当前要累加、刷新或读取的订单编号
      */
-    private static Order requireOpen(TradingAccountRuntime runtime, long orderId) {
+    private static Order requireOpen(AccountBook accountBook, long orderId) {
         // 当前首次累加或发布后重新取得的权威订单引用。
-        Order order = runtime.order(orderId);
+        Order order = accountBook.order(orderId);
         if (order == null || order.canceled() || order.remainingQuantitySteps() == 0) {
             throw new IllegalStateException("runtime matched order is not open: " + orderId);
         }

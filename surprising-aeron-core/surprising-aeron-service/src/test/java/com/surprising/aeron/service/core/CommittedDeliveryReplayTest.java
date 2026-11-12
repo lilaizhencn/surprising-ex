@@ -23,7 +23,7 @@ class CommittedDeliveryReplayTest {
      */
     private long sequence, now = TIME;
     /** 与回放接收完全相同命令的在线业务对照，AfterEach 关闭。 */
-    private TradingCoreRuntime reference;
+    private TradingCore reference;
     /**
      * 每个用例结束关闭原在线对照运行时，尚未创建时跳过。
      */
@@ -101,7 +101,7 @@ class CommittedDeliveryReplayTest {
     private CommittedTradeReplay opened(ProductLine line) {
         // 当前新建或从首分页快照恢复的回放资源
         var replay = new CommittedTradeReplay(line, null);
-        reference = new TradingCoreRuntime(line);
+        reference = new TradingCore(line);
         // 按本交割产品线选出的合约类型
         var type = ContractType.valueOf(line.contractTypeCode());
         // 该合约结算资产，币本位 BTC，其余 USDT
@@ -149,9 +149,9 @@ class CommittedDeliveryReplayTest {
      * @param line 本轮 U 本位或币本位交割产品线
      */
     private CoreSettlementProgressView assertApplied(CommittedTradeReplay replay, ProductLine line) {
-        try (/* 从回放当前快照恢复的短期只读结果核对运行时 */ var probe = TradingCoreRuntime.fromSnapshot(line, replay.snapshot())) {
+        try (/* 从回放当前快照恢复的短期只读结果核对运行时 */ var probe = TradingCore.fromSnapshot(line, replay.snapshot())) {
             // 按当前来源 UUID 找到的原已提交结算终态
-            var result = probe.resultLedger().get(new UUID(117, sequence));
+            var result = probe.commandResultLog().get(new UUID(117, sequence));
             assertThat(result).as("committed settlement result").isNotNull();
             assertThat(result.status()).as("settlement code=" + result.resultCode()).isEqualTo(ResponseStatus.APPLIED);
             return CoreSettlementProgressCodec.decode(result.responseData());

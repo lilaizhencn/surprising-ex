@@ -10,7 +10,7 @@ import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.AccountPartition;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /** 一笔普通账户或业务列表查询的跨 Lane 任务，保存本次响应槽和原子完成位。 */
 final class AccountQuery extends CompletableFuture<CoreQueryService.QueryResult> implements AccountLaneCommand,
         java.util.function.Function<AccountPartition, CoreResponse> {
-    private final TradingCoreRuntime owner;
+    private final TradingCore owner;
     private final long commandCount, userId, orderId, laneMask;
     private final String clientName;
     private final CoreMessageType type;
@@ -35,12 +35,12 @@ final class AccountQuery extends CompletableFuture<CoreQueryService.QueryResult>
     PendingTransferQueryPage transferPage;
     private final AtomicLong completedLaneMask = new AtomicLong();
 
-    AccountQuery(TradingCoreRuntime owner, long commandCount, CoreMessageType type, long userId,
+    AccountQuery(TradingCore owner, long commandCount, CoreMessageType type, long userId,
                          long orderId, String clientName, long laneMask, com.surprising.aeron.support.collection.ImmutableLongArrayList openOrderIds, AlgoQueryPage algoPage) {
         this.owner = owner;
         this.commandCount = commandCount; this.type = type;
         this.userId = userId; this.orderId = orderId; this.clientName = clientName; this.laneMask = laneMask;
-        int count = owner.runtimeState().topology().accountLaneCount();
+        int count = owner.accountBook().topology().accountLaneCount();
         responses = new CoreResponse[count]; found = new boolean[count];
         this.openOrderIds = openOrderIds;
         this.algoPage = algoPage;
@@ -50,7 +50,7 @@ final class AccountQuery extends CompletableFuture<CoreQueryService.QueryResult>
     /** 在目标 Lane 建立只读范围并记录本 Lane 响应。原子累计完成位并拒绝重复完成，最后一个 Lane 归并和保存结果，通知 Owner。 */
     @Override public void execute(AccountPartition lane) {
         CoreResponse response;
-        try { response = owner.runtimeState().readAccountLane(lane, this); }
+        try { response = owner.accountBook().readAccountLane(lane, this); }
         catch (QueryTooLargeException tooLarge) {
             response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                     CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
@@ -80,8 +80,8 @@ final class AccountQuery extends CompletableFuture<CoreQueryService.QueryResult>
     @Override public CoreResponse apply(AccountPartition lane) {
         if (transferPage != null) {
             for (int index = 0; index < transferPage.ids().length; index++) {
-                if (owner.runtimeState().topology().accountLaneId(transferPage.users()[index]) != lane.laneId()) continue;
-                var value = owner.runtimeState().pendingTransfer(transferPage.ids()[index]);
+                if (owner.accountBook().topology().accountLaneId(transferPage.users()[index]) != lane.laneId()) continue;
+                var value = owner.accountBook().pendingTransfer(transferPage.ids()[index]);
                 if (value == null || value.sourceUserId() != transferPage.users()[index])
                     throw new IllegalArgumentException("pending transfer routing differs from Lane identity");
                 transferPage.views()[index] = value;
@@ -90,29 +90,29 @@ final class AccountQuery extends CompletableFuture<CoreQueryService.QueryResult>
         }
         if (triggerPage != null) {
             for (int index = 0; index < triggerPage.ids().length; index++) {
-                if (owner.runtimeState().topology().accountLaneId(triggerPage.users()[index]) != lane.laneId()) continue;
-                var value = owner.runtimeState().triggerOrder(triggerPage.ids()[index]);
+                if (owner.accountBook().topology().accountLaneId(triggerPage.users()[index]) != lane.laneId()) continue;
+                var value = owner.accountBook().triggerOrder(triggerPage.ids()[index]);
                 if (value != null) triggerPage.views()[index] = value.view();
             }
             return null;
         }
         if (algoPage != null) {
             for (int index = 0; index < algoPage.ids().length; index++) {
-                if (owner.runtimeState().topology().accountLaneId(algoPage.users()[index]) != lane.laneId()) continue;
+                if (owner.accountBook().topology().accountLaneId(algoPage.users()[index]) != lane.laneId()) continue;
                 algoPage.views()[index] = OperationalQueries.algoOrder(
-                        owner.runtimeState(), algoPage.ids()[index]);
+                        owner.accountBook(), algoPage.ids()[index]);
             }
             return null;
         }
         if (openOrderIds != null) {
             for (int index = 0; index < openOrderIds.size(); index++) {
-                var query = StateQueries.orderState(owner.runtimeState(), lane, owner.identities(), openOrderIds.valueAt(index), false);
+                var query = StateQueries.orderState(owner.accountBook(), lane, owner.identities(), openOrderIds.valueAt(index), false);
                 if (query.found() && "OPEN".equals(query.view().status())) openOrders[index] = query.view();
             }
             return null;
         }
         if (type == CoreMessageType.USER_STATE_QUERY || type == CoreMessageType.USER_STATE_HASH_QUERY) {
-            var query = StateQueries.userState(owner.runtimeState(), lane, owner.identities(), userId,
+            var query = StateQueries.userState(owner.accountBook(), lane, owner.identities(), userId,
                     type == CoreMessageType.USER_STATE_HASH_QUERY);
             if (query.tooLarge()) return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                     CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
@@ -123,8 +123,8 @@ final class AccountQuery extends CompletableFuture<CoreQueryService.QueryResult>
                     : CoreQueryService.missingAccountResponse(type, commandCount);
         }
         var query = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY
-                ? StateQueries.clientOrderState(owner.runtimeState(), lane, owner.identities(), userId, clientName)
-                : orderId == 0 ? null : StateQueries.orderState(owner.runtimeState(), lane, owner.identities(), orderId,
+                ? StateQueries.clientOrderState(owner.accountBook(), lane, owner.identities(), userId, clientName)
+                : orderId == 0 ? null : StateQueries.orderState(owner.accountBook(), lane, owner.identities(), orderId,
                         type == CoreMessageType.ORDER_STATE_HASH_QUERY);
         found[lane.laneId()] = query != null && query.found();
         if (!found[lane.laneId()]) return CoreQueryService.missingAccountResponse(type, commandCount);

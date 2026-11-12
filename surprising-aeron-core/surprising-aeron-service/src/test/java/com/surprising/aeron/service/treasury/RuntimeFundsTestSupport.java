@@ -9,7 +9,7 @@ import java.util.List;
 public final class RuntimeFundsTestSupport {
     private RuntimeFundsTestSupport() { }
 
-    public static List<Posting> postings(RuntimeFundsAccumulator funds) {
+    public static List<Posting> postings(FundsTotal funds) {
         try {
             int size = (int) value(funds, "size");
             int[] assets = (int[]) value(funds, "assetIds");
@@ -30,9 +30,9 @@ public final class RuntimeFundsTestSupport {
         }
     }
 
-    private static Object value(RuntimeFundsAccumulator funds, String name)
+    private static Object value(FundsTotal funds, String name)
             throws ReflectiveOperationException {
-        Field field = RuntimeFundsAccumulator.class.getDeclaredField(name);
+        Field field = FundsTotal.class.getDeclaredField(name);
         field.setAccessible(true);
         return field.get(funds);
     }

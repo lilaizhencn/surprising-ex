@@ -327,7 +327,7 @@
       32
     ],
     [
-      "com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision:76",
+      "com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision:76",
       27
     ],
     [
@@ -479,7 +479,7 @@
   ],
   "cpu_samples_by_thread": [
     [
-      "com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-jmh-worker-1",
+      "com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision-jmh-worker-1",
       275
     ],
     [

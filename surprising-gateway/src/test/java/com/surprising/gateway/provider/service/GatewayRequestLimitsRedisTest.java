@@ -159,7 +159,7 @@ class GatewayRequestLimitsRedisTest {
         });
     }
 
-    @Test void uploadsShareBytesAndCountBudgetsAndHaveIndependentAdmissionCapacity() throws Exception {
+    @Test void uploadsShareBytesAndCountBudgetsAndHaveIndependentOrderCheckCapacity() throws Exception {
         properties.setUploadKibibytes(new Rule(2, 2, Duration.ofDays(1)));
         first.checkUpload(7, 1024); second.checkUpload(7, 1);
         assertThatThrownBy(() -> first.checkUpload(7, 1)).isInstanceOf(GatewayRequestLimits.Rejection.class);

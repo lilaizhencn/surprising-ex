@@ -11,7 +11,7 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import com.surprising.aeron.support.ingress.CoreMessageFlyweightDecoder;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.SynchronousMatchingEngine;
@@ -47,7 +47,7 @@ public class HotCommandSlotAllocationBenchmark {
     private final CoreMessageFlyweightDecoder frameDecoder = new CoreMessageFlyweightDecoder();
     private AccountPartition lane;
     private SynchronousMatchingEngine matcher;
-    private com.surprising.aeron.service.order.OrderAdmissionService.Context decision;
+    private com.surprising.aeron.service.order.OrderCheckService.Context decision;
     private long retiredSequence;
 
     @Setup public void setup() {
@@ -67,18 +67,18 @@ public class HotCommandSlotAllocationBenchmark {
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
-        decision = new com.surprising.aeron.service.order.OrderAdmissionService.Context(
+        decision = new com.surprising.aeron.service.order.OrderCheckService.Context(
                 instrument, 0, new com.surprising.aeron.service.market.MarkPrice(0, instrument, 100, 1, 1),
                 FeePolicyBook.from(java.util.Map.of(1L, new com.surprising.aeron.model.CoreFeePolicyState(
                         1, 1, 7, "1", -10, 20, 0, true, 1, 0))), 1_000,
-                new TreasuryRuntime().settlementStatus(0));
+                new SystemFunds().settlementStatus(0));
         for (int index = 0; index < WINDOW; index++) {
             String client = switch (clientId) { case "EMPTY" -> ""; case "ASCII" -> "client-" + index; default -> "客户-" + index; };
             var order = new PlaceOrderCommand(index + 1, "1", CoreOrderSide.BUY, 100, 10, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, client);
             resolved[index] = new OrderCommand.ResolvedPlaceOrder(order, instrument, 0, 100, 100, 100, 0, 0,
                     ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
-            sourceOrders[index] = TradingAccountRuntime.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7,
+            sourceOrders[index] = AccountBook.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7,
                     resolved[index], commandId, 0, 1, 1);
             decoded[index] = PlaceOrderCommand.commandSlot();
             nativeSlots[index] = MatcherResult.commandSlot();
@@ -117,7 +117,7 @@ public class HotCommandSlotAllocationBenchmark {
         long checksum = 0;
         for (int index = 0; index < WINDOW; index++) {
             var target = resolved[index];
-            com.surprising.aeron.service.order.OrderAdmissionService.resolveInto(
+            com.surprising.aeron.service.order.OrderCheckService.resolveInto(
                     target, decision, 7, target.intent());
             checksum += target.matchingPriceTicks() + target.makerFeeRatePpm() + target.takerFeeRatePpm();
         }

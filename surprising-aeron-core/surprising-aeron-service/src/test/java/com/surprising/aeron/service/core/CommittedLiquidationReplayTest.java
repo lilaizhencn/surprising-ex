@@ -19,7 +19,7 @@ class CommittedLiquidationReplayTest {
     private long sequence;
 
     @Test void originalCommandFactsSurviveSnapshotAndDoNotChangeTradingState() {
-        try (var reference = new TradingCoreRuntime(LINE)) {
+        try (var reference = new TradingCore(LINE)) {
             byte[] snapshot;
             LiquidationChange planned;
             try (var replay = new CommittedTradeReplay(LINE, null)) {
@@ -47,7 +47,7 @@ class CommittedLiquidationReplayTest {
                 for (int i = 0; changes.isEmpty() && i < 8; i++) {
                     send(replay, reference, CoreMessageType.CONTINUE_RISK_SCAN, 0,
                             TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(
-                                    reference.runtimeState().riskScanControl().scanBatchSize())));
+                                    reference.accountBook().riskScanControl().scanBatchSize())));
                     changes.addAll(replay.liquidationChanges());
                 }
                 planned = changes.stream().filter(c -> c.state().userId() == 2).findFirst().orElseThrow();
@@ -82,7 +82,7 @@ class CommittedLiquidationReplayTest {
         }
     }
 
-    private void send(CommittedTradeReplay replay, TradingCoreRuntime reference, CoreMessageType type, long user, byte[] payload) {
+    private void send(CommittedTradeReplay replay, TradingCore reference, CoreMessageType type, long user, byte[] payload) {
         var command = message(type, user, payload);
         replay.apply(CoreMessageCodec.encode(command), TIME + sequence, sequence * 4096);
         var response = CoreTestCompletion.applyAsynchronously(reference, command, TIME + sequence, sequence * 4096);

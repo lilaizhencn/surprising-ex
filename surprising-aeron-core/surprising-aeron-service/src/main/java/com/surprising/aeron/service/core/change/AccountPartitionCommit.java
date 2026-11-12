@@ -4,8 +4,8 @@ import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.AccountLaneCommand;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.order.*;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderCommand.ResultTarget;
@@ -32,7 +32,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
     private final LongArrayList[] usersByLane;
     private final long[] completedLanes;
     /** 当前事件关联的运行时，Owner 重置后可清空，所以 Lane 发布前先保存通知目标。 */
-    private TradingAccountRuntime runtime;
+    private AccountBook accountBook;
     @Accessors(fluent = true, chain = false)
     @Getter
     private long coreSequence;
@@ -44,7 +44,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
     @Getter
     private long committedLaneMask;
     private OrderCommand.ResultTarget resultTarget;
-    private RuntimeIdentityRegistry identities;
+    private IdIndex identities;
     private int resultLaneId;
 
     private LongArrayList[] metadataOrderIds;
@@ -62,11 +62,11 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
         int count = 0;
         for (Long id : ids) {
             if (id == null) continue;
-            var trigger = runtime.triggerRoute(id);
+            var trigger = accountBook.triggerRoute(id);
             if (trigger == null || trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
                 continue;
             if (!trigger.cancelRevisionAvailable()) throw new ArithmeticException("trigger revision overflow");
-            int laneId = runtime.topology().accountLaneId(trigger.userId());
+            int laneId = accountBook.topology().accountLaneId(trigger.userId());
             if ((requiredLaneMask & (1L << laneId)) == 0)
                 throw new IllegalStateException("closing trigger has no account commit Lane");
             if (triggerCancelIds == null) {
@@ -77,24 +77,24 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
             triggerCancelIds[laneId].add(id);
             count++;
         }
-        Math.addExact(runtime.revision(), count);
+        Math.addExact(accountBook.revision(), count);
     }
 
     private void cancelClosingTriggers(AccountPartition lane) {
         int laneId = lane.laneId();
         if (triggerCancelIds == null || triggerCancelIds[laneId] == null) return;
-        runtime.enterLaneCommandScope(lane);
+        accountBook.enterLaneCommandScope(lane);
         try {
             LongArrayList ids = triggerCancelIds[laneId];
             for (int index = 0; index < ids.size(); index++)
-                if (runtime.triggerOrders().cancelPendingTriggerOrderForCommit(ids.get(index)))
+                if (accountBook.triggerOrders().cancelPendingTriggerOrderForCommit(ids.get(index)))
                     canceledTriggers[laneId]++;
-        } finally { runtime.exitLaneCommandScope(lane); }
+        } finally { accountBook.exitLaneCommandScope(lane); }
     }
 
     private final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure collectMetadataOrder = (orderId, userId) -> {
         if (userId == 0) return;
-        int laneId = runtime.topology().accountLaneId(userId);
+        int laneId = accountBook.topology().accountLaneId(userId);
         if ((requiredLaneMask & (1L << laneId)) == 0)
             throw new IllegalStateException("metadata order has no account commit Lane");
         if (metadataOrderIds[laneId] == null) metadataOrderIds[laneId] = new LongArrayList(4);
@@ -128,7 +128,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
         int laneId = lane.laneId();
         if (metadataOrderIds == null || metadataOrderIds[laneId] == null) return;
         LongArrayList ids = metadataOrderIds[laneId];
-        runtime.enterLaneCommandScope(lane);
+        accountBook.enterLaneCommandScope(lane);
         try {
             for (int index = 0; index < ids.size(); index++) {
                 long id = ids.get(index);
@@ -136,13 +136,13 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
                 if (order == null) continue;
                 if (order.updatedAtEpochMillis() == metadataTimestamp && order.clusterPosition() == metadataPosition)
                     continue;
-                runtime.accountRollback().captureUserBefore(order.userId());
-                runtime.accountRollback().captureOrderMetadataBefore(order);
+                accountBook.accountRollback().captureUserBefore(order.userId());
+                accountBook.accountRollback().captureOrderMetadataBefore(order);
                 order.applyCommitMetadataInPlace(metadataTimestamp, metadataPosition);
                 metadataOrders[laneId].put(id, order);
                 if (!usersByLane[laneId].contains(order.userId())) usersByLane[laneId].add(order.userId());
             }
-        } finally { runtime.exitLaneCommandScope(lane); }
+        } finally { accountBook.exitLaneCommandScope(lane); }
     }
 
     /** Owner 收齐后发布实际关闭触发的变化与修订，并接管各 Lane 已保存的订单元数据后值和相关用户编号，不重新读取活订单字段。 */
@@ -154,10 +154,10 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
                 int laneId = Long.numberOfTrailingZeros(lanes);
                 lanes &= lanes - 1;
                 if (canceledTriggers[laneId] == 0) continue;
-                runtime.flushPublishedChanges(laneId);
+                accountBook.flushPublishedChanges(laneId);
                 count = Math.addExact(count, canceledTriggers[laneId]);
             }
-            if (count != 0) runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), count));
+            if (count != 0) accountBook.setMetadata(accountBook.productLine(), Math.addExact(accountBook.revision(), count));
         }
         if (metadataOrderIds == null) return;
         long lanes = requiredLaneMask;
@@ -165,8 +165,8 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
             if (metadataOrders[laneId] == null || metadataOrders[laneId].isEmpty()) continue;
-            runtime.orderChanges().adopt(laneId, metadataOrders[laneId]);
-            usersByLane[laneId].forEach(runtime::changedUser);
+            accountBook.orderChanges().adopt(laneId, metadataOrders[laneId]);
+            usersByLane[laneId].forEach(accountBook::changedUser);
         }
     }
 
@@ -179,7 +179,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
 
     /** 要求事件当前空闲、序号正数且目标非空，记录运行时和两个目标位图，并复制各参与 Lane 的用户编号列表。 */
     public AccountPartitionCommit prepare(long sequence, long laneMask, LongArrayList[] routedUsers,
-                            TradingAccountRuntime owner) {
+                            AccountBook owner) {
         if (sequence <= 0 || laneMask == 0 || routedUsers == null || owner == null
                 || coreSequence != 0 || completedLaneMask() != 0) {
             throw new IllegalStateException("invalid Account Lane commit event");
@@ -187,7 +187,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
         coreSequence = sequence;
         requiredLaneMask = laneMask;
         committedLaneMask = laneMask;
-        runtime = owner;
+        accountBook = owner;
         long lanes = laneMask;
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
@@ -200,7 +200,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
     }
 
     /** 要求结果所属 Lane 已参与事件，保存最终响应捕获目标及身份字典，并允许调用方指定真正要推进用户水位的提交位图。 */
-    public void prepareResponse(OrderCommand.ResultTarget target, RuntimeIdentityRegistry registry,
+    public void prepareResponse(OrderCommand.ResultTarget target, IdIndex registry,
                          int laneId, long commitMask) {
         if (target == null || registry == null || (requiredLaneMask & (1L << laneId)) == 0)
             throw new IllegalArgumentException("batch response requires its account Lane");
@@ -220,7 +220,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
         cancelClosingTriggers(lane);
         stampMetadata(lane);
         if ((committedLaneMask & laneBit) != 0)
-            runtime.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
+            accountBook.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
         if (resultTarget != null && laneId == resultLaneId)
             OrderCommand.ResultTarget.captureFinal(resultTarget, identities, lane);
         lane.recordSettlementOperation();
@@ -293,7 +293,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
             usersByLane[laneId].clear();
             LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 0L);
         }
-        runtime = null;
+        accountBook = null;
         coreSequence = 0;
         requiredLaneMask = 0;
         committedLaneMask = 0;
@@ -400,7 +400,7 @@ public static final class Delta {
     final LongHashSet removedReservationRoutes = new LongHashSet();
 
     /** 为单用户批量准入预留用户、订单及预留变化容量。 */
-    public void ensureAdmissionCapacity(int expectedOrders) {
+    public void ensureOrderCheckCapacity(int expectedOrders) {
         users.ensureCapacity(1);
         orders.ensureCapacity(expectedOrders);
         reservations.ensureCapacity(expectedOrders);
@@ -463,7 +463,7 @@ public static final class Delta {
     public void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
 
     /** 收集本方法覆盖的用户及订单变化键，清理相关业务缓冲，并更新风险持仓身份集合。 */
-    public void drainTo(TradingAccountRuntime state,
+    public void drainTo(AccountBook state,
                         com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
                         com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         if (changedUsers != null || changedOrders != null) {
@@ -498,8 +498,8 @@ public static final class Delta {
     }
 
     /** 先发布触发及关闭计数，要求终态准备完成，再收集用户及预留元数据和终态身份，传递强平风险变化，最后接管订单与持仓物理缓冲。 */
-    public void commitTerminalToOwner(TradingAccountRuntime state, int laneId,
-            TradingAccountRuntime.TerminalOrderSink terminalOrderSink,
+    public void commitTerminalToOwner(AccountBook state, int laneId,
+            AccountBook.TerminalOrderSink terminalOrderSink,
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         publishTriggersToOwner(state);
@@ -527,7 +527,7 @@ public static final class Delta {
     }
 
     private void publishPreparedToOwner(
-            TradingAccountRuntime state,
+            AccountBook state,
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         for (int index = 0; index < users.size(); index++) {
@@ -566,7 +566,7 @@ public static final class Delta {
     }
 
     /** 把已准备的批量准入变化和触发变化交给 Owner，并接管订单和持仓缓冲。 */
-    public void commitBatchAdmissionToOwner(TradingAccountRuntime state, int laneId) {
+    public void commitBatchOrderCheckToOwner(AccountBook state, int laneId) {
         if (state == null || laneId < 0 || laneId >= state.accountLaneCount()) {
             throw new IllegalArgumentException("invalid batch admission owner handoff");
         }
@@ -601,7 +601,7 @@ public static final class Delta {
     }
 
     /** 把算法与触发变化交入 Owner 变化集合，再清空源列，保持原命令顺序。 */
-    public void publishTriggersToOwner(TradingAccountRuntime state) {
+    public void publishTriggersToOwner(AccountBook state) {
         if (algos != null) algos.drainTo(state.changedAlgoOrders()::put);
         if (triggers == null || triggers.isEmpty()) return;
         triggers.forEach((id, value) -> {
@@ -611,7 +611,7 @@ public static final class Delta {
     }
 
     /** 收集控制任务的用户及预留元数据，接管已冻结的订单持仓变化并传递强平风险后值。 */
-    public void recordControlChanges(TradingAccountRuntime state, int laneId) {
+    public void recordControlChanges(AccountBook state, int laneId) {
         for (int index = 0; index < users.size(); index++) {
             state.changedUser(users.keyAt(index));
             state.captureUserMetadata(users.valueAt(index));

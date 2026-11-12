@@ -6,7 +6,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.*;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
@@ -15,7 +15,7 @@ import com.surprising.aeron.service.core.index.CancelAllAfterIndex;
 import com.surprising.aeron.service.core.index.LiquidationIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
-import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
+import com.surprising.aeron.service.core.index.BizIndex;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.product.api.ProductLine;
@@ -37,7 +37,7 @@ import org.openjdk.jmh.annotations.*;
 @Threads(1)
 public class TriggerCommitBenchmark {
     @Param("2") public int accountLanes;
-    private TradingAccountRuntime runtime;
+    private AccountBook accountBook;
     private TriggerOrderIndex triggerIndex;
     private List<Long> users, triggerIds;
     private CoreInstrument instrument;
@@ -46,11 +46,11 @@ public class TriggerCommitBenchmark {
     @Setup(Level.Trial)
     public void setup() {
         var topology = new LaneTopology(1, accountLanes, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256);
-        runtime = new TradingAccountRuntime(topology);
+        accountBook = new AccountBook(topology);
         var initial = TradingCoreState.empty(ProductLine.SPOT);
-        var identities = new RuntimeIdentityRegistry();
+        var identities = new IdIndex();
         triggerIndex = new TriggerOrderIndex(initial);
-        runtime.bindFactIndexes(new RuntimeFactIndexes(
+        accountBook.bindFactIndexes(new BizIndex(
                 new PositionUserIndex(initial),
                 new OpenInterestIndex(initial),
                 triggerIndex,
@@ -69,17 +69,17 @@ public class TriggerCommitBenchmark {
             while (topology.accountLaneId(user) != lane) user++;
             accounts.add(user);
             ids.add(901L + lane);
-            runtime.putUser(new UserAccount(user));
-            runtime.putBalance(new AccountBalance(user, 3, 1000, 0));
+            accountBook.putUser(new UserAccount(user));
+            accountBook.putBalance(new AccountBalance(user, 3, 1000, 0));
         }
         users = List.copyOf(accounts);
         triggerIds = List.copyOf(ids);
-        runtime.startAccountLanes();
+        accountBook.startAccountLanes();
     }
 
     @Setup(Level.Invocation)
     public void preparePendingFixture() {
-        runtime.acquireOwnerLaneAccess();
+        accountBook.acquireOwnerLaneAccess();
         try {
             for (int i = 0; i < users.size(); i++) {
                 long id = triggerIds.get(i);
@@ -88,35 +88,35 @@ public class TriggerCommitBenchmark {
                         CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1, 1, 1);
-                runtime.putTriggerOrder(trigger);
+                accountBook.putTriggerOrder(trigger);
                 triggerIndex.apply(id, trigger);
             }
-            runtime.clearChangedKeys();
+            accountBook.clearChangedKeys();
         } finally {
-            runtime.releaseOwnerLaneAccess();
+            accountBook.releaseOwnerLaneAccess();
         }
     }
 
     @Benchmark
     public long cancelWithSequenceCommit() {
-        long before = runtime.revision();
+        long before = accountBook.revision();
         long next = ++sequence;
 
-        var event = runtime.dispatchLaneMutation(next, users, null, triggerIds, next, next);
+        var event = accountBook.dispatchLaneMutation(next, users, null, triggerIds, next, next);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (!runtime.laneCommitComplete(event)) {
+        while (!accountBook.laneCommitComplete(event)) {
             if (System.nanoTime() > deadline) throw new IllegalStateException("trigger commit timeout");
             Thread.onSpinWait();
         }
-        runtime.releaseLaneCommit(event);
-        if (runtime.revision() != before + users.size()) throw new IllegalStateException("trigger version mismatch");
-        runtime.acquireOwnerLaneAccess();
+        accountBook.releaseLaneCommit(event);
+        if (accountBook.revision() != before + users.size()) throw new IllegalStateException("trigger version mismatch");
+        accountBook.acquireOwnerLaneAccess();
         try {
             for (long id : triggerIds)
-                if (runtime.triggerOrder(id).status() != CoreTriggerOrderStatus.CANCELED)
+                if (accountBook.triggerOrder(id).status() != CoreTriggerOrderStatus.CANCELED)
                     throw new IllegalStateException("trigger not canceled");
         } finally {
-            runtime.releaseOwnerLaneAccess();
+            accountBook.releaseOwnerLaneAccess();
         }
         return next;
     }
@@ -124,16 +124,16 @@ public class TriggerCommitBenchmark {
     @TearDown(Level.Trial)
     public void close() {
         try {
-            runtime.acquireOwnerLaneAccess();
+            accountBook.acquireOwnerLaneAccess();
             try {
                 for (long user : users) {
-                    var balance = runtime.balance(user, 3);
+                    var balance = accountBook.balance(user, 3);
                     if (balance.availableUnits() != 1000 || balance.lockedUnits() != 0)
                         throw new IllegalStateException("trigger cancellation changed funds");
                 }
             } finally {
-                runtime.releaseOwnerLaneAccess();
+                accountBook.releaseOwnerLaneAccess();
             }
-        } finally { runtime.close(); }
+        } finally { accountBook.close(); }
     }
 }

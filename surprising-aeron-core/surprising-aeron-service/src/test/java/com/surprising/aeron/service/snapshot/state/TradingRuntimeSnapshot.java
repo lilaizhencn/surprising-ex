@@ -64,7 +64,7 @@ public record TradingRuntimeSnapshot(
         Map<Long, CoreAlgoOrderState> algoOrders,
         Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers,
         Map<Long, CoreTriggerOrderState> triggerOrders,
-        Map<Integer, TreasurySnapshot> treasury,
+        Map<Integer, SystemFundsSnapshot> systemFunds,
         Map<Integer, Long> fundingSettlements,
         Map<Integer, FundingProgressSnapshot> fundingProgress,
         Map<Integer, Long> lifecycleSettlements,
@@ -79,7 +79,7 @@ public record TradingRuntimeSnapshot(
                 || markPrices == null || riskSnapshots == null || riskScans == null || nextLiquidationId <= 0
                 || instruments == null || leverages == null || algoOrders == null
                 || cancelAllAfterTimers == null || triggerOrders == null
-                || treasury == null
+                || systemFunds == null
                 || fundingSettlements == null || fundingProgress == null
                 || lifecycleSettlements == null || lifecycleProgress == null) {
             throw new IllegalArgumentException("invalid runtime snapshot");
@@ -99,7 +99,7 @@ public record TradingRuntimeSnapshot(
         algoOrders = immutableSorted(algoOrders);
         cancelAllAfterTimers = immutableSorted(cancelAllAfterTimers);
         triggerOrders = immutableSorted(triggerOrders);
-        treasury = immutableSorted(treasury);
+        systemFunds = immutableSorted(systemFunds);
         fundingSettlements = immutableSorted(fundingSettlements);
         fundingProgress = immutableSorted(fundingProgress);
         lifecycleSettlements = immutableSorted(lifecycleSettlements);
@@ -481,7 +481,7 @@ public record TradingRuntimeSnapshot(
      * @param roundingResidualUnits 该资产舍入剩余差额
      * @param clearingPnlUnits 该资产财库清算盈亏余额
      */
-    public record TreasurySnapshot(long feeUnits, long insuranceUnits, long insuranceDeficitUnits,
+    public record SystemFundsSnapshot(long feeUnits, long insuranceUnits, long insuranceDeficitUnits,
                                    long liquidationFeeUnits, long fundingResidualUnits,
                                    long roundingResidualUnits, long clearingPnlUnits) {
     }

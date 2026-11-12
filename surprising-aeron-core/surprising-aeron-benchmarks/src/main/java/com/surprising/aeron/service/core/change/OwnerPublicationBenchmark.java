@@ -16,8 +16,8 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
@@ -45,7 +45,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Measurement(iterations = 3, time = 1)
 @Fork(1)
 public class OwnerPublicationBenchmark {
-    private final TradingAccountRuntime runtime = new TradingAccountRuntime();
+    private final AccountBook accountBook = new AccountBook();
     private final AccountPartitionCommit.Delta delta = new AccountPartitionCommit.Delta();
     private final StateChangeBuffer.Indexed<String, String> lane = new StateChangeBuffer.Indexed<>();
     private final StateChangeBuffer.OwnerIndexed<String, String> owner = new StateChangeBuffer.OwnerIndexed<>(new StateChangeBuffer.Indexed<>());
@@ -55,18 +55,18 @@ public class OwnerPublicationBenchmark {
     private long coreSequence;
     private TradeSettlement.Changes settlement;
     private AccountPartition settlementLane;
-    private final RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+    private final IdIndex identities = new IdIndex();
     private final Order[] settlementOrders = new Order[20];
     private final OrderFundsReservation[] settlementReservations = new OrderFundsReservation[20];
 
     @Setup public void setup() {
         for (int i = 0; i < users.length; i++) {
             users[i] = new UserAccount(i + 1);
-            runtime.accountLane(runtime.topology().accountLaneId(i + 1L)).storeUser(i + 1, users[i]);
+            accountBook.accountLane(accountBook.topology().accountLaneId(i + 1L)).storeUser(i + 1, users[i]);
         }
-        int laneId = runtime.topology().accountLaneId(7);
-        settlementLane = runtime.accountLane(laneId);
-        settlement = new TradeSettlement.Changes(runtime.topology().accountLaneCount());
+        int laneId = accountBook.topology().accountLaneId(7);
+        settlementLane = accountBook.accountLane(laneId);
+        settlement = new TradeSettlement.Changes(accountBook.topology().accountLaneCount());
         settlement.ensureOrderCapacity(settlementOrders.length, 1L << laneId);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand(
@@ -107,7 +107,7 @@ public class OwnerPublicationBenchmark {
         long result = 0;
         for (var user : users) {
             long userId = user.userId();
-            result += runtime.onLane(userId, lane -> runtime.requireUser(userId)).userId();
+            result += accountBook.onLane(userId, lane -> accountBook.requireUser(userId)).userId();
         }
         return result;
     }
@@ -115,7 +115,7 @@ public class OwnerPublicationBenchmark {
     /** Empty recycled buffers must not rescan their retained hash-table capacity. */
     @Benchmark public void clearRecycledBuffers() {
         delta.clear();
-        runtime.treasury().clearChangedKeys();
+        accountBook.systemFunds().clearChangedKeys();
     }
 
     @Benchmark public Object handoffAndQueryPreparedChanges() {
@@ -135,5 +135,5 @@ public class OwnerPublicationBenchmark {
         return changedIds.valueAt(19);
     }
 
-    @TearDown public void close() { runtime.close(); }
+    @TearDown public void close() { accountBook.close(); }
 }

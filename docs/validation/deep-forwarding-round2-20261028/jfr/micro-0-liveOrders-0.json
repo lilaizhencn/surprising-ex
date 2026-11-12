@@ -241,7 +241,7 @@
       45
     ],
     [
-      "com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision:76",
+      "com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision:76",
       44
     ],
     [
@@ -257,7 +257,7 @@
       14
     ],
     [
-      "com.surprising.aeron.service.core.jmh_generated.OrderAdmissionAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:198",
+      "com.surprising.aeron.service.core.jmh_generated.OrderCheckAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:198",
       12
     ],
     [
@@ -281,11 +281,11 @@
       7
     ],
     [
-      "com.surprising.aeron.service.core.jmh_generated.OrderAdmissionAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:196",
+      "com.surprising.aeron.service.core.jmh_generated.OrderCheckAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:196",
       7
     ],
     [
-      "com.surprising.aeron.service.core.jmh_generated.OrderAdmissionAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:197",
+      "com.surprising.aeron.service.core.jmh_generated.OrderCheckAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:197",
       6
     ],
     [
@@ -319,11 +319,11 @@
       50
     ],
     [
-      "com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision:76",
+      "com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision:76",
       46
     ],
     [
-      "com.surprising.aeron.service.core.jmh_generated.OrderAdmissionAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:195",
+      "com.surprising.aeron.service.core.jmh_generated.OrderCheckAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:195",
       44
     ],
     [
@@ -331,7 +331,7 @@
       33
     ],
     [
-      "com.surprising.aeron.service.core.jmh_generated.OrderAdmissionAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_AverageTime:157",
+      "com.surprising.aeron.service.core.jmh_generated.OrderCheckAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_AverageTime:157",
       25
     ],
     [
@@ -389,7 +389,7 @@
       46
     ],
     [
-      "com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision:76",
+      "com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision:76",
       44
     ],
     [
@@ -397,15 +397,15 @@
       21
     ],
     [
-      "com.surprising.aeron.service.core.jmh_generated.OrderAdmissionAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:198",
+      "com.surprising.aeron.service.core.jmh_generated.OrderCheckAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:198",
       12
     ],
     [
-      "com.surprising.aeron.service.core.jmh_generated.OrderAdmissionAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:196",
+      "com.surprising.aeron.service.core.jmh_generated.OrderCheckAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:196",
       7
     ],
     [
-      "com.surprising.aeron.service.core.jmh_generated.OrderAdmissionAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:197",
+      "com.surprising.aeron.service.core.jmh_generated.OrderCheckAllocationBenchmark_laneCloseCapacityDecision_jmhTest.laneCloseCapacityDecision_avgt_jmhStub:197",
       6
     ],
     [
@@ -415,7 +415,7 @@
   ],
   "cpu_samples_by_thread": [
     [
-      "com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-jmh-worker-1",
+      "com.surprising.aeron.service.core.OrderCheckAllocationBenchmark.laneCloseCapacityDecision-jmh-worker-1",
       274
     ],
     [

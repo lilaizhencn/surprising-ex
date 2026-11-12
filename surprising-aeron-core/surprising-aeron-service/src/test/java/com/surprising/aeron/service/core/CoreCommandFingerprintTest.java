@@ -23,7 +23,7 @@ class CoreCommandFingerprintTest {
      */
     @Test
     void changedPayloadWithSameCommandIdConflictsBeforeAnyMutation() {
-        try (/* 本轮用于提交原命令的交易运行时；try 作用域版本退出自动关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本轮用于提交原命令的交易运行时；try 作用域版本退出自动关闭 */ var state = new TradingCore(ProductLine.SPOT)) {
             // 首条及重试共用的命令 UUID
             UUID commandId = UUID.randomUUID();
             // 首次将用户余额增加七的现货请求
@@ -39,7 +39,7 @@ class CoreCommandFingerprintTest {
             assertThat(testBalance(state, 1001)).isEqualTo(7);
             assertThat(state.appliedCommandCount()).isOne();
             assertThat(state.lastSourceSequences())
-                    .containsEntry(new TradingCoreRuntime.SourceKey(CommandSource.GATEWAY, 7), 1L);
+                    .containsEntry(new TradingCore.SourceKey(CommandSource.GATEWAY, 7), 1L);
         }
     }
 
@@ -49,7 +49,7 @@ class CoreCommandFingerprintTest {
     @Test
     void sameFingerprintReplaysOriginalAfterSourceEpochAndSnapshotRestore() {
         // 本轮用于提交原命令的交易运行时；try 作用域版本退出自动关闭
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCore state = new TradingCore(ProductLine.SPOT);
         // 首条及重试共用的命令 UUID
         UUID commandId = UUID.randomUUID();
         // 首次成功提交的终态响应，供恢复后重复结果逐字段对照
@@ -57,13 +57,13 @@ class CoreCommandFingerprintTest {
         // 原运行时提交后编码出的完整快照字节
         byte[] snapshot = state.snapshot();
         // 从原快照恢复的独立交易运行时
-        TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, snapshot);
+        TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, snapshot);
         // 重试前恢复运行时的状态哈希，重复不能改变它
         long stateHash = restored.stateHash();
         // 重试前已经应用的命令数，重复不能再次增加
         long appliedCommandCount = restored.appliedCommandCount();
         // 重试前恢复出的来源水位映射，重复不能用新来源改写它
-        Map<TradingCoreRuntime.SourceKey, Long> sourceSequences = restored.lastSourceSequences();
+        Map<TradingCore.SourceKey, Long> sourceSequences = restored.lastSourceSequences();
 
         // 同业务载荷跨来源元数据重试得到的重复终态
         CoreResponse replay = CoreTestCompletion.applyAsynchronously(restored, new CoreMessage(
@@ -95,7 +95,7 @@ class CoreCommandFingerprintTest {
                 id, product, CommandSource.GATEWAY, 7, 1, 1001, 1000, 11), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 7)));
         // 在进入执行前计算的原业务指纹，结果表须保留同一实例
         var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.of(message);
-        try (/* 本轮用于提交原命令的交易运行时；try 作用域版本退出自动关闭 */ var state = new TradingCoreRuntime(product)) {
+        try (/* 本轮用于提交原命令的交易运行时；try 作用域版本退出自动关闭 */ var state = new TradingCore(product)) {
             // 当前余额控制命令执行或续步得到的响应
             var response = state.applyDecodedCommand(message, 1000, 1, null, false, fingerprint);
             // 最多五秒等直接控制命令完成的单调时钟截止值
@@ -105,8 +105,8 @@ class CoreCommandFingerprintTest {
                 if (System.nanoTime() >= deadline) throw new AssertionError("funds command did not complete");
             }
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.resultLedger().get(id).fingerprint()).isSameAs(fingerprint);
-            try (/* 从原快照恢复的独立交易运行时 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+            assertThat(state.commandResultLog().get(id).fingerprint()).isSameAs(fingerprint);
+            try (/* 从原快照恢复的独立交易运行时 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                 assertThat(CoreTestCompletion.applyAsynchronously(restored, message).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 // 同一 UUID 改成不同余额增量的冲突消息
                 var changed = new CoreMessage(message.header(), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 99)));
@@ -143,7 +143,7 @@ class CoreCommandFingerprintTest {
      * @param state 本测试的交易运行时，读取已提交导出状态
      * @param userId 要核对余额的用户 ID
      */
-    private static long testBalance(TradingCoreRuntime state, long userId) {
+    private static long testBalance(TradingCore state, long userId) {
         // 从已提交测试状态取得的可空用户，用于核对 USDT 总额
         var user = state.tradingState().users().get(userId);
         return user == null ? 0 : CoreStateTestFixtures.totalUnits(user, "USDT");

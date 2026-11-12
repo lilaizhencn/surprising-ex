@@ -28,7 +28,7 @@ class ProductRecoveryLifecycleTest {
         ContractType type = ContractType.valueOf(product.contractTypeCode());
         // 币本位使用 BTC，其他本场景使用 USDT 的结算资产名称。
         String asset = type.isInverse() ? "BTC" : "USDT";
-        try (/* 基准交易实例，场景结束时自动关闭。 */ TradingCoreRuntime live = new TradingCoreRuntime(product)) {
+        try (/* 基准交易实例，场景结束时自动关闭。 */ TradingCore live = new TradingCore(product)) {
             apply(live, command(product, 1, 1, CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1_000 : 1,
@@ -72,7 +72,7 @@ class ProductRecoveryLifecycleTest {
                                 trigger.positionSide(), trigger.expiresAtEpochMillis(), trigger.priceSource()))));
             // 含部分成交及待触发单的内存快照字节。
             byte[] checkpoint = live.snapshot(100);
-            try (/* 从首份快照恢复并继续接收相同命令的实例。 */ TradingCoreRuntime recovered = TradingCoreRuntime.fromSnapshot(product, checkpoint)) {
+            try (/* 从首份快照恢复并继续接收相同命令的实例。 */ TradingCore recovered = TradingCore.fromSnapshot(product, checkpoint)) {
                 parity(live, recovered);
                 assertThat(apply(recovered, partial).data()).isEqualTo(partialResult.data());
                 parity(live, recovered);
@@ -102,7 +102,7 @@ class ProductRecoveryLifecycleTest {
                     }
                     assertThat(apply(recovered, message).data()).isEqualTo(actual.data());
                     parity(live, recovered);
-                    try (/* 每条尾部命令之后再次快照恢复出的临时实例，核对后立即关闭。 */ TradingCoreRuntime boundary = TradingCoreRuntime.fromSnapshot(product, recovered.snapshot(200 + message.header().sourceSequence()))) {
+                    try (/* 每条尾部命令之后再次快照恢复出的临时实例，核对后立即关闭。 */ TradingCore boundary = TradingCore.fromSnapshot(product, recovered.snapshot(200 + message.header().sourceSequence()))) {
                         parity(recovered, boundary);
                     }
                 }
@@ -157,7 +157,7 @@ class ProductRecoveryLifecycleTest {
                 assertThat(CoreTriggerOrderCodec.decodeList(placed.data())).hasSize(2);
                 assertThat(apply(live, placeTrigger).data()).isEqualTo(placed.data());
                 apply(recovered, placeTrigger);
-                try (/* 合法 OCO 仍等待触发时，从快照恢复的临时实例。 */ TradingCoreRuntime afterPendingTrigger = TradingCoreRuntime.fromSnapshot(product, recovered.snapshot(300))) {
+                try (/* 合法 OCO 仍等待触发时，从快照恢复的临时实例。 */ TradingCore afterPendingTrigger = TradingCore.fromSnapshot(product, recovered.snapshot(300))) {
                     // 把参考价格更新到止盈触发点并推进价格序号的命令。
                     CoreMessage price = command(product, 14, 1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
@@ -178,7 +178,7 @@ class ProductRecoveryLifecycleTest {
                     assertThat(afterPendingTrigger.tradingState().orders()).hasSize(1);
                     apply(afterPendingTrigger, price);
                     assertThat(afterPendingTrigger.tradingState().orders()).hasSize(1);
-                    try (/* 一腿触发、另一腿取消后再次从快照恢复的临时实例。 */ TradingCoreRuntime afterTriggered = TradingCoreRuntime.fromSnapshot(product, afterPendingTrigger.snapshot(301))) {
+                    try (/* 一腿触发、另一腿取消后再次从快照恢复的临时实例。 */ TradingCore afterTriggered = TradingCore.fromSnapshot(product, afterPendingTrigger.snapshot(301))) {
                         parity(live, afterTriggered);
                         // 对触发生成的订单继续成交、最终清空活动订单和预留的买单命令。
                         CoreMessage close = command(product, 16, 11, CoreMessageType.PLACE_ORDER,
@@ -213,9 +213,9 @@ class ProductRecoveryLifecycleTest {
      * @param expected 作为对照基准的运行时
      * @param actual 需要核对恢复一致性的运行时
      */
-    private static void parity(TradingCoreRuntime expected, TradingCoreRuntime actual) {
+    private static void parity(TradingCore expected, TradingCore actual) {
         assertThat(actual.tradingState().businessStateHash()).isEqualTo(expected.tradingState().businessStateHash());
-        assertThat(TradingCoreRuntime.inspectSnapshot(actual.productLine(), actual.snapshot()).engineStateHash()).isEqualTo(TradingCoreRuntime.inspectSnapshot(expected.productLine(), expected.snapshot()).engineStateHash());
+        assertThat(TradingCore.inspectSnapshot(actual.productLine(), actual.snapshot()).engineStateHash()).isEqualTo(TradingCore.inspectSnapshot(expected.productLine(), expected.snapshot()).engineStateHash());
         assertThat(actual.committedCoreSequence()).isEqualTo(expected.committedCoreSequence());
     }
 
@@ -249,7 +249,7 @@ class ProductRecoveryLifecycleTest {
      * @param state 当前要应用命令的交易运行时
      * @param message 可供两实例及重复请求原样使用的命令
      */
-    private static CoreResponse apply(TradingCoreRuntime state, CoreMessage message) {
+    private static CoreResponse apply(TradingCore state, CoreMessage message) {
         // 本条命令当前取得的原始或续步响应。
         CoreResponse result = state.apply(message);
         // 当前辅助方法直接控制续步的五秒纳秒截止点。
@@ -279,7 +279,7 @@ class ProductRecoveryLifecycleTest {
      * @param state 当前要应用命令的交易运行时
      * @param message 可供两实例及重复请求原样使用的命令
      */
-    private static CoreResponse applyDirect(TradingCoreRuntime state, CoreMessage message) {
+    private static CoreResponse applyDirect(TradingCore state, CoreMessage message) {
         // 本条命令当前取得的原始或续步响应。
         CoreResponse result = state.apply(message);
         // 当前辅助方法直接控制续步的五秒纳秒截止点。

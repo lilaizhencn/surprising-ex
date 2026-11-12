@@ -6,8 +6,8 @@ import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.AccountExposureIndex;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
@@ -16,7 +16,7 @@ import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -31,26 +31,26 @@ public final class ContractExpirySettlementService {
 
     /** 校验结算编号、产品规则和已有游标，选取当前订单页。同一编号已经完整结算时返回完成对象，否则优先重用已经可回收的工作对象及其分组容量。 */
     public static SettlementWork prepare(SettlementWork reuse, SettleInstrumentCommand command, Iterable<Long> indexedUserIds,
-            ActiveOrderIndex activeOrderIndex, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+            ActiveOrderIndex activeOrderIndex, AccountBook accountBook, IdIndex identities) {
         if (command == null || indexedUserIds == null
-                || activeOrderIndex == null || runtime == null || identities == null) {
+                || activeOrderIndex == null || accountBook == null || identities == null) {
             throw new IllegalArgumentException("invalid asynchronous runtime settlement");
         }
-        CoreInstrument instrument = requireInstrument(runtime, command);
+        CoreInstrument instrument = requireInstrument(accountBook, command);
         int symbolId = identities.symbolId(instrument.instrumentIdValue());
-        long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
+        long previousSettlement = accountBook.systemFunds().lifecycleSettlement(symbolId);
         if (command.settlementId() < previousSettlement) {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "settlement id must increase");
         }
         if (command.settlementId() == previousSettlement) {
             CoreSettlementProgressView completed = new CoreSettlementProgressView(
                     command.settlementId(), true, true, 0, 0, 0, 0);
-            return reuse == null || !reuse.reusable() ? SettlementWork.completed(runtime, completed)
-                    : reuse.resetCompleted(runtime, completed);
+            return reuse == null || !reuse.reusable() ? SettlementWork.completed(accountBook, completed)
+                    : reuse.resetCompleted(accountBook, completed);
         }
         ProductTradingRules kernel = ProductTradingRules.forInstrument(instrument);
         kernel.validateLifecycleSettlement(instrument, command);
-        TreasuryRuntime.LifecycleProgressRuntime previousProgress = runtime.treasury().lifecycleProgress(symbolId);
+        SystemFunds.LifecycleProgressRuntime previousProgress = accountBook.systemFunds().lifecycleProgress(symbolId);
         validateProgress(previousProgress, command);
         boolean ordersComplete = previousProgress != null && previousProgress.ordersComplete();
         List<CancellationOrder> selectedOrders = List.of();
@@ -62,9 +62,9 @@ public final class ContractExpirySettlementService {
         }
         int assetId = identities.assetId(instrument.settleAsset());
         if (reuse == null || !reuse.reusable()) {
-            return new SettlementWork(command, runtime, instrument, kernel, symbolId, assetId, selectedOrders, moreOrders, indexedUserIds);
+            return new SettlementWork(command, accountBook, instrument, kernel, symbolId, assetId, selectedOrders, moreOrders, indexedUserIds);
         }
-        return reuse.reset(command, runtime, instrument, kernel, symbolId, assetId, selectedOrders,
+        return reuse.reset(command, accountBook, instrument, kernel, symbolId, assetId, selectedOrders,
                 moreOrders, indexedUserIds);
     }
 
@@ -119,26 +119,26 @@ public final class ContractExpirySettlementService {
         private long[] clearingByLane;
 
         private SettlementWork(SettleInstrumentCommand command,
-                TradingAccountRuntime runtime, CoreInstrument instrument,
+                AccountBook accountBook, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 List<CancellationOrder> selectedOrders, boolean moreOrders, Iterable<Long> indexedUserIds) {
-            int laneCount = runtime.topology().accountLaneCount();
+            int laneCount = accountBook.topology().accountLaneCount();
             this.usersByLane = new LongArrayList[laneCount];
             for (int lane = 0; lane < laneCount; lane++) usersByLane[lane] = new LongArrayList();
             this.ordersByLane = newLaneOrderGroups(laneCount);
-            reset(command, runtime, instrument, kernel, symbolId, assetId, selectedOrders, moreOrders, indexedUserIds);
+            reset(command, accountBook, instrument, kernel, symbolId, assetId, selectedOrders, moreOrders, indexedUserIds);
         }
 
         @SuppressWarnings("unchecked")
-        private SettlementWork(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
-            initializeLedgerCommand(runtime);
+        private SettlementWork(AccountBook accountBook, CoreSettlementProgressView result) {
+            initializeLedgerCommand(accountBook);
             this.command = null;
             this.instrument = null; this.kernel = null;
             this.symbolId = this.assetId = 0; this.selectedOrders = List.of();
             this.moreOrders = false; this.userPage = null;
-            this.usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
+            this.usersByLane = new LongArrayList[accountBook.topology().accountLaneCount()];
             for (int lane = 0; lane < usersByLane.length; lane++) usersByLane[lane] = new LongArrayList();
-            this.ordersByLane = (ArrayList<CancellationOrder>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
+            this.ordersByLane = (ArrayList<CancellationOrder>[]) new ArrayList<?>[accountBook.topology().accountLaneCount()];
             this.orderLaneMask = this.userLaneMask = 0; this.phase = Phase.DONE; this.result = result;
         }
 
@@ -149,12 +149,12 @@ public final class ContractExpirySettlementService {
 
         /** 账本未激活时直接选用户，否则延后交给账本线程选页。 */
         @SuppressWarnings("unchecked")
-        private SettlementWork reset(SettleInstrumentCommand command, TradingAccountRuntime runtime,
+        private SettlementWork reset(SettleInstrumentCommand command, AccountBook accountBook,
                 CoreInstrument instrument, ProductTradingRules kernel, int symbolId, int assetId,
                 List<CancellationOrder> selectedOrders,
                 boolean moreOrders, Iterable<Long> indexedUserIds) {
-            initializeLedgerCommand(runtime);
-            if (usersByLane.length != runtime.topology().accountLaneCount()) {
+            initializeLedgerCommand(accountBook);
+            if (usersByLane.length != accountBook.topology().accountLaneCount()) {
                 throw new IllegalStateException("settlement continuation lane topology changed");
             }
             this.command = command;
@@ -166,7 +166,7 @@ public final class ContractExpirySettlementService {
             for (ArrayList<CancellationOrder> orders : ordersByLane) if (orders != null) orders.clear();
             for (CancellationOrder order : selectedOrders) {
                 if (order == null) continue;
-                int lane = runtime.topology().accountLaneId(order.userId());
+                int lane = accountBook.topology().accountLaneId(order.userId());
                 ArrayList<CancellationOrder> group = ordersByLane[lane];
                 if (group == null) ordersByLane[lane] = group = new ArrayList<>();
                 group.add(order);
@@ -191,7 +191,7 @@ public final class ContractExpirySettlementService {
             userPage = moreOrders ? null
                     : AccountExposureIndex.Page.select(indexedUserIds, command.cursorUserId(), command.maxUsers());
             List<Long> selectedUserIds = userPage == null ? List.of() : userPage.userIds();
-            for (long user : selectedUserIds) usersByLane[runtime.topology().accountLaneId(user)].add(user);
+            for (long user : selectedUserIds) usersByLane[accountBook.topology().accountLaneId(user)].add(user);
             userLaneMask = laneMask(usersByLane);
             indexedUserIds = null;
         }
@@ -201,8 +201,8 @@ public final class ContractExpirySettlementService {
             return userPage == null ? List.of() : userPage.userIds();
         }
 
-        private SettlementWork resetCompleted(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
-            initializeLedgerCommand(runtime);
+        private SettlementWork resetCompleted(AccountBook accountBook, CoreSettlementProgressView result) {
+            initializeLedgerCommand(accountBook);
             this.command = null;
             this.instrument = null; this.kernel = null; this.symbolId = this.assetId = 0;
             this.selectedOrders = List.of(); this.userPage = null;
@@ -227,22 +227,22 @@ public final class ContractExpirySettlementService {
         }
 
         /** 创建无需再推进账户或账本的已完成结算页。 */
-        static SettlementWork completed(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
-            return new SettlementWork(runtime, result);
+        static SettlementWork completed(AccountBook accountBook, CoreSettlementProgressView result) {
+            return new SettlementWork(accountBook, result);
         }
 
         /** Owner 分次推进本页：派发撤单并收齐回执，再派发后值计算、核对整页保险、应用账户，最后等账本记录差额和进度。 */
         public boolean poll() {
-            runtime.assertOwner();
+            accountBook.assertOwner();
             if (phase == Phase.DONE) return true;
             switch (phase) {
                 case CANCEL -> {
                     phase = Phase.CANCEL_WAIT;
-                    runtime.dispatchControlLanes(orderLaneMask, this);
+                    accountBook.dispatchControlLanes(orderLaneMask, this);
                     return false;
                 }
                 case CANCEL_WAIT -> {
-                    if (orderLaneMask != 0 && !runtime.pollControlLanes()) return false;
+                    if (orderLaneMask != 0 && !accountBook.pollControlLanes()) return false;
                     if (moreOrders) {
                         nextOrderCursor = selectedOrders.isEmpty() ? command.cursorOrderId() : selectedOrders.getLast().orderId();
                         financialPhase = FinancialPhase.ORDER_PROGRESS;
@@ -255,11 +255,11 @@ public final class ContractExpirySettlementService {
                         return false;
                     }
                     phase = Phase.PREPARE_WAIT;
-                    runtime.dispatchControlLanes(userLaneMask, this);
+                    accountBook.dispatchControlLanes(userLaneMask, this);
                     return false;
                 }
                 case PREPARE_WAIT -> {
-                    if (!runtime.pollControlLanes()) return false;
+                    if (!accountBook.pollControlLanes()) return false;
                     financialPhase = FinancialPhase.INSURANCE;
                     phase = Phase.BUDGET_WAIT;
                     return false;
@@ -267,7 +267,7 @@ public final class ContractExpirySettlementService {
                 case BUDGET_WAIT -> {
                     applyFinancialPhase();
                     if (!budgetSufficient) {
-                        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                        accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
                         long cursor = command.cursorUserId();
                         result = new CoreSettlementProgressView(command.settlementId(), false, true,
                                 0, cursor, selectedOrders.size(), 0, requiredInsurance);
@@ -275,18 +275,18 @@ public final class ContractExpirySettlementService {
                         return true;
                     }
                     phase = Phase.APPLY_WAIT;
-                    runtime.dispatchControlLanes(userLaneMask, this);
+                    accountBook.dispatchControlLanes(userLaneMask, this);
                     return false;
                 }
                 case APPLY_WAIT -> {
-                    if (!runtime.pollControlLanes()) return false;
+                    if (!accountBook.pollControlLanes()) return false;
                     financialPhase = FinancialPhase.FINAL;
                     phase = Phase.FINAL_WAIT;
                     return false;
                 }
                 case FINAL_WAIT -> {
                     applyFinancialPhase();
-                    runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), selectedOrders.isEmpty() ? 1 : 2));
+                    accountBook.setMetadata(accountBook.productLine(), Math.addExact(accountBook.revision(), selectedOrders.isEmpty() ? 1 : 2));
                     if (financialPhase == FinancialPhase.ORDER_PROGRESS)
                         result = new CoreSettlementProgressView(command.settlementId(), false, false,
                                 nextOrderCursor, 0, selectedOrders.size(), 0);
@@ -306,18 +306,18 @@ public final class ContractExpirySettlementService {
         @Override
         public Object apply(int lane) {
             switch (phase) {
-                case CANCEL_WAIT -> cancelOrdersOnLane(runtime, ordersByLane[lane]);
-                case PREPARE_WAIT -> prepared[lane] = prepareLane(runtime, instrument, kernel, command,
+                case CANCEL_WAIT -> cancelOrdersOnLane(accountBook, ordersByLane[lane]);
+                case PREPARE_WAIT -> prepared[lane] = prepareLane(accountBook, instrument, kernel, command,
                         usersByLane[lane], symbolId, assetId);
-                case APPLY_WAIT -> clearingByLane[lane] = applyLane(runtime, prepared[lane]);
+                case APPLY_WAIT -> clearingByLane[lane] = applyLane(accountBook, prepared[lane]);
                 default -> throw new IllegalStateException("settlement lane operation outside dispatch phase");
             }
             return null;
         }
 
         private void applyFinancialPhase() {
-            Math.addExact(runtime.revision(), financialPhase == FinancialPhase.INSURANCE ? 1 : selectedOrders.isEmpty() ? 1 : 2);
-            runtime.dispatchLedgerCommand(this);
+            Math.addExact(accountBook.revision(), financialPhase == FinancialPhase.INSURANCE ? 1 : selectedOrders.isEmpty() ? 1 : 2);
+            accountBook.dispatchLedgerCommand(this);
             requireLedgerAccepted();
         }
 
@@ -327,9 +327,9 @@ public final class ContractExpirySettlementService {
         }
 
         /** 在 System Ledger 上执行当前财务阶段：保存撤单进度、汇总并预扣保险，或合并账户回执后保存结算完成标记和用户游标。 */
-        @Override protected void applyLedger(TreasuryRuntime ledger) {
+        @Override protected void applyLedger(SystemFunds ledger) {
             if (financialPhase == FinancialPhase.ORDER_PROGRESS) {
-                ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), false, nextOrderCursor, 0, 0));
+                ledger.setLifecycleProgress(symbolId, new SystemFunds.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), false, nextOrderCursor, 0, 0));
                 return;
             }
             if (financialPhase == FinancialPhase.INSURANCE) {
@@ -342,7 +342,7 @@ public final class ContractExpirySettlementService {
                 budgetSufficient = requiredInsurance <= ledger.insurance(assetId);
                 if (!budgetSufficient) {
                     long cursor = command.cursorUserId();
-                    ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, cursor, requiredInsurance));
+                    ledger.setLifecycleProgress(symbolId, new SystemFunds.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, cursor, requiredInsurance));
                 } else if (requiredInsurance != 0) {
                     ledger.setInsurance(assetId, Math.subtractExact(ledger.insurance(assetId), requiredInsurance),
                             ledger.insuranceDeficit(assetId));
@@ -359,7 +359,7 @@ public final class ContractExpirySettlementService {
             if (accountsSettled) ledger.setClearingPnl(assetId, Math.addExact(ledger.clearingPnl(assetId), clearing));
             boolean complete = userPage.complete() || userPage.userIds().isEmpty();
             if (complete) ledger.setLifecycleSettlement(symbolId, command.settlementId());
-            else ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, userPage.nextCursorUserId(), 0));
+            else ledger.setLifecycleProgress(symbolId, new SystemFunds.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, userPage.nextCursorUserId(), 0));
         }
 
         /** 返回本次工作已经发布的页结果。 */
@@ -374,18 +374,18 @@ public final class ContractExpirySettlementService {
                           Position[] positions, long clearing, long insurance) { }
 
     /** 在所属账户 Lane 只计算本页用户的结算后值，不写余额和持仓。 */
-    static List<UserSettlement> prepareLane(TradingAccountRuntime runtime, CoreInstrument instrument,
+    static List<UserSettlement> prepareLane(AccountBook accountBook, CoreInstrument instrument,
                                             ProductTradingRules kernel, SettleInstrumentCommand command,
                                             LongArrayList users, int symbolId, int assetId) {
         ArrayList<UserSettlement> plans = new ArrayList<>();
         for (int userIndex = 0; userIndex < users.size(); userIndex++) {
             long userId = users.get(userIndex);
-            if (runtime.user(userId) == null) continue;
-            LongArrayList indexedKeys = runtime.positionKeysForUserAndSymbolPrimitive(userId, symbolId);
+            if (accountBook.user(userId) == null) continue;
+            LongArrayList indexedKeys = accountBook.positionKeysForUserAndSymbolPrimitive(userId, symbolId);
             if (indexedKeys.isEmpty()) continue;
             long[] keys = new long[indexedKeys.size()];
             Position[] positions = new Position[keys.length];
-            AccountBalance balance = runtime.balance(userId, assetId);
+            AccountBalance balance = accountBook.balance(userId, assetId);
             if (balance == null) throw new IllegalStateException("settlement balance is missing");
             long available = balance.availableUnits();
             long locked = balance.lockedUnits();
@@ -393,7 +393,7 @@ public final class ContractExpirySettlementService {
             int index = 0;
             for (int positionIndex = 0; positionIndex < indexedKeys.size(); positionIndex++) {
                 long key = indexedKeys.get(positionIndex);
-                Position position = runtime.position(key);
+                Position position = accountBook.position(key);
                 if (position == null || position.signedQuantitySteps() == 0) continue;
                 long pnl = kernel.lifecycleSettlementCashDeltaUnits(
                         instrument, position.signedQuantitySteps(), position.entryPriceTicks(),
@@ -417,7 +417,7 @@ public final class ContractExpirySettlementService {
             if (index == 0) continue;
             long equity = Math.addExact(Math.addExact(available, crossMargin), crossPnl);
             if (equity < 0) insurance = Math.addExact(insurance, Math.negateExact(equity));
-            Math.incrementExact(runtime.user(userId).revision());
+            Math.incrementExact(accountBook.user(userId).revision());
             plans.add(new UserSettlement(
                     new AccountBalance(userId, assetId, Math.max(0, equity), locked),
                     keys, positions, Math.negateExact(totalPnl), insurance));
@@ -426,28 +426,28 @@ public final class ContractExpirySettlementService {
     }
 
     /** 在所属账户 Lane 应用保险已确认的后值：替换有效持仓、替换余额并推进用户修订号，返回清算盈亏差额供财库应用。此步骤不再次检查保险，也不在这里实现跨 Lane 回滚。 */
-    static long applyLane(TradingAccountRuntime runtime, List<UserSettlement> plans) {
+    static long applyLane(AccountBook accountBook, List<UserSettlement> plans) {
         long clearing = 0;
         for (UserSettlement plan : plans) {
             for (int index = 0; index < plan.keys().length; index++) {
                 if (plan.positions()[index] != null)
-                    runtime.replacePosition(plan.keys()[index], plan.positions()[index]);
+                    accountBook.replacePosition(plan.keys()[index], plan.positions()[index]);
             }
-            runtime.replaceBalance(plan.balance());
-            runtime.advanceUserRevision(plan.balance().userId());
+            accountBook.replaceBalance(plan.balance());
+            accountBook.advanceUserRevision(plan.balance().userId());
             clearing = Math.addExact(clearing, plan.clearing());
         }
         return clearing;
     }
 
     /** 只处理当前 Lane 所属用户的订单。 */
-    static void cancelOrdersOnLane(TradingAccountRuntime runtime, Collection<CancellationOrder> orders) {
+    static void cancelOrdersOnLane(AccountBook accountBook, Collection<CancellationOrder> orders) {
         if (orders == null || orders.isEmpty()) return;
         for (var order : orders) {
-            if (!runtime.currentLaneOwns(order.userId())) continue;
-            OrderFundsReservation reservation = runtime.reservation(order.orderId());
+            if (!accountBook.currentLaneOwns(order.userId())) continue;
+            OrderFundsReservation reservation = accountBook.reservation(order.orderId());
             if (reservation == null) throw new IllegalStateException("settlement reservation is missing");
-            runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
+            accountBook.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
         }
     }
 
@@ -468,9 +468,9 @@ public final class ContractExpirySettlementService {
     }
 
     /** 读取命令指定币对，缺失时返回业务拒绝。 */
-    static CoreInstrument requireInstrument(TradingAccountRuntime runtime,
+    static CoreInstrument requireInstrument(AccountBook accountBook,
                                                  SettleInstrumentCommand command) {
-        CoreInstrument instrument = runtime.instrument(command.instrumentId());
+        CoreInstrument instrument = accountBook.instrument(command.instrumentId());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
@@ -478,7 +478,7 @@ public final class ContractExpirySettlementService {
     }
 
     /** 首次分页必须从双零游标开始。已有进度时，结算编号、价格、撤单阶段与两个游标必须完全匹配，否则拒绝续页。 */
-    static void validateProgress(TreasuryRuntime.LifecycleProgressRuntime progress,
+    static void validateProgress(SystemFunds.LifecycleProgressRuntime progress,
                                  SettleInstrumentCommand command) {
         if (progress == null && (command.cursorUserId() != 0 || command.cursorOrderId() != 0)) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");

@@ -4,7 +4,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.product.api.ProductLine;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
@@ -27,7 +27,7 @@ public final class OfflineReplayMain {
         }
         ProductLine productLine = ProductLine.requireExternalCode(args[0]);
         long messages = 0;
-        try (TradingCoreRuntime state = new TradingCoreRuntime(productLine);
+        try (TradingCore state = new TradingCore(productLine);
                 DataInputStream input = new DataInputStream(new BufferedInputStream(
                         Files.newInputStream(Path.of(args[1]))))) {
             while (true) {
@@ -75,7 +75,7 @@ public final class OfflineReplayMain {
         }
     }
 
-    private static void drainMatching(TradingCoreRuntime state, int pendingBefore,
+    private static void drainMatching(TradingCore state, int pendingBefore,
             CoreMessage message, long position) {
         long deadline = System.nanoTime() + 30_000_000_000L;
         while (state.pendingMatching().size() > pendingBefore) {
@@ -89,7 +89,7 @@ public final class OfflineReplayMain {
         }
     }
 
-    private static void drainQuery(TradingCoreRuntime state, java.util.UUID queryId) {
+    private static void drainQuery(TradingCore state, java.util.UUID queryId) {
         CoreResponse result = null;
         long deadline = System.nanoTime() + 30_000_000_000L;
         while (result == null && System.nanoTime() < deadline) {

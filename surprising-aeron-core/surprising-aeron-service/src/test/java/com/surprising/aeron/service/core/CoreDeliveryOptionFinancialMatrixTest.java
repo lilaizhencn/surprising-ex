@@ -36,7 +36,7 @@ import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
@@ -44,8 +44,8 @@ import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.settlement.ContractExpirySettlementService;
 import com.surprising.aeron.service.snapshot.state.*;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
@@ -126,7 +126,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
      * 默认正向交割为两位用户建立对向持仓，直接结算后确认进度完成并和冷转换完整状态比较；没有启动账户或账本工作线程。
      */
     @Test
-    void crossLaneExpiryReturnsClearingContributionsBeforeSequencerTreasuryApply() {
+    void crossLaneExpiryReturnsClearingContributionsBeforeSequencerSystemFundsApply() {
         // 本次执行的交割或期权测试组合
         Variant variant = VARIANTS.getFirst();
         // 本场景准备好的原冷状态，后续结算或风险操作由此开始
@@ -139,14 +139,14 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 冷转换直接结算相同对向持仓后的完整预期状态
         TradingCoreState expected = reducer.settleInstrument(opening, command);
         // 本次投影、业务辅助和物化共用的独立整数身份表
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(opening, identities)) {
+        IdIndex identities = new IdIndex();
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ AccountBook accountBook = SnapshotLoader.loadSnapshot(opening, identities)) {
             // 直接结算方法返回的用户和订单游标及完成状态
             CoreSettlementProgressView actual = RuntimeLifecycleSettlementFixture.applyRuntime(command,
-                    List.of(USER_ID, SECOND_MAKER_ID), new ActiveOrderIndex(opening), runtime, identities);
+                    List.of(USER_ID, SECOND_MAKER_ID), new ActiveOrderIndex(opening), accountBook, identities);
 
             assertThat(actual.complete()).isTrue();
-            RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
+            RuntimeStateParityChecker.assertMatches(expected, identities, accountBook);
         }
     }
 
@@ -167,17 +167,17 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 冷转换完成同一结算后的完整预期状态，供异步账本提交结果比较
         TradingCoreState expected = reducer.settleInstrument(opening, command);
         // 本次投影、业务辅助和物化共用的独立整数身份表
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ var runtime = RuntimeStateProjector.project(opening, identities)) {
-            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
+        var identities = new IdIndex();
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ var accountBook = SnapshotLoader.loadSnapshot(opening, identities)) {
+            accountBook.startAccountLanes(); accountBook.bindLedgerPositionOwner();
             // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
             var work = ContractExpirySettlementService.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID),
-                    new ActiveOrderIndex(opening), runtime, identities);
-            LedgerControlTestSupport.await(runtime, work::poll);
+                    new ActiveOrderIndex(opening), accountBook, identities);
+            LedgerControlTestSupport.await(accountBook, work::poll);
             assertThat(work.result().complete()).isTrue();
             assertThat(work.poll()).isTrue();
-            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
-            assertThat(runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
+            assertThat(LedgerControlTestSupport.commit(accountBook, identities, false)).isEqualTo(expected);
+            assertThat(accountBook.systemFunds().insurance(identities.assetId(variant.settleAsset())))
                     .isEqualTo(expected.treasuryState().insuranceBalances().getOrDefault(variant.settleAsset(), 0L));
         }
     }
@@ -195,34 +195,34 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 逐仓交割结算七百零二命令，固定价格一百二十，保险不足后重试同一业务身份
         var command = new SettleInstrumentCommand(702, variant.instrumentId(), 120);
         // 本次投影、业务辅助和物化共用的独立整数身份表
-        var identities = new RuntimeIdentityRegistry();
+        var identities = new IdIndex();
         // 只给冷对照运行时使用的独立身份表
-        var coldIdentities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ var runtime = RuntimeStateProjector.project(opening, identities);
-             /* 同一起点投影的冷运行时，和异步账本路径逐步比较 */ var cold = RuntimeStateProjector.project(opening, coldIdentities)) {
+        var coldIdentities = new IdIndex();
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ var accountBook = SnapshotLoader.loadSnapshot(opening, identities);
+             /* 同一起点投影的冷运行时，和异步账本路径逐步比较 */ var cold = SnapshotLoader.loadSnapshot(opening, coldIdentities)) {
             // 从原状态建立的活跃订单索引，结算首段和补款重试复用
             var index = new ActiveOrderIndex(opening);
-            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
+            accountBook.startAccountLanes(); accountBook.bindLedgerPositionOwner();
             // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
-            var work = ContractExpirySettlementService.prepare(null, command, List.of(USER_ID), index, runtime, identities);
-            LedgerControlTestSupport.await(runtime, work::poll);
+            var work = ContractExpirySettlementService.prepare(null, command, List.of(USER_ID), index, accountBook, identities);
+            LedgerControlTestSupport.await(accountBook, work::poll);
             assertThat(work.result().requiredInsuranceUnits()).isEqualTo(20);
             assertThat(work.result().nextCursorUserId()).isZero();
             assertThat(work.result().processedUsers()).isZero();
             RuntimeLifecycleSettlementFixture.applyRuntime(command, List.of(USER_ID), index, cold, coldIdentities);
-            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(RuntimeStateMaterializer.materialize(cold, coldIdentities));
+            assertThat(LedgerControlTestSupport.commit(accountBook, identities, false)).isEqualTo(SnapshotWriter.writeSnapshot(cold, coldIdentities));
             cold.clearChangedKeys();
             // 给缺口对应结算资产保险基金增加二十的补款命令
             var topUp = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), 20);
-            LedgerControlTestSupport.await(runtime, InsuranceFundCommands.prepare(runtime, identities, topUp));
+            LedgerControlTestSupport.await(accountBook, InsuranceFundCommands.prepare(accountBook, identities, topUp));
             LedgerControlTestSupport.await(cold, InsuranceFundCommands.prepare(cold, coldIdentities, topUp));
-            LedgerControlTestSupport.commit(runtime, identities, true); cold.clearChangedKeys();
-            work = ContractExpirySettlementService.prepare(work, command, List.of(USER_ID), index, runtime, identities);
-            LedgerControlTestSupport.await(runtime, work::poll);
+            LedgerControlTestSupport.commit(accountBook, identities, true); cold.clearChangedKeys();
+            work = ContractExpirySettlementService.prepare(work, command, List.of(USER_ID), index, accountBook, identities);
+            LedgerControlTestSupport.await(accountBook, work::poll);
             assertThat(work.result().complete()).isTrue();
             RuntimeLifecycleSettlementFixture.applyRuntime(command, List.of(USER_ID), index, cold, coldIdentities);
-            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(RuntimeStateMaterializer.materialize(cold, coldIdentities));
-            assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).isEmpty();
+            assertThat(LedgerControlTestSupport.commit(accountBook, identities, false)).isEqualTo(SnapshotWriter.writeSnapshot(cold, coldIdentities));
+            assertThat(accountBook.systemFundsForQuery(identities).insuranceBalances()).isEmpty();
         }
     }
 
@@ -633,28 +633,28 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(marked.users().get(USER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isEqualTo(1);
         assertThat(total(marked, option.settleAsset())).isEqualTo(100);
         // 本次投影、业务辅助和物化共用的独立整数身份表
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭
-        TradingAccountRuntime runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
+        AccountBook accountBook = RuntimeDerivativeRiskFixture.simulateMarkPrice(
                 opening, mark, identities);
         try {
-            RuntimeStateParityChecker.assertMatches(marked, identities, runtime);
+            RuntimeStateParityChecker.assertMatches(marked, identities, accountBook);
             assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(marked),
                     ProductLine.OPTION)).isEqualTo(marked);
             // 即使已经存在排队强平计划，也不能绕过非组合保证金期权多头保护。
-            runtime.putLiquidation(new RiskScanner.LiquidationOrder(99, USER_ID,
+            accountBook.putLiquidation(new RiskScanner.LiquidationOrder(99, USER_ID,
                     identities.symbolId(option.instrumentId()), CoreMarginMode.CROSS, CorePositionSide.NET,
-                    runtime.instrument(option.instrumentId()), 1, 1, 1, 0, 0, 0, 0,
+                    accountBook.instrument(option.instrumentId()), 1, 1, 1, 0, 0, 0, 0,
                     CoreLiquidationState.Status.PLANNED, 0));
             // 对手工排入的受保护期权多头计划发起的强平执行命令
             var execution = new com.surprising.aeron.protocol.ExecuteLiquidationCommand(
                     99, 1, PREMIUM_PRICE, 0);
-            RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(execution, List.of(), runtime, identities);
-            assertThat(runtime.liquidation(99).status()).isEqualTo(CoreLiquidationState.Status.CANCELED);
-            assertThat(runtime.position(identities.positionKey(USER_ID, option.instrumentId()))
+            RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(execution, List.of(), accountBook, identities);
+            assertThat(accountBook.liquidation(99).status()).isEqualTo(CoreLiquidationState.Status.CANCELED);
+            assertThat(accountBook.position(identities.positionKey(USER_ID, option.instrumentId()))
                     .signedQuantitySteps()).isEqualTo(1);
         } finally {
-            runtime.close();
+            accountBook.close();
         }
     }
 
@@ -779,10 +779,10 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(matched.users().get(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isEqualTo(40);
 
         // 本次投影、业务辅助和物化共用的独立整数身份表
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeDerivativeMatchFixture.simulate(
+        IdIndex identities = new IdIndex();
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ AccountBook accountBook = RuntimeDerivativeMatchFixture.simulate(
                 beforeMatch, 302, matches, identities)) {
-            RuntimeStateParityChecker.assertMatches(matched, identities, runtime);
+            RuntimeStateParityChecker.assertMatches(matched, identities, accountBook);
         }
 
         // 卖方平空的只减仓买单，数量二、价格十
@@ -813,10 +813,10 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(total(closed, option.settleAsset())).isEqualTo(2 * WALLET);
 
         // 平仓成交对照单独投影使用的身份表
-        RuntimeIdentityRegistry closeIdentities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeDerivativeMatchFixture.simulate(
+        IdIndex closeIdentities = new IdIndex();
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ AccountBook accountBook = RuntimeDerivativeMatchFixture.simulate(
                 beforeClose, 303, closeMatches, closeIdentities)) {
-            RuntimeStateParityChecker.assertMatches(closed, closeIdentities, runtime);
+            RuntimeStateParityChecker.assertMatches(closed, closeIdentities, accountBook);
         }
     }
 
@@ -837,9 +837,9 @@ class CoreDeliveryOptionFinancialMatrixTest {
                         /* 本次预期的业务拒绝异常，用稳定业务代码核对原因 */ exception -> assertThat(exception.code()).isEqualTo("OPTION_LEVERAGE_UNSUPPORTED"));
 
         // 本次投影、业务辅助和物化共用的独立整数身份表
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities)) {
-            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountCommandService().prepareLeverageChange(runtime, identities, USER_ID, command)))
+        IdIndex identities = new IdIndex();
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ AccountBook accountBook = SnapshotLoader.loadSnapshot(state, identities)) {
+            assertThatThrownBy(() -> LedgerControlTestSupport.await(accountBook, new AccountCommandService().prepareLeverageChange(accountBook, identities, USER_ID, command)))
                     .isInstanceOfSatisfying(CoreStateRejectedException.class,
                             /* 本次预期的业务拒绝异常，用稳定业务代码核对原因 */ exception -> assertThat(exception.code())
                                     .isEqualTo("OPTION_LEVERAGE_UNSUPPORTED"));
@@ -853,12 +853,12 @@ class CoreDeliveryOptionFinancialMatrixTest {
      * @param operation 接收身份表并创建、执行业务后返回运行时的测试闭包，返回值在本辅助内关闭
      */
     private static void assertRuntimeParity(TradingCoreState before, TradingCoreState expected,
-                                            java.util.function.Function<RuntimeIdentityRegistry,
-                                                    TradingAccountRuntime> operation) {
+                                            java.util.function.Function<IdIndex,
+                                                    AccountBook> operation) {
         // 本次投影、业务辅助和物化共用的独立整数身份表
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = operation.apply(identities)) {
-            RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
+        IdIndex identities = new IdIndex();
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ AccountBook accountBook = operation.apply(identities)) {
+            RuntimeStateParityChecker.assertMatches(expected, identities, accountBook);
         }
     }
 
@@ -1246,16 +1246,16 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 指定资产全部用户现金的 stream.sum 合计，尚未合入财库余额
         long users = state.users().values().stream().mapToLong(/* 当前需要构造或检查持仓、锁定或合计资金的用户值 */ user -> CoreStateTestFixtures.totalUnits(user, asset)).sum();
         // 本次总额统计读到的财库分量
-        CoreTreasuryState treasury = state.treasuryState();
+        CoreTreasuryState systemFunds = state.treasuryState();
         // 逐项合入手续费、保险、强平费、资金费残差、舍入及清算余额的累计总额，最后减保险亏空
         long total = users;
-        total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.insuranceBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.liquidationFeeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.fundingResidualBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.roundingResidualBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.clearingPnlBalances().getOrDefault(asset, 0L));
-        return Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.feeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.insuranceBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.liquidationFeeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.fundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.roundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.clearingPnlBalances().getOrDefault(asset, 0L));
+        return Math.subtractExact(total, systemFunds.insuranceDeficits().getOrDefault(asset, 0L));
     }
 
     /**

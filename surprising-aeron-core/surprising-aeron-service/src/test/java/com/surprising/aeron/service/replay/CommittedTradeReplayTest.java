@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.replay;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -276,7 +276,7 @@ class CommittedTradeReplayTest {
                     new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
             assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.INVALID_ALGO_CHILD);
-            try (/* 从同产品快照恢复的独立回放或查询 Core */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT,replay.snapshot())) {
+            try (/* 从同产品快照恢复的独立回放或查询 Core */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT,replay.snapshot())) {
                 // 恢复副本查询出的完整用户视图，用来检查预留与余额不变
                 var user = CoreTestCompletion.userState(restored,7);
                 assertThat(user.reservations()).isEmpty();
@@ -306,7 +306,7 @@ class CommittedTradeReplayTest {
     /**
      * 现货可用余额不足导致下单前拒绝，没有订单变化帧，但最终收据仍带原合法客户号、币对及明确余额不足码。
      */
-    @Test void spotAdmissionRejectionWithoutAnOrderStillCarriesTheClientIdentity() {
+    @Test void spotOrderCheckRejectionWithoutAnOrderStillCarriesTheClientIdentity() {
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
             send(replay, ProductLine.SPOT, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(

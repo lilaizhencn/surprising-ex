@@ -22,14 +22,14 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.*;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.aeron.service.treasury.InsuranceAllocationPolicy;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.treasury.SystemFunds;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
@@ -220,9 +220,9 @@ class CoreLifecycleStateTest {
         RuntimeTestStateTransitions.FundingApplication netZeroExpected = reducer.applyFundingWithFacts(netZero,
                 netZeroCommand);
         // 等额收付运行时投影及状态对照共用的身份表。
-        RuntimeIdentityRegistry netZeroIdentities = new RuntimeIdentityRegistry();
+        IdIndex netZeroIdentities = new IdIndex();
         // 从等额收付前置状态投影出的独立运行时。
-        TradingAccountRuntime netZeroRuntime = RuntimeStateProjector.project(netZero, netZeroIdentities);
+        AccountBook netZeroRuntime = SnapshotLoader.loadSnapshot(netZero, netZeroIdentities);
         // 实际运行时资金费入口返回的等额收付结果。
         var netZeroActual = RuntimeTestStateTransitions.applyFundingRuntime(netZero, netZeroCommand, null, netZeroRuntime, netZeroIdentities);
         RuntimeStateParityChecker.assertMatches(netZeroExpected.state(), netZeroIdentities, netZeroRuntime);
@@ -239,9 +239,9 @@ class CoreLifecycleStateTest {
         // 辅助状态推进器得到的扣款封顶期望结果。
         RuntimeTestStateTransitions.FundingApplication cappedExpected = reducer.applyFundingWithFacts(capped, cappedCommand);
         // 扣款封顶运行时模拟及状态对照共用的身份表。
-        RuntimeIdentityRegistry cappedIdentities = new RuntimeIdentityRegistry();
+        IdIndex cappedIdentities = new IdIndex();
         // 独立投影出的扣款封顶运行时及本页收付结果。
-        TradingAccountRuntime cappedRuntime = RuntimeStateProjector.project(capped, cappedIdentities);
+        AccountBook cappedRuntime = SnapshotLoader.loadSnapshot(capped, cappedIdentities);
         var cappedActual = RuntimeTestStateTransitions.applyFundingRuntime(capped, cappedCommand, null, cappedRuntime, cappedIdentities);
         RuntimeStateParityChecker.assertMatches(cappedExpected.state(), cappedIdentities, cappedRuntime);
         assertThat(cappedActual.payments()).isEqualTo(cappedExpected.payments());
@@ -254,9 +254,9 @@ class CoreLifecycleStateTest {
         RuntimeTestStateTransitions.FundingApplication firstExpected = reducer.applyFundingWithFacts(chunked,
                 firstCommand, List.of(1L, 2L));
         // 两页实际运行时共用的身份表。
-        RuntimeIdentityRegistry chunkedIdentities = new RuntimeIdentityRegistry();
+        IdIndex chunkedIdentities = new IdIndex();
         // 第一页建立并继续用于第二页的可变权威运行时。
-        TradingAccountRuntime chunkedRuntime = RuntimeStateProjector.project(chunked, chunkedIdentities);
+        AccountBook chunkedRuntime = SnapshotLoader.loadSnapshot(chunked, chunkedIdentities);
         // 实际运行时第一页结果，后续继续使用同一份chunkedRuntime。
         var firstActual = RuntimeTestStateTransitions.applyFundingRuntime(chunked, firstCommand, List.of(1L, 2L), chunkedRuntime, chunkedIdentities);
         RuntimeStateParityChecker.assertMatches(firstExpected.state(), chunkedIdentities, chunkedRuntime);
@@ -293,7 +293,7 @@ class CoreLifecycleStateTest {
         // 在缺价与已完成编号两种场景复用的资金费请求。
         ApplyFundingCommand command = new ApplyFundingCommand(104, "1", 10_000);
         assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(state, command, null,
-                new RuntimeIdentityRegistry()))
+                new IdIndex()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("MARK_PRICE_NOT_FOUND"));
 
@@ -303,14 +303,14 @@ class CoreLifecycleStateTest {
         // 资金费或保险调整后的业务状态。
         TradingCoreState funded = reducer.applyFunding(marked, command);
         assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(funded, command, null,
-                new RuntimeIdentityRegistry()))
+                new IdIndex()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("STALE_SETTLEMENT_ID"));
 
         // 尚无保存进度却从用户一之后开始的非法首轮请求。
         ApplyFundingCommand invalidCursor = new ApplyFundingCommand(105, "1", 10_000, 1, 1);
         assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(marked, invalidCursor, List.of(1L, 2L),
-                new RuntimeIdentityRegistry()))
+                new IdIndex()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("INVALID_COMMAND"));
     }
@@ -522,7 +522,7 @@ class CoreLifecycleStateTest {
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("LIQUIDATION_DEFICIT_REMAINS"));
         assertThatThrownBy(() -> RuntimeDerivativeLiquidationFixture.simulateResolution(
-                liquidated, command, new RuntimeIdentityRegistry()))
+                liquidated, command, new IdIndex()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("LIQUIDATION_DEFICIT_REMAINS"));
         assertThat(liquidated.riskState().liquidations().get(1L).status())
@@ -570,7 +570,7 @@ class CoreLifecycleStateTest {
         // 风险恢复后取消原强平计划但保留持仓的期望状态。
         TradingCoreState recovered = reducer.applyMarkPrice(state, command);
         // 独立运行时投影或业务状态对照使用的身份表。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         RuntimeStateParityChecker.assertMatches(recovered, identities,
                 RuntimeDerivativeRiskFixture.simulateMarkPrice(
                         state, command, identities));
@@ -675,39 +675,39 @@ class CoreLifecycleStateTest {
         long secondCoverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(state, secondUser.liquidationId());
 
         // 独立运行时投影或业务状态对照使用的身份表。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 用于核对反向编号列表分配结果的独立运行时。
-        try (TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities)) {
+        try (AccountBook accountBook = SnapshotLoader.loadSnapshot(state, identities)) {
             // 故意反转的候选强平编号列表，用来检查输入次序不改变分配。
             var reverseIds = new java.util.ArrayList<>(state.riskState().liquidations().keySet());
             java.util.Collections.reverse(reverseIds);
             int assetId = identities.assetId("USDT");
             // 空槽和有效前缀之后的重复回执均不应参与分配。
             RiskScanner.LiquidationOrder[] receipts = new RiskScanner.LiquidationOrder[reverseIds.size() + 2];
-            for (int index = 0; index < reverseIds.size(); index++) receipts[index + 1] = runtime.liquidation(reverseIds.get(index));
-            receipts[receipts.length - 1] = runtime.liquidation(firstUser.liquidationId());
+            for (int index = 0; index < reverseIds.size(); index++) receipts[index + 1] = accountBook.liquidation(reverseIds.get(index));
+            receipts[receipts.length - 1] = accountBook.liquidation(firstUser.liquidationId());
             int count = receipts.length - 1;
             java.util.function.LongUnaryOperator resolution = id ->
-                    runtime.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.resolve(receipts, count, id, assetId, ledger));
+                    accountBook.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.resolve(receipts, count, id, assetId, ledger));
             // 对反向候选列表一次性求出的全部保险分配结果。
             long[] ids = reverseIds.stream().mapToLong(Long::longValue).toArray();
-            var claims = new InsuranceAllocationPolicy.AllocationInputs[runtime.topology().accountLaneCount()];
+            var claims = new InsuranceAllocationPolicy.AllocationInputs[accountBook.topology().accountLaneCount()];
             for (int laneId = 0; laneId < claims.length; laneId++) {
                 final int current = laneId;
                 long[] laneIds = java.util.Arrays.stream(ids)
-                        .filter(id -> runtime.accountLaneId(runtime.liquidation(id).userId()) == current).toArray();
+                        .filter(id -> accountBook.accountLaneId(accountBook.liquidation(id).userId()) == current).toArray();
                 if (laneIds.length == 0) continue;
                 int[] assets = new int[laneIds.length];
                 java.util.Arrays.fill(assets, assetId);
                 var instruments = new CoreInstrument[laneIds.length];
                 for (int index = 0; index < laneIds.length; index++)
-                    instruments[index] = runtime.liquidation(laneIds[index]).instrument();
-                runtime.inLaneCommandScope(runtime.accountLane(laneId), lane -> {
-                    claims[current] = InsuranceAllocationPolicy.prepareLaneAllocations(runtime, laneIds, assets, instruments);
+                    instruments[index] = accountBook.liquidation(laneIds[index]).instrument();
+                accountBook.inLaneCommandScope(accountBook.accountLane(laneId), lane -> {
+                    claims[current] = InsuranceAllocationPolicy.prepareLaneAllocations(accountBook, laneIds, assets, instruments);
                     return null;
                 });
             }
-            var allAllocations = runtime.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.allocations(
+            var allAllocations = accountBook.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.allocations(
                     ledger, claims));
             for (long /* 当前要比较逐项保险覆盖结果的强平编号。 */ id : reverseIds) {
                 assertThat(allAllocations.get(id))
@@ -716,14 +716,14 @@ class CoreLifecycleStateTest {
             assertThat(resolution.applyAsLong(firstUser.liquidationId())).isEqualTo(firstCoverage);
             assertThat(resolution.applyAsLong(secondUser.liquidationId())).isEqualTo(-1);
 
-            TreasuryRuntime fullBudget = new TreasuryRuntime();
+            SystemFunds fullBudget = new SystemFunds();
             fullBudget.setInsurance(assetId, 10_000, 0);
             assertThat(Math.addExact(firstUser.deficitUnits(), secondUser.deficitUnits())).isLessThan(10_000);
             assertThat(InsuranceAllocationPolicy.resolve(receipts, count, firstUser.liquidationId(), assetId, fullBudget))
                     .isEqualTo(firstUser.deficitUnits());
             assertThat(InsuranceAllocationPolicy.resolve(receipts, count, secondUser.liquidationId(), assetId, fullBudget))
                     .isEqualTo(-1L);
-            assertThat(InsuranceAllocationPolicy.resolve(receipts, count, firstUser.liquidationId(), assetId, new TreasuryRuntime()))
+            assertThat(InsuranceAllocationPolicy.resolve(receipts, count, firstUser.liquidationId(), assetId, new SystemFunds()))
                     .isEqualTo(0L);
             assertThat(InsuranceAllocationPolicy.resolve(receipts, count, Long.MAX_VALUE, assetId, fullBudget))
                     .isEqualTo(-1L);
@@ -784,9 +784,9 @@ class CoreLifecycleStateTest {
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 -10, 200, 1, 5, deficit - coverage);
         // 独立运行时投影或业务状态对照使用的身份表。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 独立运行时 ADL 模拟得到的实际状态。
-        TradingAccountRuntime runtimeResolved = RuntimeDerivativeLiquidationFixture.simulateAdl(
+        AccountBook runtimeResolved = RuntimeDerivativeLiquidationFixture.simulateAdl(
                 state, command, identities);
         // 保险回执或 ADL 处理完成后的业务状态。
         TradingCoreState resolved = reducer.executeAdl(state, command);
@@ -825,7 +825,7 @@ class CoreLifecycleStateTest {
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "1",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,
-                        -9, 200, 1, 5, residual), new RuntimeIdentityRegistry()))
+                        -9, 200, 1, 5, residual), new IdIndex()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("ADL_POSITION_CONFLICT"));
 
@@ -833,7 +833,7 @@ class CoreLifecycleStateTest {
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "1",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,
-                        -10, 200, 2, 5, residual), new RuntimeIdentityRegistry()))
+                        -10, 200, 2, 5, residual), new IdIndex()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("STALE_MARK_PRICE"));
 
@@ -841,7 +841,7 @@ class CoreLifecycleStateTest {
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "1",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,
-                        -10, 200, 1, 1, residual), new RuntimeIdentityRegistry()))
+                        -10, 200, 1, 1, residual), new IdIndex()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("ADL_PROFIT_INSUFFICIENT"));
     }

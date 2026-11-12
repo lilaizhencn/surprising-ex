@@ -78,7 +78,7 @@ class RuntimeCommitRecoveryTest {
      */
     @Test
     void multiplePendingTransfersKeepCanonicalOrderAcrossRestart() {
-        try (/* 未中断的原运行时，或提供初始恢复快照的原运行时 */ var original = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 未中断的原运行时，或提供初始恢复快照的原运行时 */ var original = new TradingCore(ProductLine.SPOT)) {
             // 按非排序 ID 构造的原待完成划转对照表
             var transfers = new java.util.HashMap<Long, TransferFundsCommand>();
             for (long /* 当前遍历的原划转 ID 或快照段编号 */ id : new long[]{17, 1, 257, 9}) {
@@ -86,10 +86,10 @@ class RuntimeCommitRecoveryTest {
                         ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 25,
                         "ordered-" + id, "recovery", 1001, 1001));
             }
-            original.runtimeState.restorePendingTransfers(transfers);
+            original.accountBook.restorePendingTransfers(transfers);
             // 当前对照业务哈希或按账户段累计的摘要
             long hash = original.stateHash();
-            try (/* 当前恢复的 Owner 测试入口或交易运行时 */ var recovered = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot())) {
+            try (/* 当前恢复的 Owner 测试入口或交易运行时 */ var recovered = TradingCore.fromSnapshot(ProductLine.SPOT, original.snapshot())) {
                 assertThat(recovered.stateHash()).isEqualTo(hash);
                 assertThat(recovered.pendingTransfers().keySet()).containsExactly(1L, 9L, 17L, 257L);
                 assertThat(recovered.pendingTransfers()).isEqualTo(transfers);
@@ -109,12 +109,12 @@ class RuntimeCommitRecoveryTest {
         TransferFundsCommand transfer = new TransferFundsCommand(
                 701, ProductLine.LINEAR_PERPETUAL, ProductLine.SPOT,
                 "USDT_PERPETUAL", "SPOT", "USDT", 125, "recovery-701", "snapshot parity", 1001L, 1001L);
-        try (/* 未中断的原运行时，或提供初始恢复快照的原运行时 */ TradingCoreRuntime original = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
-            original.runtimeState.restoreFeePolicies(Map.of(feePolicy.policyId(), feePolicy));
-            original.runtimeState.restorePendingTransfers(Map.of(transfer.transferId(), transfer));
+        try (/* 未中断的原运行时，或提供初始恢复快照的原运行时 */ TradingCore original = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
+            original.accountBook.restoreFeePolicies(Map.of(feePolicy.policyId(), feePolicy));
+            original.accountBook.restorePendingTransfers(Map.of(transfer.transferId(), transfer));
             // 保存快照前原运行时业务哈希
             long originalStateHash = original.stateHash();
-            try (/* 由原完整快照恢复的独立运行时 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(
+            try (/* 由原完整快照恢复的独立运行时 */ TradingCore restored = TradingCore.fromSnapshot(
                     ProductLine.LINEAR_PERPETUAL, original.snapshot(700))) {
                 assertThat(restored.feePolicies()).containsExactlyEntriesOf(original.feePolicies());
                 assertThat(restored.pendingTransfers()).containsExactlyEntriesOf(original.pendingTransfers());
@@ -133,7 +133,7 @@ class RuntimeCommitRecoveryTest {
                 assertThat(CoreStateTestFixtures.totalUnits(restored.tradingState().users().get(1001L), "USDT")).isEqualTo(500);
                 assertThat(restored.feePolicies()).containsEntry(feePolicy.policyId(), feePolicy);
                 assertThat(restored.pendingTransfers()).containsEntry(transfer.transferId(), transfer);
-                try (/* 再次从恢复运行时快照构造的第三份运行时 */ TradingCoreRuntime recoveredAgain = TradingCoreRuntime.fromSnapshot(
+                try (/* 再次从恢复运行时快照构造的第三份运行时 */ TradingCore recoveredAgain = TradingCore.fromSnapshot(
                         ProductLine.LINEAR_PERPETUAL, restored.snapshot(704))) {
                     assertThat(recoveredAgain.stateHash()).isEqualTo(restored.stateHash());
                     assertThat(CoreStateTestFixtures.totalUnits(recoveredAgain.tradingState().users().get(1001L), "USDT")).isEqualTo(500);
@@ -166,10 +166,10 @@ class RuntimeCommitRecoveryTest {
                 command(9, 11, CoreMessageType.PLACE_ORDER, place(401, CoreOrderSide.BUY, 100, 10, false)),
                 command(10, 22, CoreMessageType.PLACE_ORDER, place(402, CoreOrderSide.SELL, 100, 4, true)),
                 command(11, 33, CoreMessageType.PLACE_ORDER, place(403, CoreOrderSide.SELL, 100, 6, true)));
-        try (/* 从头继续执行或作为所有恢复位置参考的原运行时/Owner 入口 */ TradingCoreRuntime uninterrupted = seededLinearPerpetual()) {
+        try (/* 从头继续执行或作为所有恢复位置参考的原运行时/Owner 入口 */ TradingCore uninterrupted = seededLinearPerpetual()) {
             // 本次用于再次恢复的快照字节；索引规范化中为字段对照映射
             byte[] snapshot = uninterrupted.snapshot(701);
-            try (/* 初始挂单快照恢复的第一份运行时 */ TradingCoreRuntime firstRestore = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
+            try (/* 初始挂单快照恢复的第一份运行时 */ TradingCore firstRestore = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 // 初次快照围栏的投影序号，恢复后必须一致
                 long fenceProjectionSequence = uninterrupted.realtimeExportSequence();
                 assertThat(firstRestore.realtimeExportSequence()).isEqualTo(fenceProjectionSequence);
@@ -189,7 +189,7 @@ class RuntimeCommitRecoveryTest {
                 ReplayResult restoredMiddle = replay(firstRestore, middle);
                 assertParity(firstRestore, uninterrupted, restoredMiddle, uninterruptedMiddle);
                 assertThat(uninterrupted.tradingState().orders()).doesNotContainKeys(101L, 202L, 102L);
-                assertThat(uninterrupted.terminalRetention().containsOrder(101, 11, "")).isTrue();
+                assertThat(uninterrupted.completedOrderArchive().containsOrder(101, 11, "")).isTrue();
                 // 原部分成交响应中复制并解码的 taker 已成交订单视图
                 var partialOrder = CoreCommandResultCodec.decode(HexFormat.of().parseHex(
                         uninterruptedPartial.responses().getFirst().data())).orders().getFirst();
@@ -206,7 +206,7 @@ class RuntimeCommitRecoveryTest {
 
                 // 中段结束后原运行时的第二份恢复快照
                 byte[] secondSnapshot = uninterrupted.snapshot(702);
-                try (/* 从中段快照恢复、仅继续尾部的第三份运行时 */ TradingCoreRuntime secondRestore = TradingCoreRuntime.fromSnapshot(
+                try (/* 从中段快照恢复、仅继续尾部的第三份运行时 */ TradingCore secondRestore = TradingCore.fromSnapshot(
                         ProductLine.LINEAR_PERPETUAL, secondSnapshot)) {
                     // 原运行时全部平仓阶段响应
                     ReplayResult uninterruptedTail = replay(uninterrupted, tail);
@@ -270,7 +270,7 @@ class RuntimeCommitRecoveryTest {
      */
     @Test
     void rejectsCorruptLaneAndHashSnapshotAtomically() {
-        try (/* 未中断的原运行时，或提供初始恢复快照的原运行时 */ TradingCoreRuntime original = seededLinearPerpetual()) {
+        try (/* 未中断的原运行时，或提供初始恢复快照的原运行时 */ TradingCore original = seededLinearPerpetual()) {
             // 本次用于再次恢复的快照字节；索引规范化中为字段对照映射
             byte[] snapshot = original.snapshot(703);
             // 破坏快照测试前原运行时业务哈希
@@ -280,7 +280,7 @@ class RuntimeCommitRecoveryTest {
             // 按指定旧线程名前缀统计的破坏测试前存活数
             long projectorThreads = projectorThreadCount();
             // 只有候选解码成功后才替换的原运行时发布引用
-            AtomicReference<TradingCoreRuntime> published = new AtomicReference<>(original);
+            AtomicReference<TradingCore> published = new AtomicReference<>(original);
             // 用户清单已改且 Lane 摘要/外层 CRC 保持相符的坏快照
             byte[] corruptLaneManifest = mutateLaneUserPreservingDigest(snapshot, original.laneTopology());
             // 仅破坏载荷、不维护外层 CRC 的坏快照
@@ -334,7 +334,7 @@ class RuntimeCommitRecoveryTest {
                         batchPlace(82_002, "fatal-batch-second", CoreOrderSide.BUY, 100, 1)))));
         // 已包含两份 maker 挂单的原配对快照
         byte[] pairedSnapshot;
-        try (/* 用于生成配对快照的原运行时，退出自动关闭 */ TradingCoreRuntime seed = seededPerpetualBatchState()) {
+        try (/* 用于生成配对快照的原运行时，退出自动关闭 */ TradingCore seed = seededPerpetualBatchState()) {
             pairedSnapshot = seed.snapshot(705);
         }
 
@@ -369,8 +369,8 @@ class RuntimeCommitRecoveryTest {
                     .isEqualTo(-2);
             assertThat(recovered.state().tradingState().orders()).isEmpty();
             assertThat(recovered.state().tradingState().clientOrderIndex()).isEmpty();
-            assertThat(recovered.state().terminalRetention().containsOrder(82_001, 1001, "fatal-batch-first")).isTrue();
-            assertThat(recovered.state().terminalRetention().containsOrder(82_002, 1001, "fatal-batch-second")).isTrue();
+            assertThat(recovered.state().completedOrderArchive().containsOrder(82_001, 1001, "fatal-batch-first")).isTrue();
+            assertThat(recovered.state().completedOrderArchive().containsOrder(82_002, 1001, "fatal-batch-second")).isTrue();
             assertThat(recovered.state().tradingState().riskState())
                     .isEqualTo(uninterrupted.state().tradingState().riskState());
             assertThat(recovered.state().tradingState().treasuryState())
@@ -492,10 +492,10 @@ class RuntimeCommitRecoveryTest {
                                     current.nextCancelOrderId(), 1)));
                 }
                 // 原强平页执行前账户所有权交接代号
-                long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState);
+                long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().accountBook);
                 replayClustered(uninterrupted, List.of(executeLiquidation));
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState)).isEqualTo(handoffBefore);
-                assertThat(uninterrupted.state().runtimeState.ownerLaneAccess()).isFalse();
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().accountBook)).isEqualTo(handoffBefore);
+                assertThat(uninterrupted.state().accountBook.ownerLaneAccess()).isFalse();
                 current = liquidation(uninterrupted.state(), planned.liquidationId());
             }
             assertThat(liquidationPages).isEqualTo(3);
@@ -538,10 +538,10 @@ class RuntimeCommitRecoveryTest {
                 assertThat(RuntimeTestStateTransitions.expectedInsuranceCoverage(uninterrupted.state().tradingState(),
                         planned.liquidationId())).isEqualTo(25);
                 // 部分保险确认前的原账户交接代号，执行不得接管其他 Lane
-                long insuranceHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState);
+                long insuranceHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().accountBook);
                 // 原入口执行部分保险确认的响应
                 ReplayResult partialReference = replayClustered(uninterrupted, List.of(partialInsurance.getLast()));
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState))
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().accountBook))
                         .as("insurance resolution must not take Lane ownership").isEqualTo(insuranceHandoff);
                 // 保险前恢复入口执行相同确认的响应
                 ReplayResult partialRecovered = replayClustered(restoredBeforeInsurance, List.of(partialInsurance.getLast()));
@@ -572,11 +572,11 @@ class RuntimeCommitRecoveryTest {
                             TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(
                                     planned.liquidationId(), 2, "1", CoreMarginMode.CROSS,
                                     CorePositionSide.NET, -10, 100, 2, 10, residual)));
-                    try (/* 从保险后快照单独恢复、用于错误 ADL 回滚验证的运行时 */ var rejectedState = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, afterInsurance)) {
+                    try (/* 从保险后快照单独恢复、用于错误 ADL 回滚验证的运行时 */ var rejectedState = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, afterInsurance)) {
                         // 错误目标 ADL 前保存的完整冷状态
                         var beforeRejected = rejectedState.tradingState();
                         // 错误目标 ADL 前的原账户所有权交接代号
-                        long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(rejectedState.runtimeState);
+                        long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(rejectedState.accountBook);
                         // 将 ADL 预期价格改成一百零一的目标冲突消息
                         var invalid = operationsCommand(adlSequence, CoreMessageType.EXECUTE_ADL,
                                 TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(planned.liquidationId(),
@@ -585,10 +585,10 @@ class RuntimeCommitRecoveryTest {
                         var rejected = CoreTestCompletion.applyAsynchronously(rejectedState, invalid);
                         assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                         assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.ADL_POSITION_CONFLICT);
-                        assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(rejectedState.runtimeState)).isEqualTo(handoff);
+                        assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(rejectedState.accountBook)).isEqualTo(handoff);
                         assertThat(rejectedState.tradingState()).as("all participating Lanes roll back on target rejection")
                                 .isEqualTo(beforeRejected);
-                        try (/* 从拒绝后快照再次恢复的运行时，继续正确 ADL */ var again = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, rejectedState.snapshot())) {
+                        try (/* 从拒绝后快照再次恢复的运行时，继续正确 ADL */ var again = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, rejectedState.snapshot())) {
                             assertThat(again.tradingState()).isEqualTo(beforeRejected);
                             // 拒绝恢复后以新来源序号执行正确 ADL 的应用响应
                             var resumed = CoreTestCompletion.applyAsynchronously(again,
@@ -603,10 +603,10 @@ class RuntimeCommitRecoveryTest {
                     // 正确 ADL 前本夹具口径经济权益，减仓不应凭空改变它
                     long beforeAdlEconomic = economicEquityUsdt(uninterrupted.state());
                     // 正确 ADL 前原账户交接代号
-                    long adlHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState);
+                    long adlHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().accountBook);
                     // 原入口执行正确 ADL 的响应清单
                     ReplayResult adlReference = replayClustered(uninterrupted, List.of(adl));
-                    assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState))
+                    assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().accountBook))
                             .as("ADL target and liquidation remain on their own Lanes").isEqualTo(adlHandoff);
                     // 保险前恢复并已继续保险的入口执行同一 ADL 响应
                     ReplayResult adlFromBeforeCut = replayClustered(restoredBeforeInsurance, List.of(adl));
@@ -689,9 +689,9 @@ class RuntimeCommitRecoveryTest {
     /**
      * 注册标的一 U 本位永续、标记价一百，给两用户各两千 USDT，挂出用户十一十份卖单，返回尚可继续成交的运行时。
      */
-    private static TradingCoreRuntime seededLinearPerpetual() {
+    private static TradingCore seededLinearPerpetual() {
         // 本辅助构造并返回的原运行时
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
+        TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                         "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -712,9 +712,9 @@ class RuntimeCommitRecoveryTest {
     /**
      * 建立带非零 maker/taker 费用的永续场景，两用户各两千，maker 挂两份独立一手卖单供配对批次恢复测试。
      */
-    private static TradingCoreRuntime seededPerpetualBatchState() {
+    private static TradingCore seededPerpetualBatchState() {
         // 本辅助构造并返回的原运行时
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
+        TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                         "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -750,13 +750,13 @@ class RuntimeCommitRecoveryTest {
                     Math.addExact(balance.availableUnits(), balance.lockedUnits()));
         }
         // 当前冷财库或原运行时财库，只按本辅助需要的分量读取
-        var treasury = state.treasuryState();
-        total = Math.addExact(total, treasury.feeBalances().getOrDefault("USDT", 0L));
-        total = Math.addExact(total, treasury.insuranceBalances().getOrDefault("USDT", 0L));
-        total = Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault("USDT", 0L));
-        total = Math.addExact(total, treasury.liquidationFeeBalances().getOrDefault("USDT", 0L));
-        total = Math.addExact(total, treasury.fundingResidualBalances().getOrDefault("USDT", 0L));
-        total = Math.addExact(total, treasury.roundingResidualBalances().getOrDefault("USDT", 0L));
+        var systemFunds = state.treasuryState();
+        total = Math.addExact(total, systemFunds.feeBalances().getOrDefault("USDT", 0L));
+        total = Math.addExact(total, systemFunds.insuranceBalances().getOrDefault("USDT", 0L));
+        total = Math.subtractExact(total, systemFunds.insuranceDeficits().getOrDefault("USDT", 0L));
+        total = Math.addExact(total, systemFunds.liquidationFeeBalances().getOrDefault("USDT", 0L));
+        total = Math.addExact(total, systemFunds.fundingResidualBalances().getOrDefault("USDT", 0L));
+        total = Math.addExact(total, systemFunds.roundingResidualBalances().getOrDefault("USDT", 0L));
         return total;
     }
 
@@ -871,7 +871,7 @@ class RuntimeCommitRecoveryTest {
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      * @param command 本次按原身份与载荷提交或重复重放的协议消息
      */
-    private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
+    private static CoreResponse apply(TradingCore state, CoreMessage command) {
         // 本辅助当前取得、轮询或编码的原响应
         CoreResponse response = state.apply(command);
         // 本次直接控制最多五秒的单调时钟截止值
@@ -917,7 +917,7 @@ class RuntimeCommitRecoveryTest {
      * 在已恢复运行时继续补两用户、成交十份再压低标记价，续扫到有用户五十五强平动作后执行，按原顺序收集响应；续扫循环没有另设总页数上限。
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
-    private static ReplayResult liquidate(TradingCoreRuntime state) {
+    private static ReplayResult liquidate(TradingCore state) {
         // 本次按原顺序收集的独立响应对照或模拟会话响应字节清单
         ArrayList<ResponseView> responses = new ArrayList<>();
         // 按原顺序准备账户、资金费、挂单及低标记价的消息清单或其响应
@@ -961,7 +961,7 @@ class RuntimeCommitRecoveryTest {
      * 查询原强平执行工作，若内部挂起则最多五秒等待异步查询并检查健康，要求 OK 后解码。
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
-    private static CoreLiquidationWorkView liquidationWork(TradingCoreRuntime state) {
+    private static CoreLiquidationWorkView liquidationWork(TradingCore state) {
         // 查询当前强平执行页的原只读消息
         CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                 UUID.nameUUIDFromBytes("recovery-liquidation-work".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
@@ -992,7 +992,7 @@ class RuntimeCommitRecoveryTest {
      * @param actual 恢复运行时本轮响应对照
      * @param expected 未中断运行时本轮预期响应对照
      */
-    private static void assertParity(TradingCoreRuntime actualState, TradingCoreRuntime expectedState,
+    private static void assertParity(TradingCore actualState, TradingCore expectedState,
                                      ReplayResult actual, ReplayResult expected) {
         assertThat(actual.responses()).isEqualTo(expected.responses());
         assertThat(actualState.pendingMatching().size()).isZero();
@@ -1020,7 +1020,7 @@ class RuntimeCommitRecoveryTest {
      */
     private static BatchReplay completeBatch(TradingOwnerTestSupport service, CoreMessage batch) {
         // 本辅助构造并返回的原运行时
-        TradingCoreRuntime state = service.state();
+        TradingCore state = service.state();
         // 当前进程内会话入口收集的响应清单
         ClusterReplay replay = replayClusterCommand(service, batch);
         assertThat(replay.responses()).hasSize(1);
@@ -1037,7 +1037,7 @@ class RuntimeCommitRecoveryTest {
      * @param sequence 要等待的原 Core 撮合序号
      */
     private static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatching(
-            TradingCoreRuntime state, long sequence) {
+            TradingCore state, long sequence) {
         // 指定原序号的 Matcher 结果，尚未就绪时为空
         com.surprising.aeron.service.matcher.OrderMatchingResult matching = null;
         // 当前撮合、结算或回调推进阶段的五秒截止时间，各阶段分别计算
@@ -1163,7 +1163,7 @@ class RuntimeCommitRecoveryTest {
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      * @param liquidationId 本次要读取或核对的强平任务 ID
      */
-    private static CoreLiquidationState liquidation(TradingCoreRuntime state, long liquidationId) {
+    private static CoreLiquidationState liquidation(TradingCore state, long liquidationId) {
         return java.util.Objects.requireNonNull(
                 state.tradingState().riskState().liquidations().get(liquidationId), "liquidation");
     }
@@ -1172,7 +1172,7 @@ class RuntimeCommitRecoveryTest {
      * 读取本永续测试当前 USDT 保险亏空，无值按零。
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
-    private static long deficit(TradingCoreRuntime state) {
+    private static long deficit(TradingCore state) {
         return state.tradingState().treasuryState().insuranceDeficits().getOrDefault("USDT", 0L);
     }
 
@@ -1180,7 +1180,7 @@ class RuntimeCommitRecoveryTest {
      * 在本夹具 USDT 资金汇总上，加 USDT 结算非零持仓按标记价减入场价计算的线性未实现盈亏；不是币本位或期权通用估值。
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
-    private static long economicEquityUsdt(TradingCoreRuntime state) {
+    private static long economicEquityUsdt(TradingCore state) {
         // 本次估值或重建索引读取的已提交冷状态
         var core = state.tradingState();
         // 按本夹具资金口径累计的 USDT 单位总额
@@ -1286,25 +1286,25 @@ class RuntimeCommitRecoveryTest {
      * @param assetId 原内部资产编号
      */
     private static RuntimeFinancialView runtimeFinancialView(
-            com.surprising.aeron.service.core.TradingAccountRuntime runtime, int assetId) {
+            com.surprising.aeron.service.core.AccountBook accountBook, int assetId) {
         // 固定用户一千零一的原余额
-        var buyer = runtime.balance(1001, assetId);
+        var buyer = accountBook.balance(1001, assetId);
         // 固定用户二千零一的原余额
-        var maker = runtime.balance(2001, assetId);
+        var maker = accountBook.balance(2001, assetId);
         // 当前冷财库或原运行时财库，只按本辅助需要的分量读取
-        var treasury = runtime.treasury();
+        var systemFunds = accountBook.systemFunds();
         // 按本辅助各财库分量普通求和得到的该资产总额
-        long treasuryUnits = treasury.fee(assetId) + treasury.insurance(assetId)
-                - treasury.insuranceDeficit(assetId) + treasury.liquidationFee(assetId)
-                + treasury.fundingResidual(assetId) + treasury.roundingResidual(assetId)
-                + treasury.clearingPnl(assetId);
+        long systemFundsUnits = systemFunds.fee(assetId) + systemFunds.insurance(assetId)
+                - systemFunds.insuranceDeficit(assetId) + systemFunds.liquidationFee(assetId)
+                + systemFunds.fundingResidual(assetId) + systemFunds.roundingResidual(assetId)
+                + systemFunds.clearingPnl(assetId);
         // 固定双方余额与该财库总额的普通求和
         long economicUnits = buyer.availableUnits() + buyer.lockedUnits()
-                + maker.availableUnits() + maker.lockedUnits() + treasuryUnits;
+                + maker.availableUnits() + maker.lockedUnits() + systemFundsUnits;
         return new RuntimeFinancialView(
                 new RuntimeBalanceView(buyer.availableUnits(), buyer.lockedUnits()),
                 new RuntimeBalanceView(maker.availableUnits(), maker.lockedUnits()),
-                treasury.fee(assetId), treasuryUnits, economicUnits);
+                systemFunds.fee(assetId), systemFundsUnits, economicUnits);
     }
 
     /**
@@ -1312,7 +1312,7 @@ class RuntimeCommitRecoveryTest {
      * @param recovered 待与原执行对照的恢复运行时
      * @param reference 未中断执行的原对照运行时或 Owner 测试入口
      */
-    private static void assertBatchRecoveryParity(TradingCoreRuntime recovered, TradingCoreRuntime reference)
+    private static void assertBatchRecoveryParity(TradingCore recovered, TradingCore reference)
             throws Exception {
         assertThat(recovered.tradingState()).isEqualTo(reference.tradingState());
         assertThat(recovered.tradingState().users()).isEqualTo(reference.tradingState().users());
@@ -1320,10 +1320,10 @@ class RuntimeCommitRecoveryTest {
         assertThat(recovered.tradingState().clientOrderIndex())
                 .isEqualTo(reference.tradingState().clientOrderIndex());
         // 反射取得的恢复运行时原身份表
-        var recoveredIdentities = (com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry)
+        var recoveredIdentities = (com.surprising.aeron.service.core.identity.IdIndex)
                 field(recovered, "identities");
         // 反射取得的未中断对照原身份表
-        var referenceIdentities = (com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry)
+        var referenceIdentities = (com.surprising.aeron.service.core.identity.IdIndex)
                 field(reference, "identities");
         assertThat(com.surprising.aeron.service.core.identity.IdentityTestContents.capture(recoveredIdentities))
                 .isEqualTo(com.surprising.aeron.service.core.identity.IdentityTestContents.capture(referenceIdentities));
@@ -1357,12 +1357,12 @@ class RuntimeCommitRecoveryTest {
      * 检查无事实作用域、无直接控制及撮合在途，并要求运行时满足原快照围栏。
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
-    private static void assertNoUnfinishedCommands(TradingCoreRuntime state) throws Exception {
+    private static void assertNoUnfinishedCommands(TradingCore state) throws Exception {
         assertThat(state.factContextActive()).isFalse();
         assertThat(state.directCommand.active()).isFalse();
         assertThat(state.pendingMatching().size()).isZero();
         assertThat(state.pendingMatching().inFlight()).isZero();
-        state.runtimeState.requireSnapshotFenceReady();
+        state.accountBook.requireSnapshotFenceReady();
     }
 
     /**
@@ -1381,8 +1381,8 @@ class RuntimeCommitRecoveryTest {
      * 对运行时八个既有派生索引读取规范对照内容，不新增生产索引。
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
-    private static Map<String, Map<String, Object>> allIndexSnapshots(TradingCoreRuntime state) throws Exception {
-        var indexes = state.factIndexes();
+    private static Map<String, Map<String, Object>> allIndexSnapshots(TradingCore state) throws Exception {
+        var indexes = state.bizIndex();
         return Map.ofEntries(
                 Map.entry("position-user", indexSnapshot(indexes.positionUsers())),
                 Map.entry("open-interest", indexSnapshot(indexes.openInterest())),
@@ -1398,11 +1398,11 @@ class RuntimeCommitRecoveryTest {
      * 从同一冷正文及身份表重新构造八个索引，按本测试规范化规则比较其内容与原运行时索引。
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
-    private static void assertIndexesEqualCanonicalRebuild(TradingCoreRuntime state) throws Exception {
+    private static void assertIndexesEqualCanonicalRebuild(TradingCore state) throws Exception {
         // 本次估值或重建索引读取的已提交冷状态
         var core = state.tradingState();
         // 当前冷重建或规范化取内容的原身份字典
-        var identities = (com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry)
+        var identities = (com.surprising.aeron.service.core.identity.IdIndex)
                 field(state, "identities");
         // 八份从同一冷正文重建索引的字段对照结果
         Map<String, Map<String, Object>> rebuilt = Map.ofEntries(
@@ -1451,7 +1451,7 @@ class RuntimeCommitRecoveryTest {
      * @param value 待转换为测试对照值的对象，或待混合摘要的数字
      */
     private static Object canonicalIndexValue(Object value) {
-        if (value instanceof com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry /* 当前冷重建或规范化取内容的原身份字典 */ identities)
+        if (value instanceof com.surprising.aeron.service.core.identity.IdIndex /* 当前冷重建或规范化取内容的原身份字典 */ identities)
             return com.surprising.aeron.service.core.identity.IdentityTestContents.capture(identities); // 比较身份事实，不导出另一套可恢复格式。
         if (value instanceof com.surprising.aeron.service.order.Order /* 当前原订单，取文本比较跨恢复合约对象身份 */ order)
             return order.toString(); // 恢复后合约对象身份可不同，用本测试既有订单文本规则对照。
@@ -1519,7 +1519,7 @@ class RuntimeCommitRecoveryTest {
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      * @param commands 按原业务顺序推进的命令清单
      */
-    private static ReplayResult replay(TradingCoreRuntime state, List<CoreMessage> commands) {
+    private static ReplayResult replay(TradingCore state, List<CoreMessage> commands) {
         // 本次按原顺序收集的独立响应对照或模拟会话响应字节清单
         List<ResponseView> responses = commands.stream().map(/* 当前待提交的原协议消息 */ command -> response(apply(state, command))).toList();
         return new ReplayResult(responses);
@@ -1580,8 +1580,8 @@ class RuntimeCommitRecoveryTest {
      */
     private record RuntimeFinancialView(RuntimeBalanceView buyerBalance,
                                         RuntimeBalanceView makerBalance,
-                                        long treasuryFee,
-                                        long treasuryUnits,
+                                        long systemFundsFee,
+                                        long systemFundsUnits,
                                         long economicUnits) {
         /**
          * 读取买方余额视图可用部分。

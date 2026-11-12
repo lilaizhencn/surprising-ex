@@ -1,0 +1,85 @@
+package com.surprising.aeron.service.core;
+
+import com.surprising.aeron.service.order.*;
+
+import com.surprising.aeron.config.LaneTopology;
+import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.core.identity.IdIndex;
+import com.surprising.aeron.service.instrument.CoreInstrument;
+import com.surprising.aeron.service.order.Order;
+import com.surprising.product.api.ProductLine;
+import exchange.core2.core.common.*;
+import exchange.core2.core.common.cmd.*;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import org.openjdk.jmh.annotations.*;
+
+/** Reused no-trade cancellation fact across real Account/Ledger threads; technical stage, not API capacity. */
+@BenchmarkMode(Mode.Throughput)
+@OutputTimeUnit(TimeUnit.SECONDS)
+@Warmup(iterations = 3, time = 1)
+@Measurement(iterations = 5, time = 1)
+@Fork(value = 1, jvmArgsAppend = {"-Xms512m", "-Xmx1g", "-XX:+UseG1GC"})
+@State(Scope.Thread)
+public class MatcherSystemFundsReceiptBenchmark {
+    @Param({"1", "2"}) public int laneCount;
+    private AccountBook accountBook;
+    private IdIndex identities;
+    private Order original;
+    private MatcherResult nativeResult;
+    private long sequence;
+    private final UUID commandId = new UUID(1, 2);
+
+    @Setup public void setup() {
+        accountBook = new AccountBook(new LaneTopology(1, laneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256,
+                256, 256));
+        identities = new IdIndex();
+        accountBook.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+        var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
+        accountBook.registerInstrument(instrument);
+        int symbol = identities.symbolId("1");
+        original = new Order(11, 1, symbol, instrument, CoreOrderSide.BUY, 100,
+                false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC, 0, 0, 1, 0, 1, false);
+        accountBook.putOrder(original);
+        accountBook.clearChangedKeys();
+        nativeResult = new MatcherResult(1, OrderCommandType.CANCEL_ORDER, 11, symbol,
+                100, 1, 100, OrderAction.BID, OrderType.GTC, 1, 1_000, 0,
+                CommandResultCode.MATCHING_UNKNOWN_ORDER_ID, List.of(),
+                new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
+        accountBook.startAccountLanes();
+
+        accountBook.releaseOwnerLaneAccess();
+    }
+
+    @Benchmark public long completeFinancialReceipt() {
+        long currentSequence = ++sequence;
+        var event = accountBook.prepareDirectCancellation(currentSequence, original.userId(), original.orderId(), commandId, 0, identities, 10, 20);
+        event.submitSystemFundsSettlement();
+        event.reserveMatcherPublication();
+        event.beginMatcherPublication();
+        // Matcher payload is a retained no-trade fixture; the Core proof/commit sequence
+        // still increases for every Account application. This is not an API load generator.
+        event.publishDirectNativeResult(nativeResult, currentSequence, 1, 2, 11, currentSequence, 0);
+        event.completeMatcherPublication();
+        while (!event.complete()) { accountBook.assertAccountLanesHealthy(); Thread.onSpinWait(); }
+        accountBook.collectMatcherSettlement(event, null, null, null);
+        long sequence = event.coreSequence();
+        accountBook.releaseMatcherSettlement(event);
+        return sequence;
+    }
+
+    @TearDown public void close() {
+
+        if (accountBook.systemFunds().assetLedgerEntryCount() != 0)
+            throw new IllegalStateException("no-trade fact changed Treasury money");
+        accountBook.close();
+    }
+}

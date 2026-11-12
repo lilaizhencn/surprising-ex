@@ -23,7 +23,7 @@ class CoreMatcherLedgerTest {
     @Test
     @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void collectedOrderDeletionWinsBeforeOldActiveRouteIsRetired() throws Exception {
-        try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -36,21 +36,21 @@ class CoreMatcherLedgerTest {
             applied(state, CoreMessageType.ADJUST_BALANCE, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
             applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.BUY, 99, 1)));
-            try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {
+            try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.accountBook)) {
                 assertThat(state.activeOrderIndex().activeOrderRoute(1).userId()).isEqualTo(1001);
                 assertThatThrownBy(() -> state.runtimeOrder(1)).isInstanceOf(IllegalStateException.class);
                 assertThatThrownBy(() -> state.runtimeOrder(999)).isInstanceOf(IllegalStateException.class);
                 // 模拟Lane删除回执已收集、Owner活跃路由尚未发布的提交窗口。
-                var field = com.surprising.aeron.service.core.TradingAccountRuntime.class.getDeclaredField("changedOrders");
+                var field = com.surprising.aeron.service.core.AccountBook.class.getDeclaredField("changedOrders");
                 field.setAccessible(true);
                 // 当前运行时订单变更缓冲，用 null 值模拟已收集删除。
-                var changes = field.get(state.runtimeState);
+                var changes = field.get(state.accountBook);
                 // 变更缓冲 put(long,Object) 的反射方法句柄。
                 var put = changes.getClass().getDeclaredMethod("put", long.class, Object.class);
                 put.setAccessible(true);
                 put.invoke(changes, 1L, (Object) null);
                 assertThat(state.activeOrderIndex().activeOrderRoute(1)).isNotNull();
-                assertThat(state.runtimeState.hasChangedOrder(1)).isTrue();
+                assertThat(state.accountBook.hasChangedOrder(1)).isTrue();
                 assertThat(state.runtimeOrder(1)).isNull();
             }
         }
@@ -61,7 +61,7 @@ class CoreMatcherLedgerTest {
      */
     @Test
     void matchingAndBatchFeesUseOriginalLedgerAndAccountFactsRemainConserved() throws Exception {
-        try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -73,8 +73,8 @@ class CoreMatcherLedgerTest {
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             for (long /* 本轮测试用户，用于注入余额或最终核对其预留已清空。 */ user : new long[]{1001, 1002}) applied(state, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
-            assertThat(state.runtimeState.treasury().fee(state.identities.assetId("USDT"))).isZero();
-            try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {
+            assertThat(state.accountBook.systemFunds().fee(state.identities.assetId("USDT"))).isZero();
+            try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.accountBook)) {
                 applied(state, CoreMessageType.PLACE_ORDER, 1002, TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.SELL, 100, 3)));
                 applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(2, CoreOrderSide.BUY, 100, 1)));
                 // 批量成交或当前完成辅助器返回的命令响应。
@@ -99,8 +99,8 @@ class CoreMatcherLedgerTest {
      * 在 Owner 读取守卫下提交同用户相交反向单，要求旧单撤销而只剩新单，用户总额十万、无自成交持仓且无手续费，最后确认回调完成。
      */
     @Test
-    void laneAdmissionCancelsOwnCrossingOrderWithoutOwnerBusinessReads() throws Exception {
-        try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+    void laneOrderCheckCancelsOwnCrossingOrderWithoutOwnerBusinessReads() throws Exception {
+        try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -112,7 +112,7 @@ class CoreMatcherLedgerTest {
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.ADJUST_BALANCE, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
-            try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {
+            try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.accountBook)) {
                 applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.BUY, 100, 1)));
                 applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(2, CoreOrderSide.SELL, 100, 1)));
             }
@@ -145,7 +145,7 @@ class CoreMatcherLedgerTest {
      * @param user 本条请求关联用户编号
      * @param payload 已经编码的业务载荷
      */
-    private CoreResponse applied(TradingCoreRuntime state, CoreMessageType type, long user, byte[] payload) {
+    private CoreResponse applied(TradingCore state, CoreMessageType type, long user, byte[] payload) {
         // 本次递增后的命令源序号，写入 UUID 和请求头。
         long seq = ++sequence;
         // 携带固定来源和当前源序号的运营命令帧。

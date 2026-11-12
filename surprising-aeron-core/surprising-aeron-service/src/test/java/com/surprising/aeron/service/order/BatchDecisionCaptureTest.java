@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -20,7 +20,7 @@ class BatchDecisionCaptureTest {
      * 注册两个品种，检查同品种复用同一判断对象、异品种分开；更新价格后旧对象仍保留原值，清缓存后新捕获使用新价格，最后清批不残留上下文。
      */
     @Test void contextsAreSharedPerSymbolAndReleasedBeforeRecapturingANewPrefix() {
-        try (/* 测试创建并自动关闭的 U 本位永续 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 测试创建并自动关闭的 U 本位永续 Core */ var core = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             for (String /* 当前要注册和定价的品种名称 */ symbol : new String[]{"1", "2"}) {
                 applied(core, CoreMessageType.REGISTER_INSTRUMENT, TradingCommandCodec.encodeRegisterInstrument(
                         new RegisterInstrumentCommand(
@@ -68,9 +68,9 @@ class BatchDecisionCaptureTest {
      * @param price 标记价整数刻度
      * @param version 标记价版本号
      */
-    private void mark(TradingCoreRuntime core, String symbol, long price, long version) {
+    private void mark(TradingCore core, String symbol, long price, long version) {
         applied(core, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol, price, version, TIME), core.runtimeState().productLine()));
+                new ApplyMarkPriceCommand(symbol, price, version, TIME), core.accountBook().productLine()));
     }
 
     /**
@@ -79,7 +79,7 @@ class BatchDecisionCaptureTest {
      * @param type 测试命令的消息类别
      * @param payload 已编码的命令载荷
      */
-    private void applied(TradingCoreRuntime core, CoreMessageType type, byte[] payload) {
+    private void applied(TradingCore core, CoreMessageType type, byte[] payload) {
         // 本条命令新分配的来源序号及 UUID 低位
         long id = ++sequence;
         // 带当前产品线和已编码载荷的测试 Core 命令

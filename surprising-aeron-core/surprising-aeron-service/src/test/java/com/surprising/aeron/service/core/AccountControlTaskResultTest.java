@@ -6,9 +6,9 @@ import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.AccountCommandService;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -33,31 +33,31 @@ class AccountControlTaskResultTest {
                 Map.of(), Map.of("1", position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         var initial = new TradingCoreState(product, 1, Map.of(7L, user), Map.of(), Map.of("1", instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
-        var ids = new RuntimeIdentityRegistry();
+        var ids = new IdIndex();
         for (int i = 0; i < 256; i++) ids.assetId("ASSET" + i);
-        try (var runtime = RuntimeStateProjector.project(initial, ids,
+        try (var accountBook = SnapshotLoader.loadSnapshot(initial, ids,
                 new LaneTopology(1, lanes, 42, 32, 64, 128))) {
             assertThat(ids.assetId("USDT")).isGreaterThan(127);
-            runtime.startAccountLanes();
+            accountBook.startAccountLanes();
             var task = new AccountCommandService();
             var exceedsAvailable = new TransferFundsCommand(91, product, product,
                     product.accountTypeCode(), product.accountTypeCode(), "USDT", 901, "frozen-test", "", 7, 8);
-            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime,
-                    task.prepareTransferOut(runtime, ids, 7, exceedsAvailable)))
+            assertThatThrownBy(() -> LedgerControlTestSupport.await(accountBook,
+                    task.prepareTransferOut(accountBook, ids, 7, exceedsAvailable)))
                     .hasMessageContaining("insufficient");
-            assertThat(runtime.pendingTransferUser(91)).isZero();
-            assertThat(LedgerControlTestSupport.commit(runtime, ids, false)).isEqualTo(initial);
+            assertThat(accountBook.pendingTransferUser(91)).isZero();
+            assertThat(LedgerControlTestSupport.commit(accountBook, ids, false)).isEqualTo(initial);
             for (long delta : new long[]{10, -10}) {
-                task.preparePositionMarginAdjustment(runtime, ids, 7,
+                task.preparePositionMarginAdjustment(accountBook, ids, 7,
                         new AdjustPositionMarginCommand("1", CorePositionSide.NET, delta));
                 assertThat(task.stateChanged()).isFalse();
-                LedgerControlTestSupport.await(runtime, task);
+                LedgerControlTestSupport.await(accountBook, task);
                 assertThat(task.stateChanged()).isTrue();
-                assertThat(runtime.controlLaneResult(runtime.topology().accountLaneId(7))).isNull();
-                long revision = runtime.revision();
+                assertThat(accountBook.controlLaneResult(accountBook.topology().accountLaneId(7))).isNull();
+                long revision = accountBook.revision();
                 assertThat(task.getAsBoolean()).isTrue();
-                assertThat(runtime.revision()).isEqualTo(revision);
-                var committed = LedgerControlTestSupport.commit(runtime, ids, false);
+                assertThat(accountBook.revision()).isEqualTo(revision);
+                var committed = LedgerControlTestSupport.commit(accountBook, ids, false);
                 assertThat(committed.users().get(7L).balances().get("USDT"))
                         .isEqualTo(new AssetBalance("USDT", delta > 0 ? 890 : 900, delta > 0 ? 110 : 100));
                 assertThat(committed.users().get(7L).positions().get("1").positionMarginUnits())
@@ -66,15 +66,15 @@ class AccountControlTaskResultTest {
             var leverage = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 5_000_000);
             var mode = new UpdatePositionModeCommand(CorePositionMode.HEDGE);
             for (boolean changed : new boolean[]{true, false}) {
-                LedgerControlTestSupport.await(runtime, task.prepareLeverageChange(runtime, ids, 9, leverage));
+                LedgerControlTestSupport.await(accountBook, task.prepareLeverageChange(accountBook, ids, 9, leverage));
                 assertThat(task.stateChanged()).isEqualTo(changed);
-                assertThat(runtime.controlLaneResult(runtime.topology().accountLaneId(9))).isNull();
-                var committed = LedgerControlTestSupport.commit(runtime, ids, false);
+                assertThat(accountBook.controlLaneResult(accountBook.topology().accountLaneId(9))).isNull();
+                var committed = LedgerControlTestSupport.commit(accountBook, ids, false);
                 assertThat(committed.leverages()).containsEntry(new CoreLeverageKey(9, "1", CoreMarginMode.CROSS), 5_000_000L);
-                LedgerControlTestSupport.await(runtime, task.preparePositionModeChange(runtime, 9, mode));
+                LedgerControlTestSupport.await(accountBook, task.preparePositionModeChange(accountBook, 9, mode));
                 assertThat(task.stateChanged()).isEqualTo(changed);
-                assertThat(runtime.controlLaneResult(runtime.topology().accountLaneId(9))).isNull();
-                assertThat(LedgerControlTestSupport.commit(runtime, ids, false).users().get(9L).positionMode())
+                assertThat(accountBook.controlLaneResult(accountBook.topology().accountLaneId(9))).isNull();
+                assertThat(LedgerControlTestSupport.commit(accountBook, ids, false).users().get(9L).positionMode())
                         .isEqualTo(CorePositionMode.HEDGE);
             }
         }

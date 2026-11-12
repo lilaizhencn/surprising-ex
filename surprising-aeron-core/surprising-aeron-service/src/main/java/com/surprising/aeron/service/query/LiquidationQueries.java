@@ -7,8 +7,8 @@ import com.surprising.aeron.protocol.CoreLiquidationActionView;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreRiskScanContinuation;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -60,13 +60,13 @@ public final class LiquidationQueries {
 
     /** 只在执行用途携带风险续扫信息。 */
     public static CoreRiskScanContinuation continuation(
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
+            AccountBook accountBook, IdIndex identities,
             CoreLiquidationWorkView.Purpose purpose) {
         if (purpose != CoreLiquidationWorkView.Purpose.EXECUTION) return null;
-        if (runtime.riskScanCount() > OperationalQueries.MAX_INDEX_SCAN) {
+        if (accountBook.riskScanCount() > OperationalQueries.MAX_INDEX_SCAN) {
             throw new QueryTooLargeException();
         }
-        RiskScanner.State selected = runtime.firstRiskIncompleteScan();
+        RiskScanner.State selected = accountBook.firstRiskIncompleteScan();
         return selected == null ? null
                 : new CoreRiskScanContinuation(identities.instrumentId(selected.symbolId()),
                         selected.priceSequence(), selected.lastUserId());

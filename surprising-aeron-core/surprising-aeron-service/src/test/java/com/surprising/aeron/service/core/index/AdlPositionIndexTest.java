@@ -4,7 +4,7 @@ import com.surprising.aeron.service.query.QueryTooLargeException;
 
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
@@ -120,7 +120,7 @@ class AdlPositionIndexTest {
      */
     private static AdlPositionIndex emptyIndex() {
         return new AdlPositionIndex(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
-                new RuntimeIdentityRegistry());
+                new IdIndex());
     }
 
     /**

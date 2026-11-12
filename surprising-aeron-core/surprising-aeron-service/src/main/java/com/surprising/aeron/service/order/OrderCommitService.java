@@ -10,7 +10,7 @@ import com.surprising.aeron.protocol.CoreLiquidationProgressView;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import com.surprising.aeron.service.matcher.OrderBookSnapshot;
@@ -32,10 +32,10 @@ public final class OrderCommitService {
     /** 唯一所属交易 Owner，串行访问命令槽和发布边界。借用本提交边界所属的 Owner 运行时。 */
     @Accessors(fluent = true, chain = false)
     @Getter
-    final TradingCoreRuntime owner;
+    final TradingCore owner;
 
     /** 保存所属 Owner 并创建同一运行时的发布边界，不另建账户或账本状态。 */
-    public OrderCommitService(TradingCoreRuntime owner) {
+    public OrderCommitService(TradingCore owner) {
         this.owner = owner;
         this.publication = new Publication(owner);
     }
@@ -73,10 +73,10 @@ public final class OrderCommitService {
         CoreResultCode resultCode = pending.matchingRejection();
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.matchingFlow.commitMatchingSequence(sequence);
-        owner.resultLedger().storeOwnedResult(pending.command().header().commandIdMsb(),
+        owner.commandResultLog().storeOwnedResult(pending.command().header().commandIdMsb(),
                 pending.command().header().commandIdLsb(), pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, sequence,
-                TradingCoreRuntime.EMPTY_RESPONSE_DATA, 0, 0);
+                TradingCore.EMPTY_RESPONSE_DATA, 0, 0);
         if (direct != null && direct.direct()) {
             // 回收直达事件前推进 Owner 的该分片水位，使在线状态与恢复后的游标一致。
             if (direct.directResultAvailable()) {
@@ -87,7 +87,7 @@ public final class OrderCommitService {
                     applyMatcherProgress(matcherResult);
                 }
             }
-            owner.runtimeState().discardMatcherSettlement(pending.takeSettlementEvent());
+            owner.accountBook().discardMatcherSettlement(pending.takeSettlementEvent());
         } else if (pending.isMatchingSubmitted()) {
             OrderMatchingResult matcherResult = pending.matchingResult();
             if (matcherResult == null) matcherResult = pending.matchingCompletion();
@@ -98,7 +98,7 @@ public final class OrderCommitService {
         }
         owner.matchingFlow.removePendingMatching(sequence);
         CoreResponse response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                sequence, TradingCore.EMPTY_RESPONSE_DATA);
         return owner.finishFactContext(response);
     }
 
@@ -119,7 +119,7 @@ public final class OrderCommitService {
         long sequence = pending.sequence();
         OrderBatchProcessor.PendingBatch waitingBatch = pending.orderBatch() != null ? pending.orderBatch() : owner.batches().batch(sequence);
         try {
-            owner.runtimeState().assertAccountLanesHealthy();
+            owner.accountBook().assertAccountLanesHealthy();
         } catch (RuntimeException failure) {
             if (waitingBatch != null) throw owner.batches().failOrderBatch(waitingBatch, pending, "batch item Lane failed", failure);
             throw owner.failMatching(pending, "account lane settlement failed; snapshot/log recovery is required", failure);
@@ -134,8 +134,8 @@ public final class OrderCommitService {
                     + " result=" + matchingResult.resultCode());
             throw owner.failMatching(pending, detail, failure);
         }
-        if (pending.operation() == OrderCommand.Operation.PLACE && pending.placeAdmission() != null) {
-            if (!owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return null;
+        if (pending.operation() == OrderCommand.Operation.PLACE && pending.placeOrderCheck() != null) {
+            if (!owner.matchingFlow.collectPlaceOrderCheckIfReady(pending)) return null;
             if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
                 if (pending.settlementEvent() != null && pending.settlementEvent().direct()
                         && (!pending.settlementEvent().complete() || pending.submittedMatcherShard() != -1)) {
@@ -162,24 +162,24 @@ public final class OrderCommitService {
                 }
                 pending.controlWork(null);
                 if (!pending.controlAccountsCommitted() && pending.commitEvent() == null) {
-                    owner.runtimeState().pendingReservations().completePendingReservations(sequence);
+                    owner.accountBook().pendingReservations().completePendingReservations(sequence);
                     owner.resultBuilder.materializeChangeAccumulators();
                     for (long userId : owner.resultBuilder.commandChangedUserIds)
                         pending.includeControlLanes(owner.matchingAdapter().topology().accountLaneMask(userId),
                                 validAccountLaneMask());
-                    pending.commitEvent(owner.runtimeState().dispatchLaneMutation(sequence,
+                    pending.commitEvent(owner.accountBook().dispatchLaneMutation(sequence,
                             owner.resultBuilder.commandChangedUserIds,
-                            publication.dirty() ? owner.runtimeState().metadataOrderUsers(owner.resultBuilder.commandChangedOrderIds) : null, null,
+                            publication.dirty() ? owner.accountBook().metadataOrderUsers(owner.resultBuilder.commandChangedOrderIds) : null, null,
                             clusterTimestamp, clusterPosition));
                 }
                 if (pending.commitEvent() != null) {
-                    if (!owner.runtimeState().laneCommitComplete(pending.commitEvent())) {
+                    if (!owner.accountBook().laneCommitComplete(pending.commitEvent())) {
                         retainControlResponse(pending, matchingResult);
                         owner.suspendMatchingCommitContext(pending);
                         return null;
                     }
                     long laneMask = pending.commitEvent().requiredLaneMask();
-                    owner.runtimeState().releaseLaneCommit(pending.commitEvent());
+                    owner.accountBook().releaseLaneCommit(pending.commitEvent());
                     pending.commitEvent(null);
                     pending.completeLanes(laneMask);
                 }
@@ -191,9 +191,9 @@ public final class OrderCommitService {
             }
         }
         if (waitingBatch != null && waitingBatch.pipelined() && !waitingBatch.commitStarted()) {
-            OrderBatchProcessor.PlaceBatchAdmissionEvent admission = waitingBatch.placeBatchAdmissionEvent();
+            OrderBatchProcessor.PlaceBatchCheckEvent orderCheck = waitingBatch.placeBatchOrderCheckEvent();
             boolean preparedCancel = pending.clusterIndependent() && waitingBatch.kind() == OrderBatchProcessor.Kind.CANCEL;
-            if (preparedCancel || (admission != null && admission.complete() && admission.rejection() == null)) {
+            if (preparedCancel || (orderCheck != null && orderCheck.complete() && orderCheck.rejection() == null)) {
                 owner.batches().beginPipelinedOrderBatchCommit(waitingBatch, pending);
             }
         }
@@ -263,8 +263,8 @@ public final class OrderCommitService {
             if (!pending.settlementEvent().complete()) return null;
             // 拒单没有结算变更，不能开启或恢复发布批次。
             // Matcher/Lane 可先于 owner 完成，拒单也必须走同一个有序终态边界。
-            if (pending.operation() == OrderCommand.Operation.PLACE && pending.placeAdmission() != null) {
-                if (!owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return null;
+            if (pending.operation() == OrderCommand.Operation.PLACE && pending.placeOrderCheck() != null) {
+                if (!owner.matchingFlow.collectPlaceOrderCheckIfReady(pending)) return null;
                 if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence()))
                     return completeRejectedMatching(pending.sequence());
             }
@@ -338,7 +338,7 @@ public final class OrderCommitService {
                                 chunk.orders().size());
                         var work = com.surprising.aeron.service.liquidation.LiquidationService
                                  .beginExecution(pending.liquidationWork(), command, orders, nextCursor,
-                                        owner.runtimeState(), owner.identities());
+                                        owner.accountBook(), owner.identities());
                         pending.liquidationWork(work);
                         pending.deferLiquidationExecutionControl(this, work, progress);
                     }
@@ -354,7 +354,7 @@ public final class OrderCommitService {
                         var work = com.surprising.aeron.service.settlement.ContractExpirySettlementService.prepare(
                                 pending.settlementWork(), command,
                                 owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()),
-                                owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
+                                owner.activeOrderIndex(), owner.accountBook(), owner.identities());
                         pending.settlementWork(work);
                         pending.deferSettlementControl(this, work);
                     }
@@ -365,7 +365,7 @@ public final class OrderCommitService {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             }
-            owner.runtimeState().pendingReservations().completePendingReservations(pending.sequence());
+            owner.accountBook().pendingReservations().completePendingReservations(pending.sequence());
         } catch (CoreStateRejectedException exception) {
             throw owner.failMatching(pending, "Core rejected an accepted matcher result", exception);
         } catch (ArithmeticException | IllegalArgumentException exception) {
@@ -387,7 +387,7 @@ public final class OrderCommitService {
         boolean laneResponse = responseData != null && responseData == pending.lanePreparedResponse();
         pending.resultData(null);
         owner.terminalTradeCount(Math.addExact(owner.terminalTradeCount(), owner.resultBuilder.commandTradeCount()));
-        owner.resultLedger().storeOwnedResult(pending.command().header().commandIdMsb(),
+        owner.commandResultLog().storeOwnedResult(pending.command().header().commandIdMsb(),
                 pending.command().header().commandIdLsb(), pending.fingerprint(),
                 status, resultCode, applied, responseData,
                 responseOffset, responseLength);
@@ -412,7 +412,7 @@ public final class OrderCommitService {
                 throw new IllegalStateException("matcher settlement in-flight count underflow");
             }
         }
-        owner.runtimeState().releaseMatcherSettlement(pending.takeSettlementEvent());
+        owner.accountBook().releaseMatcherSettlement(pending.takeSettlementEvent());
         owner.matchingFlow.removePendingMatching(pending.sequence());
         // 先结束当前命令事实作用域，再恢复后继批次的挂起上下文。
         owner.finishFactContext(response);
@@ -429,19 +429,19 @@ public final class OrderCommitService {
         long clusterPosition = pending.commitFenceClusterPosition();
         if (!lanesCommitted && pending.settlementEvent() == null) {
             owner.resultBuilder.materializeChangeAccumulators();
-            pending.commitEvent(owner.runtimeState().dispatchLaneMutation(sequence,
+            pending.commitEvent(owner.accountBook().dispatchLaneMutation(sequence,
                     owner.resultBuilder.commandChangedUserIds,
-                    publication.dirty() ? owner.runtimeState().metadataOrderUsers(owner.resultBuilder.commandChangedOrderIds) : null, null,
+                    publication.dirty() ? owner.accountBook().metadataOrderUsers(owner.resultBuilder.commandChangedOrderIds) : null, null,
                     clusterTimestamp, clusterPosition));
             if (pending.commitEvent() != null) {
-                if (!owner.runtimeState().laneCommitComplete(pending.commitEvent())) {
+                if (!owner.accountBook().laneCommitComplete(pending.commitEvent())) {
                     pending.controlPending(true);
                     retainControlResponse(pending, matchingResult);
                     owner.suspendMatchingCommitContext(pending);
                     return null;
                 }
                 long laneMask = pending.commitEvent().requiredLaneMask();
-                owner.runtimeState().releaseLaneCommit(pending.commitEvent());
+                owner.accountBook().releaseLaneCommit(pending.commitEvent());
                 pending.commitEvent(null);
                 pending.completeLanes(laneMask);
             }
@@ -458,7 +458,7 @@ public final class OrderCommitService {
                 || pending.operation() == OrderCommand.Operation.LIQUIDATION_BATCH
                 || pending.operation() == OrderCommand.Operation.SETTLEMENT)) {
             pending.controlAccountsCommitted(true);
-            owner.runtimeState().validateControlFunds(false);
+            owner.accountBook().validateControlFunds(false);
         }
         return finishTerminalMatching(pending, matchingResult);
     }
@@ -471,26 +471,26 @@ public final class OrderCommitService {
         if (event == null || !event.complete()) return null;
         owner.captureRealtimeTrades(pending);
         try {
-            owner.runtimeState().collectMatcherSettlement(
-                    event, owner.terminalRetention(),
+            owner.accountBook().collectMatcherSettlement(
+                    event, owner.completedOrderArchive(),
                     owner.resultBuilder.changedUserIds(), owner.resultBuilder.changedOrderIds());
             owner.resultBuilder.markLaneCommitIdsSeeded();
             pending.completeLanes(event.requiredLaneMask());
             switch (pending.operation()) {
                 case CANCEL -> { }
                 case PLACE -> {
-                    owner.resultBuilder.commandTradeCount(TradingCoreRuntime.tradeCount(pending.settlementPlan()));
+                    owner.resultBuilder.commandTradeCount(TradingCore.tradeCount(pending.settlementPlan()));
                 }
                 case REPLACE, AMEND -> {
-                    owner.requireMatchingAdmission(pending);
-                    owner.resultBuilder.commandTradeCount(TradingCoreRuntime.tradeCount(pending.settlementPlan()));
+                    owner.requireMatchingOrderCheck(pending);
+                    owner.resultBuilder.commandTradeCount(TradingCore.tradeCount(pending.settlementPlan()));
                 }
                 case TRIGGER -> {
                     var trigger = pending.sourceTrigger();
                     if (trigger == null) {
                         throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
                     }
-                    owner.resultBuilder.commandTradeCount(TradingCoreRuntime.tradeCount(pending.settlementPlan()));
+                    owner.resultBuilder.commandTradeCount(TradingCore.tradeCount(pending.settlementPlan()));
                 }
                 default -> throw new IllegalStateException(
                         "operation cannot own an asynchronous matcher settlement: " + pending.operation());
@@ -501,8 +501,8 @@ public final class OrderCommitService {
                 case TRIGGER -> matchingResult.accepted() ? 1 : 2;
                 default -> 1;
             };
-            owner.runtimeState().setMetadata(owner.productLine(),
-                    Math.addExact(owner.runtimeState().revision(),
+            owner.accountBook().setMetadata(owner.productLine(),
+                    Math.addExact(owner.accountBook().revision(),
                             Math.addExact(revisionDelta, pending.settlementPlan().preCancellationCount())));
             publication.request();
             owner.resultBuilder.materializeChangeAccumulators();
@@ -662,27 +662,27 @@ public final class OrderCommitService {
                 }
                 if (!executionRequests.isEmpty()) {
                     accountWork = com.surprising.aeron.service.liquidation.LiquidationService
-                            .beginExecutionBatch(executionRequests, batch.liquidationFeeRatePpm(), owner.runtimeState(), owner.identities());
+                            .beginExecutionBatch(executionRequests, batch.liquidationFeeRatePpm(), owner.accountBook(), owner.identities());
                     return false;
                 }
                 int completedRiskWork = 0;
                 if (!riskStarted) {
                     riskStarted = true;
-                    var scan = owner.runtimeState().firstRiskIncompleteScan();
+                    var scan = owner.accountBook().firstRiskIncompleteScan();
                     var continuation = batch.riskScanContinuation();
                     if (scan != null && continuation != null
                             && owner.identities().instrumentId(scan.symbolId()).equals(continuation.instrumentId())
                             && scan.priceSequence() == continuation.priceSequence()
                             && scan.lastUserId() == continuation.lastUserId()) {
-                        beforeRiskRevision = owner.runtimeState().revision();
+                        beforeRiskRevision = owner.accountBook().revision();
                         riskWork = new RiskScanner(batch.maxRiskScanUsers(), owner.positionUserIndex(),
-                                owner.runtimeState(), owner.identities());
+                                owner.accountBook(), owner.identities());
                     }
                 }
                 if (riskWork != null) {
                     if (!riskWork.poll()) return false;
                     completedRiskWork = riskWork.completedWork();
-                    if (owner.runtimeState().revision() != beforeRiskRevision) publication.request();
+                    if (owner.accountBook().revision() != beforeRiskRevision) publication.request();
                 }
                 owner.resultBuilder.materializeChangeAccumulators();
                 owner.resultBuilder.commandLiquidationBatchResult = new CoreLiquidationBatchResultView(
@@ -706,7 +706,7 @@ public final class OrderCommitService {
             List<Long> expected = result instanceof com.surprising.aeron.service.settlement.TradeSettlement direct
                     ? direct.completedPreMatchingCancellations() : pending.preMatchingCancellationOrderIds();
             var replacement = pending.orderBatch() != null
-                    ? pending.orderBatch().replacementAdmission() : pending.matchingAdmission();
+                    ? pending.orderBatch().replacementOrderCheck() : pending.matchingOrderCheck();
             long replacedOrderId = replacement != null
                     && (pending.operation() == OrderCommand.Operation.REPLACE
                     || pending.operation() == OrderCommand.Operation.AMEND)
@@ -818,7 +818,7 @@ public final class OrderCommitService {
             TradeSettlement event = financialDispatchEvent(pending);
             if (event == null) return;
             boolean sequential = pending.orderBatch() != null && !pending.orderBatch().pipelined();
-            owner.runtimeState().dispatchMatcherFinancialSettlement(event);
+            owner.accountBook().dispatchMatcherFinancialSettlement(event);
             // 顺序批次还会产生后续子项。
             // 在最后子项或显式业务关闭前保留资金游标，响应槽租约也继续保留。
             if (sequential && !pending.orderBatch().matchingApplied()) return;
@@ -856,17 +856,17 @@ public final class OrderCommitService {
         if (pending.sequence() != owner.pendingMatching().firstSequence()) return false;
         if (pending.hasMatchingRejection() || owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) return true;
         OrderBatchProcessor.PendingBatch batch = pending.orderBatch();
-        if (batch == null) return owner.runtimeState().pollMatcherFinancialSettlement(pending.settlementEvent());
+        if (batch == null) return owner.accountBook().pollMatcherFinancialSettlement(pending.settlementEvent());
         if (batch.itemSettlementEvent() != null
-                && !owner.runtimeState().pollMatcherFinancialSettlement(batch.itemSettlementEvent())) return false;
-        return owner.runtimeState().pollMatcherFinancialSettlement(batch.settlementEvent());
+                && !owner.accountBook().pollMatcherFinancialSettlement(batch.itemSettlementEvent())) return false;
+        return owner.accountBook().pollMatcherFinancialSettlement(batch.settlementEvent());
     }
 
     /** 必要时先收普通下单准入，再检查拒单、财务、批次账户工作及事件完成条件。 */
     public boolean matchingCommitReady(OrderCommand pending) {
         if (pending == null) return false;
-        if (pending.operation() == OrderCommand.Operation.PLACE && pending.placeAdmission() != null) {
-            if (!owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return false;
+        if (pending.operation() == OrderCommand.Operation.PLACE && pending.placeOrderCheck() != null) {
+            if (!owner.matchingFlow.collectPlaceOrderCheckIfReady(pending)) return false;
         }
         if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
             if (!pending.isMatchingSubmitted()) return true;
@@ -878,12 +878,12 @@ public final class OrderCommitService {
         OrderBatchProcessor.PendingBatch batch = pending.orderBatch();
         // 批次账户工作尚未完成时，仅有撮合结果不能作为提交就绪。
         if (batch != null && (!batch.activated() || !batch.laneWorkComplete())) return false;
-        if (batch != null && batch.itemAdmission() != null) return true;
+        if (batch != null && batch.itemOrderCheck() != null) return true;
         if (batch != null && (batch.itemSettlementEvent() != null || batch.laneCommitEvent() != null)) return true;
         if (batch != null && batch.settlementEvent() != null && batch.settlementEvent().direct())
             return batch.settlementEvent().complete();
-        if (batch != null && batch.placeBatchAdmissionEvent() != null
-                && (!batch.placeBatchAdmissionEvent().complete() || !pending.isMatchingSubmitted())) return false;
+        if (batch != null && batch.placeBatchOrderCheckEvent() != null
+                && (!batch.placeBatchOrderCheckEvent().complete() || !pending.isMatchingSubmitted())) return false;
         // 直达事件不另建 Owner 撮合结果槽。
         if (pending.settlementEvent() != null && pending.settlementEvent().direct())
             return pending.settlementEvent().complete();
@@ -893,7 +893,7 @@ public final class OrderCommitService {
 
     /** 消费直达就绪位并增加一次调度修订，业务结算事实由队首从原事件收集。 */
     public void drainMatcherSettlementCompletions() {
-        if (owner.runtimeState().takeDirectMatcherSettlementReadyLaneMask() != 0)
+        if (owner.accountBook().takeDirectMatcherSettlementReadyLaneMask() != 0)
             owner.pendingMatching().progressChanged();
     }
 
@@ -915,7 +915,7 @@ public final class OrderCommitService {
     private OrderMatchingResult matchingResult(OrderCommand pending) {
         OrderMatchingResult matching =
                 pending.orderBatch() != null && (pending.orderBatch().itemSettlementEvent() != null
-                        || pending.orderBatch().itemAdmission() != null && pending.orderBatch().activated())
+                        || pending.orderBatch().itemOrderCheck() != null && pending.orderBatch().activated())
                 ? pending.orderBatch().lastMatchingResult() : pending.matchingResult();
         if (matching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
             matching = pending.settlementEvent().directResult();
@@ -936,13 +936,13 @@ public final class OrderCommitService {
 
     /** 使用不受限的序号上限，按给定尝试预算推进队首并回调实际完成响应。 */
     public int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
-                            boolean awaitFirst, TradingCoreRuntime.MatchingCommitHandler handler) {
+                            boolean awaitFirst, TradingCore.MatchingCommitHandler handler) {
         return commitReadyMatching(maxCompletions, clusterTimestamp, clusterPosition, awaitFirst, Long.MAX_VALUE, handler);
     }
 
     /** 使用同一个上限控制本轮资金派发及终态提交，进入完整推进入口。 */
     int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
-                            boolean awaitFirst, long throughSequence, TradingCoreRuntime.MatchingCommitHandler handler) {
+                            boolean awaitFirst, long throughSequence, TradingCore.MatchingCommitHandler handler) {
         return commitReadyMatching(maxCompletions, clusterTimestamp, clusterPosition, awaitFirst,
                 throughSequence, throughSequence, true, handler);
     }
@@ -950,7 +950,7 @@ public final class OrderCommitService {
     /** 要求 Owner 健康、正尝试预算和非空处理器，可先推进资金到派发上限，再逐队首尝试提交。 */
     int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
                             boolean awaitFirst, long throughSequence, long dispatchThroughSequence,
-                            boolean advanceProgress, TradingCoreRuntime.MatchingCommitHandler handler) {
+                            boolean advanceProgress, TradingCore.MatchingCommitHandler handler) {
         owner.assertOwner();
         owner.assertHealthy();
         if (maxCompletions <= 0 || handler == null) {
@@ -1030,7 +1030,7 @@ public final class OrderCommitService {
 
 public static final class Publication {
     /** 只由 Owner 推进的所属交易运行时。 */
-    private final TradingCoreRuntime owner;
+    private final TradingCore owner;
     private long runtimePatchRevision;
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -1049,7 +1049,7 @@ public static final class Publication {
     private boolean closed;
 
     /** 保存非空所属运行时，不启动线程，也不复制账户状态。 */
-    Publication(TradingCoreRuntime owner) {
+    Publication(TradingCore owner) {
         this.owner = Objects.requireNonNull(owner);
     }
 
@@ -1119,13 +1119,13 @@ public static final class Publication {
                 if (!owner.factContextActive()) {
                     throw new IllegalStateException("runtime commit requires an active command scope");
                 }
-                if (owner.realtimeCapture() != null) owner.runtimeState().captureRealtimeChanges(owner.realtimeCapture());
-                if (owner.runtimeState().committedRevision() < runtimePatchRevision)
+                if (owner.realtimeCapture() != null) owner.accountBook().captureRealtimeChanges(owner.realtimeCapture());
+                if (owner.accountBook().committedRevision() < runtimePatchRevision)
                     throw new IllegalStateException("runtime changed-index commit is out of order");
-                owner.runtimeState().applyChangedIndexes();
+                owner.accountBook().applyChangedIndexes();
                 publishedSequence = sequence;
-                runtimePatchRevision = owner.runtimeState().committedRevision();
-                owner.runtimeState().clearCommittedChanges(owner.identities());
+                runtimePatchRevision = owner.accountBook().committedRevision();
+                owner.accountBook().clearCommittedChanges(owner.identities());
             } catch (RuntimeException failure) {
                 owner.commitPublicationFailure(new IllegalStateException(
                         "owner commit failed after deterministic mutation; restart from snapshot and log is required",

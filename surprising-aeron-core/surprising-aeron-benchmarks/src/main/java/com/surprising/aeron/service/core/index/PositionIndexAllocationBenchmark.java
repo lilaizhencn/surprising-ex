@@ -2,12 +2,12 @@ package com.surprising.aeron.service.core.index;
 
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
@@ -18,10 +18,10 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1, jvmArgsAppend = {"-Xms512m", "-Xmx512m", "-XX:+UseG1GC"})
 public class PositionIndexAllocationBenchmark {
     @Param({"RESIZE", "REVERSE", "CLOSE_REOPEN"}) public String transition;
-    private TradingAccountRuntime runtime;
-    private RuntimeIdentityRegistry identities;
+    private AccountBook accountBook;
+    private IdIndex identities;
     private Position source;
-    private RuntimeFactIndexes indexes;
+    private BizIndex indexes;
     private OpenInterestIndex openInterest;
     private AdlPositionIndex adl;
     private long generation, previousQuantity;
@@ -29,8 +29,8 @@ public class PositionIndexAllocationBenchmark {
 
     @Setup public void setup() {
         var state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
-        identities = new RuntimeIdentityRegistry();
-        runtime = RuntimeStateProjector.project(state, identities);
+        identities = new IdIndex();
+        accountBook = SnapshotLoader.loadSnapshot(state, identities);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand(
                         "1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -43,7 +43,7 @@ public class PositionIndexAllocationBenchmark {
                 instrument, 2, 100, 200, 0, 20);
         openInterest = new OpenInterestIndex(state);
         adl = new AdlPositionIndex(state, identities);
-        indexes = new RuntimeFactIndexes(new PositionUserIndex(state), openInterest,
+        indexes = new BizIndex(new PositionUserIndex(state), openInterest,
                 new TriggerOrderIndex(state), new AlgoOrderIndex(state), new LiquidationIndex(state),
                 new CancelAllAfterIndex(state), new ActiveOrderIndex(state), adl);
     }
@@ -75,5 +75,5 @@ public class PositionIndexAllocationBenchmark {
         return checksum;
     }
 
-    @TearDown public void close() { runtime.close(); }
+    @TearDown public void close() { accountBook.close(); }
 }

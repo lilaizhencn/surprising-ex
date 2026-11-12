@@ -4,8 +4,8 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.AccountBook;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import lombok.AccessLevel;
@@ -15,36 +15,36 @@ import lombok.NoArgsConstructor;
 public final class RiskMarginCalculator {
 
     /** 拒绝未注册币对、旧价格序号或缺失的期权风险价格，写入新行情并重建本币对扫描。 */
-    public static void applyMarkPriceRuntime(ApplyMarkPriceCommand command, TradingAccountRuntime runtime,
-                                             RuntimeIdentityRegistry identities) {
-        if (command == null || runtime == null || identities == null) {
+    public static void applyMarkPriceRuntime(ApplyMarkPriceCommand command, AccountBook accountBook,
+                                             IdIndex identities) {
+        if (command == null || accountBook == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
-        CoreInstrument instrument = runtime.requireInstrument(command.instrumentId());
+        CoreInstrument instrument = accountBook.requireInstrument(command.instrumentId());
         int symbolId = identities.symbolId(instrument.instrumentIdValue());
-        MarkPrice current = runtime.markPrice(symbolId);
+        MarkPrice current = accountBook.markPrice(symbolId);
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
         }
         requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
-        runtime.putMarkPrice(new MarkPrice(symbolId, instrument, command.markPriceTicks(),
+        accountBook.putMarkPrice(new MarkPrice(symbolId, instrument, command.markPriceTicks(),
                 command.indexPriceTicks(), command.forwardPriceTicks(), command.priceSequence(),
                 command.generatedAtEpochMillis(), command.lastPriceTicks()));
-        RiskScanner.State currentScan = runtime.riskScan(symbolId);
+        RiskScanner.State currentScan = accountBook.riskScan(symbolId);
         long scanStart = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.scanStartPriceSequence() : command.priceSequence();
         int accountLaneId = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.accountLaneId() : 0;
-        boolean disabled = !runtime.riskScanControl().enabled();
+        boolean disabled = !accountBook.riskScanControl().enabled();
         var progress = !disabled && currentScan != null && !currentScan.riskComplete()
                 ? currentScan.laneProgress() : java.util.List.<com.surprising.aeron.model.RiskLaneProgress>of();
         RiskScanner.State nextScan = new RiskScanner.State(symbolId, accountLaneId,
                 command.priceSequence(), scanStart, disabled,
                 true, 0, 0, 0, 0, 0, 0, 0, 0,
                 currentScan == null ? 0 : currentScan.lastScheduledRevision(), progress);
-        runtime.setMarketRevision(Math.incrementExact(runtime.revision()));
-        runtime.putRiskScan(nextScan);
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        accountBook.setMarketRevision(Math.incrementExact(accountBook.revision()));
+        accountBook.putRiskScan(nextScan);
+        accountBook.setMetadata(accountBook.productLine(), Math.incrementExact(accountBook.revision()));
     }
 
     private static void requireOptionRiskPrices(CoreInstrument instrument, long indexPriceTicks,

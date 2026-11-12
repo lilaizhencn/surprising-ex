@@ -10,8 +10,8 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.UserAccount;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.TradingCore;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.order.*;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
@@ -61,7 +61,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 先更新角色、非负初始日志位置并重置请求节流，再使用已绑定的实时通道配置。否则创建 outbox、接入状态捕获与发送器，控制通道非空时再创建请求接收器。 */
-    public void start(Cluster.Role role, long logPosition, TradingCoreRuntime state) {
+    public void start(Cluster.Role role, long logPosition, TradingCore state) {
         leader = role == Cluster.Role.LEADER;
         committedPosition = Math.max(0, logPosition);
         nextSnapshotNanos = 0;
@@ -95,7 +95,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 仅已启用且为 Leader 时按原日志位置、业务时间及当前导出序号开始捕获。 */
-    public void beginCapture(TradingCoreRuntime state, long position, long timestamp) {
+    public void beginCapture(TradingCore state, long position, long timestamp) {
         if (capture == null || !leader) return;
         try {
             capture.begin(position, timestamp, 0, state.realtimeExportSequence());
@@ -105,7 +105,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 推进已提交位置，存在捕获器时按运行时当前导出序号提交原 outbox 批次。 */
-    public void commit(TradingCoreRuntime state, long position) {
+    public void commit(TradingCore state, long position) {
         committedPosition = position;
         if (capture != null) capture.commit(state.realtimeExportSequence());
     }
@@ -117,7 +117,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 启用且为 Leader 时先推进已有账户快照和盘口读取。否则最多取一个请求，用已提交位置及原 Cluster 时间发起读取。 */
-    public int poll(TradingCoreRuntime state, long clusterTime, long nowNanos) {
+    public int poll(TradingCore state, long clusterTime, long nowNanos) {
         if (capture == null || !leader) return 0;
         int work = state.pollRealtimeSnapshot() + state.pollRealtimeBook();
         if (state.realtimeSnapshotPending() || state.realtimeBookPending()
@@ -137,13 +137,13 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
 
     /** 接入非空外部 outbox。 */
     public void attach(RealtimeOutbox externalOutbox, TradingRealtimeBoundary.StateCapture externalCapture,
-                TradingCoreRuntime state) {
+                TradingCore state) {
         outbox = java.util.Objects.requireNonNull(externalOutbox, "realtime outbox is required");
         capture = externalCapture == null ? state.attachRealtime(outbox) : externalCapture;
     }
 
     /** 恢复替换运行时后，已有 outbox 时让新运行时重新接入捕获器，不复制账户状态。 */
-    public void rebindState(TradingCoreRuntime state) {
+    public void rebindState(TradingCore state) {
         if (outbox != null) capture = state.attachRealtime(outbox);
     }
 
@@ -180,7 +180,7 @@ public static final class StateCapture {
     /** 本 Owner 使用的实时暂存与提交缓存，发送线程只消费已编码字节。 */
     private final RealtimeOutbox outbox;
     private final ProductLine product;
-    private final RuntimeIdentityRegistry identities;
+    private final IdIndex identities;
     @Accessors(fluent = true, chain = false)
     @Setter
     private boolean orderProjectionOnly;

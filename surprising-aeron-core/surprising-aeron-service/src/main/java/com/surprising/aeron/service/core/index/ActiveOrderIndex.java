@@ -8,7 +8,7 @@ import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.order.Order;
@@ -179,7 +179,7 @@ public final class ActiveOrderIndex {
     }
 
     /** 变更后仍为 OPEN 才保留路由，并用身份表还原标的文本。 */
-    public void apply(long orderId, Order after, RuntimeIdentityRegistry identities) {
+    public void apply(long orderId, Order after, IdIndex identities) {
         Order current = after != null && after.status() == CoreOrderStatus.OPEN ? after : null;
         applyRoute(orderId, current == null ? 0 : current.userId(),
                 current == null ? null : identities.instrumentId(current.symbolId()));

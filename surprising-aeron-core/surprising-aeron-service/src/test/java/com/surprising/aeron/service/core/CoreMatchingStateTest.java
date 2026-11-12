@@ -58,7 +58,7 @@ class CoreMatchingStateTest {
         long quantity = notional / 100;
         // 每个用户实际注入的初始结算资产金额。
         long capital = 1_000_000L * 100_000_000L;
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCoreRuntime(product)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCore(product)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", capital)));
@@ -91,11 +91,11 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().users().get(11L).positions().get("1").positionMarginUnits()).isEqualTo(capital);
             assertThat(state.tradingState().users().get(11L).balances().get("USDT").availableUnits()).isZero();
             assertThat(total(state, "USDT")).isEqualTo(capital * 2);
-            try (/* 从调整前快照恢复、重放同一杠杆命令的对照实例。 */ var replay = TradingCoreRuntime.fromSnapshot(product, beforeLeverage)) {
+            try (/* 从调整前快照恢复、重放同一杠杆命令的对照实例。 */ var replay = TradingCore.fromSnapshot(product, beforeLeverage)) {
                 apply(replay, 6, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
                 assertThat(replay.tradingState()).isEqualTo(state.tradingState());
             }
-            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
             }
         }
@@ -109,7 +109,7 @@ class CoreMatchingStateTest {
     @org.junit.jupiter.params.provider.EnumSource(value = ProductLine.class,
             names = {"LINEAR_PERPETUAL", "LINEAR_DELIVERY"})
     void marketPriceBandProducesOnlyFundedPositionsAndSurvivesSnapshot(ProductLine product) {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCoreRuntime(product)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCore(product)) {
             applyInstrument(state);
             for (int /* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user : new int[]{11, 22}) {
                 apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
@@ -128,7 +128,7 @@ class CoreMatchingStateTest {
             assertThat(orderIn(result, 201).executedQuantitySteps()).isEqualTo(1);
             assertThat(state.tradingState().orders().get(102L).remainingQuantitySteps()).isEqualTo(2);
             assertThat(total(state, "USDT")).isEqualTo(before);
-            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ var restored = TradingCore.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
                 assertThat(awaitMatchingHash(restored)).isEqualTo(awaitMatchingHash(state));
             }
@@ -140,9 +140,9 @@ class CoreMatchingStateTest {
      */
     @Test
     void emptyNotificationProbeStillDetectsAFailedLaneWithoutACompletion() throws Exception {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
-            var signal = AccountLaneTestAccess.failure(state.runtimeState());
+            var signal = AccountLaneTestAccess.failure(state.accountBook());
             // 本用例注入且希望下一次通知探测原样抛出的异常。
             var failure = new IllegalStateException("injected lane failure before completion publication");
             // 比当前纳秒时间晚一秒的测试探测时刻，随后再人为推进探测时间。
@@ -162,7 +162,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void inFlightSynchronousRejectionIsPublishedAsReadyAndDoesNotBlockThePendingHead() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -203,7 +203,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void inFlightIdempotencyUsesPendingIndexWithoutPollutingTerminalResultLedger() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 7, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
@@ -242,7 +242,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void crossLaneIocPartialFillCommitsBothOwnersAndReleasesUnusedFunds() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 7, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
@@ -267,7 +267,7 @@ class CoreMatchingStateTest {
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
 
             assertThat(state.tradingState().orders().get(202L)).isNull();
-            assertThat(state.terminalRetention().containsOrder(202, 9, "client-202")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(202, 9, "client-202")).isTrue();
             // 终态客户编号尚保留时尝试复用该编号的新订单命令。
             CoreMessage duplicateClientId = message(state, 5, 9, CoreMessageType.PLACE_ORDER,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
@@ -280,9 +280,9 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().users().get(9L).balances().get("USDT").lockedUnits()).isZero();
             assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(9L), "BTC")).isEqualTo(2);
             // 挂单用户按当前拓扑路由到的账户 Lane。
-            int makerLane = state.runtimeState.topology().accountLaneId(7);
+            int makerLane = state.accountBook.topology().accountLaneId(7);
             // 主动用户按当前拓扑路由到的另一账户 Lane。
-            int takerLane = state.runtimeState.topology().accountLaneId(9);
+            int takerLane = state.accountBook.topology().accountLaneId(9);
             assertThat(makerLane).isNotEqualTo(takerLane);
             // 完成后读取的 Lane 应用与提交水位指标。
             CoreLaneMetricsView metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics());
@@ -300,7 +300,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void postOnlyRejectionLeavesNoOrderOrReservedFunds() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
@@ -334,7 +334,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void finalMatcherFactCarriesTheRestingOrderWithoutExportingPendingState() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 22, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
@@ -361,7 +361,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void marketOrderUsesProtectionPriceAndNeverRestsOnBook() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 1)));
@@ -389,7 +389,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void spotMatchUpdatesBothUsersFundsOrdersAndNativeMatcherAtomically() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10)));
@@ -419,12 +419,12 @@ class CoreMatchingStateTest {
             int matchedBookHash = awaitMatchingHash(state);
             assertThat(matchedBookHash).isNotEqualTo(restingBookHash).isNotZero();
 
-            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
                 assertThat(awaitMatchingHash(restored)).isEqualTo(matchedBookHash);
                 apply(restored, 5, 22, CoreMessageType.PLACE_ORDER,
                         place(203, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
-                assertThat(restored.terminalRetention().containsOrder(101, 11, "")).isTrue();
+                assertThat(restored.completedOrderArchive().containsOrder(101, 11, "")).isTrue();
                 assertThat(restored.tradingState().orders().get(101L)).isNull();
                 assertThat(restored.tradingState().orders().values())
                         .noneMatch(/* 当前用于状态筛选、订单编号查找或结果断言的业务订单值。 */ order -> order.status() == CoreOrderStatus.OPEN);
@@ -439,7 +439,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @MethodSource("allProductLines")
     void sameUserCrossCancelsTheRestingOrderBeforeSubmittingTheTaker(ProductLine productLine) {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(productLine)) {
             applyInstrument(state);
             // 按产品选择的测试预留用途参照，辅助编码器不把它写成请求字段。
             ReservationKind reservationKind = productLine == ProductLine.SPOT
@@ -469,7 +469,7 @@ class CoreMatchingStateTest {
                             productLine == ProductLine.SPOT ? 300 : 1_000));
 
             assertThat(state.tradingState().orders().get(101L)).isNull();
-            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(101, 11, "")).isTrue();
             assertThat(state.tradingState().orders().get(202L).status()).isEqualTo(CoreOrderStatus.OPEN);
             assertThat(state.tradingState().orders().get(202L).executedQuantitySteps()).isZero();
             if (productLine == ProductLine.SPOT) {
@@ -494,7 +494,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @MethodSource("derivativeLines")
     void nonOptionDerivativeLinesCreatePositionMarginFromMatchedReservations(ProductLine productLine) {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(productLine)) {
             applyInstrument(state);
             // 本产品实际使用的结算资产名称。
             String settleAsset = settleAsset(productLine);
@@ -525,7 +525,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void multiMakerPerpetualSettlementPublishesOnlyAfterTheUnifiedLaneBarrier() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             // 构造多 Maker 前置输入时递增的源序号，或等待撮合所用的在途序号。
             long sequence = 1;
@@ -576,7 +576,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void optionFillTransfersPremiumAndCreatesBuyerSellerPositions() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.OPTION)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.OPTION)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
@@ -588,7 +588,7 @@ class CoreMatchingStateTest {
             CoreResponse receipt4 = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
 
-            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(101, 11, "")).isTrue();
             assertThat(state.tradingState().orders().get(101L)).isNull();
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
             assertThat(state.tradingState().orders().get(202L)).isNull();
@@ -604,7 +604,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void derivativeCloseReverseAndReduceOnlyCapacityAreAuthoritative() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -646,7 +646,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void coreDerivesTheFullDerivativeCloseReservation() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -680,7 +680,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void normalCloseCancelsNewestConflictingReduceOnlyOrderBeforeMatcherSubmission(boolean asynchronous) {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -707,7 +707,7 @@ class CoreMatchingStateTest {
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
 
             assertThat(state.tradingState().orders().get(203L).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(state.terminalRetention().containsOrder(204, 22, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(204, 22, "")).isTrue();
             assertThat(state.tradingState().orders().get(204L)).isNull();
             assertThat(state.tradingState().orders().get(205L).status()).isEqualTo(CoreOrderStatus.OPEN);
             assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(2);
@@ -719,11 +719,11 @@ class CoreMatchingStateTest {
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 130, false, 0, 0));
             assertThat(orderIn(receipt8, 301).status()).isEqualTo("FILLED");
             assertThat(orderIn(receipt8, 301).executedQuantitySteps()).isEqualTo(2);
-            assertThat(state.terminalRetention().containsOrder(203, 22, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(203, 22, "")).isTrue();
             assertThat(state.tradingState().orders().get(203L)).isNull();
-            assertThat(state.terminalRetention().containsOrder(204, 22, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(204, 22, "")).isTrue();
             assertThat(state.tradingState().orders().get(204L)).isNull();
-            assertThat(state.terminalRetention().containsOrder(205, 22, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(205, 22, "")).isTrue();
             assertThat(state.tradingState().orders().get(205L)).isNull();
             assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isZero();
         }
@@ -733,8 +733,8 @@ class CoreMatchingStateTest {
      * 超大普通平仓方向请求因可用不足拒绝时，要求原冲突订单和余额完整保留、不增加新预留；同请求重发仍返回重复拒绝。
      */
     @Test
-    void rejectedLaneCloseAdmissionKeepsConflictingOrdersAndFunds() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+    void rejectedLaneCloseOrderCheckKeepsConflictingOrdersAndFunds() {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             for (long /* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user : new long[]{11, 22})
                 apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
@@ -775,7 +775,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void laneCloseAndOwnerSelfTradeCancellationsAreAppliedOnce(boolean asynchronous) {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             for (long /* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user : new long[]{11, 22})
                 apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
@@ -812,7 +812,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void postOnlyCloseFailureCommitsOnlyLaneAuthorizedCancellations() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             for (long /* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user : new long[]{11, 22})
                 apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
@@ -850,7 +850,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void selfTradeScanCancelsOnlyCrossingOwnOrdersAndRestoresWithoutTradingWithSelf() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             for (long /* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user : new long[]{11, 22}) {
                 apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
@@ -873,7 +873,7 @@ class CoreMatchingStateTest {
                 assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(user).balances().get("USDT"))).isEqualTo(2_000);
                 assertThat(state.tradingState().users().get(user).positions()).isEmpty();
             }
-            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, state.snapshot())) {
+            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }
@@ -884,7 +884,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void linearPerpetualMatchConservesFundsWithMakerTakerFees() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state, -50_000, 100_000);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -903,7 +903,7 @@ class CoreMatchingStateTest {
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false, 0, 100_000));
 
-            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(101, 11, "")).isTrue();
             assertThat(state.tradingState().orders().get(101L)).isNull();
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
             assertThat(state.tradingState().orders().get(202L)).isNull();
@@ -921,7 +921,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void linearPerpetualActiveCloseAcceptsBetterFillThanSellMarketProtectionPrice() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -967,7 +967,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @MethodSource("allProductLines")
     void everyProductLineMatchConservesSettlementFundsWithNonzeroFees(ProductLine productLine) {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(productLine)) {
             applyInstrument(state, 100_000, 200_000);
             // 六产品线手续费守恒场景当前使用的结算资产名称。
             String settlementAsset = settleAsset(productLine);
@@ -1006,7 +1006,7 @@ class CoreMatchingStateTest {
                             buyerAsset, buyerReservation, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
                             100, false, 100_000, 200_000));
 
-            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(101, 11, "")).isTrue();
             assertThat(state.tradingState().orders().get(101L)).isNull();
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
             assertThat(state.tradingState().orders().get(202L)).isNull();
@@ -1020,8 +1020,8 @@ class CoreMatchingStateTest {
      * 现货成交两份后核对财库手续费六十、卖方收到一百八十 USDT、买方计价总额归零，USDT 总额二百四十和 BTC 总额二均保持。
      */
     @Test
-    void spotMatchCommitsTheChangedTreasuryBalance() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+    void spotMatchCommitsTheChangedSystemFundsBalance() {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state, 100_000, 200_000);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
@@ -1055,7 +1055,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void linearPerpetualPostOnlyRejectionPreservesFundsAndReservations() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -1089,7 +1089,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void replaceLosesPriorityCanMatchAndRestoresToSameExchangeCoreHash() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10)));
@@ -1108,10 +1108,10 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().orders().get(101L)).isNull();
             assertThat(state.tradingState().orders().get(202L)).isNull();
             assertThat(state.tradingState().orders().get(203L)).isNull();
-            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
-            assertThat(state.terminalRetention().containsOrder(202, 22, "")).isTrue();
-            assertThat(state.terminalRetention().containsOrder(203, 22, "")).isTrue();
-            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            assertThat(state.completedOrderArchive().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(202, 22, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(203, 22, "")).isTrue();
+            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().orders()).isEmpty();
             }
         }
@@ -1124,7 +1124,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @MethodSource("allProductLines")
     void preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine productLine) {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(productLine)) {
             applyInstrument(state);
             // 按产品选择的测试预留用途参照，辅助编码器不把它写成请求字段。
             ReservationKind reservationKind = productLine == ProductLine.SPOT
@@ -1151,16 +1151,16 @@ class CoreMatchingStateTest {
 
             // 保留同价挂单 FIFO 前置状态的内存快照字节。
             byte[] snapshot = state.snapshot();
-            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
+            try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCore restored = TradingCore.fromSnapshot(productLine, snapshot)) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
                 var originalIdentities = state.identities();
                 var restoredIdentities = restored.identities();
-                long client = AccountLaneQueryTestSupport.read(state.runtimeState(), 12,
+                long client = AccountLaneQueryTestSupport.read(state.accountBook(), 12,
                         () -> originalIdentities.findClientKeyValue(12, "client-102"));
                 assertThat(client).isPositive();
-                assertThat(AccountLaneQueryTestSupport.read(restored.runtimeState(), 12,
+                assertThat(AccountLaneQueryTestSupport.read(restored.accountBook(), 12,
                         () -> restoredIdentities.findClientKeyValue(12, "client-102"))).isEqualTo(client);
-                assertThat(AccountLaneQueryTestSupport.read(restored.runtimeState(), 12,
+                assertThat(AccountLaneQueryTestSupport.read(restored.accountBook(), 12,
                         () -> restoredIdentities.clientOrderId(12, client))).isEqualTo("client-102");
                 assertThat(restoredIdentities.instrumentId(restoredIdentities.symbolId("1"))).isEqualTo("1");
                 assertThat(restoredIdentities.asset(restoredIdentities.assetId(sellerAsset))).isEqualTo(sellerAsset);
@@ -1179,7 +1179,7 @@ class CoreMatchingStateTest {
 
                 assertThat(orderIn(receipt7, 202).status()).isEqualTo("FILLED");
                 assertThat(orderIn(receipt7, 202).executedQuantitySteps()).isEqualTo(4);
-                assertThat(restored.terminalRetention().containsOrder(101, 11, "")).isTrue();
+                assertThat(restored.completedOrderArchive().containsOrder(101, 11, "")).isTrue();
                 assertThat(restored.tradingState().orders().get(101L)).isNull();
                 assertThat(restored.tradingState().orders().get(102L).status()).isEqualTo(CoreOrderStatus.OPEN);
                 assertThat(restored.tradingState().orders().get(102L).remainingQuantitySteps()).isEqualTo(5);
@@ -1192,7 +1192,7 @@ class CoreMatchingStateTest {
      */
     @Test
     void amendPatchReadsOriginalInsideCoreAndReturnsReplacement() {
-        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 22, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
@@ -1209,7 +1209,7 @@ class CoreMatchingStateTest {
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(TradingCommandCodec.decodeAmendOrder(amend.payload()).replacementOrderId()).isEqualTo(203);
             assertThat(state.tradingState().orders().get(202L)).isNull();
-            assertThat(state.terminalRetention().containsOrder(202, 22, "")).isTrue();
+            assertThat(state.completedOrderArchive().containsOrder(202, 22, "")).isTrue();
             assertThat(state.tradingState().orders().get(203L).status()).isEqualTo(CoreOrderStatus.OPEN);
             assertThat(state.tradingState().orders().get(203L).priceTicks()).isEqualTo(110);
             assertThat(state.tradingState().orders().get(203L).clientOrderId()).isEqualTo("amended");
@@ -1336,7 +1336,7 @@ class CoreMatchingStateTest {
      * 以零 Maker/Taker 费率调用本测试币对注册辅助器。
      * @param state 当前被测产品线的交易运行时
      */
-    private static void applyInstrument(TradingCoreRuntime state) {
+    private static void applyInstrument(TradingCore state) {
         applyInstrument(state, 0, 0);
     }
 
@@ -1346,7 +1346,7 @@ class CoreMatchingStateTest {
      * @param makerFeeRatePpm 注册币对使用的 Maker 费率，百万分比
      * @param takerFeeRatePpm 注册币对使用的 Taker 费率，百万分比
      */
-    private static void applyInstrument(TradingCoreRuntime state, long makerFeeRatePpm, long takerFeeRatePpm) {
+    private static void applyInstrument(TradingCore state, long makerFeeRatePpm, long takerFeeRatePpm) {
         // 注册辅助器当前运行时所属的独立产品线。
         ProductLine productLine = state.productLine();
         // 对应产品线的合约类型，用于选择到期和期权参数。
@@ -1400,7 +1400,7 @@ class CoreMatchingStateTest {
      * @param state 当前被测产品线的交易运行时
      * @param command 要提交准入或控制工作的原命令帧
      */
-    private static CoreResponse submit(TradingCoreRuntime state, CoreMessage command) {
+    private static CoreResponse submit(TradingCore state, CoreMessage command) {
         // 当前准入、回调或最终命令响应。
         CoreResponse response = state.apply(command);
         // 当前辅助操作的纳秒截止点，准入十秒、账户结算及哈希等待五秒。
@@ -1425,7 +1425,7 @@ class CoreMatchingStateTest {
      * @param payload 已经编码的请求载荷
      */
     private static CoreResponse apply(
-            TradingCoreRuntime state,
+            TradingCore state,
             long sequence,
             long userId,
             CoreMessageType messageType,
@@ -1446,7 +1446,7 @@ class CoreMatchingStateTest {
      * @param response 准入或控制阶段当前响应，可能仍为 MATCHING_PENDING
      * @param message 需要继续等待撮合终态的原命令帧
      */
-    private static CoreResponse drainMatching(TradingCoreRuntime state, CoreResponse response, CoreMessage message) {
+    private static CoreResponse drainMatching(TradingCore state, CoreResponse response, CoreMessage message) {
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
         // 由原命令 UUID 查询到的在途撮合序号。
         long sequence = state.matchingSequence(message.header().commandId());
@@ -1467,7 +1467,7 @@ class CoreMatchingStateTest {
      * @param clusterPosition 本样例交给结算的模拟日志位置，不是真实 Archive 字节偏移
      */
     private static CoreResponse completeUntilTerminalOrFailure(
-            TradingCoreRuntime state, long sequence,
+            TradingCore state, long sequence,
             com.surprising.aeron.service.matcher.OrderMatchingResult result,
             long clusterTimestamp, long clusterPosition) {
         // 本命令最终完成响应，尚未完成时可为空。
@@ -1486,8 +1486,8 @@ class CoreMatchingStateTest {
      * 通过完整快照屏障取得并检查 Matcher 引擎哈希。
      * @param state 当前被测产品线的交易运行时
      */
-    private static int awaitMatchingHash(TradingCoreRuntime state) {
-        return TradingCoreRuntime.inspectSnapshot(state.productLine(), state.snapshot()).engineStateHash();
+    private static int awaitMatchingHash(TradingCore state) {
+        return TradingCore.inspectSnapshot(state.productLine(), state.snapshot()).engineStateHash();
     }
 
     /**
@@ -1498,7 +1498,7 @@ class CoreMatchingStateTest {
      * @param messageType 本次请求的协议命令类型
      * @param payload 已经编码的请求载荷
      */
-    private static CoreMessage message(TradingCoreRuntime state, long sequence, long userId,
+    private static CoreMessage message(TradingCore state, long sequence, long userId,
                                        CoreMessageType messageType, byte[] payload) {
         return new CoreMessage(CoreMessageHeader.command(messageType, UUID.randomUUID(),
                 state.productLine(), CommandSource.GATEWAY, 77, sequence, userId, 1_000, sequence), payload);
@@ -1525,20 +1525,20 @@ class CoreMatchingStateTest {
      * @param state 当前被测产品线的交易运行时
      * @param asset 本次测试合计的单一资产名称
      */
-    private static long total(TradingCoreRuntime state, String asset) {
+    private static long total(TradingCore state, String asset) {
         // 按单一资产从所有用户累计的余额总量，stream 普通 long 求和不精确检查溢出。
         long users = state.tradingState().users().values().stream()
                 .mapToLong(/* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user -> CoreStateTestFixtures.totalUnits(user, asset)).sum();
         // 完成后用于合计七类财库金额及亏空的业务状态视图。
-        var treasury = state.tradingState().treasuryState();
+        var systemFunds = state.tradingState().treasuryState();
         // 当前样例已合计的单资产资金量。
         long total = users;
-        total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.insuranceBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.liquidationFeeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.fundingResidualBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.roundingResidualBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.clearingPnlBalances().getOrDefault(asset, 0L));
-        return Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.feeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.insuranceBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.liquidationFeeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.fundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.roundingResidualBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.clearingPnlBalances().getOrDefault(asset, 0L));
+        return Math.subtractExact(total, systemFunds.insuranceDeficits().getOrDefault(asset, 0L));
     }
 }

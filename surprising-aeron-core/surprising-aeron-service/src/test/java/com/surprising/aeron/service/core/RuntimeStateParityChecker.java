@@ -1,10 +1,10 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.snapshot.state.*;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.snapshot.state.TradingRuntimeSnapshot;
 
 /**
@@ -25,16 +25,16 @@ public final class RuntimeStateParityChecker {
      * @param actual 需要物化并比较的实际运行时
      */
     public static TradingCoreState assertMatches(
-            TradingCoreState expected, RuntimeIdentityRegistry identities, TradingAccountRuntime actual) {
+            TradingCoreState expected, IdIndex identities, AccountBook actual) {
         if (expected == null || identities == null || actual == null) {
             throw new IllegalArgumentException("parity arguments are required");
         }
         actual.clearChangedKeys();
         // 按同一身份表物化的实际完整冷状态，先做值和哈希比较
-        TradingCoreState materialized = RuntimeStateMaterializer.materialize(actual, identities);
+        TradingCoreState materialized = SnapshotWriter.writeSnapshot(actual, identities);
         if (!expected.equals(materialized) || expected.businessStateHash() != materialized.businessStateHash()) {
             // 只在失败诊断分支投影的预期运行时，本方法没有另行关闭它
-            TradingAccountRuntime projected = RuntimeStateProjector.project(expected, identities);
+            AccountBook projected = SnapshotLoader.loadSnapshot(expected, identities);
             // 按预期修订捕获的预期运行时诊断快照
             TradingRuntimeSnapshot expectedSnapshot = RuntimeSnapshotBuilder.capture(projected, expected.revision());
             // 同样按预期修订捕获的实际运行时诊断快照，不是重新决定业务修订
@@ -75,7 +75,7 @@ public final class RuntimeStateParityChecker {
         if (!expected.algoOrders().equals(actual.algoOrders())) return "algo-orders";
         if (!expected.cancelAllAfterTimers().equals(actual.cancelAllAfterTimers())) return "cancel-all-after";
         if (!expected.triggerOrders().equals(actual.triggerOrders())) return "trigger-orders";
-        if (!expected.treasury().equals(actual.treasury())) return "treasury";
+        if (!expected.systemFunds().equals(actual.systemFunds())) return "treasury";
         if (!expected.fundingSettlements().equals(actual.fundingSettlements())) return "funding-settlements";
         if (!expected.fundingProgress().equals(actual.fundingProgress())) {
             return mapMismatch("funding-progress", expected.fundingProgress(), actual.fundingProgress());

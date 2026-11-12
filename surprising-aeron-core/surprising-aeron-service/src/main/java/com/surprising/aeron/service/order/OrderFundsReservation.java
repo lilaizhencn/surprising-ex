@@ -4,7 +4,7 @@ import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.InstrumentId;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.AccountPartition;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +15,7 @@ import org.agrona.collections.Long2LongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
-import static com.surprising.aeron.service.core.TradingAccountRuntime.*;
+import static com.surprising.aeron.service.core.AccountBook.*;
 
 public final class OrderFundsReservation {
     @Accessors(fluent = true, chain = false)
@@ -270,7 +270,7 @@ public static final class Snapshot {
 
 @RequiredArgsConstructor
 public static final class PendingTracker {
-    final TradingAccountRuntime owner;
+    final AccountBook owner;
 
     final PendingReservationSequenceIndex pendingReservationsBySequence =
             new PendingReservationSequenceIndex(4_096);

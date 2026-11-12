@@ -39,13 +39,13 @@ class CoreLiquidationLaneCheckTest {
                 actions.add(new ExecuteLiquidationBatchAction(id, first.userId(), first.instrumentId(),
                         first.triggerPriceSequence(), first.executionPriceTicks(), 0));
             var before = core.tradingState();
-            var runtime = core.runtimeState;
-            if (!runtime.accountLanesStarted()) runtime.startAccountLanes();
-            assertThat(runtime.accountLanesStarted()).isTrue();
+            var accountBook = core.accountBook;
+            if (!accountBook.accountLanesStarted()) accountBook.startAccountLanes();
+            assertThat(accountBook.accountLanesStarted()).isTrue();
             var check = new ExecutionCheck();
             try {
-                check.prepare(new ExecuteLiquidationBatchCommand(actions, 4, 0, null, 0), runtime, core.identities);
-                LedgerControlTestSupport.await(runtime, check::poll);
+                check.prepare(new ExecuteLiquidationBatchCommand(actions, 4, 0, null, 0), accountBook, core.identities);
+                LedgerControlTestSupport.await(accountBook, check::poll);
                 assertThat(check.cancelsOrders(0)).isTrue();
                 assertThat(check.liquidation(0).liquidationId()).isEqualTo(first.liquidationId());
                 assertThat(check.cancelsOrders(1)).isFalse();
@@ -58,8 +58,8 @@ class CoreLiquidationLaneCheckTest {
                 check.clearReferences();
                 assertThat(check.prepared()).isFalse();
                 check.prepare(new ExecuteLiquidationCommand(second.liquidationId(), second.triggerPriceSequence(),
-                        second.executionPriceTicks(), 0), runtime, core.identities);
-                LedgerControlTestSupport.await(runtime, check::poll);
+                        second.executionPriceTicks(), 0), accountBook, core.identities);
+                LedgerControlTestSupport.await(accountBook, check::poll);
                 assertThat(check.executable(0)).isTrue();
                 assertThat(check.liquidation(0).liquidationId()).isEqualTo(second.liquidationId());
                 assertThatThrownBy(() -> check.liquidation(1)).isInstanceOf(IllegalStateException.class);
@@ -72,12 +72,12 @@ class CoreLiquidationLaneCheckTest {
     @Test
     void batchPublishesBothAccountFinancialResultsExactlyOnce() throws Exception {
         try (var core = prepared()) {
-            assertThat(core.runtimeState.topology().accountLaneId(1))
-                    .isNotEqualTo(core.runtimeState.topology().accountLaneId(7));
+            assertThat(core.accountBook.topology().accountLaneId(1))
+                    .isNotEqualTo(core.accountBook.topology().accountLaneId(7));
             long beforeFunds = funds(core);
             var batch = ExecuteLiquidationBatchCommand.fromWork(work(core), 0, 0);
             CoreResponse result;
-            try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 result = applied(core, CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
                         TradingCommandCodec.encodeExecuteLiquidationBatch(batch));
             }
@@ -121,12 +121,12 @@ class CoreLiquidationLaneCheckTest {
                 // 该笔或该批强平的最终响应，稍后解码处理数量和失效动作数。
                 CoreResponse result;
                 // 执行前的 Lane 所有权交接代次，Owner 不应为读取账户而改变它。
-                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
-                try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
+                try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                     result = applied(core, CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
                             TradingCommandCodec.encodeExecuteLiquidationBatch(batch));
                 }
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
                 // 批执行返回的动作及撤单统计，用来核对预算、待处理项或过期动作数。
                 var summary = CoreLiquidationBatchResultCodec.decode(result.data());
                 assertThat(summary.processedOrders()).isEqualTo(1);
@@ -158,7 +158,7 @@ class CoreLiquidationLaneCheckTest {
             var before = core.tradingState();
             // 该笔或该批强平的最终响应，稍后解码处理数量和失效动作数。
             CoreResponse result;
-            try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 result = applied(core, CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
                         TradingCommandCodec.encodeExecuteLiquidationBatch(stale));
             }
@@ -184,27 +184,27 @@ class CoreLiquidationLaneCheckTest {
             // 从真实强平工作中选出的目标动作，用来构造指定用户或单笔旧价格执行。
             var action = ExecuteLiquidationBatchCommand.fromWork(work(core), 0, 0).actions().stream().filter(/* 从工作列表中筛选的动作，按用户编号找到用户 1 的计划。 */ value -> value.userId() == 1).findFirst().orElseThrow();
             // 合约 1 当前运行时配置，用于定位用户 1 的持仓风险键。
-            var instrument = core.runtimeState.instrument("1");
+            var instrument = core.accountBook.instrument("1");
             // 用户 1 净持仓的整数键，所属 Lane 会在这个位置把风险状态改为正常。
             long key = core.identities.findPositionKeyValue(1, instrument, CorePositionSide.NET);
-            core.runtimeState.dispatchControlLanes(core.runtimeState.topology().accountLaneMask(1), /* 当前被派发的账户 Lane，回调内只按已准备的持仓键修改该用户风险。 */ ignored -> {
+            core.accountBook.dispatchControlLanes(core.accountBook.topology().accountLaneMask(1), /* 当前被派发的账户 Lane，回调内只按已准备的持仓键修改该用户风险。 */ ignored -> {
                 // 所属 Lane 读取的原风险记录，保留身份和价格序号，把捕获的风险比例改为正常范围。
-                var risk = core.runtimeState.riskSnapshot(key);
-                core.runtimeState.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(risk.userId(), risk.symbolId(),
+                var risk = core.accountBook.riskSnapshot(key);
+                core.accountBook.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(risk.userId(), risk.symbolId(),
                         risk.positionSide(), risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
                         risk.maintenanceMarginUnits(), 0));
                 return null;
             });
             // 等待测试风险修改回调完成的单调时钟截止值，最多等五秒。
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (!core.runtimeState.pollControlLanes()) {
+            while (!core.accountBook.pollControlLanes()) {
                 if (System.nanoTime() >= deadline) throw new AssertionError("risk fixture Lane timeout");
                 Thread.onSpinWait();
             }
-            core.runtimeState.clearCommittedChanges(core.identities);
+            core.accountBook.clearCommittedChanges(core.identities);
             // 执行过期或失效强平前的业务状态，后续比较账户、订单与账本不变。
             var before = core.tradingState();
-            try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 applied(core, CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
                         TradingCommandCodec.encodeExecuteLiquidationBatch(new ExecuteLiquidationBatchCommand(
                                 List.of(action), 10, 0, null, 0)));
@@ -236,7 +236,7 @@ class CoreLiquidationLaneCheckTest {
             // 按旧动作的价格版本和执行价构造的单笔强平命令。
             var command = new ExecuteLiquidationCommand(action.liquidationId(), action.triggerPriceSequence(),
                     action.executionPriceTicks(), 0);
-            try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 // 当前查询或命令得到的最终响应，调用方核对业务状态和结果数据。
                 var response = apply(core, CoreMessageType.EXECUTE_LIQUIDATION, 0,
                         TradingCommandCodec.encodeExecuteLiquidation(command));
@@ -253,9 +253,9 @@ class CoreLiquidationLaneCheckTest {
     /**
      * 准备线性永续合约和三账户资金，让用户 1、7 各成交十步多头并挂两笔只减仓卖单，再让标记价大跌并扫出两份强平计划；准备失败时关闭运行时。
      */
-    private TradingCoreRuntime prepared() {
+    private TradingCore prepared() {
         // 已经准备资金、持仓、挂单和强平计划的运行时，测试结束自动关闭。
-        var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
+        var core = new TradingCore(ProductLine.LINEAR_PERPETUAL);
         try {
             applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
@@ -276,7 +276,7 @@ class CoreLiquidationLaneCheckTest {
             }
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME), ProductLine.LINEAR_PERPETUAL));
-            for (/* 准备阶段继续风险扫描的命令次数，限制最多二十次以暴露扫描不推进。 */ int polls = 0; core.runtimeState.firstRiskIncompleteScan() != null; polls++) {
+            for (/* 准备阶段继续风险扫描的命令次数，限制最多二十次以暴露扫描不推进。 */ int polls = 0; core.accountBook.firstRiskIncompleteScan() != null; polls++) {
                 assertThat(polls).isLessThan(20);
                 applied(core, CoreMessageType.CONTINUE_RISK_SCAN, 0,
                         TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)));
@@ -290,8 +290,8 @@ class CoreLiquidationLaneCheckTest {
      * 在禁止 Owner 越界读账户的哨兵内，真实撤销用户 1、7 各自两笔挂单，确认订单清空且集群回调已完成。
      * @param core 正在接受测试订单、行情、强平或查询的交易运行时
      */
-    private void cancelRemainingOrders(TradingCoreRuntime core) throws Exception {
-        try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+    private void cancelRemainingOrders(TradingCore core) throws Exception {
+        try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
             for (long /* 当前准备或撤销挂单的测试用户，资金守恒汇总时表示当前累计的账户。 */ user : new long[]{1, 7}) for (/* 每个目标用户两笔只减仓挂单中的下标，用来生成并再次定位固定订单编号。 */ int index = 0; index < 2; index++)
                 applied(core, CoreMessageType.CANCEL_ORDER, user,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(200 + user * 10 + index)));
@@ -310,7 +310,7 @@ class CoreLiquidationLaneCheckTest {
      * @param quantity 委托数量步数
      * @param reduceOnly 是否只减已有持仓，准备强平挂单时设为 true
      */
-    private void place(TradingCoreRuntime core, long user, long id, CoreOrderSide side, long price,
+    private void place(TradingCore core, long user, long id, CoreOrderSide side, long price,
                        long quantity, boolean reduceOnly) {
         applied(core, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(
                 new PlaceOrderCommand(id, "1", side, price, quantity, reduceOnly, CoreMarginMode.CROSS,
@@ -321,7 +321,7 @@ class CoreLiquidationLaneCheckTest {
      * 查询并解码待执行强平工作，要求查询成功，给批次构造提供真实动作和游标。
      * @param core 正在接受测试订单、行情、强平或查询的交易运行时
      */
-    private CoreLiquidationWorkView work(TradingCoreRuntime core) {
+    private CoreLiquidationWorkView work(TradingCore core) {
         // 当前查询或命令得到的最终响应，调用方核对业务状态和结果数据。
         var response = apply(core, CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
                 CoreLiquidationWorkCodec.encodeQuery(core.productLine, CoreLiquidationWorkView.Purpose.EXECUTION,
@@ -334,7 +334,7 @@ class CoreLiquidationLaneCheckTest {
      * 汇总用户 USDT 总余额、保险余额和清算对手余额，再减保险亏空，形成测试中用于前后核对的资金守恒总额。
      * @param core 正在接受测试订单、行情、强平或查询的交易运行时
      */
-    private long funds(TradingCoreRuntime core) {
+    private long funds(TradingCore core) {
         // 当前用于资金守恒汇总的业务状态。
         var state = core.tradingState();
         // 先累加所有用户余额，再加入保险和清算余额、扣除亏空的资金检查总额。
@@ -351,7 +351,7 @@ class CoreLiquidationLaneCheckTest {
      * @param user 发起这笔交易命令的用户编号，系统级查询或控制命令使用 0
      * @param payload 已经按该消息类型编码的业务载荷
      */
-    private CoreResponse applied(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private CoreResponse applied(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 当前查询或命令得到的最终响应，调用方核对业务状态和结果数据。
         var response = apply(core, type, user, payload);
         assertThat(response.commandStatus()).as("%s: %s", type, response.resultCode()).isEqualTo(ResponseStatus.APPLIED);
@@ -365,7 +365,7 @@ class CoreLiquidationLaneCheckTest {
      * @param user 发起这笔交易命令的用户编号，系统级查询或控制命令使用 0
      * @param payload 已经按该消息类型编码的业务载荷
      */
-    private CoreResponse apply(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private CoreResponse apply(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         // 为当前消息新分配的递增序号，同时写入命令编号和消息头。
         long next = ++sequence;
         // 由固定测试前缀和当前序号组成的唯一命令编号。

@@ -10,7 +10,7 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -27,16 +27,16 @@ class CoreFundsIdempotencyTest {
      */
     @Test
     void newFundsCommandsRemainExecutableBeyondOldRetentionLimit() {
-        try (/* 本场景自动关闭的真实现货 Core */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景自动关闭的真实现货 Core */ var state = new TradingCore(ProductLine.SPOT)) {
             // 冷阶段直接登记长期身份用的稳定指纹
             var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.fromBytes(
                     new byte[com.surprising.aeron.protocol.CommandFingerprint.LENGTH]);
-            for (/* 当前直接导入身份或写入淘汰命令的循环计数 */ int i = 0; i < 131_080; i++) state.terminalRetention().retainFundsCommand(new UUID(77, i), fingerprint);
+            for (/* 当前直接导入身份或写入淘汰命令的循环计数 */ int i = 0; i < 131_080; i++) state.completedOrderArchive().retainFundsCommand(new UUID(77, i), fingerprint);
             // 真实余额入账命令，重复不得再次改变余额
             var deposit = command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
             assertThat(apply(state, deposit).status()).isEqualTo(ResponseStatus.APPLIED);
-            try (/* 从当前 Core 快照恢复的独立运行时 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (/* 从当前 Core 快照恢复的独立运行时 */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(apply(restored, deposit).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(totalUnits(restored, 1001)).isEqualTo(100);
                 // 恢复后另一 UUID 的新入账命令
@@ -53,7 +53,7 @@ class CoreFundsIdempotencyTest {
      */
     @Test
     void balanceAdjustmentRemainsIdempotentAfterItsCommandResultIsEvicted() {
-        try (/* 本场景自动关闭的真实现货 Core */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景自动关闭的真实现货 Core */ TradingCore state = new TradingCore(ProductLine.SPOT)) {
             // 需要跨结果淘汰保留幂等的原入账 UUID
             UUID adjustmentId = UUID.randomUUID();
             // 原入账金额的编码字节
@@ -61,14 +61,14 @@ class CoreFundsIdempotencyTest {
                     new BalanceAdjustmentCommand("USDT", 5_000));
             assertThat(apply(state, command(CoreMessageType.ADJUST_BALANCE, adjustmentId, 1, payload)).status())
                     .isEqualTo(ResponseStatus.APPLIED);
-            for (/* 淘汰近期结果时使用的新来源序号 */ long sequence = 2; sequence <= TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS + 2L; sequence++) {
+            for (/* 淘汰近期结果时使用的新来源序号 */ long sequence = 2; sequence <= TradingCore.Limits.MAX_IDEMPOTENCY_RESULTS + 2L; sequence++) {
                 assertThat(apply(state, command(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(), sequence, com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1)))).status()).isEqualTo(ResponseStatus.APPLIED);
             }
 
             // 与原转账或入账同 UUID、等价载荷的重试
             CoreMessage retry = command(CoreMessageType.ADJUST_BALANCE, adjustmentId,
-                    TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS + 3L, payload);
-            try (/* 从当前 Core 快照恢复的独立运行时 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                    TradingCore.Limits.MAX_IDEMPOTENCY_RESULTS + 3L, payload);
+            try (/* 从当前 Core 快照恢复的独立运行时 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(apply(restored, retry).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(totalUnits(restored, 1001)).isEqualTo(5_000);
             }
@@ -90,7 +90,7 @@ class CoreFundsIdempotencyTest {
         byte[] transferPayload = TradingCommandCodec.encodeTransferFunds(transfer);
         // 源端划出 UUID
         UUID outId = UUID.randomUUID();
-        try (/* 真实源现货 Core */ TradingCoreRuntime source = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 真实源现货 Core */ TradingCore source = new TradingCore(ProductLine.SPOT)) {
             apply(source, command(ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(),
                     1, TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 5_000))));
             // 源端需要重复执行核对的划出命令
@@ -101,7 +101,7 @@ class CoreFundsIdempotencyTest {
             assertThat(totalUnits(source, 1001)).isEqualTo(4_750L);
             assertThat(source.pendingTransfers()).hasSize(1);
 
-            try (/* 从当前 Core 快照恢复的独立运行时 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, source.snapshot())) {
+            try (/* 从当前 Core 快照恢复的独立运行时 */ TradingCore restored = TradingCore.fromSnapshot(ProductLine.SPOT, source.snapshot())) {
                 assertThat(restored.pendingTransfers()).hasSize(1);
                 // 恢复后结束待转账生命周期的独立命令
                 CoreMessage complete = command(ProductLine.SPOT, CoreMessageType.COMPLETE_TRANSFER,
@@ -115,7 +115,7 @@ class CoreFundsIdempotencyTest {
 
         // 目标划入 UUID
         UUID inId = UUID.randomUUID();
-        try (/* 真实目标线性永续 Core */ TradingCoreRuntime target = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 真实目标线性永续 Core */ TradingCore target = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             // 目标端原划入命令
             CoreMessage in = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.TRANSFER_IN,
                     inId, 1, transferPayload);
@@ -149,20 +149,20 @@ class CoreFundsIdempotencyTest {
         var original = command(ProductLine.SPOT, CoreMessageType.TRANSFER_OUT, id, 2, payload);
         // 与原转账或入账同 UUID、等价载荷的重试
         var retry = command(ProductLine.SPOT, CoreMessageType.TRANSFER_OUT, id, 2, payload);
-        try (/* 真实源现货 Core */ var source = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 真实源现货 Core */ var source = new TradingCore(ProductLine.SPOT)) {
             apply(source, command(CoreMessageType.ADJUST_BALANCE, new UUID(7002, 0), 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 5000))));
             // 原划出前的快照，用来模拟日志尾部回放
             byte[] beforeTail = source.snapshot();
             assertThat(apply(source, original).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(apply(source, retry).status()).isEqualTo(ResponseStatus.DUPLICATE);
-            try (/* 从划出前快照恢复并重新执行原日志的 Core */ var crashRecovered = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, beforeTail)) {
+            try (/* 从划出前快照恢复并重新执行原日志的 Core */ var crashRecovered = TradingCore.fromSnapshot(ProductLine.SPOT, beforeTail)) {
                 assertThat(apply(crashRecovered, original).status()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(crashRecovered.stateHash()).isEqualTo(source.stateHash());
             }
             for (/* 当前直接导入身份或写入淘汰命令的循环计数 */ int i = 3; i < 150; i++) apply(source, command(CoreMessageType.ADJUST_BALANCE,
                     new UUID(7002, i), i, TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1))));
-            try (/* 从当前 Core 快照恢复的独立运行时 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, source.snapshot())) {
+            try (/* 从当前 Core 快照恢复的独立运行时 */ var restored = TradingCore.fromSnapshot(ProductLine.SPOT, source.snapshot())) {
                 // 重试前保存的业务哈希，不是余额
                 long before = restored.stateHash();
                 assertThat(restored.pendingTransfers().get(7002L)).isEqualTo(transfer);
@@ -178,7 +178,7 @@ class CoreFundsIdempotencyTest {
                         .isEqualTo("IDEMPOTENCY_CONFLICT");
             }
         }
-        try (/* 真实目标线性永续 Core */ var target = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 真实目标线性永续 Core */ var target = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             // 目标端当前编码的原划入命令
             var inbound = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.TRANSFER_IN, id, 1, payload);
             assertThat(apply(target, inbound).status()).isEqualTo(ResponseStatus.APPLIED);
@@ -204,7 +204,7 @@ class CoreFundsIdempotencyTest {
         var original = command(ProductLine.SPOT, CoreMessageType.TRANSFER_OUT, id, 2, payload);
         // 与原转账或入账同 UUID、等价载荷的重试
         var retry = command(ProductLine.SPOT, CoreMessageType.TRANSFER_OUT, id, 2, payload);
-        try (/* 真实源现货 Core */ var source = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 真实源现货 Core */ var source = new TradingCore(ProductLine.SPOT)) {
             CoreTestCompletion.applyAsynchronously(source, command(CoreMessageType.ADJUST_BALANCE, new UUID(7003, 0), 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 5000))));
             assertThat(CoreTestCompletion.applyAsynchronously(source, original).status()).isEqualTo(ResponseStatus.APPLIED);
@@ -212,7 +212,7 @@ class CoreFundsIdempotencyTest {
             for (/* 当前直接导入身份或写入淘汰命令的循环计数 */ int i = 3; i < 150; i++)
                 CoreTestCompletion.applyAsynchronously(source, command(CoreMessageType.ADJUST_BALANCE, new UUID(7003, i), i,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1))));
-            assertThat(source.resultLedger().get(id)).isNull();
+            assertThat(source.commandResultLog().get(id)).isNull();
             for (var /* 本轮原请求或重试 */ command : java.util.List.of(original, retry))
                 assertThat(CoreTestCompletion.applyAsynchronously(source, command).status()).isEqualTo(ResponseStatus.DUPLICATE);
             // 只读查询当前待完成转账列表的消息
@@ -232,7 +232,7 @@ class CoreFundsIdempotencyTest {
                     .isEqualTo("IDEMPOTENCY_CONFLICT");
             assertThat(totalUnits(source, 1001)).isEqualTo(4750 + 147);
         }
-        try (/* 真实目标线性永续 Core */ var target = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 真实目标线性永续 Core */ var target = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             assertThat(CoreTestCompletion.applyAsynchronously(target,
                     command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.TRANSFER_IN, id, 1, payload)).status())
                     .isEqualTo(ResponseStatus.APPLIED);
@@ -248,7 +248,7 @@ class CoreFundsIdempotencyTest {
      * @param core 当前要执行或查询的真实 Core
      * @param message 本次等待完成的命令
      */
-    private static CoreResponse apply(TradingCoreRuntime core, CoreMessage message) {
+    private static CoreResponse apply(TradingCore core, CoreMessage message) {
         return CoreTestCompletion.applyAsynchronously(core, message);
     }
 
@@ -257,7 +257,7 @@ class CoreFundsIdempotencyTest {
      * @param core 当前要执行或查询的真实 Core
      * @param userId 需要汇总 USDT 的用户 ID
      */
-    private static long totalUnits(TradingCoreRuntime core, long userId) {
+    private static long totalUnits(TradingCore core, long userId) {
         return CoreTestCompletion.userState(core, userId).balances().stream()
                 .filter(/* 当前待转账断言项或 USDT 余额项 */ value -> value.asset().equals("USDT"))
                 .mapToLong(/* 当前待转账断言项或 USDT 余额项 */ value -> value.availableUnits() + value.lockedUnits()).sum();

@@ -11,8 +11,8 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.LeverageLookup;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.order.OrderAdmissionService.AdmissionSummary;
+import com.surprising.aeron.service.core.identity.IdIndex;
+import com.surprising.aeron.service.order.OrderCheckService.OrderCheckSummary;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.risk.RiskScanner;
@@ -34,7 +34,7 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 public final class AccountExposureIndex {
     private final AccountPartition lane;
     /** 当前准入作用域首次创建用户成员集合时使用的容量提示，默认 2，批量结束后由外层恢复。 */
-    int admissionIndexCapacity = 2;
+    int orderCheckIndexCapacity = 2;
     final LongObjectHashMap<org.agrona.collections.LongHashSet> activeOrderIdsByUser;
     final LongObjectHashMap<org.agrona.collections.LongHashSet> reservationIdsByUser;
     final LongObjectHashMap<LongHashSet> positionKeysByUser;
@@ -43,11 +43,11 @@ public final class AccountExposureIndex {
     final LongIntHashMap pendingReservationCountsByUser;
     final IntObjectHashMap<LongLongHashMap> pendingReservedUnitsByAsset = new IntObjectHashMap<>();
     int totalPendingReservations;
-    private final Long2ObjectHashMap<Int2ObjectHashMap<AdmissionAggregate>> summariesByUser =
+    private final Long2ObjectHashMap<Int2ObjectHashMap<OrderCheckAggregate>> summariesByUser =
             new Long2ObjectHashMap<>();
-    private final java.util.ArrayDeque<AdmissionAggregate> emptyAggregates = new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<OrderCheckAggregate> emptyAggregates = new java.util.ArrayDeque<>();
     /** 每次 inspect 覆盖的准入统计返回槽，调用方不能保存为长期快照。 */
-    private final AdmissionSummary summary = new AdmissionSummary();
+    private final OrderCheckSummary summary = new OrderCheckSummary();
     int symbolId;
 
     AccountExposureIndex(AccountPartition lane, int initialEntityCapacity) {
@@ -60,11 +60,11 @@ public final class AccountExposureIndex {
     }
 
     /** 用外层选择的稠密合约编号读取准入汇总，把数量和冲突模式条数写入同一个复用返回槽。 */
-    public AdmissionSummary inspect(
+    public OrderCheckSummary inspect(
             long userId, CorePositionSide positionSide,
             CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
-        Int2ObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(userId);
-        AdmissionAggregate aggregate = bySymbol == null ? null : bySymbol.get(symbolId);
+        Int2ObjectHashMap<OrderCheckAggregate> bySymbol = summariesByUser.get(userId);
+        OrderCheckAggregate aggregate = bySymbol == null ? null : bySymbol.get(symbolId);
         return aggregate == null ? summary.set(0, 0, 0)
                 : summary.set(aggregate.pending(positionSide, side), aggregate.reduceOnly(side),
                 aggregate.marginMode(positionSide, conflictingMarginMode));
@@ -103,12 +103,12 @@ public final class AccountExposureIndex {
     }
 
     private void update(Order order, int direction, long remainingQuantity) {
-        Int2ObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(order.userId());
-        AdmissionAggregate aggregate = bySymbol == null ? null : bySymbol.get(order.symbolId());
+        Int2ObjectHashMap<OrderCheckAggregate> bySymbol = summariesByUser.get(order.userId());
+        OrderCheckAggregate aggregate = bySymbol == null ? null : bySymbol.get(order.symbolId());
         if (aggregate == null) {
             if (direction < 0) throw new IllegalStateException("admission order index is missing");
             aggregate = emptyAggregates.pollLast();
-            if (aggregate == null) aggregate = new AdmissionAggregate();
+            if (aggregate == null) aggregate = new OrderCheckAggregate();
             aggregate.update(order, direction, remainingQuantity);
             bySymbol = bySymbol == null ? new Int2ObjectHashMap<>(8, 0.65f, false) : bySymbol;
             bySymbol.put(order.symbolId(), aggregate);
@@ -137,7 +137,7 @@ public final class AccountExposureIndex {
     void addActiveOrder(long userId, long orderId) {
         var orderIds = activeOrderIdsByUser.get(userId);
         if (orderIds == null) {
-            orderIds = new org.agrona.collections.LongHashSet(admissionIndexCapacity, 0.65f, true);
+            orderIds = new org.agrona.collections.LongHashSet(orderCheckIndexCapacity, 0.65f, true);
             activeOrderIdsByUser.put(userId, orderIds);
         }
         orderIds.add(orderId);
@@ -153,7 +153,7 @@ public final class AccountExposureIndex {
     void addReservationId(long userId, long orderId) {
         var ids = reservationIdsByUser.get(userId);
         if (ids == null) {
-            ids = new org.agrona.collections.LongHashSet(admissionIndexCapacity, 0.65f, true);
+            ids = new org.agrona.collections.LongHashSet(orderCheckIndexCapacity, 0.65f, true);
             reservationIdsByUser.put(userId, ids);
         }
         ids.add(orderId);
@@ -189,7 +189,7 @@ public final class AccountExposureIndex {
     }
 
     /** 单个用户、单个合约的活跃订单统计。 */
-    static final class AdmissionAggregate {
+    static final class OrderCheckAggregate {
         private long netBuy;
         private long netSell;
         private long longBuy;
@@ -349,7 +349,7 @@ final class LaneColdState {
     final LongObjectHashMap<com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers = new LongObjectHashMap<>();
     RiskScanner.LiquidationBatch riskLiquidationBatch;
     final LeverageLookup leverageLookup = new LeverageLookup();
-    final RuntimeIdentityRegistry.LookupScratch identityLookupScratch = new RuntimeIdentityRegistry.LookupScratch();
+    final IdIndex.LookupScratch identityLookupScratch = new IdIndex.LookupScratch();
     /** 仅遍历用户修订时借用的命令收据，结束后清空，禁止嵌套借用。 */
     AccountPartitionCommit.Delta userRevisionChanges;
     final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure advanceUserRevision;

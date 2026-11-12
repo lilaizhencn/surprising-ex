@@ -14,11 +14,11 @@ import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.order.OrderCommand;
-import com.surprising.aeron.service.order.OrderCommand.ReplacementAdmission;
+import com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheck;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import com.surprising.aeron.support.collection.PrimitiveLongView;
@@ -28,26 +28,26 @@ import java.util.RandomAccess;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
-import static com.surprising.aeron.service.core.TradingCoreRuntime.*;
+import static com.surprising.aeron.service.core.TradingCore.*;
 
 /** 交易步骤 5–6：Owner 串行复用的当前命令结果工作区，收集变更 ID、借用可编码订单源，并在提交边界选择响应内容。响应数组可能来自共享池，移交后不能由下一命令提前归还。 */
 public final class CommandResultBuilder {
-    private static final byte[] EMPTY_RESULT = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
-    final TradingCoreRuntime owner;
+    private static final byte[] EMPTY_RESULT = TradingCore.EMPTY_RESPONSE_DATA;
+    final TradingCore owner;
     private final ResponseSlotPool responseSlotPool;
     private byte[] responseStorage = EMPTY_RESULT;
     private int responseOffset;
     private int responseLength;
 
     /** 关联所属运行时的响应池。传空 Owner 仅创建一个小响应池用于有限的独立使用，需要 Owner 的业务方法仍不能在空 Owner 下调用。 */
-    public CommandResultBuilder(TradingCoreRuntime owner) {
+    public CommandResultBuilder(TradingCore owner) {
         this.owner = owner;
         this.responseSlotPool = owner == null ? new ResponseSlotPool(1, ResponseSlotPool.DEFAULT_SLOT_BYTES)
                 : owner.responseSlotPool();
     }
 
     private Order commandSingleOrder;
-    private final OrderRuntimeSource commandSingleOrderSource = new OrderRuntimeSource();
+    private final OrderSource commandSingleOrderSource = new OrderSource();
     private final OrderSourceList commandOrderSources = new OrderSourceList(2);
 
     /** 清当前单订单引用及多订单源列表，不释放权威订单，也不修改账户状态。 */
@@ -179,7 +179,7 @@ public final class CommandResultBuilder {
         owner.seedChangeAccumulators();
         // Lane 结算若已交出当前命令的准确用户键，就不再重复收集 Owner 的整体变化索引。
         // 否则提交挂起期间可能把较早命令的用户混入当前结果。
-        if (!laneCommitIdsSeeded) owner.runtimeState().acceptChangedUserIds(changedUserIds::add);
+        if (!laneCommitIdsSeeded) owner.accountBook().acceptChangedUserIds(changedUserIds::add);
         directChangedUsers.bind(changedUserIds);
         directChangedOrders.bind(changedOrderIds);
         commandChangedUserIds = directChangedUsers;
@@ -189,7 +189,7 @@ public final class CommandResultBuilder {
     /** 直接控制命令接续集合并补入 Owner 用户变化，然后重新绑定两组只读视图。此入口不跳过 Owner 变化收集。 */
     public void materializeDirectChangeAccumulators() {
         owner.seedChangeAccumulators();
-        owner.runtimeState().acceptChangedUserIds(changedUserIds::add);
+        owner.accountBook().acceptChangedUserIds(changedUserIds::add);
         directChangedUsers.bind(changedUserIds);
         directChangedOrders.bind(changedOrderIds);
         commandChangedUserIds = directChangedUsers;
@@ -212,8 +212,8 @@ public final class CommandResultBuilder {
                 return;
             }
             case REPLACE, AMEND -> {
-                OrderCommand.ReplacementAdmission admission = owner.requireMatchingAdmission(pending);
-                materializeResponseOrders(pending, admission.originalOrderId(), admission.command().orderId());
+                OrderCommand.ReplaceOrderCheck orderCheck = owner.requireMatchingOrderCheck(pending);
+                materializeResponseOrders(pending, orderCheck.originalOrderId(), orderCheck.command().orderId());
                 return;
             }
             case TRIGGER -> {
@@ -397,19 +397,19 @@ public final class CommandResultBuilder {
     /** Owner 当前提交作用域使用的可增长只读列表门面，底层订单源适配器按历史最高用量复用。清列表只释放引用，编码器不能长期保留这些源。 */
     private static final class OrderSourceList extends AbstractList<CoreOrderStateSource> implements RandomAccess {
         /** 按当前有效顺序保存的复用订单源适配器数组。 */
-        private OrderRuntimeSource[] values;
+        private OrderSource[] values;
         @Accessors(fluent = true, chain = false)
         @Getter(onMethod_ = {@Override})
         private int size;
 
-        private OrderSourceList(int initialCapacity) { values = new OrderRuntimeSource[initialCapacity]; }
+        private OrderSourceList(int initialCapacity) { values = new OrderSource[initialCapacity]; }
 
         private void add(Order order, String instrumentId) {
             if (size == values.length) {
                 values = java.util.Arrays.copyOf(values, Math.multiplyExact(values.length, 2));
             }
-            OrderRuntimeSource source = values[size];
-            if (source == null) values[size] = source = new OrderRuntimeSource();
+            OrderSource source = values[size];
+            if (source == null) values[size] = source = new OrderSource();
             source.set(order, instrumentId);
             size++;
         }

@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.retention;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -30,7 +30,7 @@ class CoreFundsLedgerIndexTest {
     void allFundsKindsRemainIdempotentAfterResultEvictionAcrossProducts(ProductLine product) {
         // 与源独立的目标产品，现货转永续，其余转现货
         ProductLine destination = product == ProductLine.SPOT ? ProductLine.LINEAR_PERPETUAL : ProductLine.SPOT;
-        try (/* 源产品真实 Core */ var source = new TradingCoreRuntime(product); /* 目标产品真实 Core */ var target = new TradingCoreRuntime(destination)) {
+        try (/* 源产品真实 Core */ var source = new TradingCore(product); /* 目标产品真实 Core */ var target = new TradingCore(destination)) {
             // 源端最初加两千的余额命令
             var deposit = command(source, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -51,15 +51,15 @@ class CoreFundsLedgerIndexTest {
             assertOwnerCanReadRetainedIdentity(target, in);
             evictOldResults(source, 7); evictOldResults(target, 22);
             for (var /* 当前要检查、重试或等待的真实命令 */ request : List.of(deposit, out, complete))
-                assertThat(source.resultLedger().get(request.header().commandId())).isNull();
-            assertThat(target.resultLedger().get(in.header().commandId())).isNull();
+                assertThat(source.commandResultLog().get(request.header().commandId())).isNull();
+            assertThat(target.commandResultLog().get(in.header().commandId())).isNull();
 
             // 重复前的源 Core 应用计数
             // 重复前的目标 Core 应用计数
             long sourceCount = source.appliedCommandCount(), targetCount = target.appliedCommandCount();
             // 重复前的源业务修订号
             // 重复前的目标业务修订号
-            long sourceRevision = source.runtimeState().revision(), targetRevision = target.runtimeState().revision();
+            long sourceRevision = source.accountBook().revision(), targetRevision = target.accountBook().revision();
             // 重复前的源业务哈希
             // 重复前的目标业务哈希
             long sourceHash = source.stateHash(), targetHash = target.stateHash();
@@ -68,8 +68,8 @@ class CoreFundsLedgerIndexTest {
             duplicate(target, in);
             assertThat(source.appliedCommandCount()).isEqualTo(sourceCount);
             assertThat(target.appliedCommandCount()).isEqualTo(targetCount);
-            assertThat(source.runtimeState().revision()).isEqualTo(sourceRevision);
-            assertThat(target.runtimeState().revision()).isEqualTo(targetRevision);
+            assertThat(source.accountBook().revision()).isEqualTo(sourceRevision);
+            assertThat(target.accountBook().revision()).isEqualTo(targetRevision);
             assertThat(source.stateHash()).isEqualTo(sourceHash);
             assertThat(target.stateHash()).isEqualTo(targetHash);
 
@@ -79,8 +79,8 @@ class CoreFundsLedgerIndexTest {
             assertThat(apply(source, changedPayload).resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
             // 逐步选择的另一账户 Lane 用户，构造同 UUID 身份冲突
             long anotherUser = 8;
-            while (source.runtimeState().topology().accountLaneId(anotherUser)
-                    == source.runtimeState().topology().accountLaneId(7)) anotherUser++;
+            while (source.accountBook().topology().accountLaneId(anotherUser)
+                    == source.accountBook().topology().accountLaneId(7)) anotherUser++;
             // 原余额命令的完整协议头
             var header = deposit.header();
             // 原 UUID 与载荷不变、但改用户的冲突请求
@@ -112,7 +112,7 @@ class CoreFundsLedgerIndexTest {
      */
     @Test @Timeout(15)
     void balanceAdjustmentAppliesFundsExactlyOnceAndDeduplicates() {
-        try (/* 本场景自动关闭或故障后显式关闭的真实 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 本场景自动关闭或故障后显式关闭的真实 Core */ var core = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             applied(core, command(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100))));
             // 本次新命令前保存的应用计数
@@ -134,17 +134,17 @@ class CoreFundsLedgerIndexTest {
      * 只在冷索引导入原命令指纹，没有执行原加一百或恢复快照；激活后原命令被判重复且哈希不变，随后真正加一余额只有一，Owner 可以直接读取保留身份。
      */
     @Test void coldFundsIndexHandsExistingIdentitiesToActiveOwner() {
-        try (/* 本场景自动关闭或故障后显式关闭的真实 Core */ var core = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (/* 本场景自动关闭或故障后显式关闭的真实 Core */ var core = new TradingCore(ProductLine.SPOT)) {
             // 冷阶段只导入指纹而没有真正执行的入账命令
             var original = command(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
             // 只在冷阶段导入资金身份，验证它独立于近期响应缓存；这里没有执行快照恢复。
             // 冷索引保存的稳定原命令指纹
             var fingerprint = CommandFingerprint.of(original);
-            core.terminalRetention().retainFundsCommand(original.header().commandId(), fingerprint);
-            assertThat(core.terminalRetention().fundsCommand(original.header().commandId())).isEqualTo(fingerprint);
+            core.completedOrderArchive().retainFundsCommand(original.header().commandId(), fingerprint);
+            assertThat(core.completedOrderArchive().fundsCommand(original.header().commandId())).isEqualTo(fingerprint);
             core.activate();
-            assertThat(core.resultLedger().get(original.header().commandId())).isNull();
+            assertThat(core.commandResultLog().get(original.header().commandId())).isNull();
             // 本次新命令前保存的应用计数
             long count = core.appliedCommandCount();
             // 冷身份激活后、重复执行前的业务哈希
@@ -164,25 +164,25 @@ class CoreFundsLedgerIndexTest {
     /** 冷导入允许另一启动线程执行；激活后，只有绑定 Owner 可以访问资金身份。 */
     @Test @Timeout(15)
     void coldIndexTransfersToOwnerAndRejectsOtherThreadsAfterActivation() throws Exception {
-        try (var core = new TradingCoreRuntime(ProductLine.SPOT)) {
+        try (var core = new TradingCore(ProductLine.SPOT)) {
             var request = command(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
             var fingerprint = CommandFingerprint.of(request);
             var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
             var importer = Thread.ofPlatform().start(() -> {
-                try { core.terminalRetention().retainFundsCommand(request.header().commandId(), fingerprint); }
+                try { core.completedOrderArchive().retainFundsCommand(request.header().commandId(), fingerprint); }
                 catch (Throwable error) { failure.set(error); }
             });
             importer.join(5_000);
             assertThat(importer.isAlive()).isFalse();
             assertThat(failure.get()).isNull();
             core.activate();
-            assertThat(core.terminalRetention().fundsCommand(request.header().commandId())).isEqualTo(fingerprint);
+            assertThat(core.completedOrderArchive().fundsCommand(request.header().commandId())).isEqualTo(fingerprint);
             var foreign = Thread.ofPlatform().start(() -> {
                 try {
-                    assertThatThrownBy(() -> core.terminalRetention().fundsCommand(request.header().commandId()))
+                    assertThatThrownBy(() -> core.completedOrderArchive().fundsCommand(request.header().commandId()))
                             .isInstanceOf(IllegalStateException.class).hasMessageContaining("bound owner thread");
-                    assertThatThrownBy(() -> core.terminalRetention().retainFundsCommand(
+                    assertThatThrownBy(() -> core.completedOrderArchive().retainFundsCommand(
                             new UUID(998, 1), fingerprint))
                             .isInstanceOf(IllegalStateException.class).hasMessageContaining("bound owner thread");
                 } catch (Throwable error) { failure.set(error); }
@@ -201,8 +201,8 @@ class CoreFundsLedgerIndexTest {
      * @param core 当前执行真实资金流程的 Core
      * @param user 当前命令或查询用户 ID
      */
-    private void evictOldResults(TradingCoreRuntime core, long user) {
-        for (/* 挤出响应缓存时逐次增加的费率版本 */ int revision = 1; revision <= TradingCoreRuntime.Limits.MAX_IDEMPOTENCY_RESULTS + 1; revision++) {
+    private void evictOldResults(TradingCore core, long user) {
+        for (/* 挤出响应缓存时逐次增加的费率版本 */ int revision = 1; revision <= TradingCore.Limits.MAX_IDEMPOTENCY_RESULTS + 1; revision++) {
             // 本轮用于填近期结果窗口的费率策略
             var policy = new UpsertFeePolicyCommand(33, revision, user, "", 0, 0, 1, true, TIME - 1, 0);
             applied(core, command(core, CoreMessageType.UPSERT_FEE_POLICY, user, TradingCommandCodec.encodeUpsertFeePolicy(policy)));
@@ -214,8 +214,8 @@ class CoreFundsLedgerIndexTest {
      * @param core 当前执行真实资金流程的 Core
      * @param request 需要执行、重试或检查索引归属的原命令
      */
-    private void assertOwnerCanReadRetainedIdentity(TradingCoreRuntime core, CoreMessage request) {
-        assertThat(core.terminalRetention().fundsCommand(request.header().commandId())).isNotNull();
+    private void assertOwnerCanReadRetainedIdentity(TradingCore core, CoreMessage request) {
+        assertThat(core.completedOrderArchive().fundsCommand(request.header().commandId())).isNotNull();
     }
 
     /**
@@ -223,7 +223,7 @@ class CoreFundsLedgerIndexTest {
      * @param core 当前执行真实资金流程的 Core
      * @param request 需要执行、重试或检查索引归属的原命令
      */
-    private void applied(TradingCoreRuntime core, CoreMessage request) {
+    private void applied(TradingCore core, CoreMessage request) {
         assertThat(apply(core, request).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
     }
 
@@ -232,7 +232,7 @@ class CoreFundsLedgerIndexTest {
      * @param core 当前执行真实资金流程的 Core
      * @param request 需要执行、重试或检查索引归属的原命令
      */
-    private void duplicate(TradingCoreRuntime core, CoreMessage request) {
+    private void duplicate(TradingCore core, CoreMessage request) {
         // 异步完成助手或直接槽返回的最新结果
         var result = apply(core, request);
         assertThat(result.status()).isEqualTo(ResponseStatus.DUPLICATE);
@@ -245,7 +245,7 @@ class CoreFundsLedgerIndexTest {
      * @param core 当前执行真实资金流程的 Core
      * @param request 需要执行、重试或检查索引归属的原命令
      */
-    private CoreResponse apply(TradingCoreRuntime core, CoreMessage request) {
+    private CoreResponse apply(TradingCore core, CoreMessage request) {
         return CoreTestCompletion.applyAsynchronously(core, request);
     }
 
@@ -256,7 +256,7 @@ class CoreFundsLedgerIndexTest {
      * @param user 当前命令或查询用户 ID
      * @param payload 与该类型配对的编码载荷
      */
-    private CoreMessage command(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload) {
+    private CoreMessage command(TradingCore core, CoreMessageType type, long user, byte[] payload) {
         return command(core, type, new UUID(997, sequence + 1), user, payload);
     }
 
@@ -268,7 +268,7 @@ class CoreFundsLedgerIndexTest {
      * @param user 当前命令或查询用户 ID
      * @param payload 与该类型配对的编码载荷
      */
-    private CoreMessage command(TradingCoreRuntime core, CoreMessageType type, UUID id, long user, byte[] payload) {
+    private CoreMessage command(TradingCore core, CoreMessageType type, UUID id, long user, byte[] payload) {
         // 新命令递增后的来源序号
         long next = ++sequence;
         return new CoreMessage(CoreMessageHeader.command(type, id, core.productLine(),
@@ -279,7 +279,7 @@ class CoreFundsLedgerIndexTest {
      * 最多十秒轮询当前直接控制槽，返回最后一次结果；没有活动任务时可返回空，不在这里伪造终态。
      * @param core 当前执行真实资金流程的 Core
      */
-    private CoreResponse drain(TradingCoreRuntime core) {
+    private CoreResponse drain(TradingCore core) {
         // 异步完成助手或直接槽返回的最新结果
         CoreResponse result = null;
         // 当前整个通知场景或直接控制等待的纳秒截止时间

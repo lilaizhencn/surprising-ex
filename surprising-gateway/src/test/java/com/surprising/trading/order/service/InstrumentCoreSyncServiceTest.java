@@ -1,7 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;
@@ -23,9 +23,9 @@ class InstrumentCoreSyncServiceTest {
         var properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(line);
         var gateway = mock(MaintenanceAeronGateway.class);
-        try (var runtime = new TradingCoreRuntime(line)) {
+        try (var tradingCore = new TradingCore(line)) {
             when(gateway.commandOutcome(any(), any(), anyLong(), any())).thenAnswer(call ->
-                    new com.surprising.aeron.client.CoreCommandOutcome.Terminal(runtime.apply(new CoreMessage(
+                    new com.surprising.aeron.client.CoreCommandOutcome.Terminal(tradingCore.apply(new CoreMessage(
                             CoreMessageHeader.command(call.getArgument(0), call.getArgument(1), line,
                                     CommandSource.OPERATIONS, 993, 1, 0, 1_700_000_000_001L, 1), call.getArgument(3)))));
             var draft = row(line, 1, InstrumentStatus.DRAFT);
@@ -35,13 +35,13 @@ class InstrumentCoreSyncServiceTest {
             var service = new InstrumentCoreSyncService(cache, gateway, properties);
             service.reconcile();
             assertThat(service.state("1", line).state()).isEqualTo("APPLIED");
-            var registered = runtime.tradingState().instruments().get("1");
+            var registered = tradingCore.tradingState().instruments().get("1");
             assertThat(registered.instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
             assertThat(registered.priceTickUnits()).isEqualTo(draft.contractType().isInverse() ? 10 : 1);
             if (line.isOptionProduct()) assertThat(registered.strikePriceTicks()).isEqualTo(10);
             if (line.isDerivative()) assertThat(registered.orderProtection()).isEqualTo(properties.getRisk().protection());
             else assertThat(registered.orderProtection()).isNull();
-            try (var restored = TradingCoreRuntime.fromSnapshot(line, runtime.snapshot(42))) {
+            try (var restored = TradingCore.fromSnapshot(line, tradingCore.snapshot(42))) {
                 assertThat(restored.tradingState().instruments().get("1")).isEqualTo(registered);
             }
         }
@@ -50,7 +50,7 @@ class InstrumentCoreSyncServiceTest {
     void appliesStartupAndLaterConfigurationChangesThroughTheSameCoreCommand(ProductLine line) {
         var cache=new InstrumentSnapshotCache(); var properties=new TradingOrderProperties(); properties.getKafka().setProductLine(line);
         var gateway=mock(MaintenanceAeronGateway.class); var sequence=new AtomicLong();
-        try(var state=new TradingCoreRuntime(line)) {
+        try(var state=new TradingCore(line)) {
             when(gateway.commandOutcome(any(),any(),anyLong(),any())).thenAnswer(call->{
                 long seq=sequence.incrementAndGet();
                 var response=state.apply(new CoreMessage(CoreMessageHeader.command(call.getArgument(0),call.getArgument(1),line,
@@ -102,7 +102,7 @@ class InstrumentCoreSyncServiceTest {
                             0,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.MARKET,
                             CoreTimeInForce.IOC,false,"market-disabled"))));
             assertThat(rejectedMarket.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            try (var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(41))) {
+            try (var restored=TradingCore.fromSnapshot(line,state.snapshot(41))) {
                 var recovered=restored.tradingState().instruments().get("1");
                 assertThat(recovered.instrumentStatus()).isEqualTo(InstrumentStatus.TRADING);
                 assertThat(recovered.marketOrderEnabled()).isFalse();

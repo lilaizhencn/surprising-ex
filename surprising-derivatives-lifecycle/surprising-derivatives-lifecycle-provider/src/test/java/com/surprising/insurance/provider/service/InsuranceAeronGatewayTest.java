@@ -15,7 +15,7 @@ import static org.mockito.Mockito.*;
 class InsuranceAeronGatewayTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = "SPOT", mode = EnumSource.Mode.EXCLUDE)
-    void usesSharedClientForCommandsAndTreasury(ProductLine product) {
+    void usesSharedClientForCommandsAndSystemFunds(ProductLine product) {
         var properties = new InsuranceProperties();
         properties.getKafka().setProductLine(product);
         var client = mock(DerivativesAeronClient.class);
@@ -27,7 +27,7 @@ class InsuranceAeronGatewayTest {
         when(client.query(eq(CoreMessageType.TREASURY_STATE_QUERY), any(UUID.class), eq(0L), any(byte[].class)))
                 .thenReturn(new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, payload));
         gateway.command(CoreMessageType.ADJUST_INSURANCE_FUND, id, payload);
-        assertThat(gateway.treasury()).containsExactly(payload);
+        assertThat(gateway.systemFunds()).containsExactly(payload);
         var work = new CoreLiquidationWorkView(product, 42, true, null, java.util.List.of(), java.util.List.of());
         when(client.query(eq(CoreMessageType.LIQUIDATION_WORK_QUERY), any(UUID.class), eq(0L), any(byte[].class)))
                 .thenReturn(new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE, 2,

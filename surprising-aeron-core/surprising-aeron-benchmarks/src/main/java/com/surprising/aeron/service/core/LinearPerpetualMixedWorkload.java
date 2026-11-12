@@ -501,7 +501,7 @@ public final class LinearPerpetualMixedWorkload {
 
             @Override
             public int incompleteRiskScans() {
-                return harness.state().runtimeState().incompleteRiskScanCount();
+                return harness.state().accountBook().incompleteRiskScanCount();
             }
 
             @Override
@@ -510,7 +510,7 @@ public final class LinearPerpetualMixedWorkload {
                 // 仅在场景结束或采样时读取已发布进度，生产结算不维护基准专用计数。
                 for (String instrumentId : template.listedSymbols()) {
                     int symbolId = harness.state().identities.symbolId(instrumentId);
-                    if (harness.state().runtimeState().treasury().fundingProgress(symbolId) != null) incomplete++;
+                    if (harness.state().accountBook().systemFunds().fundingProgress(symbolId) != null) incomplete++;
                 }
                 return incomplete;
             }
@@ -602,7 +602,7 @@ public final class LinearPerpetualMixedWorkload {
         return selected;
     }
 
-    private static long[] completedLaneOperations(TradingCoreRuntime state) {
+    private static long[] completedLaneOperations(TradingCore state) {
         long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
         long[] completed = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics()).accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
@@ -856,14 +856,14 @@ public final class LinearPerpetualMixedWorkload {
     public static long totalFunds(TradingCoreState state) {
         long total = 0;
         for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, SETTLE_ASSET));
-        CoreTreasuryState treasury = state.treasuryState();
-        total = addLedger(total, treasury.feeBalances());
-        total = addLedger(total, treasury.insuranceBalances());
-        total = addLedger(total, treasury.liquidationFeeBalances());
-        total = addLedger(total, treasury.fundingResidualBalances());
-        total = addLedger(total, treasury.roundingResidualBalances());
-        total = addLedger(total, treasury.clearingPnlBalances());
-        return Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(SETTLE_ASSET, 0L));
+        CoreTreasuryState systemFunds = state.treasuryState();
+        total = addLedger(total, systemFunds.feeBalances());
+        total = addLedger(total, systemFunds.insuranceBalances());
+        total = addLedger(total, systemFunds.liquidationFeeBalances());
+        total = addLedger(total, systemFunds.fundingResidualBalances());
+        total = addLedger(total, systemFunds.roundingResidualBalances());
+        total = addLedger(total, systemFunds.clearingPnlBalances());
+        return Math.subtractExact(total, systemFunds.insuranceDeficits().getOrDefault(SETTLE_ASSET, 0L));
     }
 
     private static long addLedger(long total, Map<String, Long> ledger) {

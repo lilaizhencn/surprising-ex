@@ -4,7 +4,7 @@ import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.core.index.AlgoOrderIndex;
@@ -12,13 +12,13 @@ import com.surprising.aeron.service.core.index.CancelAllAfterIndex;
 import com.surprising.aeron.service.core.index.LiquidationIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
-import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
+import com.surprising.aeron.service.core.index.BizIndex;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.risk.*;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
+import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,8 +36,8 @@ class RuntimeChangedIndexCommitTest {
         // 本用例 U 本位永续的空冷状态
         var initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         // 原始身份表，供内部编号转换和最终身份回收断言
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 本用例由冷状态投影的交易运行时，真实 Lane 用例会显式启动账户资源 */ var runtime = RuntimeStateProjector.project(initial, identities)) {
+        var identities = new IdIndex();
+        try (/* 本用例由冷状态投影的交易运行时，真实 Lane 用例会显式启动账户资源 */ var accountBook = SnapshotLoader.loadSnapshot(initial, identities)) {
             // USDT 的内部资产编号
             // 永久标的一的内部稠密编号
             int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
@@ -46,23 +46,23 @@ class RuntimeChangedIndexCommitTest {
             // 四项可断言索引及共同事实应用入口组成的测试记录
             var indexes = indexes(initial, identities);
             for (long /* 当前循环赋给同一持仓的带符号数量，零不等于删除对象 */ quantity : new long[]{2, -2, 0, 3, 0}) {
-                runtime.putPosition(key, new Position(7, symbol, asset, CoreMarginMode.CROSS,
+                accountBook.putPosition(key, new Position(7, symbol, asset, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), quantity,
                         quantity == 0 ? 0 : 100, Math.abs(quantity) * 100, 0, Math.abs(quantity) * 10));
-                runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
-                runtime.clearChangedKeys();
+                accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
+                accountBook.clearChangedKeys();
                 assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(Math.abs(quantity));
                 if (quantity == 0) assertThat(indexes.openInterest.totals()).isEmpty();
                 else assertThat(indexes.openInterest.totals()).containsExactly(org.assertj.core.api.Assertions.entry(
                         "1", new OpenInterestIndex.Totals(Math.max(quantity, 0), Math.max(-quantity, 0))));
                 assertThat(indexes.positionUsers.usersAfter("1", 0)).containsExactly(7L);
             }
-            com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, key, 7);
-            runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(accountBook, key, 7);
+            accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
             assertThat(indexes.openInterest.totals()).isEmpty();
             assertThat(indexes.positionUsers.usersAfter("1", 0)).isEmpty();
         }
@@ -76,57 +76,57 @@ class RuntimeChangedIndexCommitTest {
         // 本用例 U 本位永续的空冷状态
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         // 原始身份表，供内部编号转换和最终身份回收断言
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例由冷状态投影的交易运行时，真实 Lane 用例会显式启动账户资源
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(initial, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(initial, identities);
         // 永久标的一对应内部稠密标的编号
         int symbolId = identities.symbolId("1");
         // USDT 内部资产编号
         int assetId = identities.assetId("USDT");
         // 本用例持仓和风险快照共用的确定性身份键
         long positionKey = identities.positionKey(7, "1:NET");
-        runtime.putPosition(positionKey, new Position(7, symbolId, assetId,
+        accountBook.putPosition(positionKey, new Position(7, symbolId, assetId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 2, 100, 200, 0, 40));
-        runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 2));
+        accountBook.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 2));
 
         // 四项可断言索引及共同事实应用入口组成的测试记录
         IndexSet indexes = indexes(initial, identities);
-        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
+        if (accountBook.accountLanesStarted()) LedgerControlTestSupport.await(accountBook, accountBook::pollControlLanes);
+        accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).containsExactly(11L);
         assertThat(indexes.positionUsers.usersAfter("1", 0)).containsExactly(7L);
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(2);
 
-        runtime.clearChangedKeys();
-        runtime.putPosition(positionKey, new Position(7, symbolId, assetId,
+        accountBook.clearChangedKeys();
+        accountBook.putPosition(positionKey, new Position(7, symbolId, assetId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 3, 100, 300, 0, 60));
-        runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 5));
-        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
+        accountBook.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 5));
+        if (accountBook.accountLanesStarted()) LedgerControlTestSupport.await(accountBook, accountBook::pollControlLanes);
+        accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
 
-        assertThat(runtime.onLane(7L, lane -> lane.admissionSummary(symbolId, 7, CorePositionSide.NET,
+        assertThat(accountBook.onLane(7L, lane -> lane.orderCheckSummary(symbolId, 7, CorePositionSide.NET,
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, CoreMarginMode.ISOLATED)).pendingQuantity()).isEqualTo(5);
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(3);
 
-        runtime.clearChangedKeys();
-        com.surprising.aeron.service.core.CoreStateTestFixtures.deleteOrder(runtime, 11);
-        com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, positionKey, 7);
-        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
+        accountBook.clearChangedKeys();
+        com.surprising.aeron.service.core.CoreStateTestFixtures.deleteOrder(accountBook, 11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(accountBook, positionKey, 7);
+        if (accountBook.accountLanesStarted()) LedgerControlTestSupport.await(accountBook, accountBook::pollControlLanes);
+        accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).isEmpty();
         assertThat(indexes.positionUsers.usersAfter("1", 0)).isEmpty();
         assertThat(indexes.openInterest.openInterestSteps("1")).isZero();
-        runtime.close();
+        accountBook.close();
     }
 
     /**
@@ -137,9 +137,9 @@ class RuntimeChangedIndexCommitTest {
         // 本用例 U 本位永续的空冷状态
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         // 原始身份表，供内部编号转换和最终身份回收断言
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例由冷状态投影的交易运行时，真实 Lane 用例会显式启动账户资源
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(initial, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(initial, identities);
         // 永久标的一对应内部稠密标的编号
         int symbolId = identities.symbolId("1");
         // USDT 内部资产编号
@@ -148,45 +148,45 @@ class RuntimeChangedIndexCommitTest {
         long userId = 7;
         // 本用例持仓和风险快照共用的确定性身份键
         long positionKey = identities.positionKey(userId, "1:NET");
-        runtime.putPosition(positionKey, new Position(userId, symbolId, assetId,
+        accountBook.putPosition(positionKey, new Position(userId, symbolId, assetId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 2, 100, 200, 0, 40));
-        runtime.clearChangedKeys();
-        runtime.startAccountLanes();
+        accountBook.clearChangedKeys();
+        accountBook.startAccountLanes();
 
         // 四项可断言索引及共同事实应用入口组成的测试记录
         IndexSet indexes = indexes(initial, identities);
         // 当前写入并随后删除的 NORMAL 风险快照
         RiskMarginCalculator.Snapshot risk = new RiskMarginCalculator.Snapshot(userId, symbolId, CorePositionSide.NET,
                 9, 1_000, 20, 100, 100_000);
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
-            runtime.putRiskSnapshot(positionKey, risk);
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
+            accountBook.putRiskSnapshot(positionKey, risk);
             return null;
         });
-        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
+        if (accountBook.accountLanesStarted()) LedgerControlTestSupport.await(accountBook, accountBook::pollControlLanes);
+        accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
 
-        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isEqualTo(risk);
+        assertThat(AccountLaneQueryTestSupport.read(accountBook, userId, () -> accountBook.riskSnapshot(positionKey))).isEqualTo(risk);
 
-        runtime.clearChangedKeys();
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
-            com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(runtime, positionKey);
-            com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, positionKey, userId);
+        accountBook.clearChangedKeys();
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(accountBook, positionKey);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(accountBook, positionKey, userId);
             return null;
         });
-        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
-        runtime.clearCommittedChanges(identities);
+        if (accountBook.accountLanesStarted()) LedgerControlTestSupport.await(accountBook, accountBook::pollControlLanes);
+        accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
+        accountBook.clearCommittedChanges(identities);
 
-        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isNull();
+        assertThat(AccountLaneQueryTestSupport.read(accountBook, userId, () -> accountBook.riskSnapshot(positionKey))).isNull();
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.preparedPositionKey(userId, "1:NET"))
                     .isInstanceOf(IllegalStateException.class);
-        assertThat(runtime.snapshotProjectionStateDirty()).isFalse();
-        runtime.close();
+        assertThat(accountBook.snapshotProjectionStateDirty()).isFalse();
+        accountBook.close();
     }
 
     /**
@@ -197,9 +197,9 @@ class RuntimeChangedIndexCommitTest {
         // 本用例 U 本位永续的空冷状态
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         // 原始身份表，供内部编号转换和最终身份回收断言
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        IdIndex identities = new IdIndex();
         // 本用例由冷状态投影的交易运行时，真实 Lane 用例会显式启动账户资源
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(initial, identities);
+        AccountBook accountBook = SnapshotLoader.loadSnapshot(initial, identities);
         // 永久标的一对应内部稠密标的编号
         int symbolId = identities.symbolId("1");
         // 本用例账户用户七
@@ -208,38 +208,38 @@ class RuntimeChangedIndexCommitTest {
         RiskScanner.LiquidationOrder planned = new RiskScanner.LiquidationOrder(1, userId, symbolId,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2,
                 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0);
-        runtime.startAccountLanes();
+        accountBook.startAccountLanes();
         // 四项可断言索引及共同事实应用入口组成的测试记录
         IndexSet indexes = indexes(initial, identities);
 
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
-            runtime.putLiquidation(planned);
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
+            accountBook.putLiquidation(planned);
             return null;
         });
-        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
+        if (accountBook.accountLanesStarted()) LedgerControlTestSupport.await(accountBook, accountBook::pollControlLanes);
+        accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
 
-        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1))).isEqualTo(planned);
+        assertThat(AccountLaneQueryTestSupport.read(accountBook, userId, () -> accountBook.liquidation(1))).isEqualTo(planned);
         assertThat(indexes.liquidations.activeIds()).containsExactly(1L);
 
-        runtime.clearChangedKeys();
-        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
-            runtime.replaceLiquidation(new RiskScanner.LiquidationOrder(1, userId, symbolId,
+        accountBook.clearChangedKeys();
+        accountBook.dispatchControlLanes(accountBook.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
+            accountBook.replaceLiquidation(new RiskScanner.LiquidationOrder(1, userId, symbolId,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2,
                     0, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
             return null;
         });
-        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        runtime.bindFactIndexes(indexes.coordinator, identities);
-        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
-        runtime.applyChangedIndexes();
+        if (accountBook.accountLanesStarted()) LedgerControlTestSupport.await(accountBook, accountBook::pollControlLanes);
+        accountBook.bindFactIndexes(indexes.coordinator, identities);
+        accountBook.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.BizIndex.PositionUndo());
+        accountBook.applyChangedIndexes();
 
-        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1)).status())
+        assertThat(AccountLaneQueryTestSupport.read(accountBook, userId, () -> accountBook.liquidation(1)).status())
                 .isEqualTo(CoreLiquidationState.Status.CANCELED);
         assertThat(indexes.liquidations.activeIds()).isEmpty();
-        runtime.close();
+        accountBook.close();
     }
 
     /**
@@ -247,7 +247,7 @@ class RuntimeChangedIndexCommitTest {
      * @param state 用于冷建各索引的本产品线已提交状态
      * @param identities 本用例原资产及标的身份表
      */
-    private static IndexSet indexes(TradingCoreState state, RuntimeIdentityRegistry identities) {
+    private static IndexSet indexes(TradingCoreState state, IdIndex identities) {
         // 由初始冷状态构造的持仓用户索引
         PositionUserIndex positionUsers = new PositionUserIndex(state);
         // 由初始冷状态构造的未平仓量索引
@@ -265,7 +265,7 @@ class RuntimeChangedIndexCommitTest {
         // 由初始冷状态构造的 ADL 持仓索引
         AdlPositionIndex adlPositions = new AdlPositionIndex(state, identities);
         return new IndexSet(positionUsers, openInterest, activeOrders, liquidations,
-                new RuntimeFactIndexes(positionUsers, openInterest, triggers, algos, liquidations,
+                new BizIndex(positionUsers, openInterest, triggers, algos, liquidations,
                         timers, activeOrders, adlPositions));
     }
 
@@ -279,5 +279,5 @@ class RuntimeChangedIndexCommitTest {
      */
     private record IndexSet(PositionUserIndex positionUsers, OpenInterestIndex openInterest,
                             ActiveOrderIndex activeOrders, LiquidationIndex liquidations,
-                            RuntimeFactIndexes coordinator) { }
+                            BizIndex coordinator) { }
 }

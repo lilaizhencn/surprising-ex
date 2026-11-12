@@ -66,8 +66,8 @@ public final class CoreStateTestFixtures {
             instrument(ProductLine.LINEAR_PERPETUAL, "1", "BTC", "USDT", "USDT"));
 
     /** 测试在所属 Core 包内取得真实业务索引，不为观察提供生产 API。 */
-    public static com.surprising.aeron.service.core.index.RuntimeFactIndexes factIndexes(TradingCoreRuntime core) {
-        return core.runtimeState().factIndexes();
+    public static com.surprising.aeron.service.core.index.BizIndex bizIndex(TradingCore core) {
+        return core.accountBook().bizIndex();
     }
 
     private CoreStateTestFixtures() {
@@ -177,7 +177,7 @@ public final class CoreStateTestFixtures {
      * @param assetId 预留及冻结使用的内部资产索引
      * @param reservedUnits 实际传给运行时的冻结数量；预留正文单独以至少一单位构造
      */
-    public static void reserveOrder(TradingAccountRuntime runtime, long orderId, long userId, long clientKey,
+    public static void reserveOrder(AccountBook accountBook, long orderId, long userId, long clientKey,
                              int symbolId, long quantitySteps, int assetId, long reservedUnits) {
         // 本次待直接登记的测试订单
         Order order = order(orderId, userId, symbolId, quantitySteps);
@@ -185,65 +185,65 @@ public final class CoreStateTestFixtures {
         OrderFundsReservation reservation = new OrderFundsReservation(orderId, userId, symbolId,
                 ReservationKind.DERIVATIVE_MARGIN, assetId,
                 Math.max(1, reservedUnits), 0, 0, quantitySteps);
-        runtime.reserveOrder(order, reservation, clientKey, reservedUnits);
+        accountBook.reserveOrder(order, reservation, clientKey, reservedUnits);
     }
     /** 为回滚/完成用例准备待预留事实，继续使用真实 Lane 标记与 Owner 路由登记。 */
-    public static void markPendingReservation(TradingAccountRuntime runtime, long userId, long orderId, long sequence) {
-        runtime.assertOwner();
-        runtime.accountRollback().captureReservationBefore(orderId);
-        var tracker = runtime.pendingReservations();
+    public static void markPendingReservation(AccountBook accountBook, long userId, long orderId, long sequence) {
+        accountBook.assertOwner();
+        accountBook.accountRollback().captureReservationBefore(orderId);
+        var tracker = accountBook.pendingReservations();
         if (tracker.hasPendingUser(orderId)) throw new IllegalStateException("reservation is already indexed as pending");
         int total = Math.incrementExact(tracker.totalPendingReservations());
-        runtime.onLane(userId, lane -> {
+        accountBook.onLane(userId, lane -> {
             var reservation = lane.reservation(orderId);
             if (reservation == null || reservation.userId() != userId) throw new IllegalStateException("pending reservation is missing");
-            runtime.accountRollback().captureBalanceBefore(userId, reservation.assetId());
+            accountBook.accountRollback().captureBalanceBefore(userId, reservation.assetId());
             lane.markPendingReservation(orderId, sequence);
-            runtime.accountRollback().captureBalanceAfter(lane, userId, reservation.assetId());
+            accountBook.accountRollback().captureBalanceAfter(lane, userId, reservation.assetId());
             return null;
         });
         tracker.indexPendingReservation(userId, orderId, sequence, total);
     }
 
     /** 测试制造订单删除事实；业务撤单仍走原终态结算。 */
-    public static void deleteOrder(TradingAccountRuntime runtime, long orderId) {
-        var previous = runtime.order(orderId);
-        runtime.accountRollback().captureOrderBefore(orderId);
-        runtime.accountRollback().captureUserBefore(previous.userId());
-        runtime.onLane(previous.userId(), lane -> { lane.removeOrder(orderId); return null; });
-        runtime.publishOrder(orderId, null);
-        runtime.changedOrder(orderId, null);
-        runtime.markUserChanged(previous.userId());
+    public static void deleteOrder(AccountBook accountBook, long orderId) {
+        var previous = accountBook.order(orderId);
+        accountBook.accountRollback().captureOrderBefore(orderId);
+        accountBook.accountRollback().captureUserBefore(previous.userId());
+        accountBook.onLane(previous.userId(), lane -> { lane.removeOrder(orderId); return null; });
+        accountBook.publishOrder(orderId, null);
+        accountBook.changedOrder(orderId, null);
+        accountBook.markUserChanged(previous.userId());
     }
 
     /** 测试制造持仓删除事实，继续使用实际索引撤销和回滚前值。 */
-    public static void deletePosition(TradingAccountRuntime runtime, long key, long userId) {
-        runtime.onLane(userId, lane -> {
-            runtime.accountRollback().captureUserBefore(userId);
-            runtime.accountRollback().capturePositionBefore(key, userId);
+    public static void deletePosition(AccountBook accountBook, long key, long userId) {
+        accountBook.onLane(userId, lane -> {
+            accountBook.accountRollback().captureUserBefore(userId);
+            accountBook.accountRollback().capturePositionBefore(key, userId);
             var previous = com.surprising.aeron.service.account.AccountLaneTestAccess.positions(lane).remove(key);
-            TradingAccountRuntime.unindexPosition(lane, key, previous);
+            AccountBook.unindexPosition(lane, key, previous);
             return null;
         });
-        runtime.publishPosition(key, null);
-        runtime.changedPosition(key, null);
-        runtime.markUserChanged(userId);
+        accountBook.publishPosition(key, null);
+        accountBook.changedPosition(key, null);
+        accountBook.markUserChanged(userId);
     }
 
     /** 为索引与退休测试准备风险删除事实，由原 Lane 完成边界生成身份退休证明。 */
-    public static void deleteRiskSnapshot(TradingAccountRuntime runtime, long key) {
-        long userId = runtime.riskSnapshot(key).userId();
-        runtime.onLane(userId, lane -> {
+    public static void deleteRiskSnapshot(AccountBook accountBook, long key) {
+        long userId = accountBook.riskSnapshot(key).userId();
+        accountBook.onLane(userId, lane -> {
             com.surprising.aeron.service.account.AccountLaneTestAccess.removeRiskSnapshot(lane, key);
-            runtime.publishRiskSnapshot(key, null);
+            accountBook.publishRiskSnapshot(key, null);
             return null;
         });
     }
 
     /** 为成员索引测试准备已完成预留的删除，并沿用真实回滚前值。 */
-    public static void deleteReservation(TradingAccountRuntime runtime, long orderId, long userId) {
-        runtime.onLane(userId, lane -> {
-            runtime.accountRollback().captureReservationBefore(orderId, userId);
+    public static void deleteReservation(AccountBook accountBook, long orderId, long userId) {
+        accountBook.onLane(userId, lane -> {
+            accountBook.accountRollback().captureReservationBefore(orderId, userId);
             lane.removeReservationValue(orderId);
             lane.removeReservationId(userId, orderId);
             return null;
@@ -251,37 +251,37 @@ public final class CoreStateTestFixtures {
     }
 
     /** 为触发索引测试准备删除事实；回滚与变化发布仍使用真实 Lane 边界。 */
-    public static void deleteTrigger(TradingAccountRuntime runtime, long id) {
-        long userId = runtime.triggerOrder(id).userId();
-        runtime.onLane(userId, lane -> {
-            runtime.accountRollback().captureTriggerOrderBefore(id, userId);
+    public static void deleteTrigger(AccountBook accountBook, long id) {
+        long userId = accountBook.triggerOrder(id).userId();
+        accountBook.onLane(userId, lane -> {
+            accountBook.accountRollback().captureTriggerOrderBefore(id, userId);
             lane.removeTrigger(id);
-            runtime.publishTriggerOrder(id, null);
+            accountBook.publishTriggerOrder(id, null);
             return null;
         });
     }
 
     /** 冷公式测试进入真实结算作用域调用 Lane 释放规则，不另写资金释放算法。 */
-    public static long releaseRemainingReservation(TradingAccountRuntime runtime, long orderId) {
-        var order = runtime.order(orderId);
+    public static long releaseRemainingReservation(AccountBook accountBook, long orderId) {
+        var order = accountBook.order(orderId);
         if (order == null || !order.canceled()) return 0;
-        var lane = runtime.accountLaneForUser(order.userId());
-        var changes = runtime.acquireMatcherSettlementChanges(1L << lane.laneId());
+        var lane = accountBook.accountLaneForUser(order.userId());
+        var changes = accountBook.acquireMatcherSettlementChanges(1L << lane.laneId());
         try {
             long released;
-            runtime.enterMatcherSettlementScope(lane, changes);
+            accountBook.enterMatcherSettlementScope(lane, changes);
             try {
-                released = runtime.releaseTerminalReservationInLane(lane, order, null);
+                released = accountBook.releaseTerminalReservationInLane(lane, order, null);
             } finally {
-                runtime.exitMatcherSettlementScope(lane, changes);
+                accountBook.exitMatcherSettlementScope(lane, changes);
             }
             changes.laneDelta(lane.laneId()).preparePublication();
-            changes.laneDelta(lane.laneId()).commitTerminalToOwner(runtime, lane.laneId(), null, null, null);
+            changes.laneDelta(lane.laneId()).commitTerminalToOwner(accountBook, lane.laneId(), null, null, null);
             var balances = changes.balancePatch(lane.laneId());
-            for (int index = 0; index < balances.size(); index++) balances.publishAvailableAt(runtime, index);
+            for (int index = 0; index < balances.size(); index++) balances.publishAvailableAt(accountBook, index);
             return released;
         } finally {
-            runtime.releaseMatcherSettlementChanges(changes);
+            accountBook.releaseMatcherSettlementChanges(changes);
         }
     }
 

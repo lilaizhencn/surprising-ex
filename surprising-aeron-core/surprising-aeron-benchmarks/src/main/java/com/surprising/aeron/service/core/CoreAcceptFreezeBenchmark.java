@@ -36,7 +36,7 @@ public final class CoreAcceptFreezeBenchmark {
     public static void main(String[] args) {
         int orders = positive(args, 0, 100_000);
         int warmup = positive(args, 1, 10_000);
-        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCore state = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             long gatewaySequence = 1;
             long operationsSequence = 1;
             long kafkaSequence = 1;
@@ -69,7 +69,7 @@ public final class CoreAcceptFreezeBenchmark {
         }
     }
 
-    private static CoreResponse apply(TradingCoreRuntime state, CoreMessageType type, CommandSource source,
+    private static CoreResponse apply(TradingCore state, CoreMessageType type, CommandSource source,
                                       long sourceSequence, long correlationId, byte[] payload) {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(),
                 ProductLine.LINEAR_PERPETUAL, source, source == CommandSource.OPERATIONS ? 9

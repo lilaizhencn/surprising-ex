@@ -10,7 +10,7 @@ import com.surprising.aeron.service.funding.FundingSettlementService;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.aeron.service.adl.AdlService;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands;
 import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import com.surprising.aeron.service.liquidation.LiquidationService;
@@ -20,13 +20,13 @@ import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 public final class DirectCommandDispatcher
         implements java.util.function.IntFunction<Object>, java.util.function.BooleanSupplier {
     /** 本产品线唯一交易 Owner，提供命令上下文、权威状态、控制槽与提交入口。 */
-    private final TradingCoreRuntime owner;
+    private final TradingCore owner;
     private final TriggerOrderCommands triggers;
     /** 当前唯一待应用费率政策，经控制邮箱交给 Lane 0，Owner 收集完成或明确失败后清除。 */
     private UpsertFeePolicyCommand pendingFeePolicy;
 
     /** 接入交易 Owner 及既有业务处理入口并逐项要求非空，避免运行中遇到缺失分支。 */
-    public DirectCommandDispatcher(TradingCoreRuntime owner, TriggerOrderCommands triggers) {
+    public DirectCommandDispatcher(TradingCore owner, TriggerOrderCommands triggers) {
         this.owner = java.util.Objects.requireNonNull(owner);
         this.triggers = java.util.Objects.requireNonNull(triggers);
     }
@@ -68,13 +68,13 @@ public final class DirectCommandDispatcher
     }
 
     private void executeRegisterInstrument(CoreMessage message) {
-        var command = TradingCommandCodec.decodeRegisterInstrument(message.payloadUnsafe(), owner.runtimeState().productLine());
-        InstrumentConfigurationCommands.applyConfiguration(owner.runtimeState(), owner.identities(), command);
+        var command = TradingCommandCodec.decodeRegisterInstrument(message.payloadUnsafe(), owner.accountBook().productLine());
+        InstrumentConfigurationCommands.applyConfiguration(owner.accountBook(), owner.identities(), command);
         owner.requestCommitPublication();
     }
 
     private void executeUpdateInstrumentMaintenance(CoreMessage message) {
-        InstrumentConfigurationCommands.updateMaintenance(owner.runtimeState(), owner.identities(),
+        InstrumentConfigurationCommands.updateMaintenance(owner.accountBook(), owner.identities(),
                 CoreMaintenanceCodec.decodeCommand(message.payloadUnsafe()));
         owner.requestCommitPublication();
     }
@@ -82,7 +82,7 @@ public final class DirectCommandDispatcher
     private void executeAdjustInsuranceFund(CoreMessage message) {
         var command = TradingCommandCodec.decodeAdjustInsuranceFund(message.payloadUnsafe());
         owner.directCommand.deferControl(InsuranceFundCommands.prepare(
-                owner.runtimeState(), owner.identities(), command));
+                owner.accountBook(), owner.identities(), command));
         owner.requestCommitPublication();
     }
 
@@ -90,7 +90,7 @@ public final class DirectCommandDispatcher
         var command = TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe());
         Iterable<Long> indexedUserIds = owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId());
         var work = FundingSettlementService.prepare(owner.directCommand.reusableFundingWork(), command,
-                indexedUserIds, owner.runtimeState(), owner.identities());
+                indexedUserIds, owner.accountBook(), owner.identities());
         owner.directCommand.deferFundingControl(work);
     }
 
@@ -98,30 +98,30 @@ public final class DirectCommandDispatcher
         var command = TradingCommandCodec.decodeApplyMarkPrice(message.payloadUnsafe(), message.header().productLine());
         int pendingBefore = owner.pendingRiskScanCount();
         long startedAt = System.nanoTime();
-        RiskMarginCalculator.applyMarkPriceRuntime(command, owner.runtimeState(), owner.identities());
+        RiskMarginCalculator.applyMarkPriceRuntime(command, owner.accountBook(), owner.identities());
         owner.initializeTriggerScan(command);
         owner.requestCommitPublication();
-        owner.logRiskScan("mark-price", command.instrumentId(), owner.runtimeState().riskScanControl().scanBatchSize(),
+        owner.logRiskScan("mark-price", command.instrumentId(), owner.accountBook().riskScanControl().scanBatchSize(),
                 pendingBefore, startedAt);
     }
 
     /** 优先选风险未完扫描，否则选仍有触发工作的一项。 */
     private void executeContinueRiskScan(CoreMessage message) {
         var command = TradingCommandCodec.decodeContinueRiskScan(message.payloadUnsafe());
-        var control = owner.runtimeState().riskScanControl();
+        var control = owner.accountBook().riskScanControl();
         if (!control.enabled() || command.maxUsers() > control.scanBatchSize()) {
             throw new CoreStateRejectedException("INVALID_COMMAND",
                     "risk scan continuation exceeds current control");
         }
-        var activeRiskScan = owner.runtimeState().firstRiskIncompleteScan();
+        var activeRiskScan = owner.accountBook().firstRiskIncompleteScan();
         var activeScan = activeRiskScan == null
-                ? owner.runtimeState().firstIncompleteRiskScan() : activeRiskScan;
+                ? owner.accountBook().firstIncompleteRiskScan() : activeRiskScan;
         if (activeScan == null) return;
         String instrumentId = owner.identities().instrumentId(activeScan.symbolId());
         int pendingBefore = owner.pendingRiskScanCount();
         int maxWork = RiskScanner.adaptiveBudget(command.maxUsers(), pendingBefore);
         long startedAt = System.nanoTime();
-        long beforeRevision = owner.runtimeState().revision();
+        long beforeRevision = owner.accountBook().revision();
         int riskBudget = activeScan.triggerComplete() ? maxWork : maxWork / 2;
         RiskScanner risk = null;
         if (!activeScan.riskComplete() && riskBudget > 0) {
@@ -134,9 +134,9 @@ public final class DirectCommandDispatcher
 
     private void executeUpdateRiskScanControl(CoreMessage message, long clusterTimestamp) {
         var command = CoreRiskScanControlCodec.decodeCommand(message.payloadUnsafe());
-        owner.runtimeState().updateRiskScanControl(command, clusterTimestamp);
+        owner.accountBook().updateRiskScanControl(command, clusterTimestamp);
         owner.requestCommitPublication();
-        owner.resultBuilder.commandRiskScanControl = owner.runtimeState().riskScanControl();
+        owner.resultBuilder.commandRiskScanControl = owner.accountBook().riskScanControl();
     }
 
     private void executeAdjustBalance(CoreMessage message) {
@@ -159,7 +159,7 @@ public final class DirectCommandDispatcher
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
         if (userId != command.targetUserId())
             throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer recipient mismatch");
-        if (owner.runtimeState().productLine() != command.targetProductLine())
+        if (owner.accountBook().productLine() != command.targetProductLine())
             throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer target product line mismatch");
         owner.directCommand.deferBalanceAdjustment(userId, command.asset(), command.amountUnits());
     }
@@ -173,14 +173,14 @@ public final class DirectCommandDispatcher
         var command = TradingCommandCodec.decodeExecuteAdl(message.payloadUnsafe());
         owner.resultBuilder.setSingleChangedUser(command.targetUserId());
         var work = AdlService.begin(owner.directCommand.reusableAdlWork(),
-                command, owner.runtimeState(), owner.identities());
+                command, owner.accountBook(), owner.identities());
         owner.directCommand.deferAdlControl(work);
     }
 
     private void executeResolveLiquidation(CoreMessage message) {
         var command = TradingCommandCodec.decodeResolveLiquidation(message.payloadUnsafe());
         var work = LiquidationService.beginResolution(owner.directCommand.reusableLiquidationResolutionWork(), command,
-                owner.runtimeState(), owner.identities(), owner.activeLiquidationIds());
+                owner.accountBook(), owner.identities(), owner.activeLiquidationIds());
         owner.directCommand.deferLiquidationResolutionControl(work);
     }
 
@@ -188,7 +188,7 @@ public final class DirectCommandDispatcher
         var command = TradingCommandCodec.decodeUpsertFeePolicy(message.payloadUnsafe());
         if (pendingFeePolicy != null) throw new IllegalStateException("fee policy command is still pending");
         pendingFeePolicy = command;
-        try { owner.runtimeState().dispatchControlLanes(1L, this); }
+        try { owner.accountBook().dispatchControlLanes(1L, this); }
         catch (RuntimeException | Error failure) { pendingFeePolicy = null; throw failure; }
         owner.directCommand.deferControl(this);
     }
@@ -218,14 +218,14 @@ public final class DirectCommandDispatcher
     public Object apply(int laneId) {
         if (laneId != 0 || pendingFeePolicy == null)
             throw new IllegalStateException("fee policy reached the wrong configuration Lane");
-        owner.runtimeState().upsertFeePolicy(pendingFeePolicy);
+        owner.accountBook().upsertFeePolicy(pendingFeePolicy);
         return null;
     }
 
     @Override
     public boolean getAsBoolean() {
         try {
-            if (!owner.runtimeState().pollControlLanes()) return false;
+            if (!owner.accountBook().pollControlLanes()) return false;
         } catch (RuntimeException | Error failure) { pendingFeePolicy = null; throw failure; }
         pendingFeePolicy = null;
         owner.requestCommitPublication();

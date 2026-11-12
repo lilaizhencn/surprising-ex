@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 
 /**
  * 测试侧把真实异步协议入口推进成便于断言的同步结果。查询仍走实际 Lane 或 Matcher 读取，不直接借 Owner 表；轮询设置局部截止，但嵌套等待各有期限，不把它当成生产线程的等待策略。applyAsynchronously 名称指进入异步作用域，方法本身会阻塞推进。
@@ -23,7 +23,7 @@ public final class CoreTestCompletion {
      * @param id 目标订单、触发单或算法单身份
      */
     public static com.surprising.aeron.protocol.CoreOrderStateView orderState(
-            TradingCoreRuntime owner, long userId, long id) {
+            TradingCore owner, long userId, long id) {
         // 当前协议入口或续步返回的可空响应。
         var response = querySynchronously(owner, query(owner,
                 com.surprising.aeron.protocol.CoreMessageType.ORDER_STATE_QUERY, userId,
@@ -40,7 +40,7 @@ public final class CoreTestCompletion {
      * @param id 目标订单、触发单或算法单身份
      */
     public static com.surprising.aeron.protocol.CoreTriggerOrderStateView triggerState(
-            TradingCoreRuntime owner, long userId, long id) {
+            TradingCore owner, long userId, long id) {
         // 当前协议入口或续步返回的可空响应。
         var response = querySynchronously(owner, query(owner,
                 com.surprising.aeron.protocol.CoreMessageType.TRIGGER_ORDER_QUERY, userId,
@@ -59,7 +59,7 @@ public final class CoreTestCompletion {
      * @param id 目标订单、触发单或算法单身份
      */
     public static com.surprising.aeron.protocol.CoreAlgoOrderView algoState(
-            TradingCoreRuntime owner, long userId, long id) {
+            TradingCore owner, long userId, long id) {
         // 当前协议入口或续步返回的可空响应。
         var response = querySynchronously(owner, query(owner,
                 com.surprising.aeron.protocol.CoreMessageType.ALGO_ORDER_QUERY, userId,
@@ -77,7 +77,7 @@ public final class CoreTestCompletion {
      * @param userId 协议查询对应的用户身份
      * @param payload 已编码查询负载
      */
-    private static com.surprising.aeron.protocol.CoreMessage query(TradingCoreRuntime owner,
+    private static com.surprising.aeron.protocol.CoreMessage query(TradingCore owner,
             com.surprising.aeron.protocol.CoreMessageType type, long userId, byte[] payload) {
         return new com.surprising.aeron.protocol.CoreMessage(
                 com.surprising.aeron.protocol.CoreMessageHeader.query(type, java.util.UUID.randomUUID(),
@@ -99,7 +99,7 @@ public final class CoreTestCompletion {
      * @param owner 当前由测试线程拥有的交易运行时
      * @param userId 协议查询对应的用户身份
      */
-    public static com.surprising.aeron.protocol.CoreUserStateView userState(TradingCoreRuntime owner, long userId) {
+    public static com.surprising.aeron.protocol.CoreUserStateView userState(TradingCore owner, long userId) {
         // 当前用户状态查询的完整协议消息。
         var request = new com.surprising.aeron.protocol.CoreMessage(
                 com.surprising.aeron.protocol.CoreMessageHeader.query(com.surprising.aeron.protocol.CoreMessageType.USER_STATE_QUERY,
@@ -117,7 +117,7 @@ public final class CoreTestCompletion {
      * @param owner 当前由测试线程拥有的交易运行时
      * @param request 需要执行的完整查询消息
      */
-    public static CoreResponse querySynchronously(TradingCoreRuntime owner, com.surprising.aeron.protocol.CoreMessage request) {
+    public static CoreResponse querySynchronously(TradingCore owner, com.surprising.aeron.protocol.CoreMessage request) {
         // 当前协议入口或续步返回的可空响应。
         CoreResponse response = applyAsynchronously(owner, request);
         if (response.resultCode() == com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING) {
@@ -139,7 +139,7 @@ public final class CoreTestCompletion {
      * @param owner 当前由测试线程拥有的交易运行时
      * @param message 要进入异步作用域执行的完整命令或查询
      */
-    public static CoreResponse applyAsynchronously(TradingCoreRuntime owner,
+    public static CoreResponse applyAsynchronously(TradingCore owner,
             com.surprising.aeron.protocol.CoreMessage message) {
         return applyAsynchronously(owner, message, message.header().submittedAtEpochMillis(),
                 message.header().sourceSequence());
@@ -152,7 +152,7 @@ public final class CoreTestCompletion {
      * @param timestamp 测试传入的 Cluster 业务时间
      * @param position 测试传入的 Cluster 日志位置
      */
-    public static CoreResponse applyAsynchronously(TradingCoreRuntime owner,
+    public static CoreResponse applyAsynchronously(TradingCore owner,
             com.surprising.aeron.protocol.CoreMessage message, long timestamp, long position) {
         owner.activate();
         // 当前辅助阶段的 nanoTime 截止点，不覆盖内部所有嵌套等待。
@@ -162,7 +162,7 @@ public final class CoreTestCompletion {
         // 入口是否可独立推进，无需为准备阶段读取 Lane 状态。
         boolean independent = owner.prepareClusterPipelineScope(message, window);
         while (!independent && owner.requiresOwnerLaneAccessForPreparation(message)
-                && !owner.runtimeState().tryAcquireOwnerLaneAccess()) {
+                && !owner.accountBook().tryAcquireOwnerLaneAccess()) {
             if (System.nanoTime() >= deadline) throw new AssertionError("Lane handoff timeout");
             Thread.onSpinWait();
         }
@@ -192,7 +192,7 @@ public final class CoreTestCompletion {
             }
             return completed[0];
         } finally {
-            owner.runtimeState().releaseOwnerLaneAccess();
+            owner.accountBook().releaseOwnerLaneAccess();
         }
     }
 
@@ -203,7 +203,7 @@ public final class CoreTestCompletion {
      * @param clusterTimestamp 完成推进使用的非负 Cluster 业务时间
      * @param clusterPosition 完成推进使用的非负 Cluster 日志位置
      */
-    public static CoreResponse completeMatchingSynchronously(TradingCoreRuntime owner, long requestedSequence,
+    public static CoreResponse completeMatchingSynchronously(TradingCore owner, long requestedSequence,
                                                long clusterTimestamp,
                                                long clusterPosition) {
         owner.assertOwner();
@@ -215,14 +215,14 @@ public final class CoreTestCompletion {
         // 当前辅助阶段的 nanoTime 截止点，不覆盖内部所有嵌套等待。
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
         while (true) {
-            owner.runtimeState().assertAccountLanesHealthy();
+            owner.accountBook().assertAccountLanesHealthy();
             owner.commits.advanceMatchingProgress(Long.MAX_VALUE);
             owner.matchingProgress.drainMatchingCompletions();
             // 当前回调完成或主循环准备推进的 Core 序号。
             long sequence = requestedSequence != 0 && owner.pendingMatching().contains(requestedSequence)
                     ? requestedSequence : owner.pendingMatching().firstSequence();
             if (sequence == 0) break;
-            owner.matchingProgress.progressPlaceBatchAdmissions();
+            owner.matchingProgress.progressPlaceBatchOrderChecks();
             // 当前协议入口或续步返回的可空响应。
             CoreResponse response;
             if (owner.matchingFlow.hasPendingMatchingRejection(sequence)) {
@@ -233,7 +233,7 @@ public final class CoreTestCompletion {
                 // 选取的批次、普通或直达撮合事实，缺失时尝试等待。
                 com.surprising.aeron.service.matcher.OrderMatchingResult matching =
                         pending != null && pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
-                                || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
+                                || pending.orderBatch.itemOrderCheck != null && pending.orderBatch.activated())
                                 ? pending.orderBatch.lastMatchingResult
                                 : pending != null && (pending.settlementEvent() != null
                                 || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
@@ -273,8 +273,8 @@ public final class CoreTestCompletion {
      * @param sequence 需要等待事实的完整 Core 序号
      */
     public static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatchingResult(
-            TradingCoreRuntime state, long sequence) {
-        return awaitMatchingResult(state, sequence, TradingCoreRuntime.Limits.MATCHING_AWAIT_TIMEOUT_NANOS);
+            TradingCore state, long sequence) {
+        return awaitMatchingResult(state, sequence, TradingCore.Limits.MATCHING_AWAIT_TIMEOUT_NANOS);
     }
 
     /**
@@ -284,17 +284,17 @@ public final class CoreTestCompletion {
      * @param timeoutNanos 本次等待撮合事实的纳秒期限，非正直接返回空
      */
     public static com.surprising.aeron.service.matcher.OrderMatchingResult awaitMatchingResult(
-            TradingCoreRuntime state, long sequence, long timeoutNanos) {
+            TradingCore state, long sequence, long timeoutNanos) {
         if (state.fatalFailure() != null) return null;
         if (timeoutNanos <= 0) return null;
         // 当前辅助阶段的 nanoTime 截止点，不覆盖内部所有嵌套等待。
         long deadline = System.nanoTime() + timeoutNanos;
         // 当前等待的命令槽，可能已经拥有批次或结算事件。
         OrderCommand pending = state.pendingMatching().get(sequence);
-        while (pending != null && placeAdmissionOutstanding(pending)
+        while (pending != null && placeOrderCheckOutstanding(pending)
                 && !state.matchingFlow.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
-            state.matchingProgress.progressPlaceBatchAdmissions();
-            if (placeAdmissionOutstanding(pending)) Thread.onSpinWait();
+            state.matchingProgress.progressPlaceBatchOrderChecks();
+            if (placeOrderCheckOutstanding(pending)) Thread.onSpinWait();
         }
         if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         // 连续空探查次数，达到阈值后从自旋转为短暂 park。
@@ -325,7 +325,7 @@ public final class CoreTestCompletion {
     }
     /** 读取现有槽内事实，供测试/基准等待使用；不执行结算或提交。 */
     public static com.surprising.aeron.service.matcher.OrderMatchingResult takeMatchingResult(
-            TradingCoreRuntime owner, long sequence) {
+            TradingCore owner, long sequence) {
         if (owner.fatalFailure() != null) return null;
         OrderCommand pending = owner.pendingMatching().get(sequence);
         if (pending == null) return null;
@@ -339,8 +339,8 @@ public final class CoreTestCompletion {
         return pending.takeMatchingCompletion();
     }
 
-    private static boolean placeAdmissionOutstanding(OrderCommand pending) {
+    private static boolean placeOrderCheckOutstanding(OrderCommand pending) {
         var batch = pending.orderBatch;
-        return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
+        return batch != null && batch.placeBatchOrderCheckEvent != null && !pending.isMatchingSubmitted();
     }
 }

@@ -28,7 +28,7 @@ class C2cSubmissionsPostgresTest {
         assertThatThrownBy(()->rows.admit(11,key,"AD_PUBLISH","b".repeat(64))).isInstanceOf(IllegalStateException.class);
     }
 
-    @Test void stopBeforeAdmissionFencesALateOriginalPost() {
+    @Test void stopBeforeOrderCheckFencesALateOriginalPost() {
         assertThat(db.transaction(()->rows.stop(11,key,"AD_PUBLISH",hash)).status()).isEqualTo("REJECTED");
         assertThat(rows.admit(11,key,"AD_PUBLISH",hash).status()).isEqualTo("REJECTED");
         assertThatThrownBy(()->db.transaction(()->rows.begin(11,key,"AD_PUBLISH",hash))).isInstanceOf(IllegalStateException.class);

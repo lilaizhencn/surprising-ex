@@ -25,7 +25,7 @@ class AsyncFundingCommandTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL"})
     void fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff(ProductLine line) throws Exception {
-        try (/* 本次场景创建并在结束时关闭的交易运行时。 */ var state = new TradingCoreRuntime(line)) {
+        try (/* 本次场景创建并在结束时关闭的交易运行时。 */ var state = new TradingCore(line)) {
             // 当前产品线对应的合约类型，决定资产和名义金额换算参数。
             var type = ContractType.valueOf(line.contractTypeCode());
             // 币本位使用 BTC，U 本位使用 USDT。
@@ -69,11 +69,11 @@ class AsyncFundingCommandTest {
                 fundingWithPendingBoundaryChecks(state, command);
                 assertThat(economicUnits(state, asset)).isEqualTo(funds);
                 // 重发相同命令前的修订号，用于检查重复提交没有再写状态。
-                long revision = state.runtimeState.revision();
+                long revision = state.accountBook.revision();
                 assertThat(CoreTestCompletion.applyAsynchronously(state, command).status()).isEqualTo(ResponseStatus.DUPLICATE);
-                assertThat(state.runtimeState.revision()).isEqualTo(revision);
+                assertThat(state.accountBook.revision()).isEqualTo(revision);
                 // 账本已发布的未完成资金费进度，空表示整轮已经结束。
-                var progress = state.runtimeState.treasury().fundingProgress(symbolId);
+                var progress = state.accountBook.systemFunds().fundingProgress(symbolId);
                 if (progress == null) break;
                 assertThat(progress.nextCursorUserId()).isGreaterThan(cursor);
                 assertThat(progress.settlementId()).isEqualTo(900);
@@ -85,7 +85,7 @@ class AsyncFundingCommandTest {
                                     new ApplyMarkPriceCommand("1", 200, 2, TIME), line)));
                 } else if (pages == 1) {
                     // 模拟恢复后行情尚未补齐；进度已保存完整的资金费计算输入。
-                    state.runtimeState.markPrices.removeKey(symbolId);
+                    state.accountBook.markPrices.removeKey(symbolId);
                     for (var invalid : java.util.List.of(
                             new ApplyFundingCommand(901, "1", 10_000, cursor, 1),
                             new ApplyFundingCommand(900, "1", 20_000, cursor, 1),
@@ -95,24 +95,24 @@ class AsyncFundingCommandTest {
                         assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                         assertThat(rejected.resultCode().name()).isEqualTo("INVALID_COMMAND");
                     }
-                    var original = state.runtimeState.instrument("1");
-                    state.runtimeState.instruments.put(original.instrumentIdValue(), original.captureForQuery());
+                    var original = state.accountBook.instrument("1");
+                    state.accountBook.instruments.put(original.instrumentIdValue(), original.captureForQuery());
                     try {
                         var validPage = new ApplyFundingCommand(900, "1", 10_000, cursor, 1);
                         assertThatThrownBy(() -> com.surprising.aeron.service.funding.FundingSettlementService
-                                .prepare(null, validPage, java.util.List.of(), state.runtimeState, state.identities))
+                                .prepare(null, validPage, java.util.List.of(), state.accountBook, state.identities))
                                 .isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
                                 .hasMessage("funding cursor does not match progress");
                     } finally {
-                        state.runtimeState.instruments.put(original.instrumentIdValue(), original);
+                        state.accountBook.instruments.put(original.instrumentIdValue(), original);
                     }
                     // 拒绝命令会记录幂等结果，但不能改变业务状态。
-                    assertThat(state.runtimeState.treasury().fundingProgress(symbolId)).isEqualTo(progress);
+                    assertThat(state.accountBook.systemFunds().fundingProgress(symbolId)).isEqualTo(progress);
                 }
             }
             assertThat(pages).isEqualTo(7);
-            assertThat(state.runtimeState.treasury().fundingSettlement(symbolId)).isEqualTo(900);
-            assertThat(state.runtimeState.treasury().fundingProgress(symbolId)).isNull();
+            assertThat(state.accountBook.systemFunds().fundingSettlement(symbolId)).isEqualTo(900);
+            assertThat(state.accountBook.systemFunds().fundingProgress(symbolId)).isNull();
             long payment = type.isInverse() ? 1 : 10;
             for (long user = 1; user <= 8; user++) {
                 assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(user), asset))
@@ -124,7 +124,7 @@ class AsyncFundingCommandTest {
             var next = message(line, CoreMessageType.APPLY_FUNDING, 0,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(901, "1", -10_000)));
             fundingWithPendingBoundaryChecks(state, next);
-            assertThat(state.runtimeState.treasury().fundingSettlement(symbolId)).isEqualTo(901);
+            assertThat(state.accountBook.systemFunds().fundingSettlement(symbolId)).isEqualTo(901);
             assertThat(economicUnits(state, asset)).isEqualTo(funds);
         }
     }
@@ -136,7 +136,7 @@ class AsyncFundingCommandTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL"})
     void fundingPagesMatchSynchronousLedgerAndContinueAfterSnapshot(ProductLine line) throws Exception {
-        try (/* 本次场景创建并在结束时关闭的交易运行时。 */ var state = new TradingCoreRuntime(line)) {
+        try (/* 本次场景创建并在结束时关闭的交易运行时。 */ var state = new TradingCore(line)) {
             // 当前产品线对应的合约类型，决定资产和名义金额换算参数。
             var type = ContractType.valueOf(line.contractTypeCode());
             // 币本位使用 BTC，U 本位使用 USDT。
@@ -161,7 +161,7 @@ class AsyncFundingCommandTest {
             }
             // 资金费执行前按本测试口径计算的经济总量，作为前后参照。
             long funds = economicUnits(state, asset);
-            try (/* 从初始内存快照新建并在作用域结束时关闭的对照运行时。 */ var restored = TradingCoreRuntime.fromSnapshot(line, state.snapshot(100))) {
+            try (/* 从初始内存快照新建并在作用域结束时关闭的对照运行时。 */ var restored = TradingCore.fromSnapshot(line, state.snapshot(100))) {
                 // 当前一轮资金费的全局用户游标。
                 long cursor = 0;
                 for (/* 当前用户页的零起点下标。 */ int page = 0; page < 8; page++) {
@@ -182,12 +182,12 @@ class AsyncFundingCommandTest {
                     assertThat(CoreTestCompletion.applyAsynchronously(state, command).status()).isEqualTo(ResponseStatus.DUPLICATE);
                     assertThat(state.stateHash()).isEqualTo(hash);
                     // 账本已发布的未完成资金费进度，空表示整轮已经结束。
-                    var progress = state.runtimeState.treasury().fundingProgress(state.identities.symbolId("1"));
+                    var progress = state.accountBook.systemFunds().fundingProgress(state.identities.symbolId("1"));
                     if (progress == null) break;
                     cursor = progress.nextCursorUserId();
                     if (page == 0) {
-                        state.runtimeState.markPrices.clear();
-                        restored.runtimeState.markPrices.clear();
+                        state.accountBook.markPrices.clear();
+                        restored.accountBook.markPrices.clear();
                         var cold = state.tradingState();
                         var risk = cold.riskState();
                         var noMark = new com.surprising.aeron.service.snapshot.state.TradingCoreState(line, cold.revision(),
@@ -196,16 +196,16 @@ class AsyncFundingCommandTest {
                                         risk.nextLiquidationId(), risk.scanControl(), risk.marketRevision()),
                                 cold.treasuryState(), cold.leverages(), cold.algoOrders(), cold.cancelAllAfterTimers(),
                                 cold.clientOrderIndex(), cold.triggerOrders());
-                        try (var source = new TradingCoreRuntime(line, 0, new java.util.LinkedHashMap<>(),
+                        try (var source = new TradingCore(line, 0, new java.util.LinkedHashMap<>(),
                                 new java.util.LinkedHashMap<>(), noMark,
-                                new com.surprising.aeron.service.retention.TerminalStateRetention(), null, 0,
+                                new com.surprising.aeron.service.retention.CompletedOrderArchive(), null, 0,
                                 java.util.Map.of(), java.util.Map.of());
-                                var withoutMark = TradingCoreRuntime.fromSnapshot(line, source.snapshot(101))) {
-                            assertThat(withoutMark.runtimeState.markPrice(withoutMark.identities.symbolId("1"))).isNull();
+                                var withoutMark = TradingCore.fromSnapshot(line, source.snapshot(101))) {
+                            assertThat(withoutMark.accountBook.markPrice(withoutMark.identities.symbolId("1"))).isNull();
                             applied(withoutMark, message(line, CoreMessageType.APPLY_FUNDING, 0,
                                     TradingCommandCodec.encodeApplyFunding(
                                             new ApplyFundingCommand(900, "1", 10_000, cursor, 1))));
-                            assertThat(withoutMark.runtimeState.treasury().fundingProgress(
+                            assertThat(withoutMark.accountBook.systemFunds().fundingProgress(
                                     withoutMark.identities.symbolId("1")).markPriceTicks()).isEqualTo(100);
                             assertThat(economicUnits(withoutMark, asset)).isEqualTo(funds);
                         }
@@ -214,7 +214,7 @@ class AsyncFundingCommandTest {
                 assertThat(state.tradingState().treasuryState().fundingSettlements()).containsEntry("1", 900L);
                 applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 2, TIME), line)));
-                try (/* 整轮结束后从新快照恢复的下一轮对照运行时。 */ var after = TradingCoreRuntime.fromSnapshot(line, state.snapshot(200))) {
+                try (/* 整轮结束后从新快照恢复的下一轮对照运行时。 */ var after = TradingCore.fromSnapshot(line, state.snapshot(200))) {
                     assertThat(after.stateHash()).isEqualTo(state.stateHash());
                     // 下一结算编号采用反向费率的命令。
                     var next = message(line, CoreMessageType.APPLY_FUNDING, 0,
@@ -232,12 +232,12 @@ class AsyncFundingCommandTest {
      * @param state 当前被检查的交易运行时
      * @param message 要等待完成或检查挂起边界的原命令
      */
-    private static CoreResponse fundingWithPendingBoundaryChecks(TradingCoreRuntime state, CoreMessage message) throws Exception {
+    private static CoreResponse fundingWithPendingBoundaryChecks(TradingCore state, CoreMessage message) throws Exception {
         // 本辅助器轮询完成的五秒纳秒截止点。
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-        state.runtimeState.releaseOwnerLaneAccess();
+        state.accountBook.releaseOwnerLaneAccess();
 
-        try (/* 本次异步期间检查 Owner 未直接读取账户的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {
+        try (/* 本次异步期间检查 Owner 未直接读取账户的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.accountBook)) {
             assertThat(state.applyDecodedCommand(message, TIME, message.header().sourceSequence(), null, false)).isNull();
             assertThat(state.directCommand.active()).isTrue();
             assertThatThrownBy(() -> state.apply(message)).hasMessageContaining("still active");
@@ -251,11 +251,11 @@ class AsyncFundingCommandTest {
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.directCommand.active()).isFalse();
             // 反射取得的 ownerLaneAccess 字段，用来核对最终没有重新授权读取。
-            assertThat(state.runtimeState.ownerLaneAccess()).isFalse();
+            assertThat(state.accountBook.ownerLaneAccess()).isFalse();
             return response;
         } finally {
 
-            state.runtimeState.releaseOwnerLaneAccess();
+            state.accountBook.releaseOwnerLaneAccess();
         }
     }
 
@@ -264,20 +264,20 @@ class AsyncFundingCommandTest {
      * @param runtime 需要导出状态并合计测试资金的交易运行时
      * @param asset 当前产品的结算资产
      */
-    private static long economicUnits(TradingCoreRuntime runtime, String asset) {
+    private static long economicUnits(TradingCore tradingCore, String asset) {
         // 为测试资金合计取得的只读交易状态视图。
-        var state = runtime.tradingState();
+        var state = tradingCore.tradingState();
         // 按本测试明确列出的用户和财库子账精确累计的总额。
         long total = 0;
         for (var /* 合计其可用与冻结总额的用户状态。 */ user : state.users().values()) total = Math.addExact(total, CoreStateTestFixtures.totalUnits(user, asset));
         // 当前测试状态的财库视图。
-        var treasury = state.treasuryState();
-        total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.insuranceBalances().getOrDefault(asset, 0L));
-        total = Math.subtractExact(total, treasury.insuranceDeficits().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.liquidationFeeBalances().getOrDefault(asset, 0L));
-        total = Math.addExact(total, treasury.fundingResidualBalances().getOrDefault(asset, 0L));
-        return Math.addExact(total, treasury.roundingResidualBalances().getOrDefault(asset, 0L));
+        var systemFunds = state.treasuryState();
+        total = Math.addExact(total, systemFunds.feeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.insuranceBalances().getOrDefault(asset, 0L));
+        total = Math.subtractExact(total, systemFunds.insuranceDeficits().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.liquidationFeeBalances().getOrDefault(asset, 0L));
+        total = Math.addExact(total, systemFunds.fundingResidualBalances().getOrDefault(asset, 0L));
+        return Math.addExact(total, systemFunds.roundingResidualBalances().getOrDefault(asset, 0L));
     }
 
     /**
@@ -298,7 +298,7 @@ class AsyncFundingCommandTest {
      * @param state 当前被检查的交易运行时
      * @param message 要等待完成或检查挂起边界的原命令
      */
-    private CoreResponse applied(TradingCoreRuntime state, CoreMessage message) {
+    private CoreResponse applied(TradingCore state, CoreMessage message) {
         // 当前等待到的完整命令响应；未完成时为 null。
         var response = CoreTestCompletion.applyAsynchronously(state, message);
         assertThat(response.commandStatus()).as("%s %s", message.header().messageType(), response.resultCode())

@@ -25,7 +25,7 @@ class CoreLaneMetricsBoundaryTest {
     void metricsCannotEnterAccountScopeOrCollectAnUnfinishedRiskDeletion() throws Exception {
         // 最终必须放行的账户任务门闩
         var release = new CountDownLatch(1);
-        try (/* 运行真实 PIPELINED 工作线程的测试 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+        try (/* 运行真实 PIPELINED 工作线程的测试 Core */ var core = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             // 注册测试合约的复制命令
             var register = new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                     new UUID(990, 1), core.productLine, CommandSource.OPERATIONS, 990, 1, 0, TIME, 1),
@@ -39,27 +39,27 @@ class CoreLaneMetricsBoundaryTest {
             // 测试合约的运行时符号编号
             int symbol = core.identities.findSymbolId("1");
             // 已注册的规范合约定义
-            var instrument = core.runtimeState.instrument("1");
+            var instrument = core.accountBook.instrument("1");
             // 本次风险增删共用的规范持仓身份键
             long key = core.identities.positionKey(1, "1");
             // 目标用户所在账户 Lane 的位图
-            long mask = core.runtimeState.topology().accountLaneMask(1);
+            long mask = core.accountBook.topology().accountLaneMask(1);
             // 目标用户所属账户 Lane 索引
             int laneId = Long.numberOfTrailingZeros(mask);
             // Owner 风险变化缓冲的反射字段
-            var changedField = TradingAccountRuntime.class.getDeclaredField("changedRiskSnapshots");
+            var changedField = AccountBook.class.getDeclaredField("changedRiskSnapshots");
             changedField.setAccessible(true);
             // 实际 Owner 风险变化缓冲，测试检查它何时可见
-            var changed = changedField.get(core.runtimeState);
+            var changed = changedField.get(core.accountBook);
             // 变化缓冲基类的空检查方法，供测试反射断言
             var isEmpty = changed.getClass().getSuperclass().getDeclaredMethod("isEmpty");
             isEmpty.setAccessible(true);
             // 账户工作已改风险状态但尚未完成的门闩
             var entered = new CountDownLatch(1);
-            core.runtimeState.dispatchControlLanes(mask, /* 控制任务传入的 Lane 编号，当前夹具使用已固定的运行时 */ actualLane -> {
-                core.runtimeState.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(1, symbol, CorePositionSide.NET,
+            core.accountBook.dispatchControlLanes(mask, /* 控制任务传入的 Lane 编号，当前夹具使用已固定的运行时 */ actualLane -> {
+                core.accountBook.putRiskSnapshot(key, new RiskMarginCalculator.Snapshot(1, symbol, CorePositionSide.NET,
                         1, 100, 0, 1, 1));
-                com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(core.runtimeState, key);
+                com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(core.accountBook, key);
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("control Lane timeout"); }
                 catch (/* 阻塞账户任务等待时的中断，转换为测试失败 */ InterruptedException failure) { throw new AssertionError(failure); }
@@ -67,10 +67,10 @@ class CoreLaneMetricsBoundaryTest {
             });
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             // 控制任务仍持有Lane作用域；排队一项查询以验证深度不再恒为零。
-            assertThat(core.runtimeState.dispatchAccountQuery(mask, /* 排在阻塞任务后面的只读任务参数，任务本身不读取 */ ignored -> {})).isTrue();
+            assertThat(core.accountBook.dispatchAccountQuery(mask, /* 排在阻塞任务后面的只读任务参数，任务本身不读取 */ ignored -> {})).isTrue();
             // 指标查询前保存的账户所有权交接代次
-            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
-            try (/* 禁止 Owner 跨线程读取账户状态的保护器 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook);
+            try (/* 禁止 Owner 跨线程读取账户状态的保护器 */ var guard = new OwnerAccountReadGuard(core.accountBook)) {
                 assertThat((Boolean) isEmpty.invoke(changed)).isTrue();
                 // 不要求 Owner 账户访问权的运行指标查询
                 var request = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LANE_METRICS_QUERY,
@@ -85,21 +85,21 @@ class CoreLaneMetricsBoundaryTest {
                 assertThat(metrics.accountLaneQueueDepths()[laneId]).isPositive();
                 assertThat(metrics.accountLaneQueueHighWaterMarks()[laneId]).isGreaterThanOrEqualTo(metrics.accountLaneQueueDepths()[laneId]);
                 assertThat(metrics.accountLaneQueueCapacities()[laneId]).isEqualTo(
-                        core.runtimeState.topology().accountLaneQueueCapacity() * (2 + core.runtimeState.topology().matchingEngineCount()));
+                        core.accountBook.topology().accountLaneQueueCapacity() * (2 + core.accountBook.topology().matchingEngineCount()));
                 assertThat((Boolean) isEmpty.invoke(changed)).isTrue();
-                assertThat(core.runtimeState.currentLaneCommandScope()).isNull();
-                assertThat(core.runtimeState.pollControlLanes()).isFalse();
+                assertThat(core.accountBook.currentLaneCommandScope()).isNull();
+                assertThat(core.accountBook.pollControlLanes()).isFalse();
                 assertThat(core.identities.findPositionKeyValue(1, instrument, CorePositionSide.NET)).isEqualTo(key);
-                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.accountBook)).isEqualTo(handoff);
                 release.countDown();
                 // 放行后等待真实控制完成的五秒截止时间
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (!core.runtimeState.pollControlLanes()) {
+                while (!core.accountBook.pollControlLanes()) {
                     if (System.nanoTime() >= deadline) throw new AssertionError("control completion timeout");
                     Thread.onSpinWait();
                 }
                 assertThat((Boolean) isEmpty.invoke(changed)).isFalse();
-                core.runtimeState.clearCommittedChanges(core.identities);
+                core.accountBook.clearCommittedChanges(core.identities);
                 assertThat(core.identities.findPositionKeyValue(1, instrument, CorePositionSide.NET)).isZero();
             }
             core.assertClusterCallbackComplete();

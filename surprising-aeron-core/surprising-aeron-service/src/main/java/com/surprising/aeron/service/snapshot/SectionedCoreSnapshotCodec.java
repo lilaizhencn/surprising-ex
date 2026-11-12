@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.snapshot;
 
 import com.surprising.aeron.protocol.ProtocolException;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import lombok.AccessLevel;
@@ -42,18 +42,18 @@ public final class SectionedCoreSnapshotCodec {
     }
 
     /** 把完整字节送入有界增量恢复器，校验全部组件并创建、激活指定产品线运行时。 */
-    public static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine) {
+    public static TradingCore decode(byte[] snapshot, ProductLine expectedProductLine) {
         return recovery(snapshot).decode(expectedProductLine);
     }
 
-    public static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine,
+    public static TradingCore decode(byte[] snapshot, ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
             com.surprising.aeron.config.LaneTopology deploymentTopology) {
         return recovery(snapshot, configuration.snapshot().maxBytes())
                 .decode(expectedProductLine, configuration, deploymentTopology);
     }
 
-    public static TradingCoreRuntime decodePassive(byte[] snapshot, ProductLine expectedProductLine,
+    public static TradingCore decodePassive(byte[] snapshot, ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
             com.surprising.aeron.config.LaneTopology deploymentTopology) {
         return recovery(snapshot, configuration.snapshot().maxBytes())

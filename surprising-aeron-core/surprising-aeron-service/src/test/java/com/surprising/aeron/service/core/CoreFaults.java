@@ -15,14 +15,14 @@ public final class CoreFaults {
     /** 按 Core 对象身份保存的一次性结算后断言，实际运行后翻转提交位图。 */
     private static final Map<Object, Runnable> settlements = new IdentityHashMap<>();
     /** 可空激活观察者，每次观察都会通知，直到调用方替换或清空。 */
-    private static Consumer<TradingCoreRuntime> activation;
+    private static Consumer<TradingCore> activation;
 
     /**
      * 要求测试插桩已安装，再按 Core 对象身份登记下一次账户上下文建立后要覆盖的参与位图。
      * @param state 要登记故障或读取激活标记的目标 Core 运行时
      * @param mask 下一次边界要覆盖的参与账户位图，可故意设置为错误值
      */
-    public static void laneMask(TradingCoreRuntime state, long mask) {
+    public static void laneMask(TradingCore state, long mask) {
         requireAgent();
         laneMasks.put(state, mask);
     }
@@ -32,7 +32,7 @@ public final class CoreFaults {
      * @param state 要登记故障或读取激活标记的目标 Core 运行时
      * @param assertion 真实结算完成后先执行的断言，非空时随后破坏最终位图
      */
-    public static void afterSettlement(TradingCoreRuntime state, Runnable assertion) {
+    public static void afterSettlement(TradingCore state, Runnable assertion) {
         requireAgent();
         settlements.put(state, assertion);
     }
@@ -41,7 +41,7 @@ public final class CoreFaults {
      * 要求测试插桩已安装，再保存或替换可空激活观察者；传空解除观察，观察函数等真实边界到达后才调用。
      * @param observer 可空激活观察函数，传空解除原观察者
      */
-    public static void beforeActivation(Consumer<TradingCoreRuntime> observer) {
+    public static void beforeActivation(Consumer<TradingCore> observer) {
         requireAgent();
         activation = observer;
     }
@@ -51,7 +51,7 @@ public final class CoreFaults {
      * @param candidate 插桩传来的待观察 Core 对象，存在观察者时转换类型
      */
     public static void observeActivation(Object candidate) {
-        if (activation != null) activation.accept((TradingCoreRuntime) candidate);
+        if (activation != null) activation.accept((TradingCore) candidate);
     }
 
     /**
@@ -91,7 +91,7 @@ public final class CoreFaults {
      * 收集 Core、Matcher 和发布器的激活标记；当前 runtime 字段同样读取 Core activated，并非独立读取账户运行时标记。
      * @param state 要登记故障或读取激活标记的目标 Core 运行时
      */
-    public static ActivationState activationState(TradingCoreRuntime state) {
+    public static ActivationState activationState(TradingCore state) {
         return new ActivationState(state.activated(),
                 state.activated(),
                 state.matchingAdapter().activated(),
