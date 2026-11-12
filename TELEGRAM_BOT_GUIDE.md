@@ -69,7 +69,7 @@ flowchart TD
 | `/trade` / `⚡ 快捷交易` | `menu:trade` | **双模交易**：一键打开 Mini App 交易终端 / Bot 内快捷市价开多做空 | `OrderService.placeCommandAsync` |
 | `/deposit` / `💳 充值` | `menu:deposit` | 支持 TRON (TRC20)、ETHEREUM (ERC20)、BITCOIN 等主网选择，**ZXing 动态生成 PNG 二维码**推送到聊天窗 | `CustodyWalletClient` + `TelegramQrCodeService` |
 | `/withdraw` / `💸 提币` | `menu:withdraw` | 多步状态机引导（网络选择 ➔ 输入目标地址 ➔ 输入金额 ➔ 手续费预估 ➔ 二次确认） | `CustodyWithdrawalService` |
-| `/transfer` / `🔄 划转` | `menu:transfer` | 现货账户 ⇄ U本位合约 ⇄ 币本位合约 之间的免手续费秒级划转 | `ProductTransferCoordinator` |
+| `/transfer` / `🔄 划转` | `menu:transfer` | 现货账户 ⇄ U本位合约 ⇄ 币本位合约 之间的免手续费秒级划转 | `ProductTransferService` |
 | `/kol` / `🤝 邀请返佣` / `推广` | `kol:dashboard` | **KOL / 社区合伙人推广主控台**：收益看板、直推/裂变人数、一键分享、海报生成、层级树与下级分成管理 | `TelegramAffiliateHandler` + `AffiliateService` |
 | `/settings` / `⚙️ 设置` | `menu:settings` | 查看与切换 Bot 操作二次确认防线，设置/修改 6 位交易密码 | `TelegramBotSecurityService` |
 

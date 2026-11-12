@@ -20,7 +20,7 @@ Use HotSpot JDK 27 and read [the performance requirements](../../AGENTS-performa
 
 Warmup, stable measurement, and drain are separate phases. Boundary drain waits up to 30 seconds for actual queues and requests. Topology mismatch fails immediately. Report drain separately; stable throughput counts terminal increments only within the stable window. Primary throughput has no profiler; GC/JFR runs are separate. Closed-loop in-flight limits can hide overload latency and do not establish Core saturation.
 
-`LinearPerpetualBenchmarkSupport` advances real commands and waits for actual asynchronous account/Matcher completion. Copy borrowed batch response bytes before returning arena leases. `InProcessTradingAllocationBenchmark` does not include UDP, Consensus, or Archive. Local Treasury receipts do not imply a separate ledger thread. Do not retain unused production interfaces solely for a benchmark.
+`LinearPerpetualBenchmarkSupport` advances real commands and waits for actual asynchronous account/Matcher completion. Copy borrowed batch response bytes before returning `ResponseSlotPool` leases. `InProcessTradingAllocationBenchmark` does not include UDP, Consensus, or Archive. Local Treasury receipts do not imply a separate ledger thread. Do not retain unused production interfaces solely for a benchmark.
 
 ## Acceptance
 

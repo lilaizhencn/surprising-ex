@@ -31,9 +31,9 @@ Nacos `127.0.0.1:8848` 连接告警是本地环境噪声，不影响结果。
 
 | 测试 | 原因 | 修复 |
 | --- | --- | --- |
-| `DeterministicExchangeCoreAdapterTest`（4 个） | `MatcherEventFixtures` 反射 `TradeSettlement.directNativeResult`，该字段已移入内部 `ExecutionState` | 先取 `state`，再取其中的 `directNativeResult` |
+| `DeterministicExchangeCoreAdapterTest`（4 个） | `MatcherEventFixtures` 读取 `TradeSettlement.ExecutionState.directNativeResult` | 先取 `state`，再取其中的 `directNativeResult` |
 | `MatcherPipelineGroupTest`（1 个） | 同上 | 同上 |
-| `SectionedCoreSnapshotCodecTest`（2 个） | `CoreFaults` 反射 `TradingCoreRuntime.matchingAdapter`，该字段已收进 `CoreComponents` | 改用现有公开入口 `state.matchingAdapter()` |
+| `SectionedCoreSnapshotCodecTest`（2 个） | `CoreFaults` 读取 `TradingCoreRuntime.matchingAdapter()` | 使用公开入口 `state.matchingAdapter()` |
 
 修复后全量测试通过。
 
@@ -78,8 +78,8 @@ Nacos `127.0.0.1:8848` 连接告警是本地环境噪声，不影响结果。
 
 ## 说明
 
-- 之前基于 `2a6673f17` 的评审报告针对的是重构前的类（`AccountLaneState`、`CommandSlot`、`MatcherSettlementEvent` 等），这些类已被远端重构删除或改名，旧行数已失效，因此不随本次提交推送；本地备份在 `backup/aeron-cleanup-20261111`。
-- 远端重构把文件数和字段数降下来了，但 `TradingAccountRuntime` 仍有 5,663 行、`OrderCommand` 仍有 2,951 行，包互赖仍有 45 对；下一阶段仍建议按状态所有权继续拆，而不是按行数拆。
+- `2a6673f17` 的评审行数不作为 `b843fd3d5` 基线；本文件只记录当前源码上的测试与注释清理结果。
+- `TradingAccountRuntime` 仍有 5,663 行、`OrderCommand` 仍有 2,951 行，包互赖仍有 45 对。按状态所有权继续拆，而不是按行数拆。
 
 ## 下一步
 

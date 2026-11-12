@@ -22,13 +22,13 @@ Startup probes reuse the real product container/pool. Only read-only not-yet-con
 flowchart LR
     Request[Order controllers / handlers] --> OS[OrderService]
     OS --> Normalize[Normalize / BBO / product and hedge checks / instrument rules]
-    Normalize --> Command[AeronOrderCommandService]
-    Command --> Gateway[OrderAeronGateway]
+    Normalize --> Encode[StableOrderIdentity + TradingCommandCodec]
+    Encode --> Gateway[OrderAeronGateway]
     Gateway --> Pool[AeronClientPool]
     Pool --> Core[Product Core]
 ```
 
-`OrderPlacementStateService.requireClosePosition` validates product, position mode, margin mode, and direction from consistent state before constructing reduce-only input. Core retains final reservation, margin, fee, and position authority. Batch requests finish local validation before submission. Explicit dry-run is separate from authoritative placement.
+`OrderService.requireClosePosition` validates product, position mode, margin mode, and direction from consistent state before constructing reduce-only input. Core retains final reservation, margin, fee, and position authority. Batch requests finish local validation before submission. Explicit dry-run is separate from authoritative placement.
 
 Normal orders, balances, positions, and trigger queries use Realtime views. Targeted order reads retrieve only the entity plus snapshot/watermark metadata. A missing active order can use the supported reliable terminal projection; an unavailable view does not trigger an arbitrary Core fallback. Command receipt/result queries are distinct from current-state queries.
 
