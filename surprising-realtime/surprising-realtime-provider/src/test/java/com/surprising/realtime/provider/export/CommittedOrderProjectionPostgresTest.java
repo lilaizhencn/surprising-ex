@@ -304,7 +304,7 @@ class CommittedOrderProjectionPostgresTest {
         assertThatThrownBy(() -> repository.persist(ProductLine.SPOT,
                 List.of(frame(ProductLine.SPOT, 91, "OPEN", 1)),
                 List.of(result(1, 7, CoreResultCode.ORDER_NOT_FOUND)), 2))
-                .isInstanceOf(IllegalStateException.class).hasMessage("conflicting committed command result");
+                .isInstanceOf(IllegalStateException.class).hasMessageStartingWith("conflicting committed command result commandId=");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark", Long.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT result_code FROM core_command_result_projection", String.class)).isEqualTo("NONE");

@@ -97,7 +97,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                     throw new IllegalStateException("committed replay matching timed out");
             }
             state.assertClusterCallbackComplete();
-            if (command.header().userId() > 0) {
+            if (command.header().userId() > 0 && !isRepeatOfFinishedCommand(response)) {
                 var retained = response != null && response.resultCode() == CoreResultCode.IDEMPOTENCY_CONFLICT
                         ? null : state.commandResultLog().get(command.header().commandId());
                 if (retained == null && response == null)
@@ -239,6 +239,17 @@ public final class CommittedTradeReplay implements AutoCloseable {
                     (state.productLine() == ProductLine.SPOT ? instrument.quoteAsset() : instrument.settleAsset()), order.cumulativeFeeUnits(), order.clusterPosition(), order.updatedAtEpochMillis()));
         }
         return List.copyOf(result);
+    }
+
+    /**
+     * 同一命令号再次提交且内容一致时，Core 回 DUPLICATE：命令不会再执行，原回执已是它唯一的终态记录。
+     * 资金类命令（调账、划转）重复时回的应用计数是“此刻”的计数，和原回执不同，重复提交不能再生成一份新回执去覆盖或冲突原回执。
+     * 来源序号过期（STALE_SOURCE_SEQUENCE）是对本次新命令号的拒绝，仍要产生自己的回执。
+     */
+    private static boolean isRepeatOfFinishedCommand(CoreResponse response) {
+        return response != null && response.status() == ResponseStatus.DUPLICATE
+                && response.resultCode() != CoreResultCode.STALE_SOURCE_SEQUENCE
+                && response.resultCode() != CoreResultCode.MATCHING_PENDING;
     }
 
     private BalanceFlowTarget balanceFlowTarget(CoreMessage command) {

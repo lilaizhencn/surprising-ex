@@ -13,6 +13,7 @@ public final class CommittedCommandResults {
                 || expected.status() != actual.status() || expected.code() != actual.code()
                 || expected.appliedCommandCount() != actual.appliedCommandCount()
                 || !expected.cancelResults().equals(actual.cancelResults()))
-            throw new IllegalStateException("conflicting committed command result");
+            throw new IllegalStateException("conflicting committed command result commandId=" + expected.commandId()
+                    + " first=" + expected + " second=" + actual);
     }
 }

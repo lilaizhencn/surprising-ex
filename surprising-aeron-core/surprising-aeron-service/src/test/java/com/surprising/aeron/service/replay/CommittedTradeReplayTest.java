@@ -46,6 +46,35 @@ class CommittedTradeReplayTest {
         }
     }
     /**
+     * 同一调账命令号在近期结果缓存被推走后重发：Core 靠资金命令索引识别重复、不重复入账，回的应用计数是此刻的计数；
+     * 回放不能为这次重复提交再产出一份回执，否则会和库里的原回执冲突而卡死导出。
+     */
+    @Test void repeatedFundsCommandAfterCacheEvictionYieldsNoSecondReceiptAndNoSecondCredit() {
+        var line=ProductLine.SPOT;
+        try(var replay=new CommittedTradeReplay(line,null)) {
+            send(replay,line,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
+                    new RegisterInstrumentCommand("604","BTC","USDT","USDT",1,1,1,null,0,0,0,-1,0),line));
+            var fixedId=new UUID(77,1);
+            var payload=TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000));
+            long seq=++sequence;
+            replay.apply(CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,fixedId,line,
+                    CommandSource.OPERATIONS,991,seq,7,TIME+seq,seq),payload)),TIME+seq,seq);
+            var original=replay.commandResult();
+            assertThat(original.status()).isEqualTo(ResponseStatus.APPLIED);
+            long balanceAfterFirst=replay.businessHash();
+            for(int i=0;i<140;i++) send(replay,line,CoreMessageType.ADJUST_BALANCE,8,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1)));
+            long balanceBeforeRepeat=replay.businessHash();
+            seq=++sequence;
+            replay.apply(CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,fixedId,line,
+                    CommandSource.OPERATIONS,991,seq,7,TIME+seq,seq),payload)),TIME+seq,seq);
+            assertThat(replay.commandResult()).as("重复提交不产生新回执").isNull();
+            assertThat(replay.balanceFlow()).as("重复提交不产生新的资金流水").isNull();
+            assertThat(replay.businessHash()).as("重复提交不再入账").isEqualTo(balanceBeforeRepeat);
+            assertThat(balanceAfterFirst).isNotEqualTo(balanceBeforeRepeat);
+        }
+    }
+    /**
      * 期权成交形成两端持仓，再建立并取消止盈条件，捕获取消帧；快照恢复后活动摘要没有待触发，但分页仍能重建已取消记录，查询不改变业务哈希。
      */
     @Test void capturesTerminalTriggersAndReconstructsThemWithoutChangingReplayBusinessState() {
@@ -462,7 +491,7 @@ class CommittedTradeReplayTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 50)));
             restored.apply(CoreMessageCodec.encode(retry), TIME + seq, seq);
             assertThat(restored.balanceFlow()).isNull();
-            assertThat(restored.commandResult().status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(restored.commandResult()).as("重复提交不产生新回执，原回执仍是唯一终态").isNull();
         }
     }
 
