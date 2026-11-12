@@ -217,7 +217,6 @@ public final class OrderCheckService {
         }
         long sequence = deferredPending == null
                 ? Math.incrementExact(owner.appliedCommandCount()) : deferredPending.sequence();
-        List<Long> preMatchingCancellations = List.of();
         com.surprising.aeron.service.order.OrderCommand.PlaceOrderCheckEvent placeOrderCheck = null;
         com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent replacementOrderCheck = null;
         owner.resultBuilder.beginCommand();
@@ -237,9 +236,6 @@ public final class OrderCheckService {
                 case LIQUIDATION_BATCH -> validatePendingLiquidationBatch(decodedCommand);
                 case SETTLEMENT -> validatePendingSettlement(decodedCommand);
             }
-            if (replacementOrderCheck == null)
-                preMatchingCancellations = preMatchingCloseCapacityCancellations(
-                        operation, placeOrderCheck);
         } catch (CoreStateRejectedException exception) {
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
@@ -252,8 +248,8 @@ public final class OrderCheckService {
         }
         OrderCommand pending = deferredPending == null
                 ? owner.pendingMatching().acquire(sequence, operation, message, effectiveFingerprint,
-                        preMatchingCancellations, decodedCommand, null)
-                : deferredPending.withPreMatchingCancellations(preMatchingCancellations)
+                        List.of(), decodedCommand, null)
+                : deferredPending.withPreMatchingCancellations(List.of())
                         .withOrderCheck(null);
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
         if (deferredPending == null) {
@@ -347,14 +343,6 @@ public final class OrderCheckService {
                 amend ? decodedCommand.amendOrder() : null, amend ? null : decodedCommand.replaceOrder(),
                 decision,
                 owner.matchingAdapter().matcherShardId(instrumentId), owner.identities());
-    }
-
-    /** 只有 PLACE 才读取准入的先撤单列表，收据未完成暂给空表。 */
-    List<Long> preMatchingCloseCapacityCancellations(OrderCommand.Operation operation,
-            com.surprising.aeron.service.order.OrderCommand.PlaceOrderCheckEvent placeOrderCheck) {
-        if (operation != OrderCommand.Operation.PLACE) return List.of();
-        if (placeOrderCheck == null) throw new IllegalStateException("place matching requires its Lane admission");
-        return placeOrderCheck.complete() ? placeOrderCheck.closeCapacityCancellations() : List.of();
     }
 
     /** 要求强平计划仍有路由，登记该用户及本页活动订单。 */
@@ -741,16 +729,6 @@ public final class OrderCheckService {
             AccountBook accountBook, AccountPartition lane, long userId, OrderCommand.ResolvedPlaceOrder order,
             long openInterestSteps, Order original,
             long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
-        return requiredReservation(accountBook, lane, userId, order, openInterestSteps,
-                original, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
-    }
-
-    /** 兼容原单编号入参的改单准入，在当前所属 Lane 一次性查找原单后直达核心检查。 */
-    static long requiredReplacementReservationPrepared(
-            AccountBook accountBook, AccountPartition lane, long userId, OrderCommand.ResolvedPlaceOrder order,
-            long openInterestSteps, long excludedOrderId,
-            long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
-        Order original = excludedOrderId == 0 ? null : lane.order(excludedOrderId);
         return requiredReservation(accountBook, lane, userId, order, openInterestSteps,
                 original, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
     }

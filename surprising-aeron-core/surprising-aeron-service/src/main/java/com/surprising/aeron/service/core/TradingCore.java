@@ -1787,14 +1787,14 @@ public final class TradingCore implements AutoCloseable {
         };
     }
 
-    /** 要求下单准入已完成，用初始用户 Lane、原提交栅栏和预撤单身份准备结算事件，并保留 Matcher 发布租约。 */
+    /** 要求下单准入收据已挂上，用初始用户 Lane 和原提交栅栏准备结算事件。单笔先撤稍后由准入事件并入，并保留 Matcher 发布租约。 */
     private com.surprising.aeron.service.settlement.TradeSettlement preparePlace(OrderCommand pending) {
         var orderCheck = java.util.Objects.requireNonNull(pending.placeOrderCheck(), "place admission receipt");
         com.surprising.aeron.service.settlement.TradeSettlement direct = accountBook.prepareDirectMatcherSettlement(
                 pending.sequence(), directInitialLaneMask(orderCheck.userId()), orderCheck,
                 pending.command().header().commandId(), matchingFlow.matcherShard(pending),
                 identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
+                java.util.List.of(), pending.laneResultTarget());
         reserveMatcherPublication(pending, direct);
         return direct;
     }

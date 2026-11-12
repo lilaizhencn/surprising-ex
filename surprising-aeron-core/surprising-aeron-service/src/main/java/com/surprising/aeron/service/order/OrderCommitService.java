@@ -261,13 +261,6 @@ public final class OrderCommitService {
         }
         if (pending.settlementEvent() != null) {
             if (!pending.settlementEvent().complete()) return null;
-            // 拒单没有结算变更，不能开启或恢复发布批次。
-            // Matcher/Lane 可先于 owner 完成，拒单也必须走同一个有序终态边界。
-            if (pending.operation() == OrderCommand.Operation.PLACE && pending.placeOrderCheck() != null) {
-                if (!owner.matchingFlow.collectPlaceOrderCheckIfReady(pending)) return null;
-                if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence()))
-                    return completeRejectedMatching(pending.sequence());
-            }
             if (pending.settlementEvent().direct() && !pending.hasCommitContext()) {
                 validateMatchingEvidence(pending, matchingResult);
                 applyMatcherProgress(matchingResult);

@@ -320,13 +320,12 @@ public final class OrderMatchingFlow {
                 && owner.pendingMatching().required(sequence).hasMatchingRejection();
     }
 
-    /** 控制命令准备有序撤单任务。下单自己的先撤由准入门闩处理，避免再放共同列表执行。 */
+    /** 控制命令准备有序撤单任务。交易命令把槽上已有的先撤路由交给 Matcher。 */
     Supplier<?> prepareMatchingCommand(OrderCommand pending,
             com.surprising.aeron.service.settlement.TradeSettlement direct) {
         if (isControlCommand(pending)) return prepareControlCancellations(pending);
         java.util.Objects.requireNonNull(direct, "trading command requires its direct settlement slot");
-        pending.matcherPreCancellations(pending.operation() == OrderCommand.Operation.PLACE
-                && pending.placeOrderCheck() != null ? List.of() : preMatchingCancellationOrders(pending));
+        pending.matcherPreCancellations(preMatchingCancellationOrders(pending));
         long userId = pending.command().header().userId();
         int shard = matcherShard(pending);
         return switch (pending.operation()) {
