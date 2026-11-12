@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core.index;
 
-import com.surprising.aeron.service.query.CoreQueryService;
+import com.surprising.aeron.service.query.QueryTooLargeException;
 
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
@@ -49,7 +49,7 @@ public final class AdlPositionIndex {
         LongHashSet values = keysByAsset.get(AssetBalance.normalizeAsset(asset));
         if (values == null || values.isEmpty()) return Set.of();
         if (values.size() > maximumPositions)
-            throw new com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException();
+            throw new QueryTooLargeException();
         PositionKey[] captured = new PositionKey[values.size()];
         int[] cursor = {0};
         values.forEach(positionKey -> {

@@ -18,7 +18,7 @@ This is the authoritative trading node for one product line. Startup, commands, 
 | Triggers and algorithms | `service.trigger`, `service.core.index` |
 | Delivery and exercise | `service.settlement.ContractExpirySettlementService` |
 | Commit and retention | `service.order.OrderCommitService`, `service.result`, `service.retention.TerminalStateRetention` |
-| Queries and output | `service.query`, `service.realtime`, `support.egress` |
+| Queries and output | `service.query.CoreQueryService`, `StateQueries`, `RiskQueries`, `OperationalQueries`, `LiquidationQueries`, `service.realtime`, `support.egress` |
 | Snapshots | `service.snapshot`, `service.snapshot.state` |
 
 ## Command lifecycle

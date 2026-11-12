@@ -12,7 +12,6 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.instrument.api.model.ContractType;
@@ -24,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.*;
+import com.surprising.aeron.service.query.OperationalQueries;
 
 /**
  * 风险查询的线程边界与结果一致性测试：用独立检查点查询核对各账户 Lane 的返回值，再验证查询固定的市场事实、分页和响应数量限制。
@@ -239,7 +239,7 @@ class CoreRiskLaneQueryTest {
         var instrument = instrument(line, "1", 50_000);
         // 超过查询实体数量上限一个用户的账户映射，用户会分布在不同 Lane。
         var users = new LinkedHashMap<Long, UserAccountSnapshot>();
-        for (/* 批量构造持仓账户的用户编号，循环到查询上限加一。 */ long user = 1; user <= CoreQueryService.OperationalQueries.MAX_QUERY_ENTITIES + 1; user++)
+        for (/* 批量构造持仓账户的用户编号，循环到查询上限加一。 */ long user = 1; user <= OperationalQueries.MAX_QUERY_ENTITIES + 1; user++)
             users.put(user, user(line, user, Map.of("1", position(line, "1", 1, CoreMarginMode.CROSS, 10))));
         // 包含超限用户数的根状态，用来验证限制按所有 Lane 的合计计算。
         var state = new TradingCoreState(line, 0, users, Map.of(), Map.of("1", instrument),

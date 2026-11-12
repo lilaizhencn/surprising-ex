@@ -442,184 +442,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    /** 查询入口：按协议类型选择 Owner 元数据、账户 Lane、账本或盘口读取，映射各分支明确捕获的业务错误。 */
-    CoreResponse routeQuery(CoreMessage message, long clusterTimestamp) {
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && CoreQueryService.accountQuery(message.header().messageType())) {
-            try { return bookQueries.beginAccountQuery(message); }
-            catch (com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException tooLarge) {
-                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            } catch (IllegalArgumentException invalid) { return rejected(CoreResultCode.INVALID_COMMAND); }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.STATE_HASH_QUERY
-                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.BUSINESS_STATE_HASH_QUERY)) {
-            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, state.appliedCommandCount,
-                    com.surprising.aeron.protocol.CoreStateQueryCodec.encodeStateHash(stateHash()));
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.LANE_METRICS_QUERY) {
-            if (message.payloadLength() != 0) return rejected(CoreResultCode.INVALID_COMMAND);
-            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, state.appliedCommandCount, encodeLaneMetrics());
-        }
-        if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
-            try {
-                var query = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeQuery(message.payloadUnsafe());
-                var instrument = runtimeState.instrument(query.instrumentId());
-                if (instrument == null) return rejected(CoreResultCode.ENTITY_NOT_FOUND);
-                return bookQueries.queryLedger(message.header().messageType(), query, instrument.maintenance());
-            } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.COMMAND_RESULT_QUERY) {
-            try {
-                java.util.UUID commandId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeCommandResultQuery(message.payloadUnsafe());
-                CommandResultLedger.StoredResult result = resultLedger.get(commandId);
-                if (result == null) {
-                    return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED, com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                            CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, state.appliedCommandCount,
-                            EMPTY_RESPONSE_DATA);
-                }
-                responseSlotPool.retain(result.responseDataUnsafe());
-                return CoreResponse.owned(com.surprising.aeron.protocol.ResponseStatus.OK, result.status(), result.resultCode(),
-                        result.appliedCommandCount(),
-                        result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRIGGER_ORDER_QUERY
-                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY)) {
-            try { return bookQueries.beginTriggerQuery(message);
-            } catch (com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException exception) {
-                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.BOOK_STATE_QUERY) {
-            try {
-                return bookQueries.beginBookQuery(message);
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ORDER_BOOK_BOOTSTRAP_QUERY) {
-            try {
-                return bookQueries.beginBookBootstrapQuery(message);
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TREASURY_STATE_QUERY) {
-            try {
-                return bookQueries.queryLedger(CoreMessageType.TREASURY_STATE_QUERY, null, null);
-            } catch (com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException exception) {
-                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.FUNDING_PROGRESS_QUERY) {
-            try {
-                String instrumentId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeFundingProgressQuery(message.payloadUnsafe());
-                var view = com.surprising.aeron.service.query.CoreQueryService.OperationalQueries
-                        .fundingProgress(runtimeState, identities, instrumentId);
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, state.appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreFundingProgressCodec.encode(view));
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.SETTLEMENT_PROGRESS_QUERY) {
-            try {
-                String instrumentId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeSettlementProgressQuery(message.payloadUnsafe());
-                var view = com.surprising.aeron.service.query.CoreQueryService.OperationalQueries
-                        .settlementProgress(runtimeState, identities, instrumentId);
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, state.appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreSettlementProgressCodec.encode(view));
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && CoreQueryService.riskAccountQuery(message.header().messageType())) {
-            try { return bookQueries.beginRiskAccountQuery(message); }
-            catch (com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException failure) {
-                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            } catch (IllegalArgumentException failure) { return rejected(CoreResultCode.INVALID_COMMAND); }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.RISK_SCAN_CONTROL_QUERY) {
-            if (message.payloadLength() != 0) return rejected(CoreResultCode.INVALID_COMMAND);
-            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, state.appliedCommandCount,
-                    com.surprising.aeron.protocol.CoreRiskScanControlCodec.encodeView(runtimeState.riskScanControl()));
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.OPEN_INTEREST_QUERY) {
-            return bookQueries.queryLedger(message.header().messageType(), null, null);
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.CANCEL_ALL_AFTER_QUERY) {
-            try {
-                var query = com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeQuery(message.payloadUnsafe());
-                var keys = factIndexes.timers().query(query.userId(), query.symbolScope(), query.dueAtEpochMillis(),
-                        query.limit(), runtimeState::cancelAllAfterTimer);
-                var values = com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.cancelAllAfter(
-                        runtimeState, keys);
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, state.appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeList(values));
-            } catch (com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException exception) {
-                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.LIQUIDATION_WORK_QUERY) {
-            try {
-                var query = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeQuery(message.payloadUnsafe());
-                if (query.productLine() != productLine) {
-                    return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
-                }
-                return bookQueries.beginLiquidationWorkQuery(message, query);
-            } catch (com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException exception) {
-                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ORDER_PREFLIGHT_QUERY) {
-            try {
-                return bookQueries.beginPreflightQuery(message, clusterTimestamp);
-            } catch (com.surprising.aeron.exception.CoreStateRejectedException exception) {
-                return rejected(CoreResultCode.fromRejectionCode(exception.code()));
-            } catch (ArithmeticException exception) {
-                return rejected(CoreResultCode.ARITHMETIC_OVERFLOW);
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.PENDING_TRANSFER_QUERY) {
-            try {
-                int limit = com.surprising.aeron.protocol.CorePendingTransferCodec.decodeQuery(
-                        message.payloadUnsafe());
-                return bookQueries.beginPendingTransferQuery(message, limit);
-            } catch (IllegalArgumentException exception) {
-                return rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        return null;
-    }
-
     /** 独立调用的便捷入口：用请求提交时间作为业务时间，并计算下一个计数作为位置。 */
     public CoreResponse apply(CoreMessage message) {
         return apply(message, message.header().submittedAtEpochMillis(), Math.addExact(state.appliedCommandCount, 1));
@@ -661,7 +483,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 runtimeState.readFenceAll(state.committedCoreSequence);
             }
         }
-        CoreResponse queryResponse = routeQuery(message, clusterTimestamp);
+        CoreResponse queryResponse = bookQueries.routeQuery(message, clusterTimestamp);
         if (queryResponse != null) return queryResponse;
         if (message.header().kind() != WireMessageKind.COMMAND) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
@@ -1166,7 +988,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /** 在 Owner 上编码 Matcher 队列、在途窗口、提交水位及账户 Lane 观测指标。 */
-    byte[] encodeLaneMetrics() {
+    public byte[] encodeLaneMetrics() {
         assertOwner();
         int count = matchingAdapter.topology().accountLaneCount();
         var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(

@@ -20,7 +20,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -56,9 +55,9 @@ class CoreAccountLaneQueryTest {
             var identities = new RuntimeIdentityRegistry();
             try (/* 由当前已提交交易状态投影的冷运行时，在合法 Lane 参数下构造预期视图和哈希。 */ var expected = RuntimeStateProjector.project(core.tradingState(), identities)) {
                 // 冷运行时中用户 1 的完整查询结果，提供详情编码和状态哈希的参照。
-                var user = CoreQueryService.StateQueries.userState(expected, expected.accountLaneForUser(1), identities, 1, false);
+                var user = StateQueries.userState(expected, expected.accountLaneForUser(1), identities, 1, false);
                 // 冷运行时中用户 7 的订单 200 查询结果，详情、哈希和客户端查询均应与它一致。
-                var order = CoreQueryService.StateQueries.orderState(expected,
+                var order = StateQueries.orderState(expected,
                         expected.accountLaneForUser(7), identities, 200, false);
                 // 查询开始前账户所有权交接计数，查询完成后必须不变。
                 long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
@@ -66,12 +65,12 @@ class CoreAccountLaneQueryTest {
                     assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 1, new byte[0]).data())
                             .isEqualTo(CoreStateQueryCodec.encodeUserState(user.view()));
                     assertThat(CoreStateQueryCodec.decodeStateHash(query(core, CoreMessageType.USER_STATE_HASH_QUERY,
-                            1, new byte[0]).data())).isEqualTo(CoreQueryService.StateQueries.userState(expected, expected.accountLaneForUser(1), identities, 1, true).stateHash());
+                            1, new byte[0]).data())).isEqualTo(StateQueries.userState(expected, expected.accountLaneForUser(1), identities, 1, true).stateHash());
                     assertThat(query(core, CoreMessageType.ORDER_STATE_QUERY, 0,
                             TradingCommandCodec.encodeOrderStateQuery(200)).data())
                             .isEqualTo(CoreStateQueryCodec.encodeOrderState(order.view()));
                     assertThat(CoreStateQueryCodec.decodeStateHash(query(core, CoreMessageType.ORDER_STATE_HASH_QUERY,
-                            0, TradingCommandCodec.encodeOrderStateQuery(200)).data())).isEqualTo(CoreQueryService.StateQueries.orderState(expected, expected.accountLaneForUser(7), identities, 200, true).stateHash());
+                            0, TradingCommandCodec.encodeOrderStateQuery(200)).data())).isEqualTo(StateQueries.orderState(expected, expected.accountLaneForUser(7), identities, 200, true).stateHash());
                     assertThat(query(core, CoreMessageType.CLIENT_ORDER_STATE_QUERY, 7,
                             CoreStateQueryCodec.encodeClientOrderStateQuery("account-q-200")).data())
                             .isEqualTo(CoreStateQueryCodec.encodeOrderState(order.view()));
@@ -176,7 +175,7 @@ class CoreAccountLaneQueryTest {
     void oversizedUserQueryRejectsOnlyItsResult() throws Exception {
         // 用户 1 的超限资产余额集合，每个资产一单位，用来超过完整用户查询实体上限。
         var balances = new LinkedHashMap<String, AssetBalance>();
-        for (/* 构造不同资产名称的下标，循环包含上限位置以确保比允许数量多一项。 */ int index = 0; index <= CoreQueryService.StateQueries.MAX_USER_QUERY_ENTITIES; index++)
+        for (/* 构造不同资产名称的下标，循环包含上限位置以确保比允许数量多一项。 */ int index = 0; index <= StateQueries.MAX_USER_QUERY_ENTITIES; index++)
             balances.put("ASSET" + index, new AssetBalance("ASSET" + index, 1, 0));
         // 拥有超限余额条数的用户 1，完整详情应被拒绝。
         var user = new UserAccountSnapshot(LINE, 1, 0, balances, Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);

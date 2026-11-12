@@ -17,11 +17,11 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
+import com.surprising.aeron.service.query.StateQueries;
 
 /**
  * 验证账户运行时索引能生成与业务快照一致的用户、普通订单和客户端订单视图及哈希，同时检查缺失查询不扩展身份表，完整用户查询不能无限物化实体。
@@ -65,14 +65,14 @@ class RuntimeStateQueryServiceTest {
         runtime.putClientOrder(1001, clientKey, 71);
 
         // 在该用户所属 Lane 内组装的完整用户查询结果。
-        var user = CoreQueryService.StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false);
+        var user = StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false);
         // 按 Core 订单编号 71 直接查询的订单结果。
-        var order = CoreQueryService.StateQueries.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, false);
+        var order = StateQueries.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, false);
         // 按用户及客户端标识查询的结果，应与直接订单编号查询完全相同。
-        var clientOrder = CoreQueryService.StateQueries.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "client-71");
+        var clientOrder = StateQueries.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "client-71");
 
         assertThat(user.found()).isTrue();
-        assertThat(CoreQueryService.StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, true)
+        assertThat(StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, true)
                 .stateHash()).isEqualTo(4_392_142_050_606_229_068L);
         assertThat(user.stateHash()).isZero();
         assertThat(user.view().balances()).hasSize(1);
@@ -80,7 +80,7 @@ class RuntimeStateQueryServiceTest {
         assertThat(user.view().positions()).hasSize(1);
         assertThat(user.view().leverages()).hasSize(1);
         assertThat(order.found()).isTrue();
-        var orderHash = CoreQueryService.StateQueries.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, true);
+        var orderHash = StateQueries.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, true);
         assertThat(orderHash.stateHash()).isEqualTo(2_473_578_025_272_220_416L);
         assertThat(orderHash.view()).isNull();
         assertThat(order.stateHash()).isZero();
@@ -101,7 +101,7 @@ class RuntimeStateQueryServiceTest {
         long before = identities.clientIdentityCount();
 
         // 不存在客户端标识的只读查询结果，found 应为 false。
-        var result = CoreQueryService.StateQueries.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "missing");
+        var result = StateQueries.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "missing");
 
         assertThat(result.found()).isFalse();
         assertThat(identities.clientIdentityCount()).isEqualTo(before);
@@ -119,12 +119,12 @@ class RuntimeStateQueryServiceTest {
         identities.bindClientLanes(runtime);
         runtime.setMetadata(ProductLine.SPOT, 1);
         runtime.putUser(new UserAccount(ProductLine.SPOT, 1001, 1, CorePositionMode.ONE_WAY));
-        for (/* 给同一用户构造不同资产余额的循环下标，遍历到上限加一条。 */ int index = 0; index <= CoreQueryService.StateQueries.MAX_USER_QUERY_ENTITIES; index++) {
+        for (/* 给同一用户构造不同资产余额的循环下标，遍历到上限加一条。 */ int index = 0; index <= StateQueries.MAX_USER_QUERY_ENTITIES; index++) {
             // 当前测试资产的整数编号，基本用例为 USDT，超限用例每次创建不同资产。
             int assetId = identities.assetId("ASSET" + index);
             runtime.putBalance(new AccountBalance(1001, assetId, 1, 0));
         }
 
-        assertThat(CoreQueryService.StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false).tooLarge()).isTrue();
+        assertThat(StateQueries.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false).tooLarge()).isTrue();
     }
 }

@@ -3,7 +3,6 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.settlement.TradeSettlement;
-import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.core.command.DirectCommandDispatcher;
 
 import com.surprising.aeron.service.order.*;
@@ -29,6 +28,7 @@ import java.util.ArrayList;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
+import com.surprising.aeron.service.query.StateQueries;
 
 /**
  * 用反射及有限源码检查约束已有架构：具体运行时依赖、单输入环、Direct 撮合、显式 Lane 查询和业务状态所有权。它检查列出的结构与文本，不代替运行时线程、资金或恢复验证；正则扫描也不是完整语法分析。
@@ -192,8 +192,8 @@ class ProductionSourceBoundaryTest {
         }
         // 当前指定或遍历中的生产 Java 文件全文，检查时也包含注释
         var fullSource = Files.readString(root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
-                + "com/surprising/aeron/service/query/CoreQueryService.java"));
-        var source = fullSource.substring(fullSource.indexOf("public static final class StateQueries"));
+                + "com/surprising/aeron/service/query/StateQueries.java"));
+        var source = fullSource.substring(fullSource.indexOf("public final class StateQueries"));
         assertThat(source).doesNotContain("currentLaneCommandScope", "accountLaneForUser", "onLane(");
         // 在账户查询正文中匹配指定 runtime 读取调用及首参的正则游标
         var reads = Pattern.compile("runtime\\.(?:user|order|reservation|position|balancesForUser|"

@@ -19,7 +19,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.product.api.ProductLine;
@@ -27,6 +26,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.assertThat;
+import com.surprising.aeron.service.query.MarketInputs;
+import com.surprising.aeron.service.query.RiskQueries;
 
 /**
  * 即时风险查询测试：按当前行情重新计算持仓风险，不能回写后台扫描缓存或推进修订号，同时核对全仓逐仓、期权权益和结算整数精度。
@@ -207,8 +208,8 @@ class RuntimeRiskQueryServiceTest {
 
     /** 单用户金额断言直接使用现有账户计算入口，并先固定本次市场输入。 */
     private List<CoreRiskSnapshotView> userRisk() {
-        return CoreQueryService.RiskQueries.userSnapshots(runtime, ids, 7,
-                CoreQueryService.RiskQueries.MarketInputs.capture(runtime, ids, runtime.instrumentIdsForQuery()));
+        return RiskQueries.userSnapshots(runtime, ids, 7,
+                MarketInputs.capture(runtime, ids, runtime.instrumentIdsForQuery()));
     }
 
     /** 汇总断言走真实查询协议，不能为冷测试保留另一份全 Lane 扫描。 */

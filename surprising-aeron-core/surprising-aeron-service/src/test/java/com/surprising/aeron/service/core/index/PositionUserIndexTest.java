@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core.index;
 
-import com.surprising.aeron.service.query.CoreQueryService;
+import com.surprising.aeron.service.query.QueryTooLargeException;
 
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.AssetBalance;
@@ -147,9 +147,9 @@ class PositionUserIndexTest {
         assertThat(index.riskQueryUserIds(7, 1)).containsExactly(7L);
         assertThat(index.riskQueryUserIds(99, 1)).containsExactly(99L);
         assertThatThrownBy(() -> index.riskQueryUserIds(0, 2))
-                .isInstanceOf(com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException.class);
+                .isInstanceOf(QueryTooLargeException.class);
         assertThatThrownBy(() -> index.riskQueryUserIds(1, 1))
-                .isInstanceOf(com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException.class);
+                .isInstanceOf(QueryTooLargeException.class);
     }
 
     /**

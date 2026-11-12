@@ -14,7 +14,7 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
-import com.surprising.aeron.service.query.CoreQueryService;
+import com.surprising.aeron.service.query.StateQueries;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -73,11 +73,11 @@ public class AccountQueryProjectionBenchmark {
     @Benchmark public byte[] projectAndEncode() {
         byte[] result = switch (queryType) {
             case "USER" -> CoreStateQueryCodec.encodeUserState(
-                    CoreQueryService.StateQueries.userState(runtime, lane, identities, 7, false).view());
+                    StateQueries.userState(runtime, lane, identities, 7, false).view());
             case "ORDER" -> CoreStateQueryCodec.encodeOrderState(
-                    CoreQueryService.StateQueries.orderState(runtime, lane, identities, 71, false).view());
+                    StateQueries.orderState(runtime, lane, identities, 71, false).view());
             case "CLIENT" -> CoreStateQueryCodec.encodeOrderState(
-                    CoreQueryService.StateQueries.clientOrderState(runtime, lane, identities, 7, "query-71").view());
+                    StateQueries.clientOrderState(runtime, lane, identities, 7, "query-71").view());
             default -> throw new IllegalArgumentException("unknown query type");
         };
         calls++;

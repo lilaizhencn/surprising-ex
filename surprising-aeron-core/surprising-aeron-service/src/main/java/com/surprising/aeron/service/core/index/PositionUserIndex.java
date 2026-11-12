@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core.index;
 
-import com.surprising.aeron.service.query.CoreQueryService;
+import com.surprising.aeron.service.query.QueryTooLargeException;
 
 import com.surprising.aeron.service.order.*;
 
@@ -57,7 +57,7 @@ public final class PositionUserIndex {
             long count = userId == 0 ? counts.sum() : counts.get(userId);
             total = Math.addExact(total, count);
             if (total > maximumPositions)
-                throw new com.surprising.aeron.service.query.CoreQueryService.OperationalQueries.QueryTooLargeException();
+                throw new QueryTooLargeException();
             if (count == 0) continue;
             if (userId == 0) counts.forEachKey(users::add);
         }

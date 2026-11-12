@@ -30,7 +30,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
-import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -40,6 +39,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
+import com.surprising.aeron.service.query.OperationalQueries;
 
 /**
  * 算法父单查询的账户 Lane 集成测试：检查全局调度顺序、保留子订单的成交汇总、扫描规模上限，以及慢 Lane 不阻塞 Owner 和结果只能消费一次。
@@ -80,8 +80,8 @@ class CoreAlgoLaneQueryTest {
         var identities = new RuntimeIdentityRegistry();
         try (/* 由同一业务状态生成的冷运行时，直接查询它以构造协议字节参照，结束时关闭。 */ var cold = RuntimeStateProjector.project(state, identities); /* 本用例激活的在线核心，查询结果必须通过所属 Lane 返回，结束时释放工作资源。 */ var core = initial(state)) {
             // 冷运行时按 502、501、503 顺序汇总的父单视图，用于核对在线编码结果。
-            var expected = List.of(CoreQueryService.OperationalQueries.algoOrder(cold, 502),
-                    CoreQueryService.OperationalQueries.algoOrder(cold, 501), CoreQueryService.OperationalQueries.algoOrder(cold, 503));
+            var expected = List.of(OperationalQueries.algoOrder(cold, 502),
+                    OperationalQueries.algoOrder(cold, 501), OperationalQueries.algoOrder(cold, 503));
             core.activate();
             var alias = state.algoOrders().get(501L).clientAlgoOrderId();
             assertThat(AccountLaneQueryTestSupport.read(core.runtimeState(), 1,
