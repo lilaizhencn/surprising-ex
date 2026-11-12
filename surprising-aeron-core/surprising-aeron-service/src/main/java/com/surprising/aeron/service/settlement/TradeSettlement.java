@@ -222,12 +222,7 @@ public final class TradeSettlement implements
         state.dispatched = false; state.queuedLaneMask = 0;
         state.expandLaneRoute = Long.bitCount(laneMask) == 1;
         state.directFailure = null;
-        state.admissionRequired = false;
-        state.admissionOrder = null;
-        state.admissionUserId = state.admissionOrderId = 0;
-        state.admissionResolved = false;
-        state.admissionAccepted = false;
-        state.admissionResultCode = CoreResultCode.NONE.wireCode();
+        resetAdmission();
         state.directCoreSequence = coreSequence;
         this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
         state.commitTimestamp = timestamp; state.commitClusterPosition = position;
@@ -352,13 +347,9 @@ public final class TradeSettlement implements
     public void publishDirectNativeResult(exchange.core2.core.common.MatcherResult result,
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        if (!state.dispatched || directPublished || state.batchPlanCount != 1 || result == null
-                || coreSequence != state.directCoreSequence || state.directCommandId == null
-                || commandIdMostSignificantBits != state.directCommandId.getMostSignificantBits()
-                || commandIdLeastSignificantBits != state.directCommandId.getLeastSignificantBits()
-                || matcherShard != state.directShard || matcherSequence <= 0) {
-            throw new IllegalStateException("direct native matcher result proof is inconsistent");
-        }
+        requireProof(state.dispatched && !directPublished && state.batchPlanCount == 1 && result != null,
+                coreSequence, commandIdMostSignificantBits, commandIdLeastSignificantBits, matcherShard,
+                matcherSequence > 0, "direct native matcher result proof is inconsistent");
         try {
             Order admitted = batchStorage.admittedOrders[0];
             if (state.cancellation) {
@@ -381,8 +372,7 @@ public final class TradeSettlement implements
             state.directMatcherSequence = matcherSequence;
             state.directLastMatcherSequence = matcherSequence;
             state.directNativeItemCount = 1;
-            state.directNativeAccepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
-                    || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+            state.directNativeAccepted = nativeAccepted(result);
             state.directNativeStateChanged = state.directAcceptedCancellationCount != 0 && !state.directNativeAccepted;
             if (state.sourceTrigger != null) {
                 batchStorage.plans[0].completeTrigger(state.directNativeAccepted
@@ -402,14 +392,10 @@ public final class TradeSettlement implements
             int index, long coreSequence,
             long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        if (!state.dispatched || directPublished || result == null || state.batchPlanCount <= 0
-                || index != state.directNativeItemCount || index < 0 || index >= state.batchPlanCount
-                || coreSequence != state.directCoreSequence || state.directCommandId == null
-                || commandIdMostSignificantBits != state.directCommandId.getMostSignificantBits()
-                || commandIdLeastSignificantBits != state.directCommandId.getLeastSignificantBits()
-                || matcherShard != state.directShard || matcherSequence <= state.directLastMatcherSequence) {
-            throw new IllegalStateException("direct native matcher batch proof is inconsistent");
-        }
+        requireProof(state.dispatched && !directPublished && result != null && state.batchPlanCount > 0
+                        && index == state.directNativeItemCount && index >= 0 && index < state.batchPlanCount,
+                coreSequence, commandIdMostSignificantBits, commandIdLeastSignificantBits, matcherShard,
+                matcherSequence > state.directLastMatcherSequence, "direct native matcher batch proof is inconsistent");
         try {
             Order admitted = batchStorage.admittedOrders[index];
             if (state.cancellation ? batchStorage.cancellationOrderIds[index] != orderId
@@ -442,15 +428,11 @@ public final class TradeSettlement implements
             exchange.core2.core.common.MatcherResult result,
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        if (!state.dispatched || directPublished || state.replacement == null || state.batchPlanCount != 1
-                || cancelResult == null || result == null || coreSequence != state.directCoreSequence
-                || state.directCommandId == null
-                || commandIdMostSignificantBits != state.directCommandId.getMostSignificantBits()
-                || commandIdLeastSignificantBits != state.directCommandId.getLeastSignificantBits()
-                || matcherShard != state.directShard || matcherSequence <= 0
-                || state.replacement.resolved().orderId() != orderId) {
-            throw new IllegalStateException("direct native replacement proof is inconsistent");
-        }
+        requireProof(state.dispatched && !directPublished && state.replacement != null && state.batchPlanCount == 1
+                        && cancelResult != null && result != null,
+                coreSequence, commandIdMostSignificantBits, commandIdLeastSignificantBits, matcherShard,
+                matcherSequence > 0 && state.replacement != null && state.replacement.resolved().orderId() == orderId,
+                "direct native replacement proof is inconsistent");
         try {
             boolean cancellationAccepted = nativeAccepted(cancelResult);
             boolean placementAccepted = cancellationAccepted && nativeAccepted(result);
@@ -479,13 +461,10 @@ public final class TradeSettlement implements
     public void publishDirectRejection(String resultCode, long coreSequence,
             long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        if (state.batchPlanCount == 0 || !state.dispatched || directPublished || !state.admissionRequired || state.admissionAccepted
-                || resultCode == null || resultCode.isBlank() || coreSequence != state.directCoreSequence
-                || state.directCommandId == null
-                || commandIdMostSignificantBits != state.directCommandId.getMostSignificantBits()
-                || commandIdLeastSignificantBits != state.directCommandId.getLeastSignificantBits()
-                || orderId != state.admissionOrderId || matcherSequence <= 0 || matcherShard != state.directShard)
-            throw new IllegalStateException("direct matcher rejection proof is inconsistent");
+        requireProof(state.batchPlanCount != 0 && state.dispatched && !directPublished && state.admissionRequired
+                        && !state.admissionAccepted && resultCode != null && !resultCode.isBlank(),
+                coreSequence, commandIdMostSignificantBits, commandIdLeastSignificantBits, matcherShard,
+                orderId == state.admissionOrderId && matcherSequence > 0, "direct matcher rejection proof is inconsistent");
         try {
             batchStorage.plans[0].prepareRejectedDirect(
                     state.directCoreSequence, state.admissionUserId, state.admissionOrderId, routedLaneMask);
@@ -495,6 +474,18 @@ public final class TradeSettlement implements
             state.directNativeItemCount = 1;
             finishDirectPublication();
         } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
+    /** 先查发布状态，再核对命令序号、命令编号和分片，最后查各入口自身的订单与序号证据。 */
+    private void requireProof(boolean publishable, long coreSequence,
+                              long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+                              int matcherShard, boolean itemEvidence, String message) {
+        if (!publishable || coreSequence != state.directCoreSequence || state.directCommandId == null
+                || commandIdMostSignificantBits != state.directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != state.directCommandId.getLeastSignificantBits()
+                || matcherShard != state.directShard || !itemEvidence) {
+            throw new IllegalStateException(message);
+        }
     }
 
     private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
@@ -713,12 +704,7 @@ public final class TradeSettlement implements
         state.triggeredAt = 0;
         state.matcherCompletionRoute = null;
         state.matcherCompletionShard = -1;
-        state.admissionRequired = false;
-        state.admissionOrder = null;
-        state.admissionUserId = state.admissionOrderId = 0;
-        state.admissionResolved = false;
-        state.admissionAccepted = false;
-        state.admissionResultCode = CoreResultCode.NONE.wireCode();
+        resetAdmission();
         state.directCoreSequence = 0;
         state.directCommandId = null;
         state.authorizedCancellations = java.util.List.of();
@@ -736,6 +722,32 @@ public final class TradeSettlement implements
         identities = null;
         treasuryTrades = false;
         state.collected = false;
+    }
+
+    static Order requireOpen(AccountPartition lane, long orderId) {
+        return requireOpen(lane.order(orderId), orderId);
+    }
+
+    static Order requireOpen(Order order, long orderId) {
+        if (order == null || order.canceled() || order.remainingQuantitySteps() == 0)
+            throw new IllegalStateException("runtime matched order is not open: " + orderId);
+        return order;
+    }
+
+    /** 已终态的订单释放剩余预留，确有释放才推进用户修订。 */
+    static void releaseCanceledReservation(TradingAccountRuntime runtime, AccountPartition lane, Order order) {
+        if (order == null || !order.canceled()) return;
+        long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
+        if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
+    }
+
+    private void resetAdmission() {
+        state.admissionRequired = false;
+        state.admissionOrder = null;
+        state.admissionUserId = state.admissionOrderId = 0;
+        state.admissionResolved = false;
+        state.admissionAccepted = false;
+        state.admissionResultCode = CoreResultCode.NONE.wireCode();
     }
 
     /** 下单步骤 4.4：所属 Lane 应用本代各计划、整理终态并发布完成位。 */
@@ -1242,11 +1254,6 @@ public static final class Plan {
         requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
         orderCount = accepted ? 1 : 0;
         if (orderCount != 0) orderIds[0] = orderId;
-    }
-
-    private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
-        return result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
-                || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
     }
 
     /** 为没有原生结果的准入拒绝只保留身份与路由，让已登记的账户路径能够交回完成回执。 */

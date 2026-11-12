@@ -147,8 +147,9 @@ public final class CommandResultLedger {
     public void storeOwnedResult(UUID commandId, CommandFingerprint fingerprint, ResponseStatus status,
                           CoreResultCode resultCode, long appliedCommandCount,
                           byte[] responseData) {
-        storeOwnedResult(commandId, fingerprint, status, resultCode, appliedCommandCount,
-                responseData, 0,
+        java.util.Objects.requireNonNull(commandId, "command id");
+        storeOwnedResult(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                fingerprint, status, resultCode, appliedCommandCount, responseData, 0,
                 responseData == null ? 0 : responseData.length);
     }
 
@@ -158,15 +159,6 @@ public final class CommandResultLedger {
         storeOwnedResult(commandIdMsb, commandIdLsb, fingerprint, status, resultCode, appliedCommandCount,
                 responseData, 0,
                 responseData == null ? 0 : responseData.length);
-    }
-
-    /** 要求命令 UUID 非空，拆成两段后交给实际存储入口，保留原响应切片范围。 */
-    public void storeOwnedResult(UUID commandId, CommandFingerprint fingerprint, ResponseStatus status,
-                          CoreResultCode resultCode, long appliedCommandCount,
-                          byte[] responseData, int responseOffset, int responseLength) {
-        java.util.Objects.requireNonNull(commandId, "command id");
-        storeOwnedResult(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                fingerprint, status, resultCode, appliedCommandCount, responseData, responseOffset, responseLength);
     }
 
     /** 校验响应切片和单项字节上限，借另一预建记录保存结果。 */

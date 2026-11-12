@@ -173,7 +173,6 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     public List<Long> preMatchingCancellationOrderIds() { return admissionState.preMatchingCancellationOrderIds; }
-    boolean commitFenceEstablished() { return commitControl.commitFenceEstablished; }
     public boolean ledgerDispatchClosed() { return settlementState.ledgerDispatchClosed; }
     public void ledgerDispatchClosed(boolean ledgerDispatchClosed) { settlementState.ledgerDispatchClosed = ledgerDispatchClosed; }
     int cachedMatcherShard() { return matchingTasks.cachedMatcherShard; }
@@ -1437,19 +1436,19 @@ public static final class Direct {
             var runtime = owner.runtimeState();
             return switch (kind) {
                 case MUTATION -> switch (mutation) {
-                    case CANCEL -> runtime.cancelTriggerOrder(userId, triggerOrderId);
-                    case CLAIM -> runtime.claimTriggerOrder(triggerOrderId, arg1, arg2, arg3);
-                    case COMPLETE -> runtime.completeTriggerOrder(triggerOrderId,
+                    case CANCEL -> runtime.triggerOrders().cancelTriggerOrder(userId, triggerOrderId);
+                    case CLAIM -> runtime.triggerOrders().claimTriggerOrder(triggerOrderId, arg1, arg2, arg3);
+                    case COMPLETE -> runtime.triggerOrders().completeTriggerOrder(triggerOrderId,
                             flag, arg1, text == null ? "" : text, arg2);
-                    case TRAILING -> runtime.updateTrailingTriggerOrder(triggerOrderId,
+                    case TRAILING -> runtime.triggerOrders().updateTrailingTriggerOrder(triggerOrderId,
                             arg1, arg2, arg3);
-                    case EXPIRE -> runtime.expireTriggerOrder(triggerOrderId, arg1);
-                    case RETRY -> runtime.retryTriggerOrder(triggerOrderId, arg1, arg2);
+                    case EXPIRE -> runtime.triggerOrders().expireTriggerOrder(triggerOrderId, arg1);
+                    case RETRY -> runtime.triggerOrders().retryTriggerOrder(triggerOrderId, arg1, arg2);
                 };
                 case TRIGGER_UPSERT -> {
-                    if (secondTrigger == null) runtime.upsertTriggerOrder(userId, trigger, symbolId,
+                    if (secondTrigger == null) runtime.triggerOrders().upsertTriggerOrder(userId, trigger, symbolId,
                             positionKey, instrumentSettled);
-                    else runtime.placeOcoPair(userId, trigger, secondTrigger,
+                    else runtime.triggerOrders().placeOcoPair(userId, trigger, secondTrigger,
                             symbolId, positionKey, instrumentSettled);
                     yield secondTrigger == null ? runtime.triggerOrder(trigger.triggerOrderId()).view()
                             : java.util.List.of(runtime.triggerOrder(trigger.triggerOrderId()).view(),
@@ -1774,15 +1773,16 @@ public static class ResolvedPlaceOrder {
     public String clientOrderId() { return intent == null ? "" : intent.clientOrderId(); }
 }
 
-public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements AccountLaneCommand {
-    private long openInterestSteps;
+/** 单笔下单与改单准入事件共用的 Lane 结果：完成位为 volatile，Owner 读到完成后才读取拒绝和平仓容量撤单。 */
+abstract static class AdmissionEvent extends ResolvedPlaceOrder {
+    long openInterestSteps;
 
     /** Lane 捕获的业务拒绝、算术或参数异常，完成后由 Owner 或 Matcher 读取。 */
-    private RuntimeException rejection;
+    RuntimeException rejection;
 
-    private List<Long> closeCapacityCancellations = List.of();
+    List<Long> closeCapacityCancellations = List.of();
 
-    private volatile boolean completed;
+    volatile boolean completed;
 
     public void bindOpenInterest(long openInterestSteps) {
         this.openInterestSteps = openInterestSteps;
@@ -1806,13 +1806,16 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
         return rejection == null ? closeCapacityCancellations : List.of();
     }
 
-    private void clearBaseAdmission() {
+    void clearBaseAdmission() {
         clearResolvedOrder();
         openInterestSteps = 0;
         rejection = null;
         closeCapacityCancellations = List.of();
         completed = false;
     }
+}
+
+public static final class PlaceAdmissionEvent extends AdmissionEvent implements AccountLaneCommand {
     @Accessors(fluent = true, chain = false)
     @Getter
     private long coreSequence;
@@ -2020,45 +2023,7 @@ public static final class PlaceAdmissionEvent extends ResolvedPlaceOrder impleme
     }
 }
 
-public static final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implements AccountLaneCommand {
-    private long openInterestSteps;
-
-    /** Lane 捕获的业务拒绝、算术或参数异常，完成后由 Owner 或 Matcher 读取。 */
-    private RuntimeException rejection;
-
-    private List<Long> closeCapacityCancellations = List.of();
-
-    private volatile boolean completed;
-
-    public void bindOpenInterest(long openInterestSteps) {
-        this.openInterestSteps = openInterestSteps;
-    }
-
-    public long openInterestSteps() {
-        return openInterestSteps;
-    }
-
-    public boolean complete() {
-        return completed;
-    }
-
-    public RuntimeException rejection() {
-        if (!completed) throw new IllegalStateException("admission is incomplete");
-        return rejection;
-    }
-
-    public List<Long> closeCapacityCancellations() {
-        if (!completed) throw new IllegalStateException("admission is incomplete");
-        return rejection == null ? closeCapacityCancellations : List.of();
-    }
-
-    private void clearBaseAdmission() {
-        clearResolvedOrder();
-        openInterestSteps = 0;
-        rejection = null;
-        closeCapacityCancellations = List.of();
-        completed = false;
-    }
+public static final class ReplacementAdmissionEvent extends AdmissionEvent implements AccountLaneCommand {
     private long sequence, userId, originalOrderId;
     /** Owner 固定的 Matcher 分片，完成通知按此唤醒原撮合续步。 */
     private int matcherShard;

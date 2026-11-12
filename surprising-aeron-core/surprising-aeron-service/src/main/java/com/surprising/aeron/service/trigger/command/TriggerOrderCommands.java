@@ -303,8 +303,8 @@ public final class TriggerOrderCommands {
 
             private Object applyMutation() {
                 return switch (kind) {
-                    case EXPIRE -> owner.runtimeState().expireTriggerOrder(triggerId, arg1);
-                    case TRAILING -> owner.runtimeState().updateTrailingTriggerOrder(triggerId,
+                    case EXPIRE -> owner.runtimeState().triggerOrders().expireTriggerOrder(triggerId, arg1);
+                    case TRAILING -> owner.runtimeState().triggerOrders().updateTrailingTriggerOrder(triggerId,
                             arg1, arg2, arg3);
                     case SIBLINGS -> {
                         boolean changed = false;
@@ -314,7 +314,7 @@ public final class TriggerOrderCommands {
                             if (id < next) break;
                             var sibling = owner.runtimeState().triggerOrder(id);
                             if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
-                                changed |= owner.runtimeState().cancelTriggerOrder(
+                                changed |= owner.runtimeState().triggerOrders().cancelTriggerOrder(
                                         trigger.userId(), id);
                         }
                         yield changed;
@@ -641,12 +641,12 @@ public final class TriggerOrderCommands {
                 if (siblingId == triggerId) continue;
                 var sibling = owner.runtimeState().triggerOrder(siblingId);
                 if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
-                    owner.runtimeState().cancelTriggerOrder(trigger.userId(), siblingId);
+                    owner.runtimeState().triggerOrders().cancelTriggerOrder(trigger.userId(), siblingId);
             }
-            owner.runtimeState().claimTriggerOrder(triggerId, triggerSequence, price, triggeredAt);
+            owner.runtimeState().triggerOrders().claimTriggerOrder(triggerId, triggerSequence, price, triggeredAt);
             trigger = owner.runtimeState().triggerOrder(triggerId);
             if (!failureReason.isEmpty()) {
-                owner.runtimeState().completeTriggerOrder(triggerId, false, 0,
+                owner.runtimeState().triggerOrders().completeTriggerOrder(triggerId, false, 0,
                         failureReason, triggeredAt);
                 return null;
             }
@@ -660,7 +660,7 @@ public final class TriggerOrderCommands {
             } catch (CoreStateRejectedException rejected) {
                 if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
                         order.clientOrderId(), key);
-                owner.runtimeState().completeTriggerOrder(triggerId, false, 0,
+                owner.runtimeState().triggerOrders().completeTriggerOrder(triggerId, false, 0,
                         rejected.code(), triggeredAt);
                 return null;
             } catch (RuntimeException | Error failure) {

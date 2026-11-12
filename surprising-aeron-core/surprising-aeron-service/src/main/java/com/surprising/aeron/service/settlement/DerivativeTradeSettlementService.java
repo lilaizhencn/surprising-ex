@@ -54,10 +54,7 @@ public final class DerivativeTradeSettlementService {
                 runtime.updateOrderStatusInLane(lane, localTaker.orderId(), CoreOrderStatus.CANCELED,
                         Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition);
             }
-            if (localTaker.canceled()) {
-                long releaseUnits = runtime.releaseTerminalReservationInLane(lane, localTaker, null);
-                if (releaseUnits > 0) runtime.advanceUserRevision(lane, localTaker.userId());
-            }
+            TradeSettlement.releaseCanceledReservation(runtime, lane, localTaker);
         }
     }
 
@@ -74,13 +71,13 @@ public final class DerivativeTradeSettlementService {
             if (match.eventType() != MatcherEventType.TRADE
                     || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
             if (localTaker != null) {
-                localTaker = requireOpen(lane, takerOrderId);
+                localTaker = TradeSettlement.requireOpen(lane, takerOrderId);
                 applyFill(runtime, lane, identities, instrument, localTaker, match.price(), match.size(), true,
                         settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
             }
             Order maker = lane.order(match.matchedOrderId());
             if (maker != null) {
-                maker = requireOpen(maker, maker.orderId());
+                maker = TradeSettlement.requireOpen(maker, maker.orderId());
                 boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
                 applyFill(runtime, lane, identities, instrument, maker, match.price(), match.size(), false,
                         settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
@@ -157,7 +154,7 @@ public final class DerivativeTradeSettlementService {
                    RuntimeTreasuryDelta treasury) {
             FillCursor cursor = cursors.get(orderId);
             if (cursor == null) {
-                Order order = requireOpen(lane, orderId);
+                Order order = TradeSettlement.requireOpen(lane, orderId);
                 long activeOrder = activeOrderByUser.get(order.userId());
                 if (activeOrder != 0 && activeOrder != orderId) flush(activeOrder);
                 long leverage = 0;
@@ -216,11 +213,7 @@ public final class DerivativeTradeSettlementService {
 
         /** 把游标最终累计结果写回所属 Lane，财务参数传空避免重复。 */
         private void publishCursor(FillCursor cursor) {
-            Order order = cursor.publish(runtime, lane, cursor.positionKey(), null);
-            if (order != null && order.canceled()) {
-                long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
-                if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
-            }
+            TradeSettlement.releaseCanceledReservation(runtime, lane, cursor.publish(runtime, lane, cursor.positionKey(), null));
         }
     }
 
@@ -237,17 +230,6 @@ public final class DerivativeTradeSettlementService {
         apply(runtime, lane, identities, instrument, order,
                 identities.preparedPositionKey(lane, order),
                 priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
-    }
-
-    private static Order requireOpen(AccountPartition lane, long orderId) {
-        Order order = lane.order(orderId);
-        return requireOpen(order, orderId);
-    }
-
-    private static Order requireOpen(Order order, long orderId) {
-        if (order == null || order.canceled() || order.remainingQuantitySteps() == 0)
-            throw new IllegalStateException("runtime matched order is not open: " + orderId);
-        return order;
     }
 
     /** 校验单笔成交、账户预留及余额归属，借用所属 Lane 的单笔游标计算并发布结果。 */

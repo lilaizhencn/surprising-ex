@@ -40,7 +40,7 @@ public final class OrderMatchingFlow {
             long sequence = owner.nextAppliedSequence();
             OrderCommand pending = owner.admissions().newPendingMatching(sequence,
                     OrderAdmissionService.matchingOperation(message.header().messageType()),
-                    message, fingerprint);
+                    message, fingerprint, owner.decodeMatchingCommand(message));
             putPendingMatching(pending);
             pending.rejectMatching(resultCode);
             owner.pendingMatching().completeSubmission(sequence);

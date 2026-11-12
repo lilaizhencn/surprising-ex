@@ -126,8 +126,82 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final AccountTransactionRollback accountRollback;
     volatile Thread owner;
     private static final java.lang.invoke.VarHandle OWNER_THREAD;
-    final UncommittedChanges changes = new UncommittedChanges();
-    final PartitionCoordinator coordinator;
+    static final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList EMPTY_POSITION_KEYS =
+            new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(0);
+    final IntObjectHashMap<RiskScanner.State> riskScans = new IntObjectHashMap<>();
+    SystemLedgerCommand ledgerControl;
+    final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
+    volatile FeePolicyBook feePolicies = FeePolicyBook.EMPTY;
+    RuntimeFactIndexes factIndexes;
+    RuntimeIdentityRegistry indexIdentities;
+    final LongHashSet riskPositionIdentities = new LongHashSet();
+    long nextLiquidationId = 1;
+    long marketRevision;
+    CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
+    boolean balancesChanged;
+    final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap metadataOrderUsers =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
+    final org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<Order>
+            captureMetadataUser = (id, order) -> {
+                if (order != null && metadataOrderUsers.containsKey(id)) metadataOrderUsers.put(id, order.userId());
+            };
+    final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure
+            captureActiveMetadataUser = (id, userId) -> {
+                if (userId != 0) return;
+                var route = factIndexes.activeOrders().activeOrderRoute(id);
+                if (route != null) metadataOrderUsers.put(id, route.userId());
+            };
+    final StateChangeBuffer.OwnerIndexed<Position, Position.IndexValue> changedPositions =
+            new StateChangeBuffer.OwnerIndexed<>(new StateChangeBuffer.Positions());
+    final StateChangeBuffer<RiskScanner.LiquidationOrder> changedLiquidations =
+            new StateChangeBuffer<>();
+    final IntHashSet changedMarkPrices = new IntHashSet();
+    final IntHashSet changedRiskScans = new IntHashSet();
+    final HashSet<CoreLeverageKey> changedLeverages = new HashSet<>();
+    final StateChangeBuffer<CoreAlgoOrderState> changedAlgoOrders = new StateChangeBuffer<>();
+    final HashSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers = new HashSet<>();
+    final StateChangeBuffer<CoreTriggerOrderState> changedTriggerOrders =
+            new StateChangeBuffer<>();
+    final LongHashSet changedFeePolicies = new LongHashSet();
+    TradingRealtimeBoundary.StateCapture realtimeCapture;
+
+    static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
+    static final int COMMITTED_SEQUENCE_STRIDE = 16;
+    static final VarHandle COMMITTED_SEQUENCES = MethodHandles.arrayElementVarHandle(long[].class);
+    static final int EVENT_POOL_INITIAL_CAPACITY = 1024;
+    static final int EVENT_POOL_PREALLOCATE_COUNT = 512;
+
+    final CoreRuntimeConfiguration configuration;
+    final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
+    final PaddedReadyMask accountAdmissionReadyShards;
+    final LaneSequenceQueue[] placeAdmissionReadyQueues;
+    final int[] accountLaneQueueHighWaterMarks;
+    final long[] publishedLaneCommittedSlots;
+    final long[] dispatchedLaneCommitSequences;
+    final java.util.ArrayDeque<AccountPartitionCommit> laneCommitEventPool =
+            new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
+    final java.util.ArrayDeque<OrderCommand.PlaceAdmissionEvent> placeAdmissionEventPool =
+            new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
+    final java.util.ArrayDeque<OrderCommand.ReplacementAdmissionEvent> replacementAdmissionEventPool =
+            new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
+    final java.util.ArrayDeque<OrderBatchProcessor.PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
+            new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
+    final java.util.ArrayDeque<TradeSettlement> matcherSettlementEventPool =
+            new java.util.ArrayDeque<>();
+    final AccountPartitionCommit.Delta[] laneDeltas;
+    boolean orderBatchMutationScope;
+    AccountPartition ownerLaneScope;
+    TradeSettlement.Changes ownerMatcherSettlementChangesScope;
+    final TradeSettlement.Changes[] matcherSettlementChangesRing;
+    final int[] freeMatcherSettlementChangeSlots;
+    int freeMatcherSettlementChangeCount;
+    volatile long retiredOwnerSequence;
+    final AccountCommandService.Dispatcher controlLanes;
+    final PaddedReadyMask directSettlementReadyLanes;
+    final PaddedReadyMask placeAdmissionReadyLanes;
+    final RuntimeFundsAccumulator controlValidationFunds = new RuntimeFundsAccumulator();
+    final RuntimeFactIndexes.PositionUndo controlPositionUndo = new RuntimeFactIndexes.PositionUndo();
+    boolean controlFundsValidated;
     private final TriggerOrderOperations triggerOps = new TriggerOrderOperations(this);
 
     static {
@@ -135,131 +209,28 @@ public final class TradingAccountRuntime implements AutoCloseable {
         catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
     }
 
-    static final class UncommittedChanges {
-        static final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList EMPTY_POSITION_KEYS =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(0);
-        final IntObjectHashMap<RiskScanner.State> riskScans = new IntObjectHashMap<>();
-        SystemLedgerCommand ledgerControl;
-        final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
-        volatile FeePolicyBook feePolicies = FeePolicyBook.EMPTY;
-        RuntimeFactIndexes factIndexes;
-        RuntimeIdentityRegistry indexIdentities;
-        final LongHashSet riskPositionIdentities = new LongHashSet();
-        long nextLiquidationId = 1;
-        long marketRevision;
-        CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
-        boolean balancesChanged;
-        final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap metadataOrderUsers =
-                new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
-        final org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<Order>
-                captureMetadataUser = (id, order) -> {
-                    if (order != null && metadataOrderUsers.containsKey(id)) metadataOrderUsers.put(id, order.userId());
-                };
-        final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure
-                captureActiveMetadataUser = (id, userId) -> {
-                    if (userId != 0) return;
-                    var route = factIndexes.activeOrders().activeOrderRoute(id);
-                    if (route != null) metadataOrderUsers.put(id, route.userId());
-                };
-        final StateChangeBuffer.OwnerIndexed<Position, Position.IndexValue> changedPositions =
-                new StateChangeBuffer.OwnerIndexed<>(new StateChangeBuffer.Positions());
-        final StateChangeBuffer<RiskScanner.LiquidationOrder> changedLiquidations =
-                new StateChangeBuffer<>();
-        final IntHashSet changedMarkPrices = new IntHashSet();
-        final IntHashSet changedRiskScans = new IntHashSet();
-        final HashSet<CoreLeverageKey> changedLeverages = new HashSet<>();
-        final StateChangeBuffer<CoreAlgoOrderState> changedAlgoOrders = new StateChangeBuffer<>();
-        final HashSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers = new HashSet<>();
-        final StateChangeBuffer<CoreTriggerOrderState> changedTriggerOrders =
-                new StateChangeBuffer<>();
-        final LongHashSet changedFeePolicies = new LongHashSet();
-        TradingRealtimeBoundary.StateCapture realtimeCapture;
-    }
-
-    static final class PartitionCoordinator {
-        static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
-        static final int COMMITTED_SEQUENCE_STRIDE = 16;
-        static final VarHandle COMMITTED_SEQUENCES = MethodHandles.arrayElementVarHandle(long[].class);
-        static final int EVENT_POOL_INITIAL_CAPACITY = 1024;
-        static final int EVENT_POOL_PREALLOCATE_COUNT = 512;
-
-        final CoreRuntimeConfiguration configuration;
-        final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
-        final PaddedReadyMask accountAdmissionReadyShards;
-        final LaneSequenceQueue[] placeAdmissionReadyQueues;
-        final int[] accountLaneQueueHighWaterMarks;
-        final long[] publishedLaneCommittedSlots;
-        final long[] dispatchedLaneCommitSequences;
-        final java.util.ArrayDeque<AccountPartitionCommit> laneCommitEventPool =
-                new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
-        final java.util.ArrayDeque<OrderCommand.PlaceAdmissionEvent> placeAdmissionEventPool =
-                new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
-        final java.util.ArrayDeque<OrderCommand.ReplacementAdmissionEvent> replacementAdmissionEventPool =
-                new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
-        final java.util.ArrayDeque<OrderBatchProcessor.PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
-                new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
-        final java.util.ArrayDeque<TradeSettlement> matcherSettlementEventPool =
-                new java.util.ArrayDeque<>();
-        final AccountPartitionCommit.Delta[] laneDeltas;
-        boolean orderBatchMutationScope;
-        AccountPartition ownerLaneScope;
-        TradeSettlement.Changes ownerMatcherSettlementChangesScope;
-        final TradeSettlement.Changes[] matcherSettlementChangesRing;
-        final int[] freeMatcherSettlementChangeSlots;
-        int freeMatcherSettlementChangeCount;
-        volatile long retiredOwnerSequence;
-        final AccountCommandService.Dispatcher controlLanes;
-        final PaddedReadyMask directSettlementReadyLanes;
-        final PaddedReadyMask placeAdmissionReadyLanes;
-        final RuntimeFundsAccumulator controlValidationFunds = new RuntimeFundsAccumulator();
-        final RuntimeFactIndexes.PositionUndo controlPositionUndo = new RuntimeFactIndexes.PositionUndo();
-        boolean controlFundsValidated;
-
-        PartitionCoordinator(TradingAccountRuntime runtime, LaneTopology topology, CoreRuntimeConfiguration configuration) {
-            this.configuration = configuration;
-            this.accountAdmissionReadyShards = new PaddedReadyMask(topology.matchingEngineCount());
-            this.directSettlementReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
-            this.placeAdmissionReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
-            int deltaRingCapacity = Math.max(64, configuration.maxPendingMatching());
-            this.matcherSettlementChangesRing = new TradeSettlement.Changes[deltaRingCapacity];
-            this.freeMatcherSettlementChangeSlots = new int[deltaRingCapacity];
-            this.freeMatcherSettlementChangeCount = deltaRingCapacity;
-            for (int index = 0; index < deltaRingCapacity; index++) {
-                matcherSettlementChangesRing[index] = new TradeSettlement.Changes(topology.accountLaneCount(), index);
-                freeMatcherSettlementChangeSlots[index] = index;
-            }
-            this.laneDeltas = new AccountPartitionCommit.Delta[topology.accountLaneCount()];
-            this.laneUserScratch = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
-            this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
-            this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
-            this.publishedLaneCommittedSlots = new long[Math.multiplyExact(topology.accountLaneCount(), COMMITTED_SEQUENCE_STRIDE)];
-            this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
-            this.controlLanes = new AccountCommandService.Dispatcher(runtime);
-        }
-    }
-
     public boolean accountLanesStarted() { return laneLifecycle.started(); }
-    public long marketRevision() { return changes.marketRevision; }
-    public StateChangeBuffer<RiskScanner.LiquidationOrder> changedLiquidations() { return changes.changedLiquidations; }
-    public StateChangeBuffer<CoreAlgoOrderState> changedAlgoOrders() { return changes.changedAlgoOrders; }
-    public StateChangeBuffer<CoreTriggerOrderState> changedTriggerOrders() { return changes.changedTriggerOrders; }
-    public boolean orderBatchMutationScope() { return coordinator.orderBatchMutationScope; }
-    public TradingRealtimeBoundary.StateCapture realtimeCapture() { return changes.realtimeCapture; }
+    public long marketRevision() { return marketRevision; }
+    public StateChangeBuffer<RiskScanner.LiquidationOrder> changedLiquidations() { return changedLiquidations; }
+    public StateChangeBuffer<CoreAlgoOrderState> changedAlgoOrders() { return changedAlgoOrders; }
+    public StateChangeBuffer<CoreTriggerOrderState> changedTriggerOrders() { return changedTriggerOrders; }
+    public boolean orderBatchMutationScope() { return orderBatchMutationScope; }
+    public TradingRealtimeBoundary.StateCapture realtimeCapture() { return realtimeCapture; }
 
     public void bindFactIndexes(RuntimeFactIndexes indexes, RuntimeIdentityRegistry identities) {
         assertOwner();
-        changes.factIndexes = java.util.Objects.requireNonNull(indexes);
-        changes.indexIdentities = java.util.Objects.requireNonNull(identities);
+        factIndexes = java.util.Objects.requireNonNull(indexes);
+        indexIdentities = java.util.Objects.requireNonNull(identities);
     }
 
     RuntimeFactIndexes factIndexes() {
         assertOwner();
-        if (changes.factIndexes == null) throw new IllegalStateException("position indexes are not bound");
-        return changes.factIndexes;
+        if (factIndexes == null) throw new IllegalStateException("position indexes are not bound");
+        return factIndexes;
     }
 
     public com.surprising.aeron.service.core.index.LiquidationIndex.LiquidationRoute liquidationRoute(long id) {
-        assertOwner(); return changes.factIndexes == null ? null : changes.factIndexes.liquidations().route(id);
+        assertOwner(); return factIndexes == null ? null : factIndexes.liquidations().route(id);
     }
 
     public TradingAccountRuntime() {
@@ -277,19 +248,37 @@ public final class TradingAccountRuntime implements AutoCloseable {
         this.accountLanes = new AccountPartition[topology.accountLaneCount()];
         this.accountRollback = new AccountTransactionRollback(this, topology.accountLaneCount());
         this.laneLifecycle = new AccountLaneLifecycle(accountLanes, topology, this::assertOwner);
-        this.coordinator = new PartitionCoordinator(this, topology, config);
+        this.configuration = config;
+        this.accountAdmissionReadyShards = new PaddedReadyMask(topology.matchingEngineCount());
+        this.directSettlementReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
+        this.placeAdmissionReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
+        int deltaRingCapacity = Math.max(64, config.maxPendingMatching());
+        this.matcherSettlementChangesRing = new TradeSettlement.Changes[deltaRingCapacity];
+        this.freeMatcherSettlementChangeSlots = new int[deltaRingCapacity];
+        this.freeMatcherSettlementChangeCount = deltaRingCapacity;
+        for (int index = 0; index < deltaRingCapacity; index++) {
+            matcherSettlementChangesRing[index] = new TradeSettlement.Changes(topology.accountLaneCount(), index);
+            freeMatcherSettlementChangeSlots[index] = index;
+        }
+        this.laneDeltas = new AccountPartitionCommit.Delta[topology.accountLaneCount()];
+        this.laneUserScratch = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
+        this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
+        this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
+        this.publishedLaneCommittedSlots = new long[Math.multiplyExact(topology.accountLaneCount(), COMMITTED_SEQUENCE_STRIDE)];
+        this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
+        this.controlLanes = new AccountCommandService.Dispatcher(this);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountPartition(laneId, topology.accountLaneQueueCapacity(), config.laneInitialEntities());
-            coordinator.placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
+            placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             publishLaneCommittedSequence(accountLanes[laneId]);
-            coordinator.laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
-            coordinator.laneDeltas[laneId] = new AccountPartitionCommit.Delta();
+            laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
+            laneDeltas[laneId] = new AccountPartitionCommit.Delta();
         }
-        for (int i = 0; i < PartitionCoordinator.EVENT_POOL_PREALLOCATE_COUNT; i++) {
-            coordinator.laneCommitEventPool.addFirst(new AccountPartitionCommit(accountLanes.length));
-            coordinator.placeAdmissionEventPool.addFirst(new OrderCommand.PlaceAdmissionEvent());
-            coordinator.replacementAdmissionEventPool.addFirst(new OrderCommand.ReplacementAdmissionEvent());
-            coordinator.placeBatchAdmissionEventPool.addFirst(new OrderBatchProcessor.PlaceBatchAdmissionEvent());
+        for (int i = 0; i < EVENT_POOL_PREALLOCATE_COUNT; i++) {
+            laneCommitEventPool.addFirst(new AccountPartitionCommit(accountLanes.length));
+            placeAdmissionEventPool.addFirst(new OrderCommand.PlaceAdmissionEvent());
+            replacementAdmissionEventPool.addFirst(new OrderCommand.ReplacementAdmissionEvent());
+            placeBatchAdmissionEventPool.addFirst(new OrderBatchProcessor.PlaceBatchAdmissionEvent());
         }
     }
 
@@ -366,16 +355,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public int observeLaneQueueHighWaterMark(int laneId, int depth) {
         assertOwner();
         int highWater = accountLanes[laneId].updateQueueHighWaterMark(
-                Math.max(coordinator.accountLaneQueueHighWaterMarks[laneId], depth));
-        coordinator.accountLaneQueueHighWaterMarks[laneId] = highWater;
+                Math.max(accountLaneQueueHighWaterMarks[laneId], depth));
+        accountLaneQueueHighWaterMarks[laneId] = highWater;
         return highWater;
     }
 
     /** 在 Owner 上单调发布已退休命令的序号边界，供 Lane 回收订单身份元数据。 */
     public void releaseRetiredOrderFence(long sequence) {
         assertOwner();
-        if (sequence < coordinator.retiredOwnerSequence) throw new IllegalStateException("order retirement fence moved backwards");
-        coordinator.retiredOwnerSequence = sequence;
+        if (sequence < retiredOwnerSequence) throw new IllegalStateException("order retirement fence moved backwards");
+        retiredOwnerSequence = sequence;
     }
 
     /** 使用禁用 CPU 亲和的配置创建账户工作资源。 */
@@ -391,7 +380,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean ownerLaneAccess() { return laneLifecycle.ownerHasAccess(); }
     /** Owner 持有账户访问权且没有批量修改范围时归还 Lane，避免过早释放仍被批次使用的访问权。 */
     public void releaseCompletedSequentialLaneStage() {
-        if (ownerLaneAccess() && !coordinator.orderBatchMutationScope) releaseOwnerLaneAccess();
+        if (ownerLaneAccess() && !orderBatchMutationScope) releaseOwnerLaneAccess();
     }
 
     /** 在 Owner 上请求全部账户工作线程交还所有权：首次请求递增轮次并设置 30 秒预算，尚有工作线程未就绪时返回假，超时或中断则抛错。 */
@@ -414,59 +403,59 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 激活时将业务持仓索引绑定至当前 Owner 线程，保留冷恢复后的线程交接边界。 */
     public void bindLedgerPositionOwner() {
         assertOwner();
-        if (changes.factIndexes != null) changes.factIndexes.bindBusinessOwner(Thread.currentThread());
+        if (factIndexes != null) factIndexes.bindBusinessOwner(Thread.currentThread());
     }
 
     /** 从账本拥有的事实索引读取准入所需持仓量。 */
     public long ledgerAdmissionOpenInterest(String instrumentId) {
-        if (changes.factIndexes == null) throw new IllegalStateException("position indexes are not bound");
-        return changes.factIndexes.openInterest().openInterestSteps(instrumentId);
+        if (factIndexes == null) throw new IllegalStateException("position indexes are not bound");
+        return factIndexes.openInterest().openInterestSteps(instrumentId);
     }
 
     /** 索引已绑定时，把指定结算 Lane 的持仓变化交给账本业务索引应用。 */
     public void applyLedgerSettlementPositions(TradeSettlement.Changes changes, long mask, RuntimeIdentityRegistry identities) {
-        if (this.changes.factIndexes != null) this.changes.factIndexes.applySettlementPositions(changes, mask, identities);
+        if (this.factIndexes != null) this.factIndexes.applySettlementPositions(changes, mask, identities);
     }
 
     /** 索引已绑定时，把当前控制命令持仓变化应用到账本索引，并记录可回滚内容。 */
     public void applyLedgerControlPositions(RuntimeFactIndexes.PositionUndo undo) {
-        if (changes.factIndexes != null) changes.factIndexes.applyControlPositions(changes.changedPositions, changes.indexIdentities, undo);
+        if (factIndexes != null) factIndexes.applyControlPositions(changedPositions, indexIdentities, undo);
     }
 
     /** 索引已绑定时，按既有撤销记录恢复账本持仓索引。 */
     public void rollbackLedgerPositions(RuntimeFactIndexes.PositionUndo undo) {
-        if (changes.factIndexes != null) undo.rollback(changes.factIndexes);
+        if (factIndexes != null) undo.rollback(factIndexes);
     }
 
     /** 在 Owner 上派发财务控制命令：内联应用并保证同一控制命令独占财务范围。 */
     public void dispatchLedgerCommand(SystemLedgerCommand command) {
         assertOwner();
         if (command == null) throw new IllegalArgumentException("Ledger command is required");
-        if (changes.ledgerControl != null && changes.ledgerControl != command)
+        if (ledgerControl != null && ledgerControl != command)
             throw new IllegalStateException("another control command owns the Ledger financial scope");
-        changes.ledgerControl = command;
+        ledgerControl = command;
         command.apply(treasury);
     }
 
     private void rollbackLedgerControl() {
-        if (changes.ledgerControl == null) {
-            if (coordinator.controlFundsValidated) {
-                rollbackLedgerPositions(coordinator.controlPositionUndo);
-                coordinator.controlFundsValidated = false;
+        if (ledgerControl == null) {
+            if (controlFundsValidated) {
+                rollbackLedgerPositions(controlPositionUndo);
+                controlFundsValidated = false;
             }
             return;
         }
-        changes.ledgerControl.rollbackScope();
+        ledgerControl.rollbackScope();
     }
 
     /** 按目标掩码派发普通控制结算任务，交由唯一控制派发器管理回执。 */
     public void dispatchControlLanes(long laneMask, java.util.function.IntFunction<Object> operation) {
-        coordinator.controlLanes.dispatch(laneMask, DirectCommandDispatcher.OperationType.SETTLEMENT, operation);
+        controlLanes.dispatch(laneMask, DirectCommandDispatcher.OperationType.SETTLEMENT, operation);
     }
 
     /** 按目标掩码派发风险任务，仍使用同一有界控制派发器。 */
     public void dispatchRiskLanes(long laneMask, java.util.function.IntFunction<Object> operation) {
-        coordinator.controlLanes.dispatch(laneMask, DirectCommandDispatcher.OperationType.RISK, operation);
+        controlLanes.dispatch(laneMask, DirectCommandDispatcher.OperationType.RISK, operation);
     }
 
     /** 校验强平批次容量在 1 至 4096 之间，从当前 Lane 或冷路径默认 Lane 0 取得可复用批次，容量不足时替换并重置。 */
@@ -491,13 +480,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /** 让控制派发器收集本轮完成状态，返回其是否已经完成。 */
-    public boolean pollControlLanes() { return coordinator.controlLanes.poll(); }
+    public boolean pollControlLanes() { return controlLanes.poll(); }
 
     /** 读取在途控制交接的诊断信息，供推进故障定位使用。 */
-    public String controlLaneDiagnostics() { return coordinator.controlLanes.diagnostics(); }
+    public String controlLaneDiagnostics() { return controlLanes.diagnostics(); }
 
     /** 取得指定 Lane 的控制结果，完成与读取条件由控制派发器检查。 */
-    public Object controlLaneResult(int laneId) { return coordinator.controlLanes.result(laneId); }
+    public Object controlLaneResult(int laneId) { return controlLanes.result(laneId); }
 
     /** 必要时先取得全部账户访问权，再只对目标用户 Lane 建立已提交序号的读栅栏。 */
     public void readFence(long userId, long committedCoreSequence) {
@@ -540,12 +529,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /** 按用户所属 Lane 执行给定操作，沿用统一的 Lane 范围检查。 */
-    public <T> T onLane(long userId, LaneOperation<T> operation) {
+    public <T> T onLane(long userId, java.util.function.Function<AccountPartition, T> operation) {
         return onLane(topology.accountLaneId(userId), operation);
     }
 
-    /** 已有命令范围时只允许访问同一 Lane。否则拒绝没有账户访问权的活动 Owner，再进入受检查的 Lane 命令范围执行。 */
-    public <T> T onLane(int laneId, LaneOperation<T> operation) {
+    /** 已有命令范围时只允许访问同一 Lane，否则进入受检查的 Lane 命令范围执行。 */
+    public <T> T onLane(int laneId, java.util.function.Function<AccountPartition, T> operation) {
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped != null) {
             if (scoped.laneId() != laneId) {
@@ -553,25 +542,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             return operation.apply(scoped);
         }
-        if (Thread.currentThread() == owner && accountLanesStarted() && !ownerLaneAccess()) {
-            throw new IllegalStateException("active account access must run on its owning Lane thread");
-        }
         return inLaneCommandScope(accountLanes[laneId], operation);
     }
 
-    /** 检查回调不为空后直接借出指定 Lane 执行读取。本方法不自动建立线程权限或读取栅栏。 */
-    public <T> T onLaneReadOnly(int laneId, LaneOperation<T> operation) {
-        if (operation == null) {
-            throw new IllegalStateException("invalid account lane read operation");
-        }
+    /** 直接借出指定 Lane 执行读取，不自动建立线程权限或读取栅栏。 */
+    public <T> T onLaneReadOnly(int laneId, java.util.function.Function<AccountPartition, T> operation) {
         return operation.apply(accountLanes[laneId]);
     }
 
     /** 进入给定 Lane 的命令范围执行回调，无论正常返回或抛错都退出该范围。 */
-    public <T> T inLaneCommandScope(AccountPartition lane, LaneOperation<T> operation) {
-        if (operation == null) {
-            throw new IllegalStateException("invalid account lane command scope");
-        }
+    public <T> T inLaneCommandScope(AccountPartition lane, java.util.function.Function<AccountPartition, T> operation) {
         enterLaneCommandScope(lane);
         try {
             return operation.apply(lane);
@@ -584,7 +564,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public AccountPartition currentLaneCommandScope() {
         Thread current = Thread.currentThread();
         if (current == owner) {
-            return coordinator.ownerLaneScope;
+            return ownerLaneScope;
         }
         if (current instanceof LaneThread laneThread) {
             AccountPartition lane = laneThread.lane();
@@ -662,7 +642,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /** 取得当前线程已接入的撮合变化容器，Owner 使用本地范围，其余线程从当前 Lane 范围读取。 */
     public TradeSettlement.Changes currentMatcherSettlementChangesScope() {
-        if (Thread.currentThread() == owner) return coordinator.ownerMatcherSettlementChangesScope;
+        if (Thread.currentThread() == owner) return ownerMatcherSettlementChangesScope;
         AccountPartition lane = currentLaneCommandScope();
         return lane != null ? lane.matcherSettlementChanges() : null;
     }
@@ -674,7 +654,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         Thread current = Thread.currentThread();
         if (owner == null) bindOwner();
-        if (current == owner ? coordinator.ownerLaneScope != null : lane.commandScopeActive())
+        if (current == owner ? ownerLaneScope != null : lane.commandScopeActive())
             throw new IllegalStateException("invalid account lane command scope");
         SettlementLaneWorker worker = laneLifecycle.worker(lane.laneId());
         if (current != owner && (worker == null || worker.thread() != current)) {
@@ -687,7 +667,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             lane.assertOwner();
         }
         if (current == owner) {
-            coordinator.ownerLaneScope = lane;
+            ownerLaneScope = lane;
             if (!accountLanesStarted()) lane.commandScopeActive(true);
         } else {
             lane.commandScopeActive(true);
@@ -697,12 +677,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 要求撮合变化容器覆盖该 Lane 且没有其他撮合范围，先进入账户命令范围，再登记本次结算变化容器。 */
     public void enterMatcherSettlementScope(AccountPartition lane, TradeSettlement.Changes changes) {
         if (changes == null || lane == null || lane.matcherSettlementChanges() != null
-                || Thread.currentThread() == owner && coordinator.ownerMatcherSettlementChangesScope != null
+                || Thread.currentThread() == owner && ownerMatcherSettlementChangesScope != null
                 || (changes.activeLaneMask() & (1L << lane.laneId())) == 0) {
             throw new IllegalStateException("invalid matcher settlement scope");
         }
         enterLaneCommandScope(lane);
-        if (Thread.currentThread() == owner) coordinator.ownerMatcherSettlementChangesScope = changes;
+        if (Thread.currentThread() == owner) ownerMatcherSettlementChangesScope = changes;
         lane.matcherSettlementChanges(changes);
     }
 
@@ -715,15 +695,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private void exitLaneCommandScope(AccountPartition lane, boolean captureRetirementProof) {
         Thread current = Thread.currentThread();
         if (lane == null || (current == owner
-                ? coordinator.ownerLaneScope != lane : !lane.commandScopeActive())) {
+                ? ownerLaneScope != lane : !lane.commandScopeActive())) {
             throw new IllegalStateException("account lane command scope is not active");
         }
         if (current != owner || !accountLanesStarted()) {
             lane.assertOwner();
-            if (captureRetirementProof) coordinator.laneDeltas[lane.laneId()].preparePositionRetirement(lane);
+            if (captureRetirementProof) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
         }
         if (current == owner) {
-            coordinator.ownerLaneScope = null;
+            ownerLaneScope = null;
             if (!accountLanesStarted()) lane.commandScopeActive(false);
             flushPublishedChanges(lane.laneId());
         } else {
@@ -734,10 +714,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 确认正在退出同一撮合变化容器，清 Owner 与 Lane 的撮合引用，再退出账户范围。 */
     public void exitMatcherSettlementScope(AccountPartition lane, TradeSettlement.Changes changes) {
         if (changes == null || lane == null || (Thread.currentThread() == owner
-                ? coordinator.ownerMatcherSettlementChangesScope != changes : lane.matcherSettlementChanges() != changes)) {
+                ? ownerMatcherSettlementChangesScope != changes : lane.matcherSettlementChanges() != changes)) {
             throw new IllegalStateException("matcher settlement scope is not active");
         }
-        if (Thread.currentThread() == owner) coordinator.ownerMatcherSettlementChangesScope = null;
+        if (Thread.currentThread() == owner) ownerMatcherSettlementChangesScope = null;
         lane.matcherSettlementChanges(null);
         exitLaneCommandScope(lane, false);
     }
@@ -754,13 +734,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 throw new java.util.concurrent.RejectedExecutionException("Lane " + laneId + " is full");
             }
         }
-    }
-
-    /** 已经确定账户 Lane 后执行一次业务的回调。线程与访问范围由调用入口建立。 */
-    public @FunctionalInterface
-    interface LaneOperation<T> {
-        /** 在调用方已经建立的账户 Lane 范围内执行业务，返回本次操作结果。 */
-        T apply(AccountPartition lane);
     }
 
     /** 要求当前已有账户命令范围，再判断给定用户是否路由到该范围的 Lane。 */
@@ -788,7 +761,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void publishLaneCommittedSequence(AccountPartition lane) {
         int laneId = lane.laneId();
         long committed = lane.committedSequence();
-        coordinator.COMMITTED_SEQUENCES.setVolatile(coordinator.publishedLaneCommittedSlots, laneId * coordinator.COMMITTED_SEQUENCE_STRIDE, committed);
+        COMMITTED_SEQUENCES.setVolatile(publishedLaneCommittedSlots, laneId * COMMITTED_SEQUENCE_STRIDE, committed);
     }
 
     /** 复制指定资产的余额数值。 */
@@ -865,7 +838,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** Lane 范围内把强平变化交给该 Lane 容器，否则写入当前 Owner 变化缓冲。 */
     void publishLiquidation(long liquidationId, RiskScanner.LiquidationOrder value) {
         AccountPartition scoped = currentLaneCommandScope();
-        if (scoped == null) changes.changedLiquidations.put(liquidationId, value);
+        if (scoped == null) changedLiquidations.put(liquidationId, value);
         else laneDelta(scoped.laneId()).putLiquidation(liquidationId, value);
     }
 
@@ -880,7 +853,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void publishTriggerOrder(long id, CoreTriggerOrderState value) {
         AccountPartition scoped = currentLaneCommandScope();
         if (scoped == null) {
-            changes.changedTriggerOrders.put(id, value);
+            changedTriggerOrders.put(id, value);
         } else {
             laneDelta(scoped.laneId()).putTrigger(id, value);
         }
@@ -889,13 +862,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 优先取得当前撮合范围的指定 Lane 变化容器，没有撮合范围则使用普通控制变化容器。 */
     public AccountPartitionCommit.Delta laneDelta(int laneId) {
         TradeSettlement.Changes changes = currentMatcherSettlementChangesScope();
-        return changes == null ? coordinator.laneDeltas[laneId] : changes.laneDelta(laneId);
+        return changes == null ? laneDeltas[laneId] : changes.laneDelta(laneId);
     }
 
     /** 按明确的 Lane 引用选择它的撮合变化容器或普通控制变化容器。 */
     public AccountPartitionCommit.Delta laneDelta(AccountPartition lane) {
         TradeSettlement.Changes changes = lane.matcherSettlementChanges();
-        return changes == null ? coordinator.laneDeltas[lane.laneId()] : changes.laneDelta(lane.laneId());
+        return changes == null ? laneDeltas[lane.laneId()] : changes.laneDelta(lane.laneId());
     }
 
     /** 向明确指定 Lane 的当前变化容器登记用户变化。 */
@@ -927,7 +900,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void flushPublishedChanges(int laneId,
                                com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
                                com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
-        AccountPartitionCommit.Delta changes = coordinator.laneDeltas[laneId];
+        AccountPartitionCommit.Delta changes = laneDeltas[laneId];
         changes.recordControlChanges(this, laneId);
         if (accountRollback.balancePatch(laneId).size() != 0) markBalancesChanged();
         changes.publishTriggersToOwner(this);
@@ -937,11 +910,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 在 Owner 上从固定环借出空闲变化槽，标记占用并准备目标 Lane 容器。 */
     public TradeSettlement.Changes acquireMatcherSettlementChanges(long laneMask) {
         assertOwner();
-        if (coordinator.freeMatcherSettlementChangeCount == 0) {
+        if (freeMatcherSettlementChangeCount == 0) {
             throw new IllegalStateException("AccountPartitionCommit.Delta ring is full");
         }
-        TradeSettlement.Changes changes = coordinator.matcherSettlementChangesRing[
-                coordinator.freeMatcherSettlementChangeSlots[--coordinator.freeMatcherSettlementChangeCount]];
+        TradeSettlement.Changes changes = matcherSettlementChangesRing[
+                freeMatcherSettlementChangeSlots[--freeMatcherSettlementChangeCount]];
         if (changes.inUse()) throw new IllegalStateException("AccountPartitionCommit.Delta ring slot is already active");
         changes.inUse(true);
         changes.activeLaneMask(laneMask);
@@ -955,7 +928,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         changes.returnRetiredOrders(this);
         changes.clear();
         changes.inUse(false);
-        coordinator.freeMatcherSettlementChangeSlots[coordinator.freeMatcherSettlementChangeCount++] = changes.ringIndex();
+        freeMatcherSettlementChangeSlots[freeMatcherSettlementChangeCount++] = changes.ringIndex();
     }
 
     /** 先归还 Owner 账户访问权并清账户启动标记，再逐一关闭账户工作对象与账本，汇总已捕获的关闭异常。账本线程确认退出后解除索引业务所有者，最后保留 Error 或包装其他故障抛出。 */
@@ -969,16 +942,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 从当前命令的冻结后值捕获候选归属，活动索引只补未产生后值的仍活动订单。返回 Owner 复用草稿，调用方必须立即交给 dispatch，不能跨命令保存。 */
     public org.eclipse.collections.api.map.primitive.LongLongMap metadataOrderUsers(Iterable<Long> orderIds) {
         assertOwner();
-        changes.metadataOrderUsers.clear();
+        metadataOrderUsers.clear();
         if (orderIds instanceof PrimitiveLongView ids) {
-            for (int i = 0; i < ids.primitiveSize(); i++) changes.metadataOrderUsers.put(ids.primitiveValueAt(i), 0);
+            for (int i = 0; i < ids.primitiveSize(); i++) metadataOrderUsers.put(ids.primitiveValueAt(i), 0);
         } else {
-            for (Long id : orderIds) if (id != null) changes.metadataOrderUsers.put(id, 0);
+            for (Long id : orderIds) if (id != null) metadataOrderUsers.put(id, 0);
         }
-        if (changes.metadataOrderUsers.isEmpty()) return changes.metadataOrderUsers;
-        changedOrders.forEach(changes.captureMetadataUser);
-        if (changes.factIndexes != null) changes.metadataOrderUsers.forEachKeyValue(changes.captureActiveMetadataUser);
-        return changes.metadataOrderUsers;
+        if (metadataOrderUsers.isEmpty()) return metadataOrderUsers;
+        changedOrders.forEach(captureMetadataUser);
+        if (factIndexes != null) metadataOrderUsers.forEachKeyValue(captureActiveMetadataUser);
+        return metadataOrderUsers;
     }
 
     /** 校验提交序号和原日志元数据，按变化用户派发账户提交任务，同时携带订单盖章和可选触发取消信息。 */
@@ -1024,7 +997,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /** 清空每条 Lane 的临时用户列表，准备下一次派发。 */
     void clearLaneUserScratch() {
-        for (org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users : coordinator.laneUserScratch) {
+        for (org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users : laneUserScratch) {
             users.clear();
         }
     }
@@ -1032,7 +1005,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 按拓扑把用户身份追加到对应临时列表，不在这里去重。 */
     void addLaneUser(long userId) {
         int laneId = topology.accountLaneId(userId);
-        coordinator.laneUserScratch[laneId].add(userId);
+        laneUserScratch[laneId].add(userId);
     }
 
     /** 按临时用户列表校验每条写入 Lane 的提交顺序，必要时加入只读响应 Lane，检查容量并借用事件。 */
@@ -1041,11 +1014,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
             OrderCommand.ResultTarget target, RuntimeIdentityRegistry identities, int responseLaneId) {
         long laneMask = 0;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = coordinator.laneUserScratch[laneId];
+            org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = laneUserScratch[laneId];
             if (users.isEmpty()) continue;
             if (coreSequence <= Math.max(
-                    (long) coordinator.COMMITTED_SEQUENCES.getVolatile(coordinator.publishedLaneCommittedSlots,
-                            laneId * coordinator.COMMITTED_SEQUENCE_STRIDE), coordinator.dispatchedLaneCommitSequences[laneId])) {
+                    (long) COMMITTED_SEQUENCES.getVolatile(publishedLaneCommittedSlots,
+                            laneId * COMMITTED_SEQUENCE_STRIDE), dispatchedLaneCommitSequences[laneId])) {
                 throw new IllegalStateException("account lane apply is out of order");
             }
             laneMask |= 1L << laneId;
@@ -1055,9 +1028,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (laneMask == 0) return null;
         if (accountLanesStarted()) releaseOwnerLaneAccess();
         ensureLaneWorkerCapacity(laneMask);
-        AccountPartitionCommit event = coordinator.laneCommitEventPool.pollFirst();
+        AccountPartitionCommit event = laneCommitEventPool.pollFirst();
         if (event == null) event = new AccountPartitionCommit(accountLanes.length);
-        event.prepare(coreSequence, laneMask, coordinator.laneUserScratch, this);
+        event.prepare(coreSequence, laneMask, laneUserScratch, this);
         try {
             if (target != null) event.prepareResponse(target, identities, responseLaneId, commitMask);
             event.prepareMetadata(orderUsers, timestamp, position);
@@ -1065,7 +1038,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         catch (RuntimeException failure) {
             event.discard();
-            coordinator.laneCommitEventPool.addFirst(event);
+            laneCommitEventPool.addFirst(event);
             throw failure;
         }
         long lanes = laneMask;
@@ -1078,7 +1051,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 laneLifecycle.worker(laneId).submit(event);
             }
             if ((commitMask & (1L << laneId)) != 0)
-                coordinator.dispatchedLaneCommitSequences[laneId] = coreSequence;
+                dispatchedLaneCommitSequences[laneId] = coreSequence;
         }
         return event;
     }
@@ -1095,12 +1068,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void releaseLaneCommit(AccountPartitionCommit event) {
         if (event == null) throw new IllegalArgumentException("Account Lane commit event is required");
         event.publishAndClear();
-        coordinator.laneCommitEventPool.addFirst(event);
+        laneCommitEventPool.addFirst(event);
     }
 
     /** 从下单准入池借出事件。 */
     public OrderCommand.PlaceAdmissionEvent acquirePlaceAdmission() {
-        OrderCommand.PlaceAdmissionEvent event = coordinator.placeAdmissionEventPool.pollFirst();
+        OrderCommand.PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
         return event == null ? new OrderCommand.PlaceAdmissionEvent() : event;
     }
 
@@ -1108,7 +1081,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void discardPlaceAdmission(OrderCommand.PlaceAdmissionEvent event) {
         if (event == null) return;
         event.discard();
-        coordinator.placeAdmissionEventPool.addFirst(event);
+        placeAdmissionEventPool.addFirst(event);
     }
 
     /** 准备单笔下单事件，先检查账户准入容量。失败时账本仍持有输入则抛出明确故障而不回收该事件，避免复用仍被引用的槽。 */
@@ -1119,7 +1092,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             long timestamp, long position) {
         assertOwner();
         int laneId = topology.accountLaneId(userId);
-        if (event == null) throw new IllegalArgumentException("place admission event is required");
         event.prepare(
                 coreSequence, userId, commandId, settlementStatus,
                 assetId, laneId, this, identities, timestamp, position);
@@ -1137,7 +1109,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
         } catch (RuntimeException | Error failure) {
             if (!event.complete()) event.discard();
-            coordinator.placeAdmissionEventPool.addFirst(event);
+            placeAdmissionEventPool.addFirst(event);
             throw failure;
         }
         return event;
@@ -1147,7 +1119,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void releasePlaceAdmission(OrderCommand.PlaceAdmissionEvent event) {
         if (event == null) return;
         event.clear();
-        coordinator.placeAdmissionEventPool.addFirst(event);
+        placeAdmissionEventPool.addFirst(event);
     }
 
     /** 准备改单准入，必要时先派发账本输入读取，再交给所属账户的普通工作邮箱。失败时仍由账本持有的输入不能回收，否则丢弃事件并归还池。 */
@@ -1159,7 +1131,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         int laneId = topology.accountLaneId(userId);
         ensureLaneWorkerCapacity(1L << laneId);
-        OrderCommand.ReplacementAdmissionEvent event = coordinator.replacementAdmissionEventPool.pollFirst();
+        OrderCommand.ReplacementAdmissionEvent event = replacementAdmissionEventPool.pollFirst();
         if (event == null) event = new OrderCommand.ReplacementAdmissionEvent();
         event.prepare(sequence, userId, originalOrderId, amend, replace, decision,
                 matcherShard, this, identities);
@@ -1176,7 +1148,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
         } catch (RuntimeException | Error failure) {
             event.discard();
-            coordinator.replacementAdmissionEventPool.addFirst(event);
+            replacementAdmissionEventPool.addFirst(event);
             throw failure;
         }
         return event;
@@ -1187,7 +1159,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         if (event == null) return;
         event.clear();
-        coordinator.replacementAdmissionEventPool.addFirst(event);
+        replacementAdmissionEventPool.addFirst(event);
     }
 
     /** 为该用户借出专用变化槽及批次准入事件，准备订单输入后在冷阶段执行或投递账户准入邮箱。 */
@@ -1201,7 +1173,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         int laneId = topology.accountLaneId(userId);
         TradeSettlement.Changes changes = acquireMatcherSettlementChanges(1L << laneId);
         changes.ensureAdmissionCapacity(laneId, itemCount);
-        OrderBatchProcessor.PlaceBatchAdmissionEvent event = coordinator.placeBatchAdmissionEventPool.pollFirst();
+        OrderBatchProcessor.PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
         if (event == null) event = new OrderBatchProcessor.PlaceBatchAdmissionEvent();
         event.prepare(coreSequence, userId, commandId, orders, clientKeys, admittedOrders,
                 itemCount, laneId, matcherShard, this, changes, identities, source,
@@ -1216,7 +1188,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         } catch (RuntimeException | Error failure) {
             releaseMatcherSettlementChanges(event.discardChanges());
             event.clear();
-            coordinator.placeBatchAdmissionEventPool.addFirst(event);
+            placeBatchAdmissionEventPool.addFirst(event);
             throw failure;
         }
         return event;
@@ -1272,7 +1244,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         if (event == null) return;
         event.clear();
-        coordinator.placeBatchAdmissionEventPool.addFirst(event);
+        placeBatchAdmissionEventPool.addFirst(event);
     }
 
     /** 在所属 Lane 按相反顺序撤销本批已准入订单的待预留、客户号、订单与冻结，最后恢复原用户修订及持仓模式。 */
@@ -1308,20 +1280,20 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /** 先发布准入完成的 Core 序号，再设置 Lane 唤醒提示。新观察到置位时通知 Owner。 */
     public void publishPlaceAdmissionReady(int laneId, long coreSequence) {
-        coordinator.placeAdmissionReadyQueues[laneId].publish(coreSequence);
-        coordinator.placeAdmissionReadyLanes.setBit(laneId);
+        placeAdmissionReadyQueues[laneId].publish(coreSequence);
+        placeAdmissionReadyLanes.setBit(laneId);
     }
 
     /** 在 Owner 上采样并清除账户准入提示，实际完成序号仍需从队列取出。 */
     public long takePlaceAdmissionReadyLaneMask() {
         assertOwner();
-        return coordinator.placeAdmissionReadyLanes.getAndClear();
+        return placeAdmissionReadyLanes.getAndClear();
     }
 
     /** 在 Owner 上从指定 Lane 的准入完成队列取一个 Core 序号，空队列返回零。 */
     public long pollPlaceAdmissionReady(int laneId) {
         assertOwner();
-        return coordinator.placeAdmissionReadyQueues[laneId].poll();
+        return placeAdmissionReadyQueues[laneId].poll();
     }
 
     /** 校验 Matcher 分片后发布账户准入就绪提示，唤醒对应撮合提交头。 */
@@ -1329,41 +1301,41 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (matcherShard < 0 || matcherShard >= topology.matchingEngineCount()) {
             throw new IllegalArgumentException("invalid matcher shard");
         }
-        coordinator.accountAdmissionReadyShards.setBit(matcherShard);
+        accountAdmissionReadyShards.setBit(matcherShard);
     }
 
     /** 在 Owner 上采样并清除 Matcher 分片的账户准入提示。 */
     public long takeAccountAdmissionReadyShardMask() {
         assertOwner();
-        return coordinator.accountAdmissionReadyShards.getAndClear();
+        return accountAdmissionReadyShards.getAndClear();
     }
 
     /** 在 Owner 上检查工作健康并只探测准入或结算就绪提示，不消费完成序号，也不代替事件完成判断。 */
     public boolean hasMatchingNotifications() {
         assertOwner();
         assertAccountLanesHealthy();
-        return coordinator.placeAdmissionReadyLanes.get() != 0
+        return placeAdmissionReadyLanes.get() != 0
                 || hasPlaceAdmissionNotifications() || hasSettlementNotifications();
     }
 
     /** 只探测是否有账户准入对应的 Matcher 分片就绪提示，不消费业务结果。 */
     public boolean hasPlaceAdmissionNotifications() {
-        return coordinator.accountAdmissionReadyShards.get() != 0;
+        return accountAdmissionReadyShards.get() != 0;
     }
 
     /** 探测直接结算提示，真实完成事实仍从原事件读取。 */
     public boolean hasSettlementNotifications() {
-        return coordinator.directSettlementReadyLanes.get() != 0;
+        return directSettlementReadyLanes.get() != 0;
     }
 
     /** 直接结算只发布 Lane 唤醒提示。原结算事件持有权威完成标记，不额外建立 Owner 序号队列或预期计数。 */
     public void publishDirectMatcherSettlementReady(int laneId) {
-        coordinator.directSettlementReadyLanes.setBit(laneId);
+        directSettlementReadyLanes.setBit(laneId);
     }
 
     /** 采样并清除直接结算提示，实际完成状态仍查原结算事件。 */
     public long takeDirectMatcherSettlementReadyLaneMask() {
-        return coordinator.directSettlementReadyLanes.getAndClear();
+        return directSettlementReadyLanes.getAndClear();
     }
 
     /** 在有效执行范围内收集已经完成且未拒绝的单笔准入，禁止重复登记，建立 Owner 的待预留索引并递增修订，返回原解析结果。 */
@@ -1386,7 +1358,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void dispatchMatcherFinancialSettlement(TradeSettlement event) {
         assertOwner();
         if (event == null) return;
-        if (changes.ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
+        if (ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
         if (!event.hasLedgerSettlement()) event.submitTreasurySettlement();
     }
 
@@ -1458,7 +1430,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 取得当前命令已收集的持仓变化，返回借用值而不是再次查询账户。 */
     public Position changedPositionValue(long positionKey) {
         assertOwner();
-        return changes.changedPositions.get(positionKey);
+        return changedPositions.get(positionKey);
     }
 
     /** Owner 收集终态订单身份的接收器，只传订单、用户和客户号。 */
@@ -1595,7 +1567,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 要求控制任务、账户工作队列、待预留索引和本命令变化缓冲均已收尾。 */
     public void requireSnapshotFenceReady() {
         assertOwner();
-        if (coordinator.controlLanes.pending()) throw new IllegalStateException("control Lane work is unfinished");
+        if (controlLanes.pending()) throw new IllegalStateException("control Lane work is unfinished");
         if (accountLanesStarted()) {
             for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 SettlementLaneWorker worker = laneLifecycle.worker(laneId);
@@ -1613,18 +1585,18 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 判断变化缓冲或回滚前值是否仍未提交，并检查冷财库变化或活动财务控制槽。 */
     public boolean hasUncommittedCommandChanges() {
         assertOwner();
-        return snapshotProjectionStateDirty() || treasury.hasChangedValues() || changes.ledgerControl != null;
+        return snapshotProjectionStateDirty() || treasury.hasChangedValues() || ledgerControl != null;
     }
 
     /** 只检查当前命令各类变化缓冲、余额标记及回滚前值是否非空，不代替全部异步任务完成判断。 */
     boolean snapshotProjectionStateDirty() {
-        return !changedUsers.isEmpty() || changes.balancesChanged || !changedOrders.isEmpty()
-                || !changedReservations.isEmpty() || !changes.changedPositions.isEmpty()
-                || !changes.changedLiquidations.isEmpty() || !changes.changedMarkPrices.isEmpty()
-                || !changedRiskSnapshots.isEmpty() || !changes.changedRiskScans.isEmpty()
-                || !changes.changedLeverages.isEmpty()
-                || !changes.changedAlgoOrders.isEmpty() || !changes.changedCancelAllAfterTimers.isEmpty()
-                || !changes.changedTriggerOrders.isEmpty() || !changes.changedFeePolicies.isEmpty()
+        return !changedUsers.isEmpty() || balancesChanged || !changedOrders.isEmpty()
+                || !changedReservations.isEmpty() || !changedPositions.isEmpty()
+                || !changedLiquidations.isEmpty() || !changedMarkPrices.isEmpty()
+                || !changedRiskSnapshots.isEmpty() || !changedRiskScans.isEmpty()
+                || !changedLeverages.isEmpty()
+                || !changedAlgoOrders.isEmpty() || !changedCancelAllAfterTimers.isEmpty()
+                || !changedTriggerOrders.isEmpty() || !changedFeePolicies.isEmpty()
                 || accountRollback.hasCaptured();
     }
 
@@ -1734,25 +1706,25 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 要求当前没有批量范围且变化与财务范围都干净，登记批量修改标记。 */
     public void beginOrderBatchMutationScope() {
         assertOwner();
-        if (coordinator.orderBatchMutationScope) throw new IllegalStateException("order batch mutation scope is already active");
-        if (snapshotProjectionStateDirty() || treasury.hasChangedValues() || changes.ledgerControl != null) {
+        if (orderBatchMutationScope) throw new IllegalStateException("order batch mutation scope is already active");
+        if (snapshotProjectionStateDirty() || treasury.hasChangedValues() || ledgerControl != null) {
             throw new IllegalStateException("order batch requires a clean command mutation set");
         }
-        coordinator.orderBatchMutationScope = true;
+        orderBatchMutationScope = true;
         treasury.beginOrderBatchMutationScope();
     }
 
     /** 存在批量范围时先结束冷财库对应范围，再清本地批量标记。 */
     public void endOrderBatchMutationScope() {
         assertOwner();
-        if (!coordinator.orderBatchMutationScope) return;
+        if (!orderBatchMutationScope) return;
         treasury.endOrderBatchMutationScope();
-        coordinator.orderBatchMutationScope = false;
+        orderBatchMutationScope = false;
     }
 
     /** 当前处于订单批量范围时拒绝指定业务域的交叉修改，范围外不额外拦截。 */
     void rejectUnsupportedOrderBatchMutation(String domain) {
-        if (coordinator.orderBatchMutationScope) {
+        if (orderBatchMutationScope) {
             throw new IllegalStateException("order batch cannot mutate " + domain);
         }
     }
@@ -1762,7 +1734,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         if (revisionCheckpoint < 0 || coreSequence <= 0)
             throw new IllegalArgumentException("invalid asynchronous rollback");
-        if (changes.realtimeCapture != null && changes.realtimeCapture.active()) changes.realtimeCapture.abort();
+        if (realtimeCapture != null && realtimeCapture.active()) realtimeCapture.abort();
         long[] pendingOrders = pendingReservations.pendingOrderIds(coreSequence);
         OrderFundsReservation.PendingTracker.PendingBatch batch = pendingReservations.batch(coreSequence);
         int expectedPending = pendingOrders.length + (batch == null ? 0 : batch.remaining());
@@ -1804,7 +1776,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 if (batch != null) pendingReservations.completedBatchItems(coreSequence, batch.remaining());
                 accountRollback.restoreOwner();
                 rollbackLedgerControl();
-                changes.ledgerControl = null;
+                ledgerControl = null;
                 revision = revisionCheckpoint;
                 clearChangedKeys();
                 return true;
@@ -1817,7 +1789,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         // 失败补丁可能已经暂存私有实时值，回滚时先丢弃当前实时批次。
         // 后续由权威快照恢复视图。
-        if (changes.realtimeCapture != null && changes.realtimeCapture.active()) changes.realtimeCapture.abort();
+        if (realtimeCapture != null && realtimeCapture.active()) realtimeCapture.abort();
         if (revisionCheckpoint < 0 || coreSequence <= 0) {
             throw new IllegalArgumentException("invalid runtime command rollback checkpoint");
         }
@@ -1832,7 +1804,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             });
         }
         accountRollback.restoreOwner();
-        if (changes.ledgerControl != null)
+        if (ledgerControl != null)
             throw new IllegalStateException("active Ledger rollback requires its asynchronous continuation");
         treasury.rollbackChangedValues();
         revision = revisionCheckpoint;
@@ -1850,8 +1822,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 账户控制任务活动时只累计本任务修订增量，其他情况通过元数据入口精确递增全局修订，溢出直接报错。 */
     public void incrementCommandRevision() {
         assertOwner();
-        if (coordinator.controlLanes.active()) {
-            coordinator.controlLanes.recordRevisionDelta();
+        if (controlLanes.active()) {
+            controlLanes.recordRevisionDelta();
             return;
         }
         setMetadata(productLine, Math.incrementExact(revision));
@@ -1868,7 +1840,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 取得本产品线当前风险扫描开关和预算配置。 */
     public CoreRiskScanControlView riskScanControl() {
         assertOwner();
-        return changes.riskScanControl;
+        return riskScanControl;
     }
 
     /** 要求不在不支持的订单批量修改范围，且配置非空，再替换当前风险扫描配置。 */
@@ -1876,7 +1848,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("risk-scan control");
         if (value == null) throw new IllegalArgumentException("risk scan control is required");
-        changes.riskScanControl = value;
+        riskScanControl = value;
     }
 
     /** 账户已启动时，要求当前已有账户命令范围或 Owner 已取得交接访问权。 */
@@ -1893,7 +1865,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (scoped != null) {
             return scoped.laneId() == laneId ? scoped.user(userId) : null;
         }
-        checkLaneAccess();
         AccountPartition lane = accountLanes[laneId];
         enterLaneCommandScope(lane);
         try {
@@ -1930,20 +1901,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
             IntObjectHashMap<AccountBalance> balances = scoped.userBalances(userId);
             return balances == null ? null : balances.get(assetId);
         }
-        checkLaneAccess();
         AccountPartition lane = accountLanes[laneId];
         enterLaneCommandScope(lane);
         try {
             return copyBalance(lane.userBalances(userId), assetId);
         } finally {
             exitLaneCommandScope(lane);
-        }
-    }
-
-    /** 活动 Owner 未持有账户访问权时拒绝直接读取，不在此自动等待账户交接。 */
-    private void checkLaneAccess() {
-        if (Thread.currentThread() == owner && accountLanesStarted() && !ownerLaneAccess()) {
-            throw new IllegalStateException("active account access must run on its owning Lane thread");
         }
     }
 
@@ -2178,7 +2141,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                     return null;
                 }
                 if (Thread.currentThread() == owner && scoped.pendingReservation(orderId)) {
-                    if (changedOrders.get(orderId) != null || coordinator.orderBatchMutationScope) {
+                    if (changedOrders.get(orderId) != null || orderBatchMutationScope) {
                         return order;
                     }
                     if (order.clientOrderId() != null && order.clientOrderId().startsWith("TRIGGER:")) {
@@ -2190,15 +2153,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             return null;
         }
-        if (changes.factIndexes != null) {
-            var route = changes.factIndexes.activeOrders().activeOrderRoute(orderId);
+        if (factIndexes != null) {
+            var route = factIndexes.activeOrders().activeOrderRoute(orderId);
             if (route != null) {
                 AccountPartition lane = accountLanes[topology.accountLaneId(route.userId())];
                 lane.assertOwner();
                 Order order = lane.order(orderId);
                 if (order != null) {
                     if (lane.pendingReservation(orderId)) {
-                        if (changedOrders.get(orderId) != null || coordinator.orderBatchMutationScope) {
+                        if (changedOrders.get(orderId) != null || orderBatchMutationScope) {
                             return order;
                         }
                         if (order.clientOrderId() != null && order.clientOrderId().startsWith("TRIGGER:")) {
@@ -2215,7 +2178,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             Order order = accountLanes[i].order(orderId);
             if (order != null) {
                 if (accountLanes[i].pendingReservation(orderId)) {
-                    if (changedOrders.get(orderId) != null || coordinator.orderBatchMutationScope) {
+                    if (changedOrders.get(orderId) != null || orderBatchMutationScope) {
                         return order;
                     }
                     if (order.clientOrderId() != null && order.clientOrderId().startsWith("TRIGGER:")) {
@@ -2241,7 +2204,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                     return null;
                 }
                 if (Thread.currentThread() == owner && scoped.pendingReservation(orderId)) {
-                    if (changedReservations.contains(orderId) || coordinator.orderBatchMutationScope) {
+                    if (changedReservations.contains(orderId) || orderBatchMutationScope) {
                         return reservation;
                     }
                     return null;
@@ -2250,15 +2213,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             return null;
         }
-        if (changes.factIndexes != null) {
-            var route = changes.factIndexes.activeOrders().activeOrderRoute(orderId);
+        if (factIndexes != null) {
+            var route = factIndexes.activeOrders().activeOrderRoute(orderId);
             if (route != null) {
                 AccountPartition lane = accountLanes[topology.accountLaneId(route.userId())];
                 lane.assertOwner();
                 OrderFundsReservation reservation = lane.reservation(orderId);
                 if (reservation != null) {
                     if (lane.pendingReservation(orderId)) {
-                        if (changedReservations.contains(orderId) || coordinator.orderBatchMutationScope) {
+                        if (changedReservations.contains(orderId) || orderBatchMutationScope) {
                             return reservation;
                         }
                         return null;
@@ -2272,7 +2235,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             OrderFundsReservation reservation = accountLanes[i].reservation(orderId);
             if (reservation != null) {
                 if (accountLanes[i].pendingReservation(orderId)) {
-                    if (changedReservations.contains(orderId) || coordinator.orderBatchMutationScope) {
+                    if (changedReservations.contains(orderId) || orderBatchMutationScope) {
                         return reservation;
                     }
                     continue;
@@ -2291,8 +2254,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (scoped != null) {
             return scoped.position(positionKey);
         }
-        if (changes.indexIdentities != null) {
-            var identity = changes.indexIdentities.positionIdentity(positionKey);
+        if (indexIdentities != null) {
+            var identity = indexIdentities.positionIdentity(positionKey);
             if (identity != null) {
                 AccountPartition lane = accountLanes[topology.accountLaneId(identity.userId())];
                 lane.assertOwner();
@@ -2318,7 +2281,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
                 scoped.symbolPositionKeys(symbolId);
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys = byUser == null ? null : byUser.get(userId);
-        return keys == null ? changes.EMPTY_POSITION_KEYS : keys;
+        return keys == null ? EMPTY_POSITION_KEYS : keys;
     }
 
     /** 当前有账户范围时只查该 Lane，否则要求有效账户读取权限后逐 Lane 查强平状态，返回借用引用。 */
@@ -2350,7 +2313,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean hasUnresolvedLiquidation(String instrumentId, int symbolId) {
         assertOwner();
         if (currentLaneCommandScope() != null) throw new IllegalStateException("instrument check belongs to Core owner");
-        if (changes.factIndexes != null) return changes.factIndexes.liquidations().hasUnresolved(
+        if (factIndexes != null) return factIndexes.liquidations().hasUnresolved(
                 symbolId < 0 ? null : instrumentId);
         requireAccountReadOwnership();
         for (AccountPartition lane : accountLanes) {
@@ -2392,14 +2355,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 按内部标的身份取得当前风险扫描续步状态。 */
     public RiskScanner.State riskScan(int symbolId) {
         assertOwner();
-        return changes.riskScans.get(symbolId);
+        return riskScans.get(symbolId);
     }
 
     /** 在整体 complete 标记尚未结束的扫描中，选择标的内部身份最小的一条。 */
     public RiskScanner.State firstIncompleteRiskScan() {
         assertOwner();
         RiskScanner.State selected = null;
-        for (RiskScanner.State scan : changes.riskScans.values()) {
+        for (RiskScanner.State scan : riskScans.values()) {
             if (!scan.complete()
                     && (selected == null || scan.symbolId() < selected.symbolId())) {
                 selected = scan;
@@ -2412,7 +2375,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public RiskScanner.State firstRiskIncompleteScan() {
         assertOwner();
         RiskScanner.State selected = null;
-        for (RiskScanner.State scan : changes.riskScans.values()) {
+        for (RiskScanner.State scan : riskScans.values()) {
             if (!scan.riskComplete() && (selected == null
                     || compareRiskProgress(scan, selected) < 0)) {
                 selected = scan;
@@ -2431,7 +2394,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public int incompleteRiskScanCount() {
         assertOwner();
         int count = 0;
-        for (RiskScanner.State scan : changes.riskScans.values()) {
+        for (RiskScanner.State scan : riskScans.values()) {
             if (!scan.complete()) {
                 count++;
             }
@@ -2442,7 +2405,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 读取下一个强平身份数值。 */
     public long nextLiquidationId() {
         assertOwner();
-        return changes.nextLiquidationId;
+        return nextLiquidationId;
     }
 
     /** 在实际财库拥有者线程上物化不可变财库导出值，不把财库所有权交给 Owner。 */
@@ -2454,16 +2417,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public <T> T queryLedgerAtRest(java.util.function.Function<TreasuryRuntime, T> read) {
         assertOwner();
         java.util.Objects.requireNonNull(read, "Ledger read is required");
-        if (changes.ledgerControl != null) throw new IllegalStateException("Treasury query requires committed control work");
+        if (ledgerControl != null) throw new IllegalStateException("Treasury query requires committed control work");
         return read.apply(treasury);
     }
 
     /** 确认已有财务控制已完成财务阶段，再就地发布该范围内的持仓索引，供风险读取。 */
     public void publishRiskPositionInputs() {
         assertOwner();
-        if (changes.ledgerControl != null && !changes.ledgerControl.allowsRiskInput())
+        if (ledgerControl != null && !ledgerControl.allowsRiskInput())
             throw new IllegalStateException("risk input requires a completed financial phase before scope close");
-        if (changes.ledgerControl != null) changes.ledgerControl.publishRiskPositionInputs();
+        if (ledgerControl != null) ledgerControl.publishRiskPositionInputs();
     }
 
     /** 借出唯一财库引用，账户命令范围内禁止取得。账本激活后仍须遵守财库自己的线程检查，这个引用不转移所有权。 */
@@ -2582,19 +2545,19 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 收集已经完成的杠杆变化并按需捕获实时值，账户任务不直接操作共享捕获器。 */
     public void recordLeverageChange(CoreLeverageKey key, long leveragePpm) {
         assertOwner();
-        changes.changedLeverages.add(key);
-        if (changes.realtimeCapture != null) changes.realtimeCapture.leverage(key, leveragePpm);
+        changedLeverages.add(key);
+        if (realtimeCapture != null) realtimeCapture.leverage(key, leveragePpm);
     }
 
     /** 取得事实索引中的算法单路由，尚未绑定索引时返回空。 */
     public com.surprising.aeron.service.core.index.AlgoOrderIndex.AlgoRoute algoRoute(long id) {
-        assertOwner(); return changes.factIndexes == null ? null : changes.factIndexes.algos().value(id);
+        assertOwner(); return factIndexes == null ? null : factIndexes.algos().value(id);
     }
 
     /** 优先取已有触发单路由。 */
     public com.surprising.aeron.service.core.index.TriggerOrderIndex.TriggerRoute triggerRoute(long id) {
         assertOwner();
-        if (changes.factIndexes != null) return changes.factIndexes.triggers().route(id);
+        if (factIndexes != null) return factIndexes.triggers().route(id);
         requireAccountReadOwnership();
         var value = triggerOrder(id);
         return value == null ? null : com.surprising.aeron.service.core.index.TriggerOrderIndex.TriggerRoute.from(value);
@@ -2625,7 +2588,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void publishAlgoOrder(CoreAlgoOrderState order) {
         assertOwner();
         AccountPartition scoped = currentLaneCommandScope();
-        if (scoped == null) changes.changedAlgoOrders.put(order.algoOrderId(), order);
+        if (scoped == null) changedAlgoOrders.put(order.algoOrderId(), order);
         else laneDelta(scoped.laneId()).putAlgo(order.algoOrderId(), order);
     }
 
@@ -2644,7 +2607,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 读取用户及标的范围对应的定时全撤状态。 */
     public CoreCancelAllAfterState cancelAllAfterTimer(CoreCancelAllAfterKey key) {
         assertOwner();
-        return changes.cancelAllAfterTimers.get(key);
+        return cancelAllAfterTimers.get(key);
     }
 
     /** 校验业务键与定时器非空，写入定时全撤表并记录变化键。 */
@@ -2652,8 +2615,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("timer state");
         if (key == null || timer == null) throw new IllegalArgumentException("invalid runtime cancel-all-after timer");
-        changes.cancelAllAfterTimers.put(key, timer);
-        changes.changedCancelAllAfterTimers.add(key);
+        cancelAllAfterTimers.put(key, timer);
+        changedCancelAllAfterTimers.add(key);
     }
 
     /** 核对用户后按用户及币对范围读旧计时器。 */
@@ -2728,7 +2691,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /** 读取本命令已经收集的触发单变化，保留到有序发布清理结束。 */
-    public CoreTriggerOrderState changedTriggerOrder(long id) { assertOwner(); return changes.changedTriggerOrders.get(id); }
+    public CoreTriggerOrderState changedTriggerOrder(long id) { assertOwner(); return changedTriggerOrders.get(id); }
 
     /** 当前有账户范围时只查该 Lane，否则在有效账户权限下逐 Lane 读取触发单。 */
     public CoreTriggerOrderState triggerOrder(long triggerOrderId) {
@@ -2797,7 +2760,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 借出定时全撤原映射，沿用 Owner 与恢复边界，不返回独立副本。 */
     public Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimersForRuntime() {
         assertOwner();
-        return changes.cancelAllAfterTimers;
+        return cancelAllAfterTimers;
     }
 
     /** 在所属账户触发单索引中检查客户触发单号是否存在。 */
@@ -2975,21 +2938,21 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 取得当前不可变费用政策版本，沿用其已有读写边界。 */
     public FeePolicyBook feePolicyBook() {
         assertOwner();
-        return changes.feePolicies;
+        return feePolicies;
     }
 
     /** 取得当前费用政策书提供的快照映射。 */
     public Map<Long, CoreFeePolicyState> feePoliciesSnapshot() {
         assertOwner();
-        return changes.feePolicies.snapshot();
+        return feePolicies.snapshot();
     }
 
     /** 要求账户已停止，从恢复映射重建费用政策版本，并清空政策变化身份。 */
     public void restoreFeePolicies(Map<Long, CoreFeePolicyState> restored) {
         assertOwner();
         if (accountLanesStarted()) throw new IllegalStateException("fee policy restore requires stopped Lanes");
-        changes.feePolicies = FeePolicyBook.from(restored);
-        changes.changedFeePolicies.clear();
+        feePolicies = FeePolicyBook.from(restored);
+        changedFeePolicies.clear();
     }
 
     /** 活动阶段只允许配置 Lane 0 修改，构造并合并不可变政策版本。内容未变直接返回，否则登记变化并推进命令修订。 */
@@ -2999,11 +2962,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
             throw new IllegalStateException("active fee policy updates must run on configuration Lane 0");
         rejectUnsupportedOrderBatchMutation("fee-policy state");
         CoreFeePolicyState next = CoreFeePolicyState.from(command);
-        FeePolicyBook updated = changes.feePolicies.upsert(next);
-        if (updated == changes.feePolicies) return;
+        FeePolicyBook updated = feePolicies.upsert(next);
+        if (updated == feePolicies) return;
         requireRevisionCapacity();
-        changes.feePolicies = updated;
-        changes.changedFeePolicies.add(next.policyId());
+        feePolicies = updated;
+        changedFeePolicies.add(next.policyId());
         incrementCommandRevision();
     }
 
@@ -3026,8 +2989,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         source.leverages().forEach(this::putLeverage);
         source.algoOrders().values().forEach(this::putAlgoOrder);
-        changes.cancelAllAfterTimers.clear();
-        changes.cancelAllAfterTimers.putAll(source.cancelAllAfterTimers());
+        cancelAllAfterTimers.clear();
+        cancelAllAfterTimers.putAll(source.cancelAllAfterTimers());
         source.triggerOrders().values().forEach(this::putTriggerOrder);
     }
 
@@ -3401,7 +3364,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             return null;
         });
         if (currentLaneCommandScope() == null) {
-            changes.changedLiquidations.put(liquidation.liquidationId(), liquidation);
+            changedLiquidations.put(liquidation.liquidationId(), liquidation);
         }
         markUserChanged(liquidation.userId());
     }
@@ -3411,7 +3374,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("mark-price state");
         markPrices.put(markPrice.symbolId(), markPrice);
-        changes.changedMarkPrices.add(markPrice.symbolId());
+        changedMarkPrices.add(markPrice.symbolId());
     }
 
     /** 保存用户及风险快照前值，在所属 Lane 写入并交出变化，登记相关用户。 */
@@ -3433,8 +3396,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void putRiskScan(RiskScanner.State scan) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("risk-scan state");
-        changes.riskScans.put(scan.symbolId(), scan);
-        changes.changedRiskScans.add(scan.symbolId());
+        riskScans.put(scan.symbolId(), scan);
+        changedRiskScans.add(scan.symbolId());
     }
 
     /** Owner 校验期望控制版本，生成下一版本的启用、间隔和工作量配置。 */
@@ -3469,7 +3432,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void setMarketRevision(long value) {
         assertOwner();
         if (value < 0) throw new IllegalArgumentException("invalid market revision");
-        changes.marketRevision = value;
+        marketRevision = value;
     }
 
     /** 禁止订单批量交叉修改，校验正值后保存下一个强平身份。 */
@@ -3477,7 +3440,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("liquidation sequence");
         if (value <= 0) throw new IllegalArgumentException("invalid next liquidation id");
-        changes.nextLiquidationId = value;
+        nextLiquidationId = value;
     }
 
     /** 要求原强平存在，先移除旧活动索引，按新用户保存并重建索引。 */
@@ -3505,7 +3468,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             return null;
         });
         if (currentLaneCommandScope() == null) {
-            changes.changedLiquidations.put(liquidation.liquidationId(), liquidation);
+            changedLiquidations.put(liquidation.liquidationId(), liquidation);
         }
         markUserChanged(liquidation.userId());
         markUserChanged(previous.userId());
@@ -3697,19 +3660,19 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /** 接入可空实时捕获器，不在此启动输出线程。 */
-    public void realtimeCapture(TradingRealtimeBoundary.StateCapture capture) { assertOwner(); changes.realtimeCapture = capture; }
+    public void realtimeCapture(TradingRealtimeBoundary.StateCapture capture) { assertOwner(); realtimeCapture = capture; }
 
     /** 实时捕获器存在时记录用户元数据，捕获运行时异常只记失败。 */
     public void captureUserMetadata(com.surprising.aeron.service.account.UserAccount value) {
-        if (changes.realtimeCapture == null) return;
-        try { changes.realtimeCapture.metadata(value); }
-        catch (RuntimeException failure) { changes.realtimeCapture.failed(); }
+        if (realtimeCapture == null) return;
+        try { realtimeCapture.metadata(value); }
+        catch (RuntimeException failure) { realtimeCapture.failed(); }
     }
     /** 实时捕获器存在时记录预留变化，捕获运行时异常只记失败。 */
     public void captureReservation(OrderFundsReservation value) {
-        if (changes.realtimeCapture == null) return;
-        try { changes.realtimeCapture.reservation(value); }
-        catch (RuntimeException failure) { changes.realtimeCapture.failed(); }
+        if (realtimeCapture == null) return;
+        try { realtimeCapture.reservation(value); }
+        catch (RuntimeException failure) { realtimeCapture.failed(); }
     }
 
     /** 启用私有捕获时导出本命令风险、订单和持仓变化。 */
@@ -3723,7 +3686,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 changedReservations.forEach(id -> capture.reservation(reservation(id)));
             }
             changedOrders.forEach((orderId, value) -> capture.order(value));
-            changes.changedPositions.forEach((positionKey, value) -> {
+            changedPositions.forEach((positionKey, value) -> {
                 if(value==null)capture.removedPosition(currentPatchPositionBefore(positionKey));else capture.position(value);
             });
         } catch (RuntimeException failure) { capture.failed(); }
@@ -3770,7 +3733,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 活动账户没有当前范围时要求已有持仓收据。 */
     void changedPosition(long positionKey) {
         if (currentLaneCommandScope() == null && accountLanesStarted()) {
-            if (!changes.changedPositions.containsKey(positionKey))
+            if (!changedPositions.containsKey(positionKey))
                 throw new IllegalStateException("position change requires a collected Lane receipt: " + positionKey);
             return;
         }
@@ -3780,57 +3743,57 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 把持仓变化或空删除值交给当前 Lane 容器或 Owner 缓冲。 */
     void changedPosition(long positionKey, Position position) {
         AccountPartition lane = currentLaneCommandScope();
-        if (lane == null) changes.changedPositions.put(positionKey, position);
+        if (lane == null) changedPositions.put(positionKey, position);
         else laneDelta(lane.laneId()).putPosition(positionKey, position);
     }
 
     /** 借出当前持仓变化键的原始迭代器，消费期间保留变化缓冲有效。 */
     public org.eclipse.collections.api.iterator.LongIterator changedPositionIterator() {
         assertOwner();
-        return changes.changedPositions.longIterator();
+        return changedPositions.longIterator();
     }
 
     /** 判断本命令持仓变化缓冲是否非空。 */
     public boolean hasChangedPositions() {
         assertOwner();
-        return !changes.changedPositions.isEmpty();
+        return !changedPositions.isEmpty();
     }
 
     /** 遍历直接及保留 Lane 变化缓冲，直接更新运行时绑定的事实索引。 */
     public void applyChangedIndexes() {
         assertOwner();
-        if (changes.factIndexes == null) throw new IllegalStateException("fact indexes are not bound");
+        if (factIndexes == null) throw new IllegalStateException("fact indexes are not bound");
         applyChangedOrderIndexes(changedOrders.directBuffer());
         long remaining = changedOrders.retainedLaneMask();
         while (remaining != 0) {
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
             applyChangedOrderIndexes(changedOrders.laneBuffer(laneId));
         }
-        for (int index = 0; index < changes.changedLiquidations.size(); index++) {
-            RiskScanner.LiquidationOrder value = changes.changedLiquidations.valueAt(index);
-            if (changes.realtimeCapture != null && changes.realtimeCapture.active()) {
-                try { changes.realtimeCapture.liquidation(value); }
-                catch (RuntimeException failure) { changes.realtimeCapture.failed(); }
+        for (int index = 0; index < changedLiquidations.size(); index++) {
+            RiskScanner.LiquidationOrder value = changedLiquidations.valueAt(index);
+            if (realtimeCapture != null && realtimeCapture.active()) {
+                try { realtimeCapture.liquidation(value); }
+                catch (RuntimeException failure) { realtimeCapture.failed(); }
             }
-            changes.factIndexes.liquidations().apply(changes.changedLiquidations.keyAt(index), value, changes.indexIdentities);
+            factIndexes.liquidations().apply(changedLiquidations.keyAt(index), value, indexIdentities);
         }
-        for (int index = 0; index < changes.changedAlgoOrders.size(); index++)
-            changes.factIndexes.algos().apply(changes.changedAlgoOrders.keyAt(index), changes.changedAlgoOrders.valueAt(index));
-        for (int index = 0; index < changes.changedTriggerOrders.size(); index++) {
-            long triggerOrderId = changes.changedTriggerOrders.keyAt(index);
-            CoreTriggerOrderState value = changes.changedTriggerOrders.valueAt(index);
-            if (changes.realtimeCapture != null && changes.realtimeCapture.active()) {
-                try { changes.realtimeCapture.trigger(value); } catch (RuntimeException failure) { changes.realtimeCapture.failed(); }
+        for (int index = 0; index < changedAlgoOrders.size(); index++)
+            factIndexes.algos().apply(changedAlgoOrders.keyAt(index), changedAlgoOrders.valueAt(index));
+        for (int index = 0; index < changedTriggerOrders.size(); index++) {
+            long triggerOrderId = changedTriggerOrders.keyAt(index);
+            CoreTriggerOrderState value = changedTriggerOrders.valueAt(index);
+            if (realtimeCapture != null && realtimeCapture.active()) {
+                try { realtimeCapture.trigger(value); } catch (RuntimeException failure) { realtimeCapture.failed(); }
             }
-            changes.factIndexes.triggers().apply(triggerOrderId, value);
+            factIndexes.triggers().apply(triggerOrderId, value);
         }
-        if (!changes.changedCancelAllAfterTimers.isEmpty())
-            for (var key : changes.changedCancelAllAfterTimers) changes.factIndexes.timers().apply(key, cancelAllAfterTimer(key));
+        if (!changedCancelAllAfterTimers.isEmpty())
+            for (var key : changedCancelAllAfterTimers) factIndexes.timers().apply(key, cancelAllAfterTimer(key));
     }
 
     private void applyChangedOrderIndexes(StateChangeBuffer<Order> orders) {
         for (int index = 0; index < orders.size(); index++)
-            changes.factIndexes.activeOrders().apply(orders.keyAt(index), orders.valueAt(index), changes.indexIdentities);
+            factIndexes.activeOrders().apply(orders.keyAt(index), orders.valueAt(index), indexIdentities);
     }
 
     /** 日志发布后先处理风险与持仓身份退休，再清变化容器并执行普通提交清理。 */
@@ -3841,17 +3804,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
             long positionKey = changedRiskSnapshots.keyAt(index);
             if (changedRiskSnapshots.valueAt(index) == null && changedRiskSnapshots.hasPreparedAt(index)
                     && Boolean.TRUE.equals(changedRiskSnapshots.preparedAt(index))
-                    && changes.changedPositions.get(positionKey) == null)
+                    && changedPositions.get(positionKey) == null)
                 releaseRetiredPositionIdentity(identities, positionKey);
         }
         changedRiskSnapshots.clear();
-        releaseRetiredPositionIdentities(identities, changes.changedPositions.directBuffer());
-        long remaining = changes.changedPositions.retainedLaneMask();
+        releaseRetiredPositionIdentities(identities, changedPositions.directBuffer());
+        long remaining = changedPositions.retainedLaneMask();
         while (remaining != 0) {
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-            releaseRetiredPositionIdentities(identities, changes.changedPositions.laneBuffer(laneId));
+            releaseRetiredPositionIdentities(identities, changedPositions.laneBuffer(laneId));
         }
-        changes.changedPositions.clear();
+        changedPositions.clear();
         clearChangedKeys();
     }
 
@@ -3863,7 +3826,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /** 只有风险记录不再持有该键时才请求身份表释放持仓身份。 */
     void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
-        if (!changes.riskPositionIdentities.contains(positionKey)) {
+        if (!riskPositionIdentities.contains(positionKey)) {
             identities.releasePositionKey(positionKey);
         }
     }
@@ -3873,7 +3836,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                                       CoreInstrument instrument, Order order) {
         if (!productLine.isDerivative()) return;
         TradeSettlement.Changes changes = lane.matcherSettlementChanges();
-        if (changes == null || !changes.directPositionIdentities() || (!lane.commandScopeActive() && coordinator.ownerLaneScope != lane))
+        if (changes == null || !changes.directPositionIdentities() || (!lane.commandScopeActive() && ownerLaneScope != lane))
             throw new IllegalStateException("direct position identity requires its settlement Lane");
         long key = order.positionIdentityKey();
         var output = changes.laneDelta(lane.laneId()).positions();
@@ -3893,8 +3856,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 活动财务控制已有专用槽时沿用其校验。否则仅在账户余额或持仓有变化时同步校验。校验失败直接抛出，财务范围关闭仍需后续提交或回滚。 */
     public void validateControlFunds(boolean externalAdjustment) {
         assertOwner();
-        if (changes.ledgerControl != null) {
-            changes.ledgerControl.validateFunds(externalAdjustment);
+        if (ledgerControl != null) {
+            ledgerControl.validateFunds(externalAdjustment);
             return;
         }
         boolean accountFundsChanged = false;
@@ -3902,13 +3865,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
             AccountTransactionRollback.BalancePatches patches = accountRollback.balancePatch(laneIndex);
             accountFundsChanged |= patches.size() != 0;
         }
-        if (!accountFundsChanged && changes.changedPositions.isEmpty()) return;
-        if (!coordinator.controlFundsValidated) {
-            appendControlAccountFunds(coordinator.controlValidationFunds);
-            coordinator.controlValidationFunds.requireConserved(externalAdjustment);
-            coordinator.controlValidationFunds.clear();
-            applyLedgerControlPositions(coordinator.controlPositionUndo);
-            coordinator.controlFundsValidated = true;
+        if (!accountFundsChanged && changedPositions.isEmpty()) return;
+        if (!controlFundsValidated) {
+            appendControlAccountFunds(controlValidationFunds);
+            controlValidationFunds.requireConserved(externalAdjustment);
+            controlValidationFunds.clear();
+            applyLedgerControlPositions(controlPositionUndo);
+            controlFundsValidated = true;
         }
     }
 
@@ -3957,38 +3920,38 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 提交或回滚收尾时清当前命令变化，按冷财库或活动控制槽结束财务范围，再发布清余额补丁并请求独立资金校验关闭。 */
     public void clearChangedKeys() {
         assertOwner();
-        changes.balancesChanged = false;
+        balancesChanged = false;
         accountRollback.clearNonBalanceImages();
         clearChanged(changedUsers);
         changedOrders.clear();
         clearChanged(changedReservations);
-        changes.changedPositions.clear();
-        changes.changedLiquidations.clear();
-        clearChanged(changes.changedMarkPrices);
+        changedPositions.clear();
+        changedLiquidations.clear();
+        clearChanged(changedMarkPrices);
         changedRiskSnapshots.clear();
-        clearChanged(changes.changedRiskScans);
-        changes.changedLeverages.clear();
-        changes.changedAlgoOrders.clear();
-        changes.changedCancelAllAfterTimers.clear();
-        changes.changedTriggerOrders.clear();
-        clearChanged(changes.changedFeePolicies);
-        if (changes.ledgerControl != null) {
-            changes.ledgerControl.commitScope();
-            changes.ledgerControl = null;
+        clearChanged(changedRiskScans);
+        changedLeverages.clear();
+        changedAlgoOrders.clear();
+        changedCancelAllAfterTimers.clear();
+        changedTriggerOrders.clear();
+        clearChanged(changedFeePolicies);
+        if (ledgerControl != null) {
+            ledgerControl.commitScope();
+            ledgerControl = null;
         } else {
             treasury.clearChangedKeys();
         }
         accountRollback.publishAndClearBalances();
-        if (coordinator.controlFundsValidated) {
-            coordinator.controlPositionUndo.clear();
-            coordinator.controlFundsValidated = false;
+        if (controlFundsValidated) {
+            controlPositionUndo.clear();
+            controlFundsValidated = false;
         }
     }
 
     /** 清空非空长整数变化集合，原数量达到压缩阈值时再压缩内部容量。 */
     static void clearChanged(LongHashSet values) {
         if (values.isEmpty()) return;
-        boolean compact = values.size() >= PartitionCoordinator.CHANGE_KEY_COMPACTION_THRESHOLD;
+        boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
         values.clear();
         if (compact) values.compact();
     }
@@ -3996,7 +3959,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 清空非空整数变化集合，原数量达到阈值时压缩内部容量。 */
     static void clearChanged(IntHashSet values) {
         if (values.isEmpty()) return;
-        boolean compact = values.size() >= PartitionCoordinator.CHANGE_KEY_COMPACTION_THRESHOLD;
+        boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
         values.clear();
         if (compact) values.compact();
     }
@@ -4094,12 +4057,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /** 借出原风险扫描映射，由外层快照边界保护读取。 */
     public IntObjectHashMap<RiskScanner.State> riskScansForSnapshot() {
-        return changes.riskScans;
+        return riskScans;
     }
 
     public int riskScanCount() {
         assertOwner();
-        return changes.riskScans.size();
+        return riskScans.size();
     }
 
     /** 校验已准备订单与预留的身份、用户、标的和数量一致，再以预留剩余量调用冻结安装入口。 */
@@ -4189,14 +4152,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
         AccountPartition lane = currentLaneCommandScope();
         if (lane == null || lane.laneId() != topology.accountLaneId(userId))
             throw new IllegalStateException("active order creation requires its Account Lane");
-        return lane.preparedOrder(productLine, userId, command, commandId, symbolId, 0, 0, coordinator.retiredOwnerSequence);
+        return lane.preparedOrder(productLine, userId, command, commandId, symbolId, 0, 0, retiredOwnerSequence);
     }
 
     /** 校验所属范围、身份、客户号及可用余额，选择已准备值或 Lane 池订单，冻结资金并写入预留、索引及用户修订。仅未传 prepared 时自行登记待预留，普通临时下单不保存控制命令回滚前值。 */
     public void placeOrderInLane(AccountPartition lane, long userId, OrderCommand.ResolvedPlaceOrder command,
             java.util.UUID commandId, long requiredReservation, long clientKey,
             int symbolId, int assetId, long coreSequence, Order prepared, long timestamp, long position) {
-        if (lane == null || !(lane.commandScopeActive() || Thread.currentThread() == owner && coordinator.ownerLaneScope == lane)
+        if (lane == null || !(lane.commandScopeActive() || Thread.currentThread() == owner && ownerLaneScope == lane)
                 || lane.laneId() != topology.accountLaneId(userId)
                 || command == null || commandId == null || userId <= 0 || requiredReservation <= 0
                 || clientKey < 0 || symbolId < 0 || assetId < 0 || coreSequence <= 0) {
@@ -4219,7 +4182,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         Order order = prepared != null && !prepared.commandSlotValue() ? prepared
                 : accountLanesStarted()
-                ? lane.preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position, coordinator.retiredOwnerSequence)
+                ? lane.preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position, retiredOwnerSequence)
                 : preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position);
         OrderFundsReservation reservation = order.prepareReservation(
                 command.reservationKind(), assetId, requiredReservation);
@@ -4270,7 +4233,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /** 没有当前账户范围时设置 Owner 余额变化标记。 */
     public void markBalancesChanged() {
-        if (currentLaneCommandScope() == null) changes.balancesChanged = true;
+        if (currentLaneCommandScope() == null) balancesChanged = true;
     }
 
     public static void putClientOrderIndex(AccountPartition lane, long userId, long clientKey, long orderId) {
@@ -4311,7 +4274,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (admission == null) throw new IllegalArgumentException("place admission is missing");
         OrderCommand.ResolvedPlaceOrder resolved = admission.matchingOrder();
         ensureLaneWorkerCapacity(laneMask);
-        TradeSettlement event = coordinator.matcherSettlementEventPool.pollFirst();
+        TradeSettlement event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new TradeSettlement();
         TradeSettlement.BatchStorage storage = event.batchStorage(1);
         CoreInstrument instrument = instrument(identities.instrumentId(resolved.symbolId()));
@@ -4348,7 +4311,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (count <= 0 || replacement == null && single == null && (orders == null || count > orders.length))
             throw new IllegalArgumentException("direct settlement admission is missing");
         ensureLaneWorkerCapacity(laneMask);
-        TradeSettlement event = coordinator.matcherSettlementEventPool.pollFirst();
+        TradeSettlement event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new TradeSettlement();
         TradeSettlement.BatchStorage storage = event.batchStorage(count);
         if (replacement != null) {
@@ -4412,7 +4375,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (userId <= 0 || orderId <= 0) throw new IllegalArgumentException("cancel order is missing");
         long laneMask = topology.accountLaneMask(userId);
         ensureLaneWorkerCapacity(laneMask);
-        TradeSettlement event = coordinator.matcherSettlementEventPool.pollFirst();
+        TradeSettlement event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new TradeSettlement();
         event.batchStorage(1).cancellationOrderIds[0] = orderId;
         event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
@@ -4429,7 +4392,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (count <= 0 || count > orders.length) throw new IllegalArgumentException("invalid cancel chunk");
         long mask = topology.accountLaneMask(userId);
         ensureLaneWorkerCapacity(mask);
-        TradeSettlement event = coordinator.matcherSettlementEventPool.pollFirst();
+        TradeSettlement event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new TradeSettlement();
         System.arraycopy(orders, 0, event.batchStorage(count).cancellationOrderIds, 0, count);
         event.prepareDirect(sequence, finalChunk ? sequence : 0, mask, timestamp, position, commandId, shard,
@@ -4462,7 +4425,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         if (event == null) return;
         event.clear();
-        coordinator.matcherSettlementEventPool.addFirst(event);
+        matcherSettlementEventPool.addFirst(event);
     }
 
     /** Owner 丢弃已完成的拒绝等直达事件。 */
@@ -4474,7 +4437,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             releaseMatcherSettlementChanges(event.takeChanges());
         }
         event.clear();
-        coordinator.matcherSettlementEventPool.addFirst(event);
+        matcherSettlementEventPool.addFirst(event);
     }
 
     /** 在批量账户作用域中等待本项结算完成，先把余额前后值按顺序接入批次回滚边界，再交既有收集入口处理变化。 */
@@ -4496,7 +4459,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 借出包含直接与保留 Lane 输出的订单变化容器。 */
     public StateChangeBuffer.OwnerIndexed<Order, Void> orderChanges() { return changedOrders; }
     /** 借出包含持仓值及已准备索引的变化容器。 */
-    public StateChangeBuffer.OwnerIndexed<Position, Position.IndexValue> positionChanges() { return changes.changedPositions; }
+    public StateChangeBuffer.OwnerIndexed<Position, Position.IndexValue> positionChanges() { return changedPositions; }
 
     /** 按数组下标借出原账户 Lane，调用方保证下标及访问边界有效。 */
     public AccountPartition accountLane(int index) { return accountLanes[index]; }
@@ -4508,9 +4471,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 直接向 Owner 变化集合加入预留订单身份。 */
     public void changedReservation(long orderId) { changedReservations.add(orderId); }
     /** 登记仍由风险记录持有的持仓身份，延后其退休释放。 */
-    public void addRiskPositionIdentity(long key) { changes.riskPositionIdentities.add(key); }
+    public void addRiskPositionIdentity(long key) { riskPositionIdentities.add(key); }
     /** 取消风险记录对持仓身份的保留标记。 */
-    public void removeRiskPositionIdentity(long key) { changes.riskPositionIdentities.remove(key); }
+    public void removeRiskPositionIdentity(long key) { riskPositionIdentities.remove(key); }
     /** 直接恢复调用方提供的修订值，不在此校验或推进业务。 */
     public void restoreRevision(long value) { revision = value; }
 
@@ -4654,48 +4617,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         incrementCommandRevision();
     }
 
-    public void upsertTriggerOrder(long userId,
-                                   CoreTriggerOrderStateView view, int symbolId,
-                                   long positionKey, boolean instrumentSettled) {
-        triggerOps.upsertTriggerOrder(userId, view, symbolId, positionKey, instrumentSettled);
-    }
-
-    public void placeOcoPair(long userId,
-                             CoreTriggerOrderStateView takeProfit, CoreTriggerOrderStateView stopLoss,
-                             int symbolId, long positionKey, boolean instrumentSettled) {
-        triggerOps.placeOcoPair(userId, takeProfit, stopLoss, symbolId, positionKey, instrumentSettled);
-    }
-
-    public boolean cancelTriggerOrder(long userId, long triggerOrderId) {
-        return triggerOps.cancelTriggerOrder(userId, triggerOrderId);
-    }
-
-    public boolean cancelPendingTriggerOrderForCommit(long triggerId) {
-        return triggerOps.cancelPendingTriggerOrderForCommit(triggerId);
-    }
-
-    public boolean claimTriggerOrder(long triggerOrderId, long triggerSequence,
-                                    long triggeredPriceTicks, long triggeredAtEpochMillis) {
-        return triggerOps.claimTriggerOrder(triggerOrderId, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis);
-    }
-
-    public boolean completeTriggerOrder(long triggerOrderId, boolean success,
-                                       long placedOrderId, String rejectReason, long completedAtEpochMillis) {
-        return triggerOps.completeTriggerOrder(triggerOrderId, success, placedOrderId, rejectReason, completedAtEpochMillis);
-    }
-
-    public boolean updateTrailingTriggerOrder(long triggerOrderId,
-                                             long highestPriceTicks, long lowestPriceTicks,
-                                             long activatedAtEpochMillis) {
-        return triggerOps.updateTrailingTriggerOrder(triggerOrderId, highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis);
-    }
-
-    public boolean expireTriggerOrder(long triggerOrderId, long expiredAtEpochMillis) {
-        return triggerOps.expireTriggerOrder(triggerOrderId, expiredAtEpochMillis);
-    }
-
-    public boolean retryTriggerOrder(long triggerOrderId,
-                                    long staleBeforeEpochMillis, long retryAtEpochMillis) {
-        return triggerOps.retryTriggerOrder(triggerOrderId, staleBeforeEpochMillis, retryAtEpochMillis);
+    /** 条件单状态操作入口，与本运行时共用 Lane 所有权。 */
+    public TriggerOrderOperations triggerOrders() {
+        return triggerOps;
     }
 }

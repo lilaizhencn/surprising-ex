@@ -87,7 +87,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
         try {
             LongArrayList ids = triggerCancelIds[laneId];
             for (int index = 0; index < ids.size(); index++)
-                if (runtime.cancelPendingTriggerOrderForCommit(ids.get(index)))
+                if (runtime.triggerOrders().cancelPendingTriggerOrderForCommit(ids.get(index)))
                     canceledTriggers[laneId]++;
         } finally { runtime.exitLaneCommandScope(lane); }
     }

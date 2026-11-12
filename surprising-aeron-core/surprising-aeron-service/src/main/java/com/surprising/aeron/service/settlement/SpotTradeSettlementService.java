@@ -64,13 +64,13 @@ public final class SpotTradeSettlementService {
             if (match.eventType() != MatcherEventType.TRADE
                     || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
             if (localTaker != null) {
-                localTaker = requireOpen(lane, takerOrderId);
+                localTaker = TradeSettlement.requireOpen(lane, takerOrderId);
                 localTaker = applyFill(runtime, lane, instrument, localTaker, match.price(), match.size(), true,
                         baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
             }
             Order maker = lane.order(match.matchedOrderId());
             if (maker != null) {
-                maker = requireOpen(maker, maker.orderId());
+                maker = TradeSettlement.requireOpen(maker, maker.orderId());
                 boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
                 maker = applyFill(runtime, lane, instrument, maker, match.price(), match.size(),
                         false, baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
@@ -200,7 +200,7 @@ public final class SpotTradeSettlementService {
         void apply(long orderId, boolean taker, long price, long quantity, RuntimeTreasuryDelta treasury) {
             SpotFillCursor cursor = cursors.get(orderId);
             if (cursor == null) {
-                Order order = requireOpen(lane, orderId);
+                Order order = TradeSettlement.requireOpen(lane, orderId);
                 OrderFundsReservation reservation = lane.reservation(orderId);
                 if (reservation == null || reservation.userId() != order.userId()) {
                     throw new IllegalStateException("runtime spot reservation is missing");
@@ -387,21 +387,7 @@ public final class SpotTradeSettlementService {
 
     /** 只在原 Matcher 结算作用域释放终态订单的剩余预留，实际释放金额为正才增加用户修订。 */
     static void releaseTerminalReservation(TradingAccountRuntime runtime, AccountPartition lane, long orderId) {
-        Order order = lane.order(orderId);
-        if (order == null || !order.canceled()) return;
-        long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
-        if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
-    }
-
-    private static Order requireOpen(AccountPartition lane, long orderId) {
-        Order order = lane.order(orderId);
-        return requireOpen(order, orderId);
-    }
-
-    private static Order requireOpen(Order order, long orderId) {
-        if (order == null || order.canceled() || order.remainingQuantitySteps() == 0)
-            throw new IllegalStateException("runtime matched order is not open: " + orderId);
-        return order;
+        TradeSettlement.releaseCanceledReservation(runtime, lane, lane.order(orderId));
     }
 
 }

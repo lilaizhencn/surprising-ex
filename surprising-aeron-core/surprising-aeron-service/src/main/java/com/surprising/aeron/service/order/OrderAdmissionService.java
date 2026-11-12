@@ -152,13 +152,6 @@ public final class OrderAdmissionService {
                 List.of(), owner.decodeMatchingCommand(command), null);
     }
 
-    /** 使用已有指纹并解码输入，按空前置撤单、无来源资金和空准入借槽。 */
-    OrderCommand newPendingMatching(long sequence, OrderCommand.Operation operation,
-                                   CoreMessage command, CommandFingerprint fingerprint) {
-        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
-                owner.decodeMatchingCommand(command), null);
-    }
-
     /** 复用已经解码的输入借槽，前置撤单先为空。 */
     OrderCommand newPendingMatching(long sequence, OrderCommand.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint,
@@ -986,10 +979,8 @@ public final class OrderAdmissionService {
             throw new IllegalArgumentException("invalid order decision input");
         }
         runtime.assertOwner();
-        CoreInstrument instrument = runtime.instrument(intent.instrumentId());
-        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        int symbolId = identities.findSymbolIdValue(instrument.instrumentIdValue());
-        if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
+        CoreInstrument instrument = requireInstrument(runtime.instrument(intent.instrumentId()));
+        int symbolId = requireSymbolId(identities, instrument);
         return resolveValues(null, instrument, symbolId, runtime.markPrice(symbolId),
                 runtime.feePolicyBook(), userId,
                 clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent, false);
@@ -1001,10 +992,8 @@ public final class OrderAdmissionService {
                 || userId <= 0 || clusterTimestamp <= 0)
             throw new IllegalArgumentException("invalid order decision input");
         runtime.assertOwner();
-        CoreInstrument instrument = runtime.instrument(intent.instrumentId());
-        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        int symbolId = identities.findSymbolIdValue(instrument.instrumentIdValue());
-        if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
+        CoreInstrument instrument = requireInstrument(runtime.instrument(intent.instrumentId()));
+        int symbolId = requireSymbolId(identities, instrument);
         instrument.requireOrderEnabled(intent);
         if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis()) {
             boolean lifecycleSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
@@ -1045,12 +1034,21 @@ public final class OrderAdmissionService {
 
     public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, int instrumentId, long clusterTimestamp) {
         runtime.assertOwner();
-        CoreInstrument instrument = runtime.instrument(instrumentId);
-        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        int symbolId = identities.findSymbolIdValue(instrument.instrumentIdValue());
-        if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
+        CoreInstrument instrument = requireInstrument(runtime.instrument(instrumentId));
+        int symbolId = requireSymbolId(identities, instrument);
         return new Context(instrument, symbolId, runtime.markPrice(symbolId),
                 runtime.feePolicyBook(), clusterTimestamp, runtime.treasury().settlementStatus(symbolId));
+    }
+
+    private static CoreInstrument requireInstrument(CoreInstrument instrument) {
+        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
+        return instrument;
+    }
+
+    private static int requireSymbolId(RuntimeIdentityRegistry identities, CoreInstrument instrument) {
+        int symbolId = identities.findSymbolIdValue(instrument.instrumentIdValue());
+        if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
+        return symbolId;
     }
 
     public static Context queryContext(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId, long clusterTimestamp) {

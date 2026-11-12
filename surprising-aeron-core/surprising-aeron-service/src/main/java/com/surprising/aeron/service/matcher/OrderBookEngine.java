@@ -366,16 +366,14 @@ public final class OrderBookEngine implements AutoCloseable {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
         command.requireFrozenMatcherInput(userId);
-        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, command.orderId(), aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb != 0 || commandIdLsb != 0, command.orderId(), aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(), placeNativeAdmitted(userId, command, target.nativeResultSlot(0)), target);
         } catch (RuntimeException exception) {
-            matcherFailure.compareAndSet(null, exception);
-            throw exception;
+            throw poison(exception);
         } finally {
-            scope.aeronTimestamp = 0;
-            scope.active = false;
+            endSynchronousCommand(scope);
         }
     }
 
@@ -386,16 +384,14 @@ public final class OrderBookEngine implements AutoCloseable {
             com.surprising.aeron.service.settlement.TradeSettlement target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
-        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, command.orderId(), aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb != 0 || commandIdLsb != 0, command.orderId(), aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(), placeNative(userId, command, target.nativeResultSlot(0)), target);
         } catch (RuntimeException exception) {
-            matcherFailure.compareAndSet(null, exception);
-            throw exception;
+            throw poison(exception);
         } finally {
-            scope.aeronTimestamp = 0;
-            scope.active = false;
+            endSynchronousCommand(scope);
         }
     }
 
@@ -407,16 +403,14 @@ public final class OrderBookEngine implements AutoCloseable {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || symbolId <= 0 || target == null)
             throw new IllegalArgumentException("invalid direct matcher cancellation");
-        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb != 0 || commandIdLsb != 0, orderId, aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, orderId, cancelNative(userId, orderId, symbolId, target.nativeResultSlot(0)), target);
         } catch (RuntimeException exception) {
-            matcherFailure.compareAndSet(null, exception);
-            throw exception;
+            throw poison(exception);
         } finally {
-            scope.aeronTimestamp = 0;
-            scope.active = false;
+            endSynchronousCommand(scope);
         }
     }
 
@@ -430,7 +424,7 @@ public final class OrderBookEngine implements AutoCloseable {
                 || symbolId <= 0 || replacement == null || target == null
                 || replacement.instrument().instrumentIdValue() != symbolId)
             throw new IllegalArgumentException("invalid direct matcher replacement");
-        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb != 0 || commandIdLsb != 0, orderId, aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             // 先撤旧单产生的原生结果，占用独立槽避免新单覆盖。
@@ -445,11 +439,9 @@ public final class OrderBookEngine implements AutoCloseable {
                     matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     cancellation, result, target);
         } catch (RuntimeException exception) {
-            matcherFailure.compareAndSet(null, exception);
-            throw exception;
+            throw poison(exception);
         } finally {
-            scope.aeronTimestamp = 0;
-            scope.active = false;
+            endSynchronousCommand(scope);
         }
     }
 
@@ -461,7 +453,7 @@ public final class OrderBookEngine implements AutoCloseable {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || index < 0
                 || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher batch item");
-        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId != null, command.orderId(), aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             exchange.core2.core.common.MatcherResult result = placeNative(userId, command, target.nativeResultSlot(index));
@@ -471,11 +463,9 @@ public final class OrderBookEngine implements AutoCloseable {
             return matcherEvidence.publishBatchItem(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), command.orderId(), matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     result, index, target);
         } catch (RuntimeException exception) {
-            matcherFailure.compareAndSet(null, exception);
-            throw exception;
+            throw poison(exception);
         } finally {
-            scope.aeronTimestamp = 0;
-            scope.active = false;
+            endSynchronousCommand(scope);
         }
     }
 
@@ -487,7 +477,7 @@ public final class OrderBookEngine implements AutoCloseable {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || index < 0
                 || instrumentId == null || instrumentId.isBlank() || target == null)
             throw new IllegalArgumentException("invalid direct matcher cancellation item");
-        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId != null, orderId, aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             exchange.core2.core.common.MatcherResult result = cancelNative(userId, orderId, instrumentId, target.nativeResultSlot(index));
@@ -497,11 +487,9 @@ public final class OrderBookEngine implements AutoCloseable {
             return matcherEvidence.publishBatchItem(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId, matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     result, index, target);
         } catch (RuntimeException exception) {
-            matcherFailure.compareAndSet(null, exception);
-            throw exception;
+            throw poison(exception);
         } finally {
-            scope.aeronTimestamp = 0;
-            scope.active = false;
+            endSynchronousCommand(scope);
         }
     }
 
@@ -532,8 +520,7 @@ public final class OrderBookEngine implements AutoCloseable {
         try {
             return cancelNative(userId, orderId, symbolId, scope.prefixResult);
         } finally {
-            scope.aeronTimestamp = 0;
-            scope.active = false;
+            endSynchronousCommand(scope);
         }
     }
 
@@ -569,7 +556,7 @@ public final class OrderBookEngine implements AutoCloseable {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || resultCode == null || resultCode.isBlank() || target == null)
             throw new IllegalArgumentException("invalid rejected direct matcher command");
-        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandId != null, orderId, aeronTimestamp);
         Throwable poison = matcherFailure.get();
         if (poison != null)
             throw new IllegalStateException("matcher completion discarded after fatal divergence", poison);
@@ -591,18 +578,10 @@ public final class OrderBookEngine implements AutoCloseable {
         recordUser(userId);
     }
 
-    private static void validateCommandEvidence(long coreSequence, java.util.UUID commandId,
+    /** 检查 Core 序号为正、命令编号存在、订单号及时间非负。 */
+    private static void validateCommandEvidence(long coreSequence, boolean commandIdPresent,
             long orderId, long aeronTimestamp) {
-        if (coreSequence <= 0 || commandId == null || orderId < 0
-                || aeronTimestamp < 0)
-            throw new IllegalArgumentException("invalid matcher command evidence");
-    }
-
-    /** 检查 Core 序号为正、UUID 两半不能同时为零、订单号及时间非负。 */
-    private static void validateCommandEvidence(long coreSequence, long commandIdMsb, long commandIdLsb,
-            long orderId, long aeronTimestamp) {
-        if (coreSequence <= 0 || (commandIdMsb == 0 && commandIdLsb == 0) || orderId < 0
-                || aeronTimestamp < 0)
+        if (coreSequence <= 0 || !commandIdPresent || orderId < 0 || aeronTimestamp < 0)
             throw new IllegalArgumentException("invalid matcher command evidence");
     }
 
@@ -615,6 +594,17 @@ public final class OrderBookEngine implements AutoCloseable {
         scope.active = true;
         scope.aeronTimestamp = aeronTimestamp;
         return scope;
+    }
+
+    private static void endSynchronousCommand(MatcherCommandScope scope) {
+        scope.aeronTimestamp = 0;
+        scope.active = false;
+    }
+
+    /** 记录首个撮合故障，后续命令一律拒绝；返回原异常供调用方重新抛出。 */
+    private RuntimeException poison(RuntimeException failure) {
+        matcherFailure.compareAndSet(null, failure);
+        return failure;
     }
 
     private OrderMatchingResult.Control bindControlEvidence(long coreSequence, java.util.UUID commandId,
@@ -643,72 +633,14 @@ public final class OrderBookEngine implements AutoCloseable {
         matcherFailure.compareAndSet(null, new IllegalStateException(detail));
     }
 
-    /** 冷态初始化反射字段，撮合时只读取同线程订单簿的对手最优价，避免为读一档分配完整行情。 */
-    private static final class DirectTopPriceReader {
-        private static final java.lang.reflect.Field ROUTER_FIELD;
-        private static final java.lang.reflect.Field BEST_ASK_FIELD;
-        private static final java.lang.reflect.Field BEST_BID_FIELD;
-        private static final boolean AVAILABLE;
-
-        // 任一反射步骤失败则标记不可用，由外层选择既有盘口读取路径。
-        static {
-            boolean available = false;
-            java.lang.reflect.Field routerField = null;
-            java.lang.reflect.Field bestAskField = null;
-            java.lang.reflect.Field bestBidField = null;
-            try {
-                routerField = exchange.core2.core.SynchronousMatchingEngine.class.getDeclaredField("router");
-                routerField.setAccessible(true);
-                Class<?> directBookClass = Class.forName("exchange.core2.core.orderbook.OrderBookDirectImpl");
-                bestAskField = directBookClass.getDeclaredField("bestAskOrder");
-                bestAskField.setAccessible(true);
-                bestBidField = directBookClass.getDeclaredField("bestBidOrder");
-                bestBidField.setAccessible(true);
-                available = true;
-            } catch (Throwable ignored) {
-            }
-            ROUTER_FIELD = routerField;
-            BEST_ASK_FIELD = bestAskField;
-            BEST_BID_FIELD = bestBidField;
-            AVAILABLE = available;
-        }
-
-        /** 反射直接读取目标订单簿的对手侧最优订单价格。字段不可用、没有订单簿或最优单、类型不符以及读取异常都返回负一，由外层决定使用原界限或查询盘口。 */
-        static long readBestPrice(exchange.core2.core.SynchronousMatchingEngine engine, int symbolId, boolean isBuy) {
-            if (!AVAILABLE || engine == null) return -1L;
-            try {
-                exchange.core2.core.processors.MatchingEngineRouter router =
-                        (exchange.core2.core.processors.MatchingEngineRouter) ROUTER_FIELD.get(engine);
-                if (router == null) return -1L;
-                exchange.core2.core.orderbook.IOrderBook book = router.getOrderBooks().get(symbolId);
-                if (book == null) return -1L;
-                Object directOrder = isBuy ? BEST_ASK_FIELD.get(book) : BEST_BID_FIELD.get(book);
-                if (directOrder == null) return -1L;
-                if (directOrder instanceof exchange.core2.core.common.IOrder order) {
-                    return order.getPrice();
-                }
-                return -1L;
-            } catch (Throwable e) {
-                return -1L;
-            }
-        }
-    }
-
-    /** 仅为启用滑点的市价单计算保护价：在当前 Matcher 线程读对手最优价，向内取整滑点距离后与原界限收紧。只有反射初始化不可用才查询一档盘口。可用但读不到价格时保留原界限，算术精确操作溢出会抛异常。 */
+    /** 仅为启用滑点的市价单计算保护价：读对手一档价格，向内取整滑点距离后与原界限收紧；对手侧为空时保留原界限。 */
     private long protectedMarketPrice(int symbolId, CoreOrderSide side,
             com.surprising.aeron.protocol.CoreOrderType type, long originalBound, long slippagePpm) {
         if (type != com.surprising.aeron.protocol.CoreOrderType.MARKET || slippagePpm == 0) return originalBound;
         boolean buy = side == CoreOrderSide.BUY;
-        long best = DirectTopPriceReader.readBestPrice(engine(symbolId), symbolId, buy);
-        if (best <= 0) {
-            if (!DirectTopPriceReader.AVAILABLE) {
-                L2MarketData top = engine(symbolId).orderBook(symbolId, 1);
-                if (buy ? top.askSize == 0 : top.bidSize == 0) return originalBound;
-                best = buy ? top.askPrices[0] : top.bidPrices[0];
-            } else {
-                return originalBound;
-            }
-        }
+        L2MarketData top = engine(symbolId).orderBook(symbolId, 1);
+        if (buy ? top.askSize == 0 : top.bidSize == 0) return originalBound;
+        long best = buy ? top.askPrices[0] : top.bidPrices[0];
         long distance = Math.addExact(Math.multiplyExact(best / 1_000_000L, slippagePpm),
                 (best % 1_000_000L) * slippagePpm / 1_000_000L);
         return buy ? Math.min(originalBound, Math.addExact(best, distance))
@@ -751,15 +683,13 @@ public final class OrderBookEngine implements AutoCloseable {
             try {
                 var result = cancelNative(order.userId(), order.orderId(), order.symbolId());
                 matcherEvidence.recordControlNative(topology.matcherShardId(result.symbol()), result.sequence());
-                boolean accepted = result.resultCode() == CommandResultCode.SUCCESS
-                        || result.resultCode() == CommandResultCode.ACCEPTED;
+                boolean accepted = nativeAccepted(result);
                 cancellations.add(new OrderCancelResult(order.orderId(), accepted));
                 OrderMatchingResult.Control.appendEvents(events, result.events());
                 if (accepted) successfulPrefix++;
                 else failureCode = result.resultCode().name();
             } catch (RuntimeException failure) {
-                matcherFailure.compareAndSet(null, failure);
-                throw failure;
+                throw poison(failure);
             }
         }
         return new OrderMatchingResult.Control(failureCode == null, failureCode == null ? "SUCCESS" : failureCode,
@@ -813,16 +743,15 @@ public final class OrderBookEngine implements AutoCloseable {
     /** 在当前命令作用域按既定顺序执行控制撤单并绑定控制分片负一的业务证据。运行异常记录故障，已执行前缀不回滚。 */
     public OrderMatchingResult.Control cancelControlOrders(long coreSequence, java.util.UUID commandId,
             long timestamp, List<CancellationOrder> orders) {
-        validateCommandEvidence(coreSequence, commandId, 0, timestamp);
+        validateCommandEvidence(coreSequence, commandId != null, 0, timestamp);
         java.util.Objects.requireNonNull(orders, "control cancellations");
         MatcherCommandScope scope = beginSynchronousCommand(timestamp);
         try {
             return bindControlEvidence(coreSequence, commandId,
                     matcherEvidence.nextSequence(-1), cancelRoutedBatch(orders));
         } catch (RuntimeException failure) {
-            matcherFailure.compareAndSet(null, failure);
-            throw failure;
-        } finally { scope.aeronTimestamp = 0; scope.active = false; }
+            throw poison(failure);
+        } finally { endSynchronousCommand(scope); }
     }
 
     /** 由目标分片线程执行一条控制撤单，只记录原生序号。Owner 后续汇总控制事实。 */
@@ -833,15 +762,14 @@ public final class OrderBookEngine implements AutoCloseable {
         try {
             return cancelControlNative(userId, orderId, symbolId);
         } catch (RuntimeException failure) {
-            matcherFailure.compareAndSet(null, failure);
-            throw failure;
-        } finally { scope.aeronTimestamp = 0; scope.active = false; }
+            throw poison(failure);
+        } finally { endSynchronousCommand(scope); }
     }
 
     /** 仅聚合已经在原生分片执行过的撤单结果，绑定一次控制业务证据，不重新操作任何订单簿。 */
     public OrderMatchingResult.Control completeControlCancellations(long coreSequence, java.util.UUID commandId,
             long timestamp, List<CancellationOrder> orders, List<OrderMatchingResult.Control> results) {
-        validateCommandEvidence(coreSequence, commandId, 0, timestamp);
+        validateCommandEvidence(coreSequence, commandId != null, 0, timestamp);
         return bindControlEvidence(coreSequence, commandId,
                 matcherEvidence.nextSequence(-1), aggregateRoutedCancellationResults(orders, results));
     }
