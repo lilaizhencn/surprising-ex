@@ -6,7 +6,7 @@ surprising:
   trading:
     order:
       kafka:
-        bootstrap-servers: localhost:9092
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       aeron:
         node-id: ${TRADING_NODE_ID:0}
       event-publish:

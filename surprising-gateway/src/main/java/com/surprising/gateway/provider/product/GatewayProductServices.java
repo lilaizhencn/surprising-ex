@@ -191,7 +191,7 @@ public final class GatewayProductServices implements AutoCloseable {
     }
 
     Map<String, Object> productProperties(ProductLine product) {
-        var core = configuration.getCores().get(product);
+        var core = configuration.coreFor(product);
         Map<String, Object> values = new HashMap<>();
         for (String prefix : List.of("surprising.account.kafka", "surprising.trading.order.kafka",
                 "surprising.trading.trigger", "surprising.price.consumer", "surprising.websocket.kafka",

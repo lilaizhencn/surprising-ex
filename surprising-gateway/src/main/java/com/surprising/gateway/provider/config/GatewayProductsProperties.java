@@ -10,15 +10,22 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /** Core 连接部署参数；产品线启用状态只从数据库读取。 */
 @ConfigurationProperties("surprising.gateway.products")
 public class GatewayProductsProperties {
+    private Core defaultCore;
     private Map<ProductLine, Core> cores = new EnumMap<>(ProductLine.class);
 
+    public Core getDefaultCore() { return defaultCore; }
+    public void setDefaultCore(Core defaultCore) { this.defaultCore = defaultCore; }
     public Map<ProductLine, Core> getCores() { return cores; }
     public void setCores(Map<ProductLine, Core> cores) {
         this.cores = new EnumMap<>(ProductLine.class);
         if (cores != null) this.cores.putAll(cores);
     }
-    public void validate(ProductLine product) {
+    public Core coreFor(ProductLine product) {
         Core core = cores.get(product);
+        return core != null ? core : defaultCore;
+    }
+    public void validate(ProductLine product) {
+        Core core = coreFor(product);
         if (core == null) throw new IllegalArgumentException("missing Gateway Core connection: " + product);
         core.validate();
     }

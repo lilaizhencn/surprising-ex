@@ -26,9 +26,9 @@ class GatewayProductRoutesConfigurationTest {
         assertThat(properties.getRoutes().get("trading-market").getBaseUrl()).isEqualTo("local:");
         assertLocalRoute(properties.getRoutes().get("trading-trigger"));
         assertLocalRoute(properties.getRoutes().get("account"));
-        assertProductRouteMatrix(properties.getRoutes().get("risk"));
-        assertProductRouteMatrix(properties.getRoutes().get("price-mark"));
-        assertProductRouteMatrix(properties.getRoutes().get("candlestick"));
+        assertLocalRoute(properties.getRoutes().get("risk"));
+        assertLocalRoute(properties.getRoutes().get("price-mark"));
+        assertLocalRoute(properties.getRoutes().get("candlestick"));
         assertLocalRoute(properties.getAdminRoutes().get("trading-fees"));
         assertLocalRoute(properties.getAdminRoutes().get("account"));
         assertProductRouteMatrix(properties.getAdminRoutes().get("market-maker"));

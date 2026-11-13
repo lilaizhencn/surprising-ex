@@ -3,6 +3,6 @@ surprising:
     aeron:
       source-identity: account-${HOSTNAME:node}
     kafka:
-      bootstrap-servers: localhost:9092
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       client-id: surprising-account-${HOSTNAME:${random.uuid}}
       max-poll-records: 500
