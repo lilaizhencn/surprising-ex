@@ -1,6 +1,5 @@
 package com.surprising.insurance.provider.service;
 
-import com.surprising.account.api.model.LiquidationFeeSettledEvent;
 import com.surprising.aeron.client.AeronLifecycleRetry;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -94,20 +93,6 @@ import java.util.UUID;
                         new AdjustInsuranceFundCommand(asset, request.amountUnits())));
         long committedBalance = aeron.balance(asset);
         return new InsuranceFundBalanceResponse(asset, committedBalance, now);
-    }
-
-    public void collectLiquidationFee(LiquidationFeeSettledEvent event) {
-        if (event.amountUnits() <= 0) {
-            throw new IllegalArgumentException("liquidation fee amountUnits must be positive");
-        }
-        String accountType = normalizeAccountType(event.accountType());
-        requireProviderAccountType(accountType);
-        String referenceId = event.tradeId() + ":" + event.orderId();
-        String asset = normalizeAsset(event.asset());
-        UUID commandId = stableId("LIQUIDATION_FEE:" + properties.getProductLine() + ':' + referenceId);
-        aeron.command(CoreMessageType.ADJUST_INSURANCE_FUND, commandId,
-                TradingCommandCodec.encodeAdjustInsuranceFund(
-                        new AdjustInsuranceFundCommand(asset, event.amountUnits())));
     }
 
     public InsuranceFundBalanceQueryResponse balances(String asset) {
