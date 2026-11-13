@@ -8,7 +8,7 @@ Prerequisites: HotSpot JDK 27, Maven, Node, PostgreSQL 18, Kafka, and Redis/Valk
 ./scripts/local-perpetual.sh down
 ```
 
-The launcher runs linear-perpetual Core, Gateway, Price, Realtime, Derivatives Lifecycle, Maker, and the user Web frontend. Wallet is not started. macOS uses launchd. `build` builds the backend; the launcher prepares the running frontend copy.
+The launcher runs linear-perpetual Core, Gateway, Price, Realtime, Derivatives Lifecycle, Maker, and the user Web frontend. Official local start uses one Aeron Core node, one account lane thread, and one matcher. Wallet is not started. macOS uses launchd. `build` builds the backend; the launcher prepares the running frontend copy.
 
 ## Persistent data and configuration
 

@@ -1,6 +1,6 @@
 # Single-Node Perpetual Test Deployment
 
-This deployment starts `LINEAR_PERPETUAL` with one real Core member and existing PostgreSQL, Redis/Valkey, and Kafka. It is a test topology, not high availability.
+This deployment starts `LINEAR_PERPETUAL` with one real Core member, one account lane thread, and one matcher, plus existing PostgreSQL, Redis/Valkey, and Kafka. It is a test topology, not high availability.
 
 ## Startup order
 
