@@ -2,44 +2,45 @@ package com.surprising.candlestick.provider.service;
 
 import com.surprising.candlestick.provider.aggregation.CandleKey;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
-import com.surprising.instrument.api.cache.AbstractInstrumentSnapshotInitializer;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
-import com.surprising.instrument.api.client.InstrumentRpcApi;
+import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.product.api.ProductLine;
 import java.util.Set;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 /**
  * K 线运行时 instrumentId 门禁；服务层组合品种版本与当前版本快照。
  */
 @Service
-public class SymbolRegistryService extends AbstractInstrumentSnapshotInitializer {
+public class SymbolRegistryService {
 
     private final CandlestickProperties properties;
+    private final InstrumentSnapshotCache snapshotCache;
     private volatile Set<String> enabledSymbols = Set.of();
 
     public SymbolRegistryService(CandlestickProperties properties,
-                                 InstrumentSnapshotCache snapshotCache,
-                                 InstrumentRpcApi instrumentRpcApi) {
-        super(instrumentRpcApi, snapshotCache);
+                                 InstrumentSnapshotCache snapshotCache) {
         this.properties = properties;
+        this.snapshotCache = snapshotCache;
     }
 
-    @Override
-    protected Set<ProductLine> productLines() {
-        return Set.of(properties.getProductLine());
+    @EventListener(ApplicationReadyEvent.class)
+    public void onApplicationReady() {
+        if (snapshotCache.initialized(properties.getProductLine())) {
+            refresh();
+        }
     }
 
-    @Override
-    protected String serviceName() {
-        return "K 线服务";
-    }
-
-    @Override
-    protected void afterInitialize() {
-        refresh();
+    @EventListener
+    public void onInstrumentEvent(InstrumentEvent event) {
+        if (event != null && event.productLine() == properties.getProductLine()
+                && snapshotCache.initialized(properties.getProductLine())) {
+            refresh();
+        }
     }
 
     /** 从当前合约 JVM 快照重建 K 线交易对注册表。 */

@@ -2,6 +2,7 @@ package com.surprising.realtime.provider;
 
 import com.surprising.candlestick.provider.service.CandleQueryService;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.RealtimeJsonPublisher;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -109,6 +110,7 @@ class MarketApplicationContextTest {
                         "surprising.realtime.router.enabled=" + routing,
                         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration")
                 .withBean("symbolRegistryService", SymbolRegistryService.class, () -> mock(SymbolRegistryService.class))
+                .withBean(InstrumentSnapshotCache.class, InstrumentSnapshotCache::new)
                 .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
                 .withBean(org.springframework.transaction.PlatformTransactionManager.class,
                         () -> mock(org.springframework.transaction.PlatformTransactionManager.class))

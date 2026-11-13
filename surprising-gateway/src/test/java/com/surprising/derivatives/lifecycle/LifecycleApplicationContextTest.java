@@ -1,9 +1,8 @@
 package com.surprising.derivatives.lifecycle;
 
-import com.surprising.insurance.provider.consumer.InstrumentSnapshotConsumer;
-
-import com.surprising.derivatives.lifecycle.service.DerivativesInstrumentSnapshotInitializer;
-
+import com.surprising.instrument.provider.config.InstrumentSnapshotConfiguration;
+import com.surprising.instrument.provider.service.GatewayInstrumentSnapshotBridge;
+import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.derivatives.lifecycle.task.DerivativesLifecycleMaintenanceTask;
 import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
 import com.surprising.derivatives.lifecycle.model.LifecycleSettingsSnapshot;
@@ -30,7 +29,9 @@ class LifecycleApplicationContextTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"SPOT"}, mode = EnumSource.Mode.EXCLUDE)
     void mergedApplicationLoadsForEachDerivative(ProductLine line) {
-        new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer()).withUserConfiguration(TestLifecycleAppConfig.class, SurprisingDerivativesLifecycleApplication.class)
+        new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
+                .withUserConfiguration(TestLifecycleAppConfig.class, SurprisingDerivativesLifecycleApplication.class,
+                        InstrumentSnapshotConfiguration.class, GatewayInstrumentSnapshotBridge.class)
                 .withPropertyValues("spring.config.name=application-lifecycle",
                         "surprising.risk.product-line=" + line,
                         "surprising.liquidation.product-line=" + line,
@@ -46,14 +47,23 @@ class LifecycleApplicationContextTest {
                         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration")
                 .withBean(DerivativesAeronClient.class.getName(), DerivativesAeronClient.class,
                         () -> mock(DerivativesAeronClient.class))
-                .withBean(DerivativesInstrumentSnapshotInitializer.class.getName(), DerivativesInstrumentSnapshotInitializer.class,
-                        () -> mock(DerivativesInstrumentSnapshotInitializer.class))
+                .withBean(InstrumentService.class.getName(), InstrumentService.class, () -> {
+                    var instruments = mock(InstrumentService.class);
+                    for (ProductLine p : ProductLine.values()) {
+                        org.mockito.Mockito.when(instruments.snapshot(p))
+                                .thenReturn(new com.surprising.instrument.api.model.InstrumentSnapshotResponse(
+                                        p, 0, "", java.util.List.of()));
+                    }
+                    return instruments;
+                })
                 .withBean(DerivativesLifecycleMaintenanceTask.class.getName(), DerivativesLifecycleMaintenanceTask.class,
                         () -> mock(DerivativesLifecycleMaintenanceTask.class))
                 .with(runner -> line.isFundingProduct() ? runner.withBean(com.surprising.funding.provider.task.FundingMaintenanceTask.class.getName(),
                         com.surprising.funding.provider.task.FundingMaintenanceTask.class,
                         () -> mock(com.surprising.funding.provider.task.FundingMaintenanceTask.class)) : runner)
                 .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
+                .withBean(org.springframework.transaction.PlatformTransactionManager.class,
+                        () -> mock(org.springframework.transaction.PlatformTransactionManager.class))
                 .withBean(LifecycleBusinessSettingsService.class.getName(), LifecycleBusinessSettingsService.class, () -> {
                     var settings = mock(LifecycleBusinessSettingsService.class);
                     org.mockito.Mockito.when(settings.current()).thenReturn(new LifecycleSettingsSnapshot(
@@ -70,7 +80,7 @@ class LifecycleApplicationContextTest {
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed().hasSingleBean(InstrumentSnapshotCache.class)
                             .hasSingleBean(DerivativesAeronClient.class)
-                            .hasSingleBean(com.surprising.insurance.provider.consumer.InstrumentSnapshotConsumer.class)
+                            .hasSingleBean(GatewayInstrumentSnapshotBridge.class)
                             .doesNotHaveBean("adlInstrumentSnapshotConsumer")
                             .doesNotHaveBean("adlInstrumentSnapshotConsumerFactory");
                     var shared = ctx.getBean(InstrumentSnapshotCache.class);
@@ -87,10 +97,7 @@ class LifecycleApplicationContextTest {
                             com.surprising.instrument.api.model.InstrumentStatus.HALT,
                             com.surprising.instrument.api.model.InstrumentEventType.STATUS_CHANGED,
                             java.time.Instant.now(), com.surprising.instrument.api.model.InstrumentResponse.immutableCopy(row), line, 2);
-                    var consumer = ctx.getBean(com.surprising.insurance.provider.consumer.InstrumentSnapshotConsumer.class);
-                    consumer.onInstrumentEvent(new org.apache.kafka.clients.consumer.ConsumerRecord<>(consumer.topic(), 0, 0,
-                            com.surprising.instrument.api.InstrumentEventKeys.key(line, 1),
-                            ctx.getBean(ObjectMapper.class).writeValueAsString(event)));
+                    ctx.publishEvent(event);
                     assertThat(shared.current(line, 1).orElseThrow().status())
                             .isEqualTo(com.surprising.instrument.api.model.InstrumentStatus.HALT);
                     if (line.isFundingProduct()) assertThat(ctx).hasSingleBean(FundingService.class);

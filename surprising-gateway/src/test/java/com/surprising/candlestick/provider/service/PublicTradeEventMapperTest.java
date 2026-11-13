@@ -72,7 +72,7 @@ class PublicTradeEventMapperTest {
                 java.util.Map.of("BTC", 100_000_000L, "USDT", 1_000_000L));
         CandlestickProperties properties = new CandlestickProperties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
-        SymbolRegistryService registry = new SymbolRegistryService(properties, snapshots, mock(InstrumentRpcApi.class));
+        SymbolRegistryService registry = new SymbolRegistryService(properties, snapshots);
         registry.refresh();
         assertThat(registry.isEnabled("1")).isTrue();
         assertThat(registry.isEnabled("99")).isFalse();

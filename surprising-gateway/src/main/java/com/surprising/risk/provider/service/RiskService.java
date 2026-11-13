@@ -25,7 +25,6 @@ import java.util.List;
 import com.surprising.risk.provider.model.RiskRuleModels.*;
 import com.surprising.risk.provider.model.LiquidationCandidatePageQuery;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Qualifier;
 
 @Service
 public class RiskService {
@@ -42,7 +41,7 @@ public class RiskService {
 
     public RiskService(RiskProperties properties, RiskAeronGateway aeron,
                        CoreRiskLiquidationProjectionRepository liquidations,
-                       @Qualifier("derivativesInstrumentSnapshotCache") InstrumentSnapshotCache instruments) {
+                       InstrumentSnapshotCache instruments) {
         this.properties = properties;
         this.aeron = aeron;
         this.liquidations = liquidations;

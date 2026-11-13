@@ -26,8 +26,12 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class InstrumentService {
@@ -37,16 +41,28 @@ public class InstrumentService {
     private final InstrumentProperties properties;
     private final InstrumentOutboxService outboxService;
     private final MarketSummaryService marketSummaries;
+    private final ApplicationEventPublisher eventPublisher;
 
     public InstrumentService(InstrumentStorageService storageService,
                              InstrumentValidator instrumentValidator,
                              InstrumentProperties properties,
                              InstrumentOutboxService outboxService, MarketSummaryService marketSummaries) {
+        this(storageService, instrumentValidator, properties, outboxService, marketSummaries, null);
+    }
+
+    @Autowired
+    public InstrumentService(InstrumentStorageService storageService,
+                             InstrumentValidator instrumentValidator,
+                             InstrumentProperties properties,
+                             InstrumentOutboxService outboxService,
+                             MarketSummaryService marketSummaries,
+                             ApplicationEventPublisher eventPublisher) {
         this.storageService = storageService;
         this.instrumentValidator = instrumentValidator;
         this.properties = properties;
         this.outboxService = outboxService;
         this.marketSummaries = marketSummaries;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -227,6 +243,18 @@ public class InstrumentService {
         outboxService.enqueue("INSTRUMENT", response.lastChangeId(),
                 ProductTopicNames.INSTRUMENT_EVENTS_TOPIC, InstrumentEventKeys.key(event),
                 eventType.name(), event, eventTime);
+        if (eventPublisher != null) {
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        eventPublisher.publishEvent(event);
+                    }
+                });
+            } else {
+                eventPublisher.publishEvent(event);
+            }
+        }
     }
 
     @Transactional

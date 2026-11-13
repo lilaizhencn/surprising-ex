@@ -1,17 +1,19 @@
-package com.surprising.trading.order.config;
+package com.surprising.instrument.provider.config;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 /**
- * 订单服务使用的合约快照基础组件。
+ * Gateway 进程内共享的合约快照缓存配置。
  */
-@Configuration("orderInstrumentSnapshotConfiguration")
+@Configuration("gatewayInstrumentSnapshotConfiguration")
 public class InstrumentSnapshotConfiguration {
 
     @Bean
-    public InstrumentSnapshotCache orderInstrumentSnapshotCache() {
+    @Primary
+    public InstrumentSnapshotCache gatewayInstrumentSnapshotCache() {
         return new InstrumentSnapshotCache();
     }
 }

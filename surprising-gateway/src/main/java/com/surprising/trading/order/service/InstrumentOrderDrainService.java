@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.event.EventListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -38,6 +39,13 @@ public class InstrumentOrderDrainService {
         this.algoOrderService = algoOrderService;
         this.triggerOrderService = triggerOrderService;
         this.kafkaTemplate = kafkaTemplate;
+    }
+
+    @EventListener
+    public void onInstrumentEvent(InstrumentEvent event) {
+        if (event != null) {
+            drain(event);
+        }
     }
 
     public void drain(InstrumentEvent event) {

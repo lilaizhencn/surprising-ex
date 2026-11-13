@@ -12,7 +12,6 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import java.util.Comparator;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /** Low-rate control-plane reconciliation on the scheduler, never on user order ingress. */
@@ -27,7 +26,7 @@ public class InstrumentCoreSyncService {
                            long retryAfterNanos, String error) { }
     public record SyncState(String productLine, String instrumentId, String state, String error, long appliedChangeId) { }
 
-    public InstrumentCoreSyncService(@Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache cache,
+    public InstrumentCoreSyncService(InstrumentSnapshotCache cache,
             MaintenanceAeronGateway gateway, TradingOrderProperties properties) {
         this.cache=cache; this.gateway=gateway; this.line=properties.getProductLine(); this.properties=properties;
     }

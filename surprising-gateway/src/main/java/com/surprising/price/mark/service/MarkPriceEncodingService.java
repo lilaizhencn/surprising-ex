@@ -3,7 +3,6 @@ package com.surprising.price.mark.service;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceEncoding;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /**
@@ -19,14 +18,14 @@ public class MarkPriceEncodingService {
     private com.surprising.instrument.api.client.InstrumentRpcApi instrumentRpc;
 
     public MarkPriceEncodingService(MarkPriceProperties properties,
-                                    @Qualifier("markInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
+                                    InstrumentSnapshotCache snapshotCache) {
         this.properties = properties == null ? new MarkPriceProperties() : properties;
         this.snapshotCache = snapshotCache;
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public MarkPriceEncodingService(MarkPriceProperties properties,
-            @Qualifier("markInstrumentSnapshotCache") InstrumentSnapshotCache cache,
+            InstrumentSnapshotCache cache,
             com.surprising.instrument.api.client.InstrumentRpcApi rpc) {
         this(properties,cache); this.instrumentRpc=rpc;
     }

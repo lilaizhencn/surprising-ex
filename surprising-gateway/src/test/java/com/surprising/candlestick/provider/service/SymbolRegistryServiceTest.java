@@ -56,7 +56,7 @@ class SymbolRegistryServiceTest {
     }
 
     private SymbolRegistryService service(CandlestickProperties properties, InstrumentSnapshotCache cache) {
-        return new SymbolRegistryService(properties, cache, null);
+        return new SymbolRegistryService(properties, cache);
     }
 
     private InstrumentSnapshotCache cache(ProductLine productLine, InstrumentResponse... instruments) {

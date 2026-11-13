@@ -7,7 +7,6 @@ import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import java.util.Optional;
 import java.util.Set;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /** 直接从本地合约 JVM 快照读取下单规则。 */
@@ -18,7 +17,7 @@ public class InstrumentSnapshotRuleLookup implements InstrumentRuleLookup {
     private final InstrumentSnapshotCache snapshotCache;
 
     public InstrumentSnapshotRuleLookup(TradingOrderProperties properties,
-                                        @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
+                                        InstrumentSnapshotCache snapshotCache) {
         this.properties = properties;
         this.snapshotCache = snapshotCache;
     }

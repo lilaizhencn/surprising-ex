@@ -38,7 +38,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         com.surprising.instrument.provider.config.InstrumentProperties.class})
 @EnableKafka
 @EnableScheduling
-@org.springframework.cloud.openfeign.EnableFeignClients(clients = com.surprising.instrument.api.client.InstrumentRpcApi.class)
 public class SurprisingGatewayApplication {
 
     public static void main(String[] args) {

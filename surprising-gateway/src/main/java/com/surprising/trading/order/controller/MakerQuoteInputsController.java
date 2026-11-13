@@ -8,7 +8,6 @@ import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.trading.api.model.MakerQuoteInputs;
 import com.surprising.trading.order.service.TradingFeeService;
 import java.util.ArrayList;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -23,7 +22,7 @@ public class MakerQuoteInputsController {
     private final AccountProperties properties;
 
     public MakerQuoteInputsController(AccountService accounts, TradingFeeService fees,
-            @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache instruments,
+            InstrumentSnapshotCache instruments,
             AccountProperties properties) {
         this.accounts = accounts; this.fees = fees; this.instruments = instruments; this.properties = properties;
     }

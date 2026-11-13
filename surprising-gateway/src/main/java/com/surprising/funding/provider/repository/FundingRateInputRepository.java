@@ -29,7 +29,6 @@ public class FundingRateInputRepository {
     @org.springframework.beans.factory.annotation.Autowired
     public FundingRateInputRepository(FundingProperties properties,
                                       LatestMarkPriceCache markPriceCache,
-                                      @org.springframework.beans.factory.annotation.Qualifier("derivativesInstrumentSnapshotCache")
                                       InstrumentSnapshotCache snapshotCache) {
         this.properties = properties;
         this.markPriceCache = markPriceCache;

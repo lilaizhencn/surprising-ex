@@ -8,7 +8,6 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import java.time.Instant;
 import java.util.Optional;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -19,7 +18,7 @@ public class OrderFeeSnapshotLookup {
     private final FeeScheduleSnapshotCache feeScheduleSnapshotCache;
 
     public OrderFeeSnapshotLookup(TradingOrderProperties properties,
-                                  @Qualifier("orderInstrumentSnapshotCache") InstrumentSnapshotCache instrumentSnapshotCache,
+                                  InstrumentSnapshotCache instrumentSnapshotCache,
                                   FeeScheduleSnapshotCache feeScheduleSnapshotCache) {
         this.properties = properties;
         this.instrumentSnapshotCache = instrumentSnapshotCache;
