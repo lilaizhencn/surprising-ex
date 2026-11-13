@@ -129,6 +129,20 @@ public class AuthController {
         return org.springframework.http.ResponseEntity.status(status).body(java.util.Map.of("message",ex.getMessage()));
     }
 
+    /** 页面刷新后用 Cookie（或 Bearer）恢复当前登录用户；数据来自 Valkey 中的会话和用户状态。 */
+    @GetMapping("/session")
+    public org.springframework.http.ResponseEntity<AuthModels.AuthResponse> session(@RequestHeader("Authorization") String authorization) {
+        try {
+            var principal = authService.authenticateBearer(authorization);
+            return org.springframework.http.ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                    .body(authService.currentSession(principal));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+        }
+    }
+
     @GetMapping("/me")
     public AuthModels.JwtPrincipal me(@RequestHeader("Authorization") String authorization) {
         try {

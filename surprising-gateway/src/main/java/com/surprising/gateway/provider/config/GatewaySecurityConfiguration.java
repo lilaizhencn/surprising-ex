@@ -79,7 +79,7 @@ public class GatewaySecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/ws/v1").permitAll()
                         // These adapters validate HMAC and scope against the exact wire body/query, or bearer for private operations.
                         .requestMatchers("/api/v1/gateway/**", "/api/v3/**", "/sapi/v1/**", "/fapi/v1/**", "/dapi/v1/**", "/eapi/v1/**").permitAll()
-                        .requestMatchers("/api/v1/auth/me", "/api/v1/auth/verify-email", "/api/v1/auth/resend-email-verification",
+                        .requestMatchers("/api/v1/auth/me", "/api/v1/auth/session", "/api/v1/auth/verify-email", "/api/v1/auth/resend-email-verification",
                                 "/api/v1/legal/status", "/api/v1/legal/consents",
                                 "/api/v1/security/**", "/api/v1/users/scan", "/api/v1/notifications/**", "/api/v1/wallet/**",
                                 "/api/v1/realtime/**", "/api/v1/portfolio/**", "/api/v1/affiliate/**", "/api/v1/compliance/**", "/api/v1/c2c/**", "/api/v1/announcements/**").authenticated()

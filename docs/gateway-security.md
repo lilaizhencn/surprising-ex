@@ -33,7 +33,7 @@ Web/Admin 使用同一个会话令牌，放在 HttpOnly Cookie `surprising-web-s
 1. 请求 `GET /api/v1/auth/csrf`，携带 `X-Auth-Client: web` 或 `admin` 并允许凭证；响应设置非 HttpOnly 的 CSRF Cookie `surprising-{client}-csrf`（SameSite=Lax），JSON 的 `token` 为同一个值。
 2. 浏览器登录/注册/二次验证/第三方登录携带 `X-Auth-Transport: cookie`、`X-Auth-Client` 和 `X-CSRF-Token`。成功后网关写入会话 Cookie（`Max-Age` 为 `session-token-max-lifetime`），响应 `browserSession=true`、`accessToken=null`。
 3. 之后同域请求带 Cookie 即可。使用 Cookie 认证的写请求（非 GET/HEAD/OPTIONS）必须带 `X-CSRF-Token`，值等于 CSRF Cookie（双重提交），否则 403。带 Authorization 头或 API Key 的请求不使用 Cookie 认证，免 CSRF 校验。
-4. 退出调用 `POST /api/v1/auth/logout`（Cookie 或 Bearer 均可）：删除当前会话并清除 Cookie，返回 204。页面重载直接带 Cookie 请求，401 即回到登录页。
+4. 退出调用 `POST /api/v1/auth/logout`（Cookie 或 Bearer 均可）：删除当前会话并清除 Cookie，返回 204。页面重载时请求 `GET /api/v1/auth/session`（Cookie 或 Bearer）取回当前用户资料，不返回令牌；401 即回到登录页。
 5. WebSocket 握手带同一会话 Cookie 时，`authenticate` 命令不带 `token` 即使用握手 Cookie 中的令牌；也可以照常在命令里带 Bearer 令牌。
 
 `security.admin-browser-allowed-origins` 单独限制管理 Cookie 操作。生产默认 `https://ex-api.tokdou.com`；用户站即使在 REST CORS 名单中，也不能借用管理 Cookie 获取管理访问权限。单独的管理域登记在管理来源名单中，REST CORS 自动合并该名单。来源必须是完整的 Origin，无路径或通配符。REST CORS 允许携带凭证，来源限定为 `security.cors-allowed-origins` 与管理来源名单。

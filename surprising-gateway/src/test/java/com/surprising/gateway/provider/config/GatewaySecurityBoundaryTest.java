@@ -136,6 +136,10 @@ class GatewaySecurityBoundaryTest {
         // 之后只靠 Cookie 就能通过登录校验，不需要 Authorization 头
         var me = client.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/me")).header("X-Auth-Client", "web").GET().build(), HttpResponse.BodyHandlers.ofString());
         assertThat(me.statusCode()).isEqualTo(200);
+        var current = client.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/session")).header("X-Auth-Client", "web").GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(current.statusCode()).isEqualTo(200);
+        assertThat(current.body()).contains("\"userId\":1").doesNotContain(token);
+        assertThat(current.headers().firstValue("Cache-Control").orElseThrow()).contains("no-store");
         // Cookie 认证的写请求没有 CSRF 头会被拒绝
         var noCsrf = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/logout")).header("X-Auth-Client", "web").POST(HttpRequest.BodyPublishers.noBody()).build();
         assertThat(client.send(noCsrf, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
