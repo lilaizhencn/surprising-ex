@@ -36,6 +36,7 @@ import tools.jackson.databind.ObjectMapper;
 /** Actual HTTP binding, service aggregation and six PostgreSQL repositories. */
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")
 class AuthPagePostgresTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     private static final long FIRST = 9007199254740993L;
     private static final Instant TIME = Instant.parse("2026-10-22T07:00:00.123456Z");
     private JdbcTemplate admin, jdbc;
@@ -102,7 +103,7 @@ class AuthPagePostgresTest {
                 mock(GatewayUserMfaRepository.class), sessions);
         var properties = new GatewayProperties();
         auth = spy(new AuthService(properties, persistence, mock(PasswordHasher.class), mock(JwtTokenService.class),
-                mock(EmailVerificationService.class), mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class)));
+                mock(EmailVerificationService.class), mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
         doReturn(new JwtPrincipal(7, "owner", "NORMAL", List.of("USER"), TIME.plusSeconds(3600)))
                 .when(auth).authenticateBearer("Bearer user");
         doReturn(new JwtPrincipal(99, "admin", "NORMAL", List.of("SUPER_ADMIN"), TIME.plusSeconds(3600)))

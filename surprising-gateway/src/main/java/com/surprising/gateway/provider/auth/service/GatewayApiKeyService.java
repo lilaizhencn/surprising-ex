@@ -30,6 +30,7 @@ public class GatewayApiKeyService {
     private final SensitiveActionVerificationService verificationService;
     private final ClientIpResolver clientIpResolver;
     private final com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient;
+    private final com.surprising.gateway.provider.auth.state.AuthState authState;
     private final SecureRandom random = new SecureRandom();
 
     public GatewayApiKeyService(GatewayApiKeyRepository repository,
@@ -37,7 +38,9 @@ public class GatewayApiKeyService {
                                 TotpService totpService,
                                 SensitiveActionVerificationService verificationService,
                                 com.surprising.gateway.provider.config.GatewayProperties properties,
-                                com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient) {
+                                com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient,
+                                com.surprising.gateway.provider.auth.state.AuthState authState) {
+        this.authState = authState;
         this.repository = repository;
         this.authService = authService;
         this.totpService = totpService;
@@ -97,7 +100,6 @@ public class GatewayApiKeyService {
             throw new IllegalArgumentException("invalid api signature");
         }
         currentClient.authenticated(record.userId(), record.apiKey());
-        repository.markUsed(record.apiKeyId(), Instant.now());
         return record.userId();
     }
 
@@ -106,8 +108,10 @@ public class GatewayApiKeyService {
         return requireAccess(apiKey, ipAddress, "READ").userId();
     }
 
-    private GatewayApiKeyRepository.ApiKeyRecord requireAccess(String apiKey, String ipAddress, String permission) {
-        var record = repository.active(apiKey).orElseThrow(() -> new IllegalArgumentException("invalid api key"));
+    /** 请求路径：只读 Valkey 里的 API Key 和用户状态，不访问 Postgres；Valkey 里没有就是无效 Key。 */
+    private com.surprising.gateway.provider.auth.state.ApiKeyState requireAccess(String apiKey, String ipAddress, String permission) {
+        var record = authState.apiKey(apiKey);
+        if (record == null) throw new IllegalArgumentException("invalid api key");
         try {
             authService.requireApiKeyAccess(record.userId(), ipAddress, permission);
             requireIpAllowlist(record.ipAllowlist(), ipAddress);

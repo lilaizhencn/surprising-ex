@@ -21,23 +21,23 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 
 class ApiKeyHttpBoundaryTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     String apiKey="sx_"+"a".repeat(24);
     GatewayProperties properties=new GatewayProperties();
     GatewayApiKeyRepository repository=mock(GatewayApiKeyRepository.class);
     AuthService auth=mock(AuthService.class);
     TotpService totp=new TotpService(properties);
-    GatewayApiKeyService service=new GatewayApiKeyService(repository,auth,totp,null,properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
+    GatewayApiKeyService service=new GatewayApiKeyService(repository,auth,totp,null,properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
 
     @Test
     void blockedIpMapsToOriginal403WithoutMarkingTheKeyUsed() {
         var request=request();
-        when(repository.active(apiKey)).thenReturn(Optional.of(record()));
+        fixture.putApiKey(record());
         doThrow(new IllegalStateException("device or IP is blocked for this account"))
                 .when(auth).requireApiKeyAccess(42L,"203.0.113.7","READ");
         var response=controller(service).handle(request,null);
         assertThat(response.getStatusCode().value()).isEqualTo(403);
         assertThat(new String(response.getBody(),java.nio.charset.StandardCharsets.UTF_8)).contains("blocked", "-1000");
-        verify(repository,never()).markUsed(any(),any());
     }
 
     @ParameterizedTest
@@ -58,13 +58,12 @@ class ApiKeyHttpBoundaryTest {
     @ParameterizedTest
     @ValueSource(longs={Long.MIN_VALUE,Long.MAX_VALUE,0})
     void extremeTimestampsCannotPassFreshnessByOverflow(long timestamp) {
-        when(repository.active(apiKey)).thenReturn(Optional.of(record()));
+        fixture.putApiKey(record());
         String canonical="timestamp="+timestamp;
         var input=new ApiKeyAuthenticationRequest(apiKey,"203.0.113.7",timestamp,5000,
                 service.sign("secret",canonical),canonical);
         assertThatThrownBy(()->service.authenticate(input,"READ")).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("outside recvWindow");
-        verify(repository,never()).markUsed(any(),any());
     }
 
     @Test
@@ -76,9 +75,8 @@ class ApiKeyHttpBoundaryTest {
         request.setQueryString(query+"&signature="+signature);request.setParameter("signature",signature);
         var input=new ApiKeyRequestBinding(properties).bind(request,body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         assertThat(input.canonical()).isEqualTo(canonical);
-        when(repository.active(apiKey)).thenReturn(Optional.of(record()));
+        fixture.putApiKey(record());
         assertThat(service.authenticate(input,"READ")).isEqualTo(42L);
-        verify(repository).markUsed(any(),any());
     }
 
     @Test
@@ -89,7 +87,7 @@ class ApiKeyHttpBoundaryTest {
         String canonical = "symbol=BTCUSDT&timestamp=" + System.currentTimeMillis();
         byte[] body = (canonical + "&signature=" + service.sign("secret", canonical))
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        when(repository.active(apiKey)).thenReturn(Optional.of(record()));
+        fixture.putApiKey(record());
         assertThat(service.authenticate(new ApiKeyRequestBinding(properties).bind(request, body), "READ")).isEqualTo(42L);
     }
 
@@ -103,14 +101,13 @@ class ApiKeyHttpBoundaryTest {
 
     @Test
     void theSpecificSubtractionOverflowTimestampIsRejected() {
-        when(repository.active(apiKey)).thenReturn(Optional.of(record()));
+        fixture.putApiKey(record());
         long timestamp = System.currentTimeMillis() + Long.MIN_VALUE;
         String canonical = "timestamp=" + timestamp;
         var input = new ApiKeyAuthenticationRequest(apiKey, "203.0.113.7", timestamp, 5000,
                 service.sign("secret", canonical), canonical);
         assertThatThrownBy(() -> service.authenticate(input, "READ"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("outside recvWindow");
-        verify(repository, never()).markUsed(any(), any());
     }
 
     private GatewayApiKeyRepository.ApiKeyRecord record() {

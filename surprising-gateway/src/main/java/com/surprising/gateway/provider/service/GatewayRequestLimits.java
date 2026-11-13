@@ -133,9 +133,7 @@ public final class GatewayRequestLimits {
         Rule rule;
         String operation;
         if (path.equals("/api/v1/auth/register")) { rule = properties.getRegistrationIp(); operation = "REGISTER"; }
-        else if (path.equals("/api/v1/auth/refresh") || path.equals("/api/v1/auth/browser/refresh")) {
-            rule = properties.getRefreshIp(); operation = "REFRESH";
-        } else if (path.startsWith("/api/v1/auth/") && !path.equals("/api/v1/auth/login")
+        else if (path.startsWith("/api/v1/auth/") && !path.equals("/api/v1/auth/login")
                 && !path.endsWith("/logout")) { rule = properties.getVerificationIp(); operation = "VERIFICATION"; }
         else return;
         consume(List.of(new Charge(properties.getNamespace() + ":{ip:" + ip + "}:" + operation, rule, 1)), operation);

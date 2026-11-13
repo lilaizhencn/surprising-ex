@@ -4,10 +4,10 @@ WebSocket delivery shares Gateway's process and port 9094 at `/ws/v1`. It forwar
 
 ## Authentication and subscriptions
 
-Send the access token in the first `authenticate` message, wait for `op=authenticated`, then request private channels. Never place tokens in URL query parameters. Handshake identity headers or caller-provided user IDs are not proof of login.
+Send the session token in the first `authenticate` message, wait for `op=authenticated`, then request private channels. A browser that opens the socket with its HttpOnly session cookie may send `authenticate` without `token`; the handshake cookie is used. Never place tokens in URL query parameters. Session state comes from Valkey, so a revoked, expired or frozen session closes private connections on the next periodic check. Handshake identity headers or caller-provided user IDs are not proof of login.
 
 ```json
-{"op":"authenticate","id":"a1","token":"<access-token>"}
+{"op":"authenticate","id":"a1","token":"<session-token>"}
 ```
 
 ```json

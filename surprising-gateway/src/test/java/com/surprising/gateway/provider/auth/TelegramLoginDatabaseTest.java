@@ -89,7 +89,7 @@ class TelegramLoginDatabaseTest {
             var found = userRepository.find(invocation.getArgument(0)).orElseThrow();
             return new AuthModels.AuthResponse(new AuthModels.AuthenticatedUser(found.userId(), found.username(),
                     found.email(), found.status(), List.of("USER"), found.createdAt(), found.displayName()),
-                    "access", "refresh", Instant.now().plusSeconds(60), Instant.now().plusSeconds(600));
+                    "access", Instant.now().plusSeconds(600));
         });
         manager = new DataSourceTransactionManager(ds);
         var proxy = new ProxyFactory(new TelegramLoginService(repository, new com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository(jdbc), userRepository, oidc, users, auth));

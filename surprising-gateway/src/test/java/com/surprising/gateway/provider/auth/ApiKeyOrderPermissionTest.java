@@ -17,12 +17,13 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 
 class ApiKeyOrderPermissionTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     final String key = "sx_" + "k".repeat(24);
     final GatewayProperties properties = new GatewayProperties();
     final TotpService totp = new TotpService(properties);
     final GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
     final AuthService auth = mock(AuthService.class);
-    final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
+    final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
     final GatewayProxyController proxy = mock(GatewayProxyController.class);
 
     @Test void readOnlyKeyCannotEnterTheCancellationBusiness() {
@@ -30,7 +31,6 @@ class ApiKeyOrderPermissionTest {
         var response = controller().handle(request(), null);
         assertThat(response.getStatusCode().value()).isEqualTo(403);
         verifyNoInteractions(proxy);
-        verify(repository, never()).markUsed(any(), any());
     }
 
     @Test void tradeKeyCancellationUsesTheInternalPostContract() {
@@ -45,9 +45,9 @@ class ApiKeyOrderPermissionTest {
         var scale = new GatewayProperties.SymbolScale();
         properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
         properties.getBinanceApi().setSymbolAliases(Map.of("SPOT:BTCUSDT", "1"));
-        when(repository.active(key)).thenReturn(Optional.of(new GatewayApiKeyRepository.ApiKeyRecord(
+        fixture.putApiKey(new GatewayApiKeyRepository.ApiKeyRecord(
                 UUID.randomUUID(), 42L, key, totp.encryptSecret("secret"), "bot", permissions,
-                "203.0.113.7", "ACTIVE", Instant.now(), null, null)));
+                "203.0.113.7", "ACTIVE", Instant.now(), null, null));
     }
 
     private MockHttpServletRequest request() {

@@ -65,6 +65,7 @@ surprising:
         callback-url: ${GATEWAY_KYC_VERIFF_CALLBACK_URL:}
     security:
       admin-browser-allowed-origins: ${GATEWAY_ADMIN_BROWSER_ALLOWED_ORIGINS:https://ex-api.tokdou.com}
+      browser-cookie-domain: ${GATEWAY_BROWSER_COOKIE_DOMAIN:.tokdou.com}
       cors-allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:https://ex.tokdou.com}
       require-identity-for-private-routes: true
       admin-ip-allowlist: ${GATEWAY_ADMIN_IP_ALLOWLIST}

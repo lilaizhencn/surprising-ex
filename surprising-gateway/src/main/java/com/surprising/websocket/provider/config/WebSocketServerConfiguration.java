@@ -33,6 +33,10 @@ public class WebSocketServerConfiguration implements WebSocketConfigurer {
                         String ip = addresses.resolve(servlet.getServletRequest());
                         if (ip == null || ip.isBlank()) return false;
                         attributes.put(com.surprising.websocket.provider.session.ClientConnection.CLIENT_IP, ip);
+                        String cookieToken = com.surprising.gateway.provider.auth.controller.BrowserSessionCookies
+                                .anySessionToken(servlet.getServletRequest());
+                        if (cookieToken != null) attributes.put(
+                                com.surprising.websocket.provider.session.ClientConnection.BROWSER_SESSION_TOKEN, cookieToken);
                         return true;
                     }
                     @Override public void afterHandshake(org.springframework.http.server.ServerHttpRequest request,

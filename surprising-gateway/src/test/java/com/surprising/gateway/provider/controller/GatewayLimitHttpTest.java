@@ -42,6 +42,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @EnabledIfEnvironmentVariable(named = "GATEWAY_LIMIT_TEST_REDIS_PORT", matches = "[0-9]+")
 class GatewayLimitHttpTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     final String key = "sx_" + "a".repeat(24), otherKey = "sx_" + "b".repeat(24);
     final ObjectMapper json = new ObjectMapper();
     final GatewayProperties gateway = new GatewayProperties();
@@ -72,7 +73,8 @@ class GatewayLimitHttpTest {
         when(products.enabled()).thenReturn(List.of(ProductLine.values()));
         when(products.local(any())).thenReturn(business);
         when(users.user(42)).thenReturn(Optional.of(new AuthenticatedUser(42, "owner", null, "NORMAL", List.of("USER"), Instant.now())));
-        when(tokens.verifyAccessToken("owner")).thenReturn(new JwtPrincipal(42, "owner", "NORMAL", List.of("USER"), Instant.now().plusSeconds(3600)));
+        when(tokens.verifySessionToken("owner")).thenReturn(new JwtPrincipal(42, "owner", "NORMAL", List.of("USER"), Instant.now().plusSeconds(3600), 4201L));
+        fixture.login(42, 4201L);
         stored(key, "READ,TRADE"); stored(otherKey, "READ");
         when(business.invoke(any(), any(), any(), any(), any(), any())).thenAnswer(call -> {
             assertThat(call.getArgument(3, HttpHeaders.class).getFirst("X-User-Id")).isEqualTo("42");
@@ -100,8 +102,8 @@ class GatewayLimitHttpTest {
         var clients = new AuthClientMetadataBinding(gateway, limits, binding);
         auth = new AuthService(gateway, users, mock(PasswordHasher.class), tokens, mock(EmailVerificationService.class),
                 mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), clients,
-                mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class));
-        keys = new GatewayApiKeyService(keyRows, auth, totp, mock(SensitiveActionVerificationService.class), gateway, clients);
+                mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
+        keys = new GatewayApiKeyService(keyRows, auth, totp, mock(SensitiveActionVerificationService.class), gateway, clients, fixture.state);
         var proxy = new GatewayProxyController(gateway, new RestTemplate(), auth, keys, null, json,
                 mock(com.surprising.gateway.provider.service.ProductTransferService.class), null,
                 products, business, new GatewayProductSelection(products, json));
@@ -214,7 +216,7 @@ class GatewayLimitHttpTest {
                 .andExpect(header().string("Access-Control-Allow-Origin", "https://ex.tokdou.com"))
                 .andExpect(header().string("Access-Control-Expose-Headers", org.hamcrest.Matchers.containsString("Retry-After")))
                 .andExpect(header().exists("Retry-After"));
-        verify(tokens, never()).verifyAccessToken(any());
+        verify(tokens, never()).verifySessionToken(any());
     }
 
     @Test void unavailableQuotaStoreRejectsBeforeAuthenticationOrBusinessSubmission() throws Exception {
@@ -226,7 +228,7 @@ class GatewayLimitHttpTest {
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(header().exists("Retry-After"))
                 .andExpect(jsonPath("$.code").value("RATE_LIMIT_STORAGE_UNAVAILABLE"));
-        verify(tokens, never()).verifyAccessToken(any());
+        verify(tokens, never()).verifySessionToken(any());
         assertThat(submissions).hasValue(0);
     }
 
@@ -240,8 +242,8 @@ class GatewayLimitHttpTest {
     }
 
     private void stored(String key, String permissions) {
-        when(keyRows.active(key)).thenReturn(Optional.of(new GatewayApiKeyRepository.ApiKeyRecord(UUID.randomUUID(), 42,
-                key, totp.encryptSecret("secret"), "bot", permissions, "192.0.2.7", "ACTIVE", Instant.now(), null, null)));
+        fixture.putApiKey(new GatewayApiKeyRepository.ApiKeyRecord(UUID.randomUUID(), 42,
+                key, totp.encryptSecret("secret"), "bot", permissions, "192.0.2.7", "ACTIVE", Instant.now(), null, null));
     }
 
     private MockHttpServletRequestBuilder nativeRequest(String method, String path, String body, String key) throws Exception {

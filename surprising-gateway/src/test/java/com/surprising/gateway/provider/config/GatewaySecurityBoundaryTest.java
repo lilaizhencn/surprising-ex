@@ -37,6 +37,7 @@ class GatewaySecurityBoundaryTest {
     String token;
     GatewayProperties properties;
     AuthPersistenceService rows;
+    com.surprising.gateway.provider.auth.state.AuthStateFixture fixture;
 
     @BeforeEach void start() throws Exception {
         server = new Tomcat(); server.setBaseDir(directory.toString()); server.setPort(0);
@@ -52,8 +53,15 @@ class GatewaySecurityBoundaryTest {
         properties = context.getBean(GatewayProperties.class); rows = context.getBean(AuthPersistenceService.class);
         when(rows.user(1)).thenReturn(Optional.of(new AuthenticatedUser(1, "reviewer", "reviewer@example.test", "NORMAL", List.of("SUPPORT"), Instant.now())));
         when(rows.user(2)).thenReturn(Optional.of(new AuthenticatedUser(2, "target", "target@example.test", "NORMAL", List.of("USER"), Instant.now())));
-        when(rows.permissionsForUser(1)).thenReturn(List.of());
-        token = context.getBean(JwtTokenService.class).createAccessToken(1, "reviewer", List.of("SUPPORT"), Instant.now());
+        fixture = context.getBean(com.surprising.gateway.provider.auth.state.AuthStateFixture.class);
+        loginReviewer(List.of());
+        token = context.getBean(JwtTokenService.class).createSessionToken(1, "reviewer", List.of("SUPPORT"), 1088L, Instant.now());
+    }
+
+    /** Valkey 里放入评审员用户（带给定权限）和一个有效会话。 */
+    void loginReviewer(List<String> permissions) {
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(1, "NORMAL", List.of("SUPPORT"), permissions));
+        fixture.startSession(1, 1088L);
     }
 
     private static void install(org.apache.catalina.Context context, String name, jakarta.servlet.Filter filter) {
@@ -73,7 +81,7 @@ class GatewaySecurityBoundaryTest {
         assertThat(get("/api/v1/admin/users/2").statusCode()).isEqualTo(403);
         for (String path : List.of("/api/v1/%61dmin/users/2", "/api/v1/admin;review=1/users/2", "/api/v1/admin//users/2", "/api/v1/admin/%2e/users/2"))
             assertThat(get(path).statusCode()).as(path).isEqualTo(400);
-        when(rows.permissionsForUser(1)).thenReturn(List.of("admin.users.read"));
+        loginReviewer(List.of("admin.users.read"));
         assertThat(get("/api/v1/admin/users/2").statusCode()).isEqualTo(200);
         properties.getSecurity().setAdminIpAllowlist(List.of("192.0.2.1"));
         assertThat(get("/api/v1/admin/users/2").statusCode()).isEqualTo(403);
@@ -82,10 +90,14 @@ class GatewaySecurityBoundaryTest {
     }
 
     @Test void bearerIsVerifiedOncePerRequestAndUnknownRoutesDenyByDefault() throws Exception {
-        when(rows.permissionsForUser(1)).thenReturn(List.of("admin.users.read"));
+        loginReviewer(List.of("admin.users.read"));
         clearInvocations(rows);
         assertThat(get("/api/v1/admin/users/2").statusCode()).isEqualTo(200);
-        verify(rows, times(1)).user(1);
+        // 登录后的校验只读 Valkey，用户目录本身的查询只发生在管理接口读取目标用户时
+        verify(rows, never()).permissionsForUser(anyLong());
+        verify(rows, never()).activeRefreshSession(anyLong(), anyLong(), any());
+        verify(rows, never()).roles(anyLong());
+        verify(rows, times(1)).user(2);
         assertThat(get("/api/v1/new-unlisted-endpoint").statusCode()).isEqualTo(403);
         assertThat(get("/api/v1/admin/new-unlisted-endpoint").statusCode()).isEqualTo(403);
         assertThat(get("/api/v1/realtime/SPOT/state").statusCode()).isEqualTo(404); // Known private route, absent controller in this fixture.
@@ -98,24 +110,44 @@ class GatewaySecurityBoundaryTest {
         assertThat(anonymous.headers().firstValue("Location")).isEmpty();
     }
 
-    @Test void browserRefreshRequiresCsrfAndDoesNotExposeTheRefreshSecret() throws Exception {
-        var session = new AuthResponse(rows.user(1).orElseThrow(), "access", "refresh-secret", Instant.now().plusSeconds(300), Instant.now().plusSeconds(3600));
+    @Test void browserLoginSetsHttpOnlyCookieAndCookieWritesNeedCsrfWhileBearerIsExempt() throws Exception {
         var auth = context.getBean(AuthService.class);
-        doReturn(session).when(auth).refresh(any(), any());
+        var session = new AuthResponse(rows.user(1).orElseThrow(), token, Instant.now().plusSeconds(3600));
+        doReturn(session).when(auth).login(any(), any());
         var csrfResponse = client.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/csrf")).header("X-Auth-Client", "web").GET().build(), HttpResponse.BodyHandlers.ofString());
         assertThat(csrfResponse.statusCode()).isEqualTo(200);
+        assertThat(csrfResponse.headers().allValues("Set-Cookie")).anySatisfy(value -> assertThat(value)
+                .startsWith("surprising-web-csrf=").contains("SameSite=Lax").doesNotContain("HttpOnly"));
         String csrf = new ObjectMapper().readTree(csrfResponse.body()).path("token").asString();
-        var cookieHandler = (CookieManager) client.cookieHandler().orElseThrow();
-        var cookie = new HttpCookie("surprising-web-refresh", "refresh-secret"); cookie.setPath("/api/v1/auth/browser"); cookie.setVersion(0); cookieHandler.getCookieStore().add(URI.create(base), cookie);
-        var missing = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/browser/refresh")).header("X-Auth-Client", "web").POST(HttpRequest.BodyPublishers.noBody()).build();
-        assertThat(client.send(missing, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
-        var valid = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/browser/refresh")).header("X-Auth-Client", "web").header("X-XSRF-TOKEN", csrf).POST(HttpRequest.BodyPublishers.noBody()).build();
-        var response = client.send(valid, HttpResponse.BodyHandlers.ofString());
+        String json = "{\"identifier\":\"reviewer@example.test\",\"password\":\"StrongPassword1!\"}";
+        java.util.function.Function<String, HttpRequest> login = token -> {
+            var request = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/login")).header("X-Auth-Client", "web")
+                    .header("X-Auth-Transport", "cookie").header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(json));
+            if (token != null) request.header("X-CSRF-Token", token);
+            return request.build();
+        };
+        assertThat(client.send(login.apply(null), HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
+        var response = client.send(login.apply(csrf), HttpResponse.BodyHandlers.ofString());
         assertThat(response.statusCode()).isEqualTo(200);
-        assertThat(response.body()).doesNotContain("refresh-secret").contains("\"browserSession\":true");
-        assertThat(response.headers().allValues("Set-Cookie")).anySatisfy(value -> assertThat(value).contains("HttpOnly", "SameSite=Strict", "Path=/api/v1/auth/browser"));
-        var crossOrigin = HttpRequest.newBuilder(valid, (key, value) -> true).header("Origin", "https://attacker.example").build();
-        assertThat(client.send(crossOrigin, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
+        assertThat(response.body()).doesNotContain(token).contains("\"browserSession\":true");
+        assertThat(response.headers().allValues("Set-Cookie")).anySatisfy(value -> assertThat(value)
+                .startsWith("surprising-web-session=" + token).contains("HttpOnly", "SameSite=Lax", "Path=/"));
+        // 之后只靠 Cookie 就能通过登录校验，不需要 Authorization 头
+        var me = client.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/me")).header("X-Auth-Client", "web").GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(me.statusCode()).isEqualTo(200);
+        // Cookie 认证的写请求没有 CSRF 头会被拒绝
+        var noCsrf = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/logout")).header("X-Auth-Client", "web").POST(HttpRequest.BodyPublishers.noBody()).build();
+        assertThat(client.send(noCsrf, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
+        // 跨站来源的后台请求被拒绝
+        // Authorization 头认证的写请求（App/脚本）不需要 CSRF
+        var bearer = java.net.http.HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/logout"))
+                .header("Authorization", "Bearer " + token).POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(bearer.statusCode()).isEqualTo(204);
+        assertThat(fixture.state.sessionExists(1088L)).isFalse();
+        // 登出后同一个令牌不再有效
+        assertThat(client.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/me")).header("X-Auth-Client", "web").GET().build(),
+                HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(401);
     }
 
     @Test void adminCookiesCannotBeBorrowedByTheUserWebsiteAndCsrfCookiesRemainSeparate() throws Exception {
@@ -128,24 +160,20 @@ class GatewaySecurityBoundaryTest {
         assertThat(userCsrf.headers().allValues("Set-Cookie")).anySatisfy(value -> assertThat(value).startsWith("surprising-web-csrf="));
         assertThat(adminCsrf.headers().allValues("Set-Cookie")).anySatisfy(value -> assertThat(value).startsWith("surprising-admin-csrf="));
         String csrf = new ObjectMapper().readTree(adminCsrf.body()).path("token").asString();
-        var request = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/browser/refresh"))
-                .header("X-Auth-Client", "admin").header("X-XSRF-TOKEN", csrf).header("Origin", "https://ex.tokdou.com")
+        var request = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/logout"))
+                .header("X-Auth-Client", "admin").header("X-CSRF-Token", csrf).header("Origin", "https://ex.tokdou.com")
                 .POST(HttpRequest.BodyPublishers.noBody()).build();
         var rejected = client.send(request, HttpResponse.BodyHandlers.ofString());
         assertThat(rejected.statusCode()).isEqualTo(403); assertThat(rejected.body()).contains("ADMIN_ORIGIN_DENIED");
-        var noOrigin = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/browser/refresh"))
-                .header("X-Auth-Client", "admin").header("X-XSRF-TOKEN", csrf).POST(HttpRequest.BodyPublishers.noBody()).build();
+        var noOrigin = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/logout"))
+                .header("X-Auth-Client", "admin").header("X-CSRF-Token", csrf).POST(HttpRequest.BodyPublishers.noBody()).build();
         assertThat(client.send(noOrigin, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
-        var nativeLogin = client.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/login"))
-                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString("{}"))
-                .build(), HttpResponse.BodyHandlers.ofString());
-        assertThat(nativeLogin.statusCode()).isEqualTo(404); // No AuthController in this fixture; the stateless protocol passed security.
     }
 
     @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
     @EnableWebMvc
     @Import({GatewaySecurityConfiguration.class, GatewayCorsConfig.class, AdminIpWhitelistFilter.class, AdminPermissionFilter.class,
-            AdminAuthController.class, AuthClientMetadataBinding.class, BrowserSessionController.class, BrowserSessionResponse.class})
+            AdminAuthController.class, AuthController.class, AuthClientMetadataBinding.class, BrowserSessionController.class, BrowserSessionResponse.class})
     static class Configuration {
         @Bean GatewayProperties properties() { var p = new GatewayProperties(); p.getSecurity().setBrowserCookieSecure(false); return p; }
         @Bean WebSocketProperties websocket() { return new WebSocketProperties(); }
@@ -155,9 +183,11 @@ class GatewaySecurityBoundaryTest {
         @Bean AuthPersistenceService rows() { return mock(AuthPersistenceService.class); }
         @Bean JwtTokenService tokens(GatewayProperties p, ObjectMapper json) { return new JwtTokenService(p, json); }
         @Bean AdminApprovalService approvals() { return mock(AdminApprovalService.class); }
-        @Bean AuthService auth(GatewayProperties p, AuthPersistenceService rows, JwtTokenService jwt, AuthClientMetadataBinding client) {
+        @Bean PasswordResetService passwordResets() { return mock(PasswordResetService.class); }
+        @Bean com.surprising.gateway.provider.auth.state.AuthStateFixture authFixture(GatewayProperties p) { return new com.surprising.gateway.provider.auth.state.AuthStateFixture(p); }
+        @Bean AuthService auth(GatewayProperties p, com.surprising.gateway.provider.auth.state.AuthStateFixture fixture, AuthPersistenceService rows, JwtTokenService jwt, AuthClientMetadataBinding client) {
             return spy(new AuthService(p, rows, mock(PasswordHasher.class), jwt, mock(EmailVerificationService.class),
-                    mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), client, mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class)));
+                    mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), client, mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
         }
     }
 }

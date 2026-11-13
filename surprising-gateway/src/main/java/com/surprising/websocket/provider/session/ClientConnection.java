@@ -24,6 +24,8 @@ public class ClientConnection implements AutoCloseable {
 
     private final WebSocketSession session;
     public static final String CLIENT_IP = ClientConnection.class.getName() + ".clientIp";
+    /** 握手时浏览器带来的登录 Cookie 令牌；网页端 JavaScript 读不到它，认证时由服务端代为使用。 */
+    public static final String BROWSER_SESSION_TOKEN = ClientConnection.class.getName() + ".browserSessionToken";
     private final String clientIp;
     private volatile Long authenticatedUserId;
     private record Authorization(String token, String apiKey, java.time.Instant expiresAt,
@@ -75,6 +77,7 @@ public class ClientConnection implements AutoCloseable {
     public String accessToken() {var current = authorization; return current == null ? null : current.token();}
     public String apiKey() { var current = authorization; return current == null ? null : current.apiKey(); }
     public String clientIp() { return clientIp; }
+    public String browserSessionToken() { return (String) session.getAttributes().get(BROWSER_SESSION_TOKEN); }
     public void renewLimits(long deadlineNanos) {
         long now = System.nanoTime();
         limitLease = new LimitLease(deadlineNanos, now + Math.max(0, deadlineNanos - now) / 3);

@@ -30,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 /** Actual management HTTP -> business/auth checks -> one-table PostgreSQL repository. */
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")
 class ApiKeyManagementPostgresTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     private static final String PATH = "/api/v1/security/api-keys";
     private final ObjectMapper json = new ObjectMapper();
     private JdbcTemplate admin, jdbc;
@@ -48,10 +49,11 @@ class ApiKeyManagementPostgresTest {
         admin.execute("CREATE SCHEMA " + schema);
         jdbc = new JdbcTemplate(new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema, user, password));
         String init = Files.readString(Path.of("../init.sql"));
-        for (String table : List.of("gateway_users", "gateway_api_keys")) {
+        for (String table : List.of("gateway_users", "gateway_roles", "gateway_user_roles", "gateway_permissions", "gateway_role_permissions", "gateway_user_access_blocks", "gateway_api_keys")) {
             int start = init.indexOf("CREATE TABLE IF NOT EXISTS " + table + " (");
             jdbc.execute(init.substring(start, init.indexOf("\n);", start) + 3));
         }
+        jdbc.execute("ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS display_name TEXT");
         jdbc.execute("INSERT INTO gateway_users(user_id,username,password_hash,created_at,updated_at) VALUES(7,'owner','hash',now(),now()),(8,'other','hash',now(),now())");
         var properties = new GatewayProperties();
         auth = mock(AuthService.class); verification = mock(SensitiveActionVerificationService.class);
@@ -59,7 +61,7 @@ class ApiKeyManagementPostgresTest {
                 .thenReturn(new JwtPrincipal(id, "user_" + id, "NORMAL", List.of("USER"), Instant.now().plusSeconds(300)));
         when(verification.verify(anyLong(), eq("SECURITY_SETTINGS"), any(), any(), any())).thenReturn(true);
         totp = new TotpService(properties);
-        service = new GatewayApiKeyService(new GatewayApiKeyRepository(jdbc), auth, totp, verification, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
+        service = new GatewayApiKeyService(keyRepository(jdbc), auth, totp, verification, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
         mvc = MockMvcBuilders.standaloneSetup(new UserApiKeyController(service, properties)).build();
     }
     @AfterEach void cleanup() { if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }
@@ -85,7 +87,8 @@ class ApiKeyManagementPostgresTest {
         long timestamp = Long.parseLong(canonical.substring("timestamp=".length()));
         assertThat(service.authenticate(new ApiKeyAuthenticationRequest(key, "203.0.113.9", timestamp, 5000,
                 service.sign(secret, canonical), canonical), "TRADE")).isEqualTo(7L);
-        assertThat(jdbc.queryForObject("SELECT last_used_at IS NOT NULL FROM gateway_api_keys WHERE api_key=?", Boolean.class, key)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT last_used_at IS NULL FROM gateway_api_keys WHERE api_key=?", Boolean.class, key))
+                .as("请求路径不再写 last_used_at").isTrue();
     }
 
     @Test void missingPermissionsStillReceiveReadAndEmptyAllowlistStaysUnrestricted() throws Exception {
@@ -184,5 +187,12 @@ class ApiKeyManagementPostgresTest {
     private MockHttpServletRequestBuilder secure(MockHttpServletRequestBuilder request, long user) {
         return request.header("Authorization", "Bearer " + user).header("X-Security-Email-Code", "email")
                 .header("X-Security-TOTP-Code", "123456").contentType("application/json").with(r -> { r.setRemoteAddr("203.0.113.7"); return r; });
+    }
+
+    /** 密钥表的每次变更同步写入 Valkey（内存版），与线上仓库接线一致。 */
+    private GatewayApiKeyRepository keyRepository(JdbcTemplate jdbc) {
+        var repository = new GatewayApiKeyRepository(jdbc);
+        repository.setAuthState(new com.surprising.gateway.provider.auth.state.AuthStateSync(jdbc, fixture.state, new GatewayProperties()));
+        return repository;
     }
 }

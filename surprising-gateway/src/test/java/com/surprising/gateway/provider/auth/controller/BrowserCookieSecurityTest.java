@@ -7,20 +7,25 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.*;
 
 class BrowserCookieSecurityTest {
-    @Test void productionRefreshAndCsrfCookiesHaveHostOnlySecurePrefixes() {
+    @Test void sessionCookieIsHttpOnlyLaxAndCarriesTheConfiguredDomain() {
         var properties = new GatewayProperties();
+        properties.getSecurity().setBrowserCookieSecure(true);
+        properties.getSecurity().setBrowserCookieDomain(".tokdou.com");
         var request = new MockHttpServletRequest(); request.addHeader("X-Auth-Client", "web");
-        String refresh = BrowserSessionController.cookie(request, "opaque-test-value", Duration.ofMinutes(5), true).toString();
-        assertThat(refresh).startsWith("__Host-surprising-web-refresh=")
-                .contains("Path=/;", "Secure", "HttpOnly", "SameSite=Strict").doesNotContain("Domain=");
+        String session = BrowserSessionCookies.sessionCookie(properties, "web", "jwt-test-value", Duration.ofDays(365)).toString();
+        assertThat(session).startsWith("surprising-web-session=jwt-test-value")
+                .contains("Path=/", "Secure", "HttpOnly", "SameSite=Lax", "Domain=.tokdou.com");
         var csrf = new BrowserCsrfTokens(properties); var response = new MockHttpServletResponse();
         csrf.saveToken(csrf.generateToken(request), request, response);
-        assertThat(response.getHeader("Set-Cookie")).startsWith("__Host-surprising-web-csrf=")
-                .contains("Path=/;", "Secure", "HttpOnly").doesNotContain("Domain=");
-        // MockHttpServletResponse does not serialize arbitrary Servlet Cookie attributes into its header.
-        assertThat(response.getCookie("__Host-surprising-web-csrf").getAttribute("SameSite")).isEqualTo("Strict");
-        request = new MockHttpServletRequest(); request.addHeader("X-Auth-Client", "admin");
-        assertThat(BrowserSessionController.cookie(request, "opaque-test-value", Duration.ZERO, true).toString())
-                .startsWith("__Host-surprising-admin-refresh=").contains("Max-Age=0");
+        assertThat(response.getHeader("Set-Cookie")).startsWith("surprising-web-csrf=")
+                .contains("Path=/", "Secure", "Domain=.tokdou.com").doesNotContain("HttpOnly");
+        assertThat(response.getCookie("surprising-web-csrf").getAttribute("SameSite")).isEqualTo("Lax");
+        assertThat(csrf.generateToken(request).getHeaderName()).isEqualTo("X-CSRF-Token");
+    }
+
+    @Test void adminAndWebCookiesUseSeparateNamesAndLogoutClearsTheSession() {
+        var properties = new GatewayProperties();
+        assertThat(BrowserSessionCookies.clearedSessionCookie(properties, "admin").toString())
+                .startsWith("surprising-admin-session=").contains("Max-Age=0");
     }
 }

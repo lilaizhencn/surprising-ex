@@ -33,11 +33,6 @@ public final class AuthModels {
             @NotBlank @Size(max = 128) String password) {
     }
 
-    public record RefreshRequest(@NotBlank String refreshToken) {
-    }
-
-    public record RevokeOtherSessionsRequest(@NotBlank String refreshToken) {
-    }
 
     public record EmailVerificationRequest(
             @NotBlank @Size(max = 254) String email,
@@ -99,24 +94,19 @@ public final class AuthModels {
 
     public sealed interface LoginResult permits AuthResponse, LoginVerificationModels.ChallengeResponse {}
 
+    /** 登录结果：accessToken 是登录令牌（JWT），有效性由 Valkey 会话决定；浏览器登录时令牌只放在 Cookie 里，body 里为空。 */
     public record AuthResponse(
             AuthenticatedUser user,
             String accessToken,
-            String refreshToken,
-            Instant accessTokenExpiresAt,
-            Instant refreshTokenExpiresAt,
+            Instant sessionExpiresAt,
             boolean requiresEmailVerification,
             boolean browserSession) implements LoginResult {
-        public AuthResponse(AuthenticatedUser user, String accessToken, String refreshToken,
-                            Instant accessTokenExpiresAt, Instant refreshTokenExpiresAt, boolean requiresEmailVerification) {
-            this(user, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, requiresEmailVerification, false);
+        public AuthResponse(AuthenticatedUser user, String accessToken, Instant sessionExpiresAt) {
+            this(user, accessToken, sessionExpiresAt, false, false);
         }
-        public AuthResponse(AuthenticatedUser user,
-                            String accessToken,
-                            String refreshToken,
-                            Instant accessTokenExpiresAt,
-                            Instant refreshTokenExpiresAt) {
-            this(user, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, false);
+        public AuthResponse(AuthenticatedUser user, String accessToken, Instant sessionExpiresAt,
+                            boolean requiresEmailVerification) {
+            this(user, accessToken, sessionExpiresAt, requiresEmailVerification, false);
         }
     }
 

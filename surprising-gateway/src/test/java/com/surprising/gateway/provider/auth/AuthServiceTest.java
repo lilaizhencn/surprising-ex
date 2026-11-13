@@ -40,7 +40,6 @@ import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.RefreshRequest;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -58,8 +57,9 @@ class AuthServiceTest {
     private final GatewayUserAccessBlockRepository accessBlocks = mock(GatewayUserAccessBlockRepository.class);
     private final com.surprising.gateway.provider.legal.service.LegalConsentService legal = mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class);
     private final com.surprising.affiliate.service.AffiliateService affiliate = mock(com.surprising.affiliate.service.AffiliateService.class);
+    private final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     private final AuthService service = new AuthService(new GatewayProperties(), repository,
-            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), affiliate, legal);
+            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), affiliate, legal, fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
 
     @Test void registrationWithoutCurrentAcknowledgementsHasNoAccountOrReferralSideEffects() {
         org.mockito.Mockito.doThrow(new com.surprising.gateway.provider.legal.exception.LegalProblem(
@@ -120,7 +120,7 @@ class AuthServiceTest {
 
     @Test
     void blockedIpCannotUseApiKeyAccess() {
-        when(accessBlocks.blocked(42L, "IP", "203.0.113.7")).thenReturn(true);
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.userWithBlockedIps(42L, java.util.Set.of("203.0.113.7")));
 
         assertThatThrownBy(() -> service.requireIpAccessAllowed(42L, "203.0.113.7"))
                 .isInstanceOf(IllegalStateException.class)
@@ -130,8 +130,7 @@ class AuthServiceTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"FROZEN,READ", "TRADE_DISABLED,TRADE", "WITHDRAW_DISABLED,WITHDRAW"})
     void apiKeyAccessHonorsAuthoritativeAccountRestrictions(String status, String permission) {
-        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
-                42, "bot", null, status, List.of("USER"), Instant.now())));
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(42L, status, List.of("USER"), List.of()));
         assertThatThrownBy(() -> service.requireApiKeyAccess(42L, "203.0.113.7", permission))
                 .isInstanceOf(IllegalStateException.class);
     }
@@ -139,8 +138,8 @@ class AuthServiceTest {
     @Test
     void adminRefreshSessionsReturnsRepositoryRows() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(jwtTokenService.verifyAccessToken("admin-token"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "UNKNOWN", List.of("ADMIN"), now.plusSeconds(60)));
+        when(jwtTokenService.verifySessionToken("admin-token"))
+                .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         AdminRefreshSessionResponse session = new AdminRefreshSessionResponse(
                 88L, 42L, true, now.plusSeconds(3600), null, "ua", "127.0.0.1", now, now);
@@ -156,8 +155,8 @@ class AuthServiceTest {
     @Test
     void adminRefreshSessionsWithCursorReturnsRepositoryPage() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(jwtTokenService.verifyAccessToken("admin-token"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "UNKNOWN", List.of("ADMIN"), now.plusSeconds(60)));
+        when(jwtTokenService.verifySessionToken("admin-token"))
+                .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         AdminRefreshSessionResponse session = new AdminRefreshSessionResponse(
                 88L, 42L, true, now.plusSeconds(3600), null, "ua", "127.0.0.1", now, now);
@@ -178,8 +177,8 @@ class AuthServiceTest {
     @Test
     void adminUsersWithCursorReturnsRepositoryPage() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(jwtTokenService.verifyAccessToken("admin-token"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "UNKNOWN", List.of("ADMIN"), now.plusSeconds(60)));
+        when(jwtTokenService.verifySessionToken("admin-token"))
+                .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         AuthenticatedUser user = new AuthenticatedUser(42L, "user", null, "NORMAL", List.of("USER"), now);
         when(repository.usersPage(new UserQueryFilter("user",null,"NORMAL"), new AuthPageQuery(50,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC)))
@@ -199,8 +198,8 @@ class AuthServiceTest {
     @Test
     void revokeUserRefreshSessionsRequiresTargetUserAndReturnsCount() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(jwtTokenService.verifyAccessToken("admin-token"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "UNKNOWN", List.of("ADMIN"), now.plusSeconds(60)));
+        when(jwtTokenService.verifySessionToken("admin-token"))
+                .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
                 42L, "user", null, "NORMAL", List.of("USER"), now)));
@@ -216,8 +215,8 @@ class AuthServiceTest {
     @Test
     void revokeRefreshSessionReturnsRevokedCount() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(jwtTokenService.verifyAccessToken("admin-token"))
-                .thenReturn(new JwtPrincipal(7L, "admin", "UNKNOWN", List.of("ADMIN"), now.plusSeconds(60)));
+        when(jwtTokenService.verifySessionToken("admin-token"))
+                .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         when(repository.revokeRefreshSessionForAdmin(eq(88L), any())).thenReturn(1);
 
@@ -228,32 +227,27 @@ class AuthServiceTest {
     }
 
     @Test
-    void revokeOtherRefreshSessionsKeepsTheRefreshSessionFromTheRequest() {
+    void revokeOtherSessionsKeepsTheCurrentSession() {
         Instant now = Instant.now();
-        when(jwtTokenService.verifyAccessToken("access-token"))
-                .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60)));
-        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
-                42L, "user", null, "ACTIVE", List.of("USER"), now)));
-        when(repository.refreshSession(any())).thenReturn(Optional.of(
-                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600), null)));
-        when(repository.revokeActiveForUserExcept(eq(42L), eq(88L), any())).thenReturn(2);
+        when(jwtTokenService.verifySessionToken("access-token")).thenReturn(loggedIn(42L, "user", List.of("USER"), now.plusSeconds(60)));
+        when(repository.revokeActiveForUserExcept(eq(42L), eq(42088L), any())).thenReturn(2);
 
-        var response = service.revokeOtherRefreshSessions("Bearer access-token", "refresh-token");
+        var response = service.revokeOtherSessions("Bearer access-token");
 
         assertThat(response.revoked()).isEqualTo(2);
-        verify(repository).revokeActiveForUserExcept(eq(42L), eq(88L), any());
+        verify(repository).revokeActiveForUserExcept(eq(42L), eq(42088L), any());
     }
 
     @Test
     void requireAdminPermissionAllowsWildcardRolePermission() {
-        when(repository.permissionsForUser(7L)).thenReturn(List.of("admin.gateway.*.write"));
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(7L, "NORMAL", List.of("ADMIN"), List.of("admin.gateway.*.write")));
 
         service.requireAdminPermission(7L, List.of("ADMIN"), "admin.gateway.account.write");
     }
 
     @Test
     void requireAdminPermissionRejectsMissingPermission() {
-        when(repository.permissionsForUser(7L)).thenReturn(List.of("admin.users.read"));
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(7L, "NORMAL", List.of("ADMIN"), List.of("admin.users.read")));
 
         assertThatThrownBy(() -> service.requireAdminPermission(7L, List.of("ADMIN"), "admin.users.write"))
                 .isInstanceOf(IllegalStateException.class)
@@ -270,11 +264,9 @@ class AuthServiceTest {
     @Test
     void supportRoleCanAuthenticateAsAdminButNeedsSpecificPermission() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(jwtTokenService.verifyAccessToken("support-token"))
-                .thenReturn(new JwtPrincipal(9L, "support", "UNKNOWN", List.of("SUPPORT"), now.plusSeconds(60)));
-        when(repository.user(9L)).thenReturn(Optional.of(new AuthenticatedUser(
-                9L, "support", null, "NORMAL", List.of("SUPPORT"), now)));
-        when(repository.permissionsForUser(9L)).thenReturn(List.of("admin.support.read"));
+        when(jwtTokenService.verifySessionToken("support-token"))
+                .thenReturn(loggedIn(9L, "support", List.of("SUPPORT"), now.plusSeconds(60)));
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(9L, "NORMAL", List.of("SUPPORT"), List.of("admin.support.read")));
 
         JwtPrincipal principal = service.requireAdminPermission("Bearer support-token", "admin.support.read");
 
@@ -307,7 +299,7 @@ class AuthServiceTest {
         when(passwordHasher.matches("password", "hash")).thenReturn(true);
         when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
                 42L, "user", null, "NORMAL", List.of("USER"), now)));
-        when(jwtTokenService.createAccessToken(eq(42L), eq("user"), eq(List.of("USER")), any()))
+        when(jwtTokenService.createSessionToken(eq(42L), eq("user"), eq(List.of("USER")), anyLong(), any()))
                 .thenReturn("access");
 
         var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user", "password"), new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
@@ -317,98 +309,11 @@ class AuthServiceTest {
     }
 
     @Test
-    void refreshConsumesOnlyOneActiveSession() {
-        Instant now = Instant.now();
-        when(repository.refreshSession(any())).thenReturn(Optional.of(
-                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600), null)));
-        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
-        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
-                42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
-        when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
-                .thenReturn("access");
-
-        var response = service.refresh(new RefreshRequest("refresh-token"), new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
-
-        assertThat(response.accessToken()).isEqualTo("access");
-        verify(repository).consumeRefreshSession(eq(88L), any());
-        verify(repository, org.mockito.Mockito.never()).revokeRefreshSession(any(Long.class), any());
-        verify(repository).saveRefreshSession(eq(42L), anyString(), any(), any(), any(), any(), any(), isNull());
-    }
-
-    @Test
-    void refreshPreservesOriginalPrimaryAuthenticationInsteadOfRenewingIt() {
-        Instant now = Instant.now(), original = now.minusSeconds(3600);
-        when(repository.refreshSession(any())).thenReturn(Optional.of(
-                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600),
-                        null, null, null, original)));
-        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
-        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
-                42L, null, null, "NORMAL", List.of("USER"), now)));
-        service.refresh(new RefreshRequest("refresh-token"), new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
-        verify(repository).saveRefreshSession(eq(42L), anyString(), any(), any(), any(), any(), any(), eq(original));
-    }
-
-    @Test
-    void adminRefreshKeepsTheOriginalEightHourDeadline() {
-        Instant now = Instant.now(), original = now.minusSeconds(7 * 3600);
-        when(repository.refreshSession(any())).thenReturn(Optional.of(
-                new GatewayRefreshSessionRepository.RefreshSession(88L, 7L, now.plusSeconds(3600),
-                        null, null, null, original)));
-        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
-        when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
-        var client = new AuthClientMetadataBinding(new GatewayProperties(),
-                mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class),
-                mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class));
-
-        var response = service.refresh(new RefreshRequest("refresh-token"), client.bind(new MockHttpServletRequest()));
-
-        assertThat(response.refreshTokenExpiresAt()).isEqualTo(original.plusSeconds(8 * 3600));
-        assertThat(response.accessTokenExpiresAt()).isBetween(now.plusSeconds(299), Instant.now().plusSeconds(300));
-        verify(repository).saveRefreshSession(eq(7L), anyString(), eq(original.plusSeconds(8 * 3600)),
-                any(), any(), any(), any(), eq(original));
-    }
-
-    @Test
-    void adminCannotExtendARefreshSessionPastItsOriginalDeadline() {
-        Instant now = Instant.now(), original = now.minusSeconds(9 * 3600);
-        when(repository.refreshSession(any())).thenReturn(Optional.of(
-                new GatewayRefreshSessionRepository.RefreshSession(88L, 7L, now.plusSeconds(3600),
-                        null, null, null, original)));
-        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
-        when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
-        var client = new AuthClientMetadataBinding(new GatewayProperties(),
-                mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class),
-                mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class));
-
-        assertThatThrownBy(() -> service.refresh(new RefreshRequest("refresh-token"), client.bind(new MockHttpServletRequest())))
-                .isInstanceOf(IllegalArgumentException.class).hasMessage("session requires fresh authentication");
-        verifyNoInteractions(jwtTokenService);
-    }
-
-    @Test
-    void refreshRejectsSessionConsumedByAnotherRequest() {
-        Instant now = Instant.now();
-        when(repository.refreshSession(any())).thenReturn(Optional.of(
-                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600), null)));
-        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(0);
-
-        assertThatThrownBy(() -> service.refresh(
-                new RefreshRequest("refresh-token"), new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest())))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("invalid refresh token");
-        verify(repository, org.mockito.Mockito.never()).user(any(Long.class));
-        verifyNoInteractions(jwtTokenService);
-    }
-
-    @Test
-    void logoutRevokesOnlyTheRefreshSessionFromTheRequest() {
-        Instant now = Instant.parse("2026-07-02T00:00:00Z");
-        when(repository.refreshSession(any())).thenReturn(Optional.of(
-                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600), null)));
-
-        service.logout(new RefreshRequest("refresh-token"));
-
+    void logoutRevokesOnlyTheCurrentSession() {
+        fixture.login(42L, 88L);
+        service.logout(new JwtPrincipal(42L, "user", "NORMAL", List.of("USER"), Instant.now().plusSeconds(60), 88L));
         verify(repository).revokeRefreshSession(eq(88L), any());
+        assertThat(fixture.state.sessionExists(88L)).isFalse();
     }
 
     @Test
@@ -420,7 +325,7 @@ class AuthServiceTest {
         when(passwordHasher.matches("password", "hash")).thenReturn(true);
         when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
                 42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
-        when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
+        when(jwtTokenService.createSessionToken(eq(42L), eq(null), eq(List.of("USER")), anyLong(), any()))
                 .thenReturn("access");
 
         var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user@example.com", "password"),
@@ -440,7 +345,7 @@ class AuthServiceTest {
         when(repository.createUser(eq(null), eq("user@example.com"), eq("hash"), any()))
                 .thenReturn(user);
         when(repository.user(42L)).thenReturn(Optional.of(user));
-        when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
+        when(jwtTokenService.createSessionToken(eq(42L), eq(null), eq(List.of("USER")), anyLong(), any()))
                 .thenReturn("access");
 
         var response = service.register(
@@ -464,10 +369,9 @@ class AuthServiceTest {
     @Test
     void bearerStillChecksIpFromActualRequestContext() {
         Instant now=Instant.now();
-        when(jwtTokenService.verifyAccessToken("token")).thenReturn(
-                new JwtPrincipal(42L,"user","NORMAL",List.of("USER"),now.plusSeconds(60)));
-        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(42L,"user",null,"NORMAL",List.of("USER"),now)));
-        when(accessBlocks.blocked(42L,"IP","203.0.113.7")).thenReturn(true);
+        when(jwtTokenService.verifySessionToken("token")).thenReturn(
+                loggedIn(42L, "user", List.of("USER"), now.plusSeconds(60)));
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.userWithBlockedIps(42L, java.util.Set.of("203.0.113.7")));
         var http=new MockHttpServletRequest();http.setRemoteAddr("203.0.113.7");
         http.addHeader("X-Device-Id","malformed-device-is-irrelevant-to-bearer");
         org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
@@ -475,8 +379,74 @@ class AuthServiceTest {
         try {
             assertThatThrownBy(()->service.authenticateBearer("Bearer token"))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("blocked");
-            verify(accessBlocks).blocked(42L,"IP","203.0.113.7");
         } finally {org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();}
+    }
+
+    @Test
+    void verifyingABearerNeverTouchesTheDatabase() {
+        when(jwtTokenService.verifySessionToken("token")).thenReturn(loggedIn(42L, "user", List.of("USER"), Instant.now().plusSeconds(60)));
+        for (int i = 0; i < 3; i++) assertThat(service.authenticateBearer("Bearer token").userId()).isEqualTo(42L);
+        verifyNoInteractions(repository, accessBlocks, legal);
+    }
+
+    @Test
+    void bearerWithoutAValkeySessionIsRejectedWithoutFallingBackToTheDatabase() {
+        when(jwtTokenService.verifySessionToken("token")).thenReturn(
+                new JwtPrincipal(42L, "user", "UNKNOWN", List.of("USER"), Instant.now().plusSeconds(60), 99L));
+        assertThatThrownBy(() -> service.authenticateBearer("Bearer token")).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void bearerIsRejectedAsInvalidWhenValkeyIsDownAndNothingIsCachedLocally() {
+        when(jwtTokenService.verifySessionToken("token")).thenReturn(
+                new JwtPrincipal(42L, "user", "UNKNOWN", List.of("USER"), Instant.now().plusSeconds(60), 42088L));
+        fixture.backend.down = true;
+        assertThatThrownBy(() -> service.authenticateBearer("Bearer token")).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void bearerKeepsWorkingFromTheLocalCacheWhileValkeyIsDown() {
+        when(jwtTokenService.verifySessionToken("token")).thenReturn(loggedIn(42L, "user", List.of("USER"), Instant.now().plusSeconds(60)));
+        service.authenticateBearer("Bearer token");
+        fixture.backend.down = true;
+        fixture.backend.clock.addAndGet(30_000);
+        assertThat(service.authenticateBearer("Bearer token").userId()).isEqualTo(42L);
+        fixture.backend.clock.addAndGet(31_000);
+        assertThatThrownBy(() -> service.authenticateBearer("Bearer token")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void logoutKickPasswordChangeBanAndTokenForgeryInvalidateTheNextRequest() {
+        when(jwtTokenService.verifySessionToken("token")).thenReturn(loggedIn(42L, "user", List.of("USER"), Instant.now().plusSeconds(60)));
+        service.authenticateBearer("Bearer token");
+        // 封禁：用户状态改为 FROZEN
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(42L, "FROZEN", List.of("USER"), List.of()));
+        assertThatThrownBy(() -> service.authenticateBearer("Bearer token")).isInstanceOf(IllegalStateException.class);
+        // 解封后恢复
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(42L, "NORMAL", List.of("USER"), List.of()));
+        assertThat(service.authenticateBearer("Bearer token").userId()).isEqualTo(42L);
+        // 踢下线/改密码/退出：会话被删除
+        fixture.state.endSessions(List.of(42088L));
+        assertThatThrownBy(() -> service.authenticateBearer("Bearer token")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void sessionTokenForAnotherUsersSessionIsRejected() {
+        loggedIn(43L, "other", List.of("USER"), Instant.now().plusSeconds(60));
+        when(jwtTokenService.verifySessionToken("token")).thenReturn(
+                new JwtPrincipal(42L, "user", "UNKNOWN", List.of("USER"), Instant.now().plusSeconds(60), 43088L));
+        assertThatThrownBy(() -> service.authenticateBearer("Bearer token")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** 造出已登录状态：Valkey 里有用户和会话，返回令牌验签后的主体（会话ID = 用户ID*1000+88）。 */
+    private JwtPrincipal loggedIn(long userId, String username, List<String> roles, Instant expiresAt) {
+        long sessionId = userId * 1000 + 88;
+        fixture.state.putUser(new com.surprising.gateway.provider.auth.state.UserState(userId, username, null, null,
+                Instant.EPOCH, "NORMAL", roles, List.of(), new java.util.LinkedHashSet<>(), new java.util.LinkedHashSet<>(), false));
+        fixture.startSession(userId, sessionId);
+        return new JwtPrincipal(userId, username, "UNKNOWN", roles, expiresAt, sessionId);
     }
 
     private AuthenticatedUser admin(Instant now) {

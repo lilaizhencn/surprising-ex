@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 class GatewayApiKeyAuthenticationIpTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
 
     @Test
     void authenticatesUsingForwardedClientIpWhenPeerIsTrusted() {
@@ -29,10 +30,10 @@ class GatewayApiKeyAuthenticationIpTest {
         properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
         String apiKey = "sx_" + "a".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "10.8.0.0/16");
-        when(repository.active(apiKey)).thenReturn(Optional.of(record));
+        fixture.putApiKey(record);
         MockHttpServletRequest request = signedRequest(service, apiKey, "192.0.2.10", "10.8.2.3", true);
 
         service.authenticate(new ApiKeyRequestBinding(properties).bind(request, null), "READ");
@@ -44,10 +45,10 @@ class GatewayApiKeyAuthenticationIpTest {
         properties.getSecurity().setTrustedProxyIpAllowlist(List.of("192.0.2.0/24"));
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
         String apiKey = "sx_" + "b".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "10.8.0.0/16");
-        when(repository.active(apiKey)).thenReturn(Optional.of(record));
+        fixture.putApiKey(record);
         MockHttpServletRequest request = signedRequest(service, apiKey, "203.0.113.10", "10.8.2.3");
 
         assertThatThrownBy(() -> service.authenticate(new ApiKeyRequestBinding(properties).bind(request, null), "READ"))
@@ -60,10 +61,10 @@ class GatewayApiKeyAuthenticationIpTest {
         GatewayProperties properties = new GatewayProperties();
         TotpService totpService = new TotpService(properties);
         GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
-        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
+        GatewayApiKeyService service = new GatewayApiKeyService(repository, mock(AuthService.class), totpService, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
         String apiKey = "sx_" + "c".repeat(24);
         GatewayApiKeyRepository.ApiKeyRecord record = record(totpService, apiKey, "");
-        when(repository.active(apiKey)).thenReturn(Optional.of(record));
+        fixture.putApiKey(record);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v3/order");
         request.setRemoteAddr("203.0.113.10");
         request.addHeader("X-MBX-APIKEY", apiKey);

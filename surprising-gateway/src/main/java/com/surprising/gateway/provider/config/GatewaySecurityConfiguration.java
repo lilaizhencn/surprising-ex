@@ -48,11 +48,7 @@ public class GatewaySecurityConfiguration {
                 .csrf(config -> config.csrfTokenRepository(csrf)
                         .sessionAuthenticationStrategy(new org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy())
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                        .requireCsrfProtectionMatcher(request -> List.of("web", "admin").contains(
-                                request.getHeader("X-Auth-Client") == null ? "" : request.getHeader("X-Auth-Client"))
-                                && !List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod())
-                                && ("cookie".equals(request.getHeader("X-Auth-Transport"))
-                                || request.getRequestURI().startsWith("/api/v1/auth/browser/"))))
+                        .requireCsrfProtectionMatcher(GatewaySecurityConfiguration::requiresCsrf))
                 .headers(headers -> headers
                         .referrerPolicy(policy -> policy.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER))
                         .permissionsPolicyHeader(policy -> policy.policy("camera=(), microphone=(), geolocation=()")))
@@ -75,20 +71,33 @@ public class GatewaySecurityConfiguration {
                                 "/api/v1/c2c/status", "/api/v1/c2c/markets", "/api/v1/c2c/ads", "/api/v1/c2c/ads/{id}",
                                 "/api/v1/c2c/merchants/{id}", "/api/v1/c2c/help", "/api/v1/affiliate/preview", "/api/v1/announcements/**", "/api/v1/content/media/{mediaId}").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/google/challenge", "/api/v1/auth/google/login", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/login/verify",
-                                "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password", "/api/v1/auth/refresh", "/api/v1/auth/logout",
-                                "/api/v1/auth/browser/refresh", "/api/v1/auth/browser/logout", "/api/v1/auth/telegram/start", "/api/v1/auth/telegram/complete",
+                                "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password", "/api/v1/auth/logout",
+                                "/api/v1/auth/telegram/start", "/api/v1/auth/telegram/complete",
                                 "/api/v1/auth/telegram/webapp/login",
                                 "/api/v1/telegram/bot/webhook",
                                 "/api/v1/compliance/kyc/webhooks/{provider}", "/api/v1/internal/wallet/webhooks/custody").permitAll()
                         .requestMatchers(HttpMethod.GET, "/ws/v1").permitAll()
                         // These adapters validate HMAC and scope against the exact wire body/query, or bearer for private operations.
                         .requestMatchers("/api/v1/gateway/**", "/api/v3/**", "/sapi/v1/**", "/fapi/v1/**", "/dapi/v1/**", "/eapi/v1/**").permitAll()
-                        .requestMatchers("/api/v1/auth/me", "/api/v1/auth/browser/revoke-others", "/api/v1/auth/verify-email", "/api/v1/auth/resend-email-verification",
+                        .requestMatchers("/api/v1/auth/me", "/api/v1/auth/verify-email", "/api/v1/auth/resend-email-verification",
                                 "/api/v1/legal/status", "/api/v1/legal/consents",
                                 "/api/v1/security/**", "/api/v1/users/scan", "/api/v1/notifications/**", "/api/v1/wallet/**",
                                 "/api/v1/realtime/**", "/api/v1/portfolio/**", "/api/v1/affiliate/**", "/api/v1/compliance/**", "/api/v1/c2c/**", "/api/v1/announcements/**").authenticated()
                         .anyRequest().denyAll());
         return http.build();
+    }
+
+    /**
+     * 浏览器 Cookie 登录的写请求必须带 X-CSRF-Token（与 CSRF Cookie 一致）。
+     * 用 Authorization 头或 API Key 认证的请求（App、脚本、做市商）不受影响。
+     */
+    static boolean requiresCsrf(jakarta.servlet.http.HttpServletRequest request) {
+        if (List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod())) return false;
+        if (request.getHeader("Authorization") != null || request.getHeader("X-API-Key") != null
+                || request.getHeader("X-MBX-APIKEY") != null) return false;
+        if (com.surprising.gateway.provider.auth.controller.BrowserSessionCookies.client(request) == null) return false;
+        return com.surprising.gateway.provider.auth.controller.BrowserSessionCookies.sessionToken(request) != null
+                || "cookie".equals(request.getHeader("X-Auth-Transport"));
     }
 
     @Bean public FilterRegistrationBean<AdminIpWhitelistFilter> adminIpRegistration(AdminIpWhitelistFilter filter) {

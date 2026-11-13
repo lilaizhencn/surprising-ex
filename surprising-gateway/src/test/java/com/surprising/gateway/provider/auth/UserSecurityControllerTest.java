@@ -165,15 +165,14 @@ class UserSecurityControllerTest {
     }
 
     @Test
-    void revokeAllSessionsKeepsCurrentSessionByPassingRefreshToken() {
+    void revokeAllSessionsKeepsTheSessionOfTheCallingToken() {
         Instant now = Instant.parse("2026-08-01T00:00:00Z");
-        when(authService.revokeOtherRefreshSessions("Bearer token", "refresh-token"))
+        when(authService.revokeOtherSessions("Bearer token"))
                 .thenReturn(new AuthModels.AdminSessionRevokeResponse(2, now));
 
-        var response = controller.revokeAllSessions("Bearer token",
-                new AuthModels.RevokeOtherSessionsRequest("refresh-token"));
+        var response = controller.revokeAllSessions("Bearer token");
 
         assertThat(response.revoked()).isEqualTo(2);
-        verify(authService).revokeOtherRefreshSessions("Bearer token", "refresh-token");
+        verify(authService).revokeOtherSessions("Bearer token");
     }
 }

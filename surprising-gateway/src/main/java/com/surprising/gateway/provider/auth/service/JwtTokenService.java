@@ -29,39 +29,33 @@ public class JwtTokenService {
         this.objectMapper = objectMapper;
     }
 
-    public String createAccessToken(long userId, String username, List<String> roles, Instant now) {
-        return createAccessToken(userId, username, roles, 0L, now);
-    }
-
-    public String createAccessToken(long userId, String username, List<String> roles, long sessionId, Instant now) {
-        boolean admin = roles.stream().anyMatch(properties.getSecurity().getAdminRoles()::contains);
-        Instant expiresAt = now.plus(admin ? properties.getSecurity().getAdminAccessTokenTtl() : properties.getSecurity().getAccessTokenTtl());
+    /** 登录令牌：带用户ID、会话ID、用户名和角色，签名后不查库即可得到用户ID；是否仍有效由 Valkey 会话决定。 */
+    public String createSessionToken(long userId, String username, List<String> roles, long sessionId, Instant now) {
+        Instant expiresAt = now.plus(properties.getSecurity().getSessionTokenMaxLifetime());
         Map<String, Object> header = Map.of("alg", "HS256", "typ", "JWT");
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put("iss", properties.getSecurity().getIssuer());
         claims.put("sub", Long.toString(userId));
         claims.put("username", username);
         claims.put("roles", roles);
-        claims.put("typ", "access");
+        claims.put("typ", "session");
         claims.put("iat", now.getEpochSecond());
         claims.put("exp", expiresAt.getEpochSecond());
         claims.put("jti", UUID.randomUUID().toString());
-        if (sessionId > 0) {
-            claims.put("sid", sessionId);
-        }
+        claims.put("sid", sessionId);
         String unsigned = base64Json(header) + "." + base64Json(claims);
         return unsigned + "." + sign(unsigned);
     }
 
-    public JwtPrincipal verifyAccessToken(String token) {
+    public JwtPrincipal verifySessionToken(String token) {
         Map<String, Object> claims = verify(token);
         if (!properties.getSecurity().getIssuer().equals(asString(claims.get("iss")))
-                || !"access".equals(asString(claims.get("typ")))) {
-            throw new IllegalArgumentException("invalid access token");
+                || !"session".equals(asString(claims.get("typ")))) {
+            throw new IllegalArgumentException("invalid session token");
         }
         Instant expiresAt = Instant.ofEpochSecond(asLong(claims.get("exp")));
         if (!expiresAt.isAfter(Instant.now())) {
-            throw new IllegalArgumentException("access token expired");
+            throw new IllegalArgumentException("session token expired");
         }
         @SuppressWarnings("unchecked")
         List<String> roles = claims.get("roles") instanceof List<?> values

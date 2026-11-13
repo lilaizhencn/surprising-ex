@@ -39,7 +39,6 @@ public class GatewayLimitProperties {
     @Valid @NotNull private Rule publicRequests = new Rule(2000, 4000);
     @Valid @NotNull private Rule reservedRequests = new Rule(500, 1000);
     @Valid @NotNull private Rule registrationIp = new Rule(5, 5, Duration.ofHours(1));
-    @Valid @NotNull private Rule refreshIp = new Rule(10, 20);
     @Valid @NotNull private Rule verificationIp = new Rule(10, 10, Duration.ofMinutes(1));
     @Valid @NotNull private Rule emailCooldown = new Rule(1, 1, Duration.ofMinutes(1));
     @Valid @NotNull private Rule emailHourly = new Rule(5, 5, Duration.ofHours(1));

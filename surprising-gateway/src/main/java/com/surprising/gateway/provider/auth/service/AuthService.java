@@ -26,12 +26,16 @@ import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogQueryRespon
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.EmailVerificationRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.RefreshRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
+import com.surprising.gateway.provider.auth.state.AuthState;
+import com.surprising.gateway.provider.auth.state.AuthStateSync;
+import com.surprising.gateway.provider.auth.state.SessionState;
+import com.surprising.gateway.provider.auth.state.UserState;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -54,6 +58,8 @@ public class AuthService {
     private final GatewayUserAccessBlockRepository accessBlocks;
     private final CurrentAuthClient currentClient;
     private final com.surprising.gateway.provider.legal.service.LegalConsentService legal;
+    private final AuthState authState;
+    private final AuthStateSync authStateSync;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(GatewayProperties properties,
@@ -64,7 +70,10 @@ public class AuthService {
                        LoginVerificationService loginVerification,
                        GatewayUserAccessBlockRepository accessBlocks, CurrentAuthClient currentClient,
                        com.surprising.affiliate.service.AffiliateService affiliates,
-                       com.surprising.gateway.provider.legal.service.LegalConsentService legal) {
+                       com.surprising.gateway.provider.legal.service.LegalConsentService legal,
+                       AuthState authState, AuthStateSync authStateSync) {
+        this.authState = authState;
+        this.authStateSync = authStateSync;
         this.affiliates = affiliates;
         this.properties = properties;
         this.repository = repository;
@@ -161,37 +170,12 @@ public class AuthService {
         return authResponse(user, request, now);
     }
 
+    /** 登出：作废当前登录会话；Postgres 会话记录置为已撤销，Valkey 会话立即删除。 */
     @Transactional
-    public AuthResponse refresh(RefreshRequest request, AuthClientMetadata httpRequest) {
-        Instant now = Instant.now();
-        String tokenHash = hashRefreshToken(request.refreshToken());
-        GatewayRefreshSessionRepository.RefreshSession session = repository.refreshSession(tokenHash)
-                .orElseThrow(() -> new IllegalArgumentException("invalid refresh token"));
-        if (session.revokedAt() != null || !session.expiresAt().isAfter(now)) {
-            throw new IllegalArgumentException("invalid refresh token");
-        }
-        if (session.deviceId() != null && !session.deviceId().equals(deviceId(httpRequest))) {
-            throw new IllegalArgumentException("refresh token belongs to another device");
-        }
-        requireAccessAllowed(session.userId(), session.deviceId(), ipAddress(httpRequest));
-        if (repository.consumeRefreshSession(session.sessionId(), now) != 1) {
-            throw new IllegalArgumentException("invalid refresh token");
-        }
-        AuthenticatedUser user = repository.user(session.userId())
-                .orElseThrow(() -> new IllegalStateException("user not found"));
-        if ("FROZEN".equals(user.status())) {
-            throw new IllegalStateException("user is not active");
-        }
-        return authResponse(user, httpRequest, now, false, session.authenticatedAt());
-    }
-
-    @Transactional
-    public void logout(RefreshRequest request) {
-        if (request == null || request.refreshToken() == null || request.refreshToken().isBlank()) {
-            return;
-        }
-        repository.refreshSession(hashRefreshToken(request.refreshToken()))
-                .ifPresent(session -> repository.revokeRefreshSession(session.sessionId(), Instant.now()));
+    public void logout(JwtPrincipal principal) {
+        if (principal == null || principal.sessionId() <= 0) return;
+        repository.revokeRefreshSession(principal.sessionId(), Instant.now());
+        authState.endSessions(List.of(principal.sessionId()));
     }
 
     @Transactional
@@ -223,25 +207,33 @@ public class AuthService {
         return principal;
     }
 
-    /** Security ingress verifies identity; the business adapter charges the resolved product/batch policy. */
+    /**
+     * 登录后的请求校验：JWT 验签 + Valkey 里的会话和用户状态，不访问 Postgres。
+     * Valkey 里没有会话/用户就是登录无效（401）。
+     */
     public JwtPrincipal verifyBearer(String authorizationHeader) {
         JwtPrincipal cached = currentClient.cachedBearer(authorizationHeader);
         if (cached != null) return cached;
         String token = bearerToken(authorizationHeader);
-        JwtPrincipal principal = jwtTokenService.verifyAccessToken(token);
-        AuthenticatedUser user = repository.user(principal.userId())
-                .orElseThrow(() -> new IllegalArgumentException("user not found"));
-        if (principal.sessionId() > 0
-                && !repository.activeRefreshSession(principal.userId(), principal.sessionId(), Instant.now())) {
+        JwtPrincipal principal = jwtTokenService.verifySessionToken(token);
+        if (principal.sessionId() <= 0) {
+            throw new IllegalArgumentException("access token has no session");
+        }
+        SessionState session = authState.session(principal.sessionId());
+        if (session == null || session.userId() != principal.userId()) {
+            throw new IllegalArgumentException("access session is no longer active");
+        }
+        UserState user = authState.user(principal.userId());
+        if (user == null) {
             throw new IllegalArgumentException("access session is no longer active");
         }
         if ("FROZEN".equals(user.status())) {
             throw new IllegalStateException("user is not active");
         }
         AuthClientMetadata client = currentClient.current();
-        if (client != null) requireAccessAllowed(user.userId(), null, client.ipAddress());
-        JwtPrincipal verified = new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(), principal.expiresAt(),
-                principal.sessionId());
+        if (client != null) requireStateAccessAllowed(user, null, client.ipAddress());
+        JwtPrincipal verified = new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(),
+                principal.expiresAt(), principal.sessionId());
         currentClient.cacheBearer(authorizationHeader, verified);
         return verified;
     }
@@ -256,8 +248,11 @@ public class AuthService {
 
     /** Only a verified active bearer principal can select this server-side session fact. */
     public Instant primaryAuthenticatedAt(JwtPrincipal principal) {
-        return repository.primaryAuthenticatedAt(principal.userId(), principal.sessionId(), Instant.now())
-                .orElse(null);
+        SessionState session = authState.session(principal.sessionId());
+        if (session == null || session.userId() != principal.userId() || session.authenticatedAtMillis() <= 0) {
+            return null;
+        }
+        return Instant.ofEpochMilli(session.authenticatedAtMillis());
     }
 
     public JwtPrincipal requireAdminPermission(String authorizationHeader, String permissionCode) {
@@ -271,7 +266,8 @@ public class AuthService {
         if (roles != null && roles.contains("SUPER_ADMIN")) {
             return;
         }
-        List<String> permissions = repository.permissionsForUser(userId);
+        UserState user = authState.user(userId);
+        List<String> permissions = user == null ? List.of() : user.permissions();
         if (matchesPermission(permissions, normalizedPermission)) {
             return;
         }
@@ -320,23 +316,12 @@ public class AuthService {
         return new AdminSessionRevokeResponse(revoked, now);
     }
 
+    /** 踢掉当前用户除本次登录以外的所有会话。 */
     @Transactional
-    public AdminSessionRevokeResponse revokeOtherRefreshSessions(String authorizationHeader,
-                                                                 String refreshToken) {
+    public AdminSessionRevokeResponse revokeOtherSessions(String authorizationHeader) {
         JwtPrincipal principal = authenticateBearer(authorizationHeader);
-        if (refreshToken == null || refreshToken.isBlank()) {
-            throw new IllegalArgumentException("refreshToken is required");
-        }
-        var currentSession = repository.refreshSession(hashRefreshToken(refreshToken))
-                .orElseThrow(() -> new IllegalArgumentException("refresh session not found"));
-        if (currentSession.revokedAt() != null || !currentSession.expiresAt().isAfter(Instant.now())) {
-            throw new IllegalArgumentException("refresh session is not active");
-        }
-        if (currentSession.userId() != principal.userId()) {
-            throw new IllegalArgumentException("refresh session does not belong to authenticated user");
-        }
         Instant now = Instant.now();
-        int revoked = repository.revokeActiveForUserExcept(principal.userId(), currentSession.sessionId(), now);
+        int revoked = repository.revokeActiveForUserExcept(principal.userId(), principal.sessionId(), now);
         return new AdminSessionRevokeResponse(revoked, now);
     }
 
@@ -464,37 +449,24 @@ public class AuthService {
         return authResponse(user, request, now, false);
     }
 
-    private AuthResponse authResponse(AuthenticatedUser user,
-                                      AuthClientMetadata request,
-                                      Instant now,
-                                      boolean requiresEmailVerification) {
-        return authResponse(user, request, now, requiresEmailVerification, now);
-    }
-
+    /** 创建登录会话：Postgres 记会话行（设备列表/后台展示用），Valkey 写会话和用户状态，签发登录令牌。 */
     private AuthResponse authResponse(AuthenticatedUser user, AuthClientMetadata request, Instant now,
-                                      boolean requiresEmailVerification, Instant authenticatedAt) {
-        String refreshToken = newRefreshToken();
+                                      boolean requiresEmailVerification) {
         boolean admin = user.roles().stream().anyMatch(properties.getSecurity().getAdminRoles()::contains);
-        var accessTtl = admin ? properties.getSecurity().getAdminAccessTokenTtl() : properties.getSecurity().getAccessTokenTtl();
-        Instant refreshExpiresAt = (admin ? authenticatedAt : now).plus(admin ? properties.getSecurity().getAdminRefreshTokenTtl() : properties.getSecurity().getRefreshTokenTtl());
-        if (!refreshExpiresAt.isAfter(now)) throw new IllegalArgumentException("session requires fresh authentication");
+        Duration ttl = admin ? properties.getSecurity().getAdminSessionTtl() : properties.getSecurity().getSessionTtl();
+        Instant sessionExpiresAt = now.plus(ttl);
         String deviceId = deviceId(request);
         requireAccessAllowed(user.userId(), deviceId, ipAddress(request));
         if(!admin || request==null || !request.administrativeClient())
             legal.recordAndRequire(user.userId(),request==null?List.of():request.acknowledgements(),now);
-        long sessionId = repository.saveRefreshSession(user.userId(), hashRefreshToken(refreshToken), refreshExpiresAt,
-                userAgent(request), ipAddress(request), deviceId, now, authenticatedAt);
-        String accessToken = sessionId > 0
-                ? jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), sessionId, now)
-                : jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), now);
-        return new AuthResponse(user, accessToken, refreshToken,
-                now.plus(accessTtl), refreshExpiresAt,
-                requiresEmailVerification);
+        long sessionId = repository.saveRefreshSession(user.userId(), randomSessionHash(), sessionExpiresAt,
+                userAgent(request), ipAddress(request), deviceId, now, now);
+        authStateSync.reloadUser(user.userId());
+        authState.startSession(new SessionState(sessionId, user.userId(), deviceId, now.toEpochMilli(),
+                ttl.toSeconds(), now.toEpochMilli()), ttl);
+        String token = jwtTokenService.createSessionToken(user.userId(), user.username(), user.roles(), sessionId, now);
+        return new AuthResponse(user, token, sessionExpiresAt, requiresEmailVerification);
     }
-
-
-
-
 
     private java.util.Optional<GatewayUserRepository.UserCredential> credential(String identifier) {
         if (identifier.contains("@")) {
@@ -512,19 +484,15 @@ public class AuthService {
 
 
 
-    private String newRefreshToken() {
+    /** 会话行的 token_hash 列必须有值且唯一；登录令牌不落库，这里存一个随机值的摘要。 */
+    private String randomSessionHash() {
         byte[] bytes = new byte[32];
         secureRandom.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    private String hashRefreshToken(String token) {
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(token.getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
-        } catch (Exception ex) {
-            throw new IllegalStateException("failed to hash refresh token", ex);
+            return Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
         }
     }
 
@@ -553,14 +521,25 @@ public class AuthService {
         }
     }
 
+    private void requireStateAccessAllowed(UserState user, String deviceId, String ipAddress) {
+        if ((deviceId != null && user.blockedDevices().contains(deviceId))
+                || (ipAddress != null && user.blockedIps().contains(ipAddress))) {
+            throw new IllegalStateException("device or IP is blocked for this account");
+        }
+    }
+
+    /** 请求路径：按 Valkey 里的用户封禁 IP 判断，不查库。 */
     public void requireIpAccessAllowed(long userId, String ipAddress) {
-        requireAccessAllowed(userId, null, ipAddress);
+        UserState user = authState.user(userId);
+        if (user == null) throw new IllegalArgumentException("user not found");
+        requireStateAccessAllowed(user, null, ipAddress);
     }
 
     public void requireApiKeyAccess(long userId, String ipAddress, String permission) {
-        var user = repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
+        var user = authState.user(userId);
+        if (user == null) throw new IllegalArgumentException("user not found");
         if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
-        requireIpAccessAllowed(userId, ipAddress);
+        requireStateAccessAllowed(user, null, ipAddress);
         requireUserGatewayWrite(user.status(), "TRADE".equals(permission), "WITHDRAW".equals(permission));
     }
 

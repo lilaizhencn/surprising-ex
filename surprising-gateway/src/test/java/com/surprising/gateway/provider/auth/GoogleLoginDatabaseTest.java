@@ -51,7 +51,7 @@ class GoogleLoginDatabaseTest {
         when(auth.loginGoogle(anyLong(), any())).thenAnswer(call -> {
             var row = rows.find(call.getArgument(0)).orElseThrow();
             return new AuthResponse(new AuthenticatedUser(row.userId(), null, null, "NORMAL", List.of("USER"), row.createdAt(), row.displayName()),
-                    "access", "refresh", Instant.now().plusSeconds(300), Instant.now().plusSeconds(3600));
+                    "access", Instant.now().plusSeconds(3600));
         });
         var proxy = new ProxyFactory(new GoogleLoginService(identities, google, rows, users, auth, mock(com.surprising.affiliate.service.AffiliateService.class)));
         proxy.setProxyTargetClass(true);

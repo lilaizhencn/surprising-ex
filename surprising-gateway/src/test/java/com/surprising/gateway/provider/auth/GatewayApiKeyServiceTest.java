@@ -15,9 +15,10 @@ import java.util.Map;
 import java.util.List;
 
 class GatewayApiKeyServiceTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
 
     private final GatewayApiKeyService service = new GatewayApiKeyService(
-            null, null, new TotpService(new GatewayProperties()), null, new com.surprising.gateway.provider.config.GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
+            null, null, new TotpService(new GatewayProperties()), null, new com.surprising.gateway.provider.config.GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
 
     @Test
     void removesOnlySignatureFromBinanceCanonicalQuery() {

@@ -30,6 +30,21 @@ public class GatewayRefreshSessionRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    private com.surprising.gateway.provider.auth.state.AuthStateSync authState;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAuthState(com.surprising.gateway.provider.auth.state.AuthStateSync authState) {
+        this.authState = authState;
+    }
+
+    /** 撤销会话并把被撤销的会话同步从 Valkey 删除，保证撤销立刻对所有请求生效。 */
+    private int revokeReturning(String sql, Object... args) {
+        List<Long> revoked = jdbcTemplate.query(sql + " RETURNING session_id",
+                (rs, rowNum) -> rs.getLong(1), args);
+        if (authState != null) authState.sessionsRevoked(revoked);
+        return revoked.size();
+    }
+
     public long save(long userId,
                      String tokenHash,
                      Instant expiresAt,
@@ -85,7 +100,7 @@ public class GatewayRefreshSessionRepository {
     }
 
     public void revoke(long sessionId, Instant now) {
-        jdbcTemplate.update("""
+        revokeReturning("""
                 UPDATE gateway_refresh_sessions
                    SET revoked_at = COALESCE(revoked_at, ?),
                        updated_at = ?
@@ -94,7 +109,7 @@ public class GatewayRefreshSessionRepository {
     }
 
     public int consume(long sessionId, Instant now) {
-        return jdbcTemplate.update("""
+        return revokeReturning("""
                 UPDATE gateway_refresh_sessions
                    SET revoked_at = ?,
                        updated_at = ?
@@ -140,7 +155,7 @@ public class GatewayRefreshSessionRepository {
         if (sessionId <= 0) {
             throw new IllegalArgumentException("sessionId must be positive");
         }
-        return jdbcTemplate.update("""
+        return revokeReturning("""
                 UPDATE gateway_refresh_sessions
                    SET revoked_at = COALESCE(revoked_at, ?),
                        updated_at = ?
@@ -154,7 +169,7 @@ public class GatewayRefreshSessionRepository {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        return jdbcTemplate.update("""
+        return revokeReturning("""
                 UPDATE gateway_refresh_sessions
                    SET revoked_at = COALESCE(revoked_at, ?),
                        updated_at = ?
@@ -168,7 +183,7 @@ public class GatewayRefreshSessionRepository {
         if (userId <= 0 || excludedSessionId <= 0) {
             throw new IllegalArgumentException("userId and excludedSessionId must be positive");
         }
-        return jdbcTemplate.update("""
+        return revokeReturning("""
                 UPDATE gateway_refresh_sessions
                    SET revoked_at = COALESCE(revoked_at, ?),
                        updated_at = ?
@@ -184,7 +199,7 @@ public class GatewayRefreshSessionRepository {
         if (userId <= 0 || sessionId <= 0) {
             throw new IllegalArgumentException("userId and sessionId must be positive");
         }
-        return jdbcTemplate.update("""
+        return revokeReturning("""
                 UPDATE gateway_refresh_sessions
                    SET revoked_at = COALESCE(revoked_at, ?),
                        updated_at = ?
@@ -196,7 +211,7 @@ public class GatewayRefreshSessionRepository {
     }
 
     public int revokeActiveForDevice(long userId, String deviceId, Instant now) {
-        return jdbcTemplate.update("""
+        return revokeReturning("""
                 UPDATE gateway_refresh_sessions SET revoked_at = ?, updated_at = ?
                  WHERE user_id = ? AND device_id = CAST(? AS uuid)
                    AND revoked_at IS NULL AND expires_at > ?
@@ -204,7 +219,7 @@ public class GatewayRefreshSessionRepository {
     }
 
     public int revokeActiveForIp(long userId, String ipAddress, Instant now) {
-        return jdbcTemplate.update("""
+        return revokeReturning("""
                 UPDATE gateway_refresh_sessions SET revoked_at = ?, updated_at = ?
                  WHERE user_id = ? AND ip_address = ?
                    AND revoked_at IS NULL AND expires_at > ?

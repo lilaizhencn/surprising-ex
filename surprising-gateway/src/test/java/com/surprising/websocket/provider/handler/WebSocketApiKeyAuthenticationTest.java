@@ -22,12 +22,13 @@ import org.springframework.web.socket.*;
 import tools.jackson.databind.ObjectMapper;
 
 class WebSocketApiKeyAuthenticationTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     final String key = "sx_" + "a".repeat(24);
     final ObjectMapper json = new ObjectMapper();
     final TotpService totp = new TotpService(new GatewayProperties());
     final GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
     final AuthService auth = mock(AuthService.class);
-    final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class));
+    final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
     final WebSocketProperties properties = new WebSocketProperties();
     final SubscriptionRegistry registry = new SubscriptionRegistry(json, properties);
     final WebSocketAuthenticator authenticator = new WebSocketAuthenticator(auth, keys);
@@ -65,20 +66,20 @@ class WebSocketApiKeyAuthenticationTest {
         assertThat(registry.connection(first.getId()).authenticatedUserId()).isEqualTo(42L);
         clearInvocations(repository);
         command(first, captured);
-        verify(repository, never()).active(any());
+        verifyNoInteractions(repository);
     }
 
-    @ParameterizedTest @ValueSource(strings = {"revoked", "ip-changed", "frozen", "database-unavailable"})
+    @ParameterizedTest @ValueSource(strings = {"revoked", "ip-changed", "frozen", "valkey-unavailable"})
     void revalidationClosesTheConnectionAndRemovesSubscriptionsWhenTheGrantIsLost(String change) throws Exception {
         var session = session(); command(session, proof(session));
         command(session, Map.of("op", "subscribe", "channel", "orders", "productLine", "SPOT"));
         assertThat(registry.totalSubscriptionCount()).isEqualTo(1);
         switch (change) {
-            case "revoked" -> when(repository.active(key)).thenReturn(Optional.empty());
+            case "revoked" -> fixture.state.deleteApiKey(key);
             case "ip-changed" -> stored("198.51.100.1");
             case "frozen" -> doThrow(new IllegalStateException("user is not active"))
                     .when(auth).requireApiKeyAccess(42L, "203.0.113.7", "READ");
-            default -> when(repository.active(key)).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("database unavailable"));
+            default -> { fixture.backend.down = true; fixture.backend.clock.addAndGet(120_000); }
         }
         authorization.revalidate(registry.connection(session.getId()));
         verify(session, timeout(2000)).close(argThat(status -> status.getCode() == 1008));
@@ -100,8 +101,8 @@ class WebSocketApiKeyAuthenticationTest {
     }
 
     private void stored(String ip) {
-        when(repository.active(key)).thenReturn(Optional.of(new GatewayApiKeyRepository.ApiKeyRecord(
-                UUID.randomUUID(), 42L, key, totp.encryptSecret("secret"), "bot", "READ", ip, "ACTIVE", Instant.now(), null, null)));
+        fixture.putApiKey(new GatewayApiKeyRepository.ApiKeyRecord(
+                UUID.randomUUID(), 42L, key, totp.encryptSecret("secret"), "bot", "READ", ip, "ACTIVE", Instant.now(), null, null));
     }
 
     private Map<String, Object> proof(WebSocketSession session) {

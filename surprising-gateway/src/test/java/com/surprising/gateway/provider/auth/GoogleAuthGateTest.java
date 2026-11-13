@@ -13,12 +13,13 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class GoogleAuthGateTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     AuthPersistenceService users = mock(AuthPersistenceService.class);
     JwtTokenService tokens = mock(JwtTokenService.class);
     LoginVerificationService verification = mock(LoginVerificationService.class);
     GatewayUserAccessBlockRepository blocks = mock(GatewayUserAccessBlockRepository.class);
     AuthService auth = new AuthService(new GatewayProperties(), users, mock(PasswordHasher.class), tokens,
-            mock(EmailVerificationService.class), verification, blocks, mock(CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class));
+            mock(EmailVerificationService.class), verification, blocks, mock(CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
     AuthClientMetadata request = new AuthClientMetadata("qa", "127.0.0.1", "device", java.util.List.of(), false);
     @Test void frozenGoogleUserCannotReachTokenIssuance() {
         when(users.user(7L)).thenReturn(Optional.of(new AuthenticatedUser(7, null, null, "FROZEN", List.of("USER"), Instant.now())));

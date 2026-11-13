@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth;
 import com.surprising.gateway.provider.auth.controller.*;
 import com.surprising.gateway.provider.auth.model.AuthModels.*;
 import com.surprising.gateway.provider.auth.repository.*;
+import com.surprising.gateway.provider.auth.state.AuthStateSync;
 import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.time.Instant;
@@ -29,6 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Actual HTTP -> transactional service -> one-table repositories, using the goal-owned PostgreSQL. */
 @EnabledIfEnvironmentVariable(named="INSTRUMENT_TEST_JDBC_URL",matches=".+")
 class AuthInputBoundaryPostgresTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     @Configuration @EnableTransactionManagement static class Transactions { }
     AnnotationConfigApplicationContext context;
     JdbcTemplate jdbc;
@@ -41,18 +43,22 @@ class AuthInputBoundaryPostgresTest {
     final ObjectMapper json=new ObjectMapper();
     long adminId;
 
+    AuthStateSync sync;
+    GatewayUserRoleRepository withSync(GatewayUserRoleRepository repository){repository.setAuthState(sync);return repository;}
+    GatewayRolePermissionRepository withSync(GatewayRolePermissionRepository repository){repository.setAuthState(sync);return repository;}
+
     @BeforeEach void setup() {
         var source=new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
         jdbc=new JdbcTemplate(source);jdbc.execute("TRUNCATE gateway_users CASCADE");
         properties=new GatewayProperties();properties.getSecurity().setRequireEmailVerification(false);
-        userRows=new GatewayUserRepository(jdbc);passwords=new PasswordHasher(new com.surprising.gateway.provider.config.GatewayLimitProperties());
+        sync=new AuthStateSync(jdbc,fixture.state,properties);userRows=new GatewayUserRepository(jdbc);passwords=new PasswordHasher(new com.surprising.gateway.provider.config.GatewayLimitProperties());
         context=new AnnotationConfigApplicationContext();context.register(Transactions.class);
         context.registerBean(DataSourceTransactionManager.class,()->new DataSourceTransactionManager(source));
-        context.registerBean(AuthPersistenceService.class,()->new AuthPersistenceService(userRows,new GatewayRoleRepository(jdbc),new GatewayPermissionRepository(jdbc),new GatewayUserRoleRepository(jdbc),new GatewayRolePermissionRepository(jdbc),new GatewayLoginLogRepository(jdbc),new GatewayUserMfaRepository(jdbc),new GatewayRefreshSessionRepository(jdbc)));
+        context.registerBean(AuthPersistenceService.class,()->new AuthPersistenceService(userRows,new GatewayRoleRepository(jdbc),new GatewayPermissionRepository(jdbc),withSync(new GatewayUserRoleRepository(jdbc)),withSync(new GatewayRolePermissionRepository(jdbc)),new GatewayLoginLogRepository(jdbc),new GatewayUserMfaRepository(jdbc),new GatewayRefreshSessionRepository(jdbc)));
         context.refresh();users=context.getBean(AuthPersistenceService.class);
         adminId=users.createUser("mvc_admin","admin@input.test","unused",Instant.now()).userId();users.replaceRoles(adminId,List.of("ADMIN"),Instant.now());
-        var tokens=mock(JwtTokenService.class);when(tokens.verifyAccessToken("admin-token")).thenReturn(new JwtPrincipal(adminId,"mvc_admin","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(3600)));
-        context.registerBean(AuthService.class,()->new AuthService(properties,users,passwords,tokens,mock(EmailVerificationService.class),mock(LoginVerificationService.class),new GatewayUserAccessBlockRepository(jdbc),new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), new com.surprising.affiliate.service.AffiliateService(new com.surprising.affiliate.repository.AffiliateRepository(new com.surprising.affiliate.config.AffiliateDatabase(jdbc,new com.surprising.affiliate.config.AffiliateProperties())),new com.surprising.affiliate.config.AffiliateProperties()), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class)));
+        var tokens=mock(JwtTokenService.class);when(tokens.verifySessionToken("admin-token")).thenReturn(new JwtPrincipal(adminId,"mvc_admin","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(3600),9001L));fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(adminId,"NORMAL",List.of("ADMIN"),users.permissionsForUser(adminId)));fixture.startSession(adminId,9001L);
+        context.registerBean(AuthService.class,()->new AuthService(properties,users,passwords,tokens,mock(EmailVerificationService.class),mock(LoginVerificationService.class),new GatewayUserAccessBlockRepository(jdbc),new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), new com.surprising.affiliate.service.AffiliateService(new com.surprising.affiliate.repository.AffiliateRepository(new com.surprising.affiliate.config.AffiliateDatabase(jdbc,new com.surprising.affiliate.config.AffiliateProperties())),new com.surprising.affiliate.config.AffiliateProperties()), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
         var auth=context.getBean(AuthService.class);
         approvals=mock(AdminApprovalService.class);when(approvals.approvalHeaderName()).thenReturn("X-Admin-Approval-Id");
         mvc=MockMvcBuilders.standaloneSetup(new AuthController(auth,mock(PasswordResetService.class),new AuthClientMetadataBinding(properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class))),new AdminAuthController(auth,approvals,json)).build();

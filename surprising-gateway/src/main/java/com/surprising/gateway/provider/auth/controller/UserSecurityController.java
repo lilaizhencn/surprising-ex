@@ -15,7 +15,6 @@ import com.surprising.gateway.provider.auth.model.AuthModels.ChangePasswordReque
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionRevokeResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.RevokeOtherSessionsRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.SensitiveChallengeRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.SensitiveChallengeVerificationRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.UserSecuritySceneUpdateRequest;
@@ -251,10 +250,9 @@ public class UserSecurityController {
 
     @PostMapping("/sessions/revoke-all")
     public AdminSessionRevokeResponse revokeAllSessions(
-            @RequestHeader("Authorization") String authorization,
-            @Valid @RequestBody RevokeOtherSessionsRequest request) {
+            @RequestHeader("Authorization") String authorization) {
         try {
-            return authService.revokeOtherRefreshSessions(authorization, request.refreshToken());
+            return authService.revokeOtherSessions(authorization);
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         }

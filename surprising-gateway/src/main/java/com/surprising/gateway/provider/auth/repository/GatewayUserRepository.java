@@ -32,6 +32,13 @@ public class GatewayUserRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    private com.surprising.gateway.provider.auth.state.AuthStateSync authState;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAuthState(com.surprising.gateway.provider.auth.state.AuthStateSync authState) {
+        this.authState = authState;
+    }
+
     public UserRecord create(String username, String email, String passwordHash, Instant now) {
         return create(username, email, null, passwordHash, now);
     }
@@ -154,7 +161,7 @@ public class GatewayUserRepository {
     }
 
     public Optional<UserRecord> updateStatus(long userId, String status, Instant now) {
-        return jdbcTemplate.query("""
+        Optional<UserRecord> updated = jdbcTemplate.query("""
                 UPDATE gateway_users
                    SET status = ?,
                        updated_at = ?
@@ -162,6 +169,8 @@ public class GatewayUserRepository {
                 RETURNING user_id, username, email, phone, status, created_at, display_name
                 """, (rs, rowNum) -> toUserRecord(rs), normalizeStatus(status),
                 Timestamp.from(now), userId).stream().findFirst();
+        if (updated.isPresent() && authState != null) authState.reloadUser(userId);
+        return updated;
     }
 
     public int updatePasswordHash(long userId, String passwordHash, Instant now) {
@@ -270,6 +279,7 @@ public class GatewayUserRepository {
     }
     public void updateVerifiedEmailContact(long userId,String email,Instant now) {
         jdbcTemplate.update("UPDATE gateway_users SET email=?,updated_at=?,email_verified_at=CURRENT_TIMESTAMP WHERE user_id=?",email,Timestamp.from(now),userId);
+        if (authState != null) authState.reloadUser(userId);
     }
     public void updatePhoneContact(long userId,String phone,Instant now) {
         jdbcTemplate.update("UPDATE gateway_users SET phone=?,updated_at=? WHERE user_id=?",phone,Timestamp.from(now),userId);
@@ -278,6 +288,7 @@ public class GatewayUserRepository {
     public void updateNickname(long userId, String name, Instant now) {
         jdbcTemplate.update("UPDATE gateway_users SET display_name = ?, updated_at = ? WHERE user_id = ?",
                 name, Timestamp.from(now), userId);
+        if (authState != null) authState.reloadUser(userId);
     }
 
 }

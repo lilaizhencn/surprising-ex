@@ -14,7 +14,6 @@ import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.PasswordResetRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.PasswordResetResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.PasswordResetStartRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.RefreshRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -128,22 +127,6 @@ public class AuthController {
         int status = ex.getMessage().contains("RATE_LIMITED") ? 429
                 : ex.getMessage().contains("UNAVAILABLE") || ex.getMessage().contains("DELIVERY_FAILED") ? 503 : 400;
         return org.springframework.http.ResponseEntity.status(status).body(java.util.Map.of("message",ex.getMessage()));
-    }
-
-    @PostMapping("/refresh")
-    public AuthResponse refresh(@Valid @RequestBody RefreshRequest request, HttpServletRequest httpRequest) {
-        try {
-            return authService.refresh(request, clients.bind(httpRequest));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping("/logout")
-    public void logout(@Valid @RequestBody RefreshRequest request) {
-        authService.logout(request);
     }
 
     @GetMapping("/me")

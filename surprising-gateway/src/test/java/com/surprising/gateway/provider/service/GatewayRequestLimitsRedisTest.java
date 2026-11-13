@@ -173,12 +173,12 @@ class GatewayRequestLimitsRedisTest {
         try (var upload = isolated.admit(Group.UPLOAD)) { }
     }
 
-    @Test void registrationCannotConsumeTheRefreshAllowance() {
+    @Test void registrationCannotConsumeTheVerificationAllowance() {
         properties.setRegistrationIp(new Rule(1, 1, Duration.ofHours(1)));
         first.checkPublicRequest("203.0.113.1", "/api/v1/auth/register", true, Group.SECURITY);
         assertThatThrownBy(() -> second.checkPublicRequest("203.0.113.1", "/api/v1/auth/register", true, Group.SECURITY))
                 .isInstanceOf(GatewayRequestLimits.Rejection.class);
-        second.checkPublicRequest("203.0.113.1", "/api/v1/auth/browser/refresh", true, Group.SECURITY);
+        second.checkPublicRequest("203.0.113.1", "/api/v1/auth/email/verify", true, Group.SECURITY);
     }
     @Test void dailyEmailBudgetIsAHardUtcWindowRatherThanAnotherRefillingBucket() {
         properties.setEmailCooldown(new Rule(100, 100, Duration.ofMillis(1)));

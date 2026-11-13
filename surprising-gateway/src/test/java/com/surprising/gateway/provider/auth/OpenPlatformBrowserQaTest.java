@@ -41,6 +41,7 @@ import tools.jackson.databind.ObjectMapper;
 /** Owned loopback HTTP/WS fixture: real JWT, Key crypto/PostgreSQL and Valkey; simulated OTP, no trading Core. */
 @EnabledIfEnvironmentVariable(named = "OPEN_PLATFORM_QA_DIR", matches = ".+")
 class OpenPlatformBrowserQaTest {
+    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     static final ObjectMapper json = new ObjectMapper();
     static GatewayProperties properties;
     static GatewayApiKeyService keys;
@@ -110,11 +111,11 @@ class OpenPlatformBrowserQaTest {
             var jwt = new JwtTokenService(properties, json);
             auth = new AuthService(properties, persistence, mock(PasswordHasher.class), jwt,
                     mock(EmailVerificationService.class), mock(LoginVerificationService.class), new GatewayUserAccessBlockRepository(jdbc), metadata,
-                    mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class));
+                    mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
             var verification = mock(SensitiveActionVerificationService.class);
             when(verification.verify(anyLong(), eq("SECURITY_SETTINGS"), any(), any(), any()))
                     .thenAnswer(call -> "123456".equals(call.getArgument(2)));
-            keys = new GatewayApiKeyService(new GatewayApiKeyRepository(jdbc), auth, new TotpService(properties), verification, properties, metadata);
+            keys = new GatewayApiKeyService(new GatewayApiKeyRepository(jdbc), auth, new TotpService(properties), verification, properties, metadata, fixture.state);
             products = mock(GatewayProductServices.class); when(products.enabled()).thenReturn(List.of(ProductLine.values()));
             websocket = new WebSocketProperties(); websocket.getSecurity().setAllowedOrigins(List.of("http://127.0.0.1:17174"));
             var cors = new GatewayCorsConfig().gatewayCorsSource(properties, websocket);
@@ -136,7 +137,7 @@ class OpenPlatformBrowserQaTest {
             }, 1, 1, java.util.concurrent.TimeUnit.SECONDS);
             Path state = output.resolve("qa-runtime.json");
             Files.writeString(state, json.writeValueAsString(Map.of("port", 19084, "userId", 7,
-                    "token", jwt.createAccessToken(7, "openplatformqa", List.of("USER"), Instant.now()), "schema", schema)));
+                    "token", sessionToken(jwt, fixture), "schema", schema)));
             Files.setPosixFilePermissions(state, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
             long deadline = System.nanoTime() + 1740_000_000_000L;
             while (!Files.exists(output.resolve("qa-done")) && System.nanoTime() < deadline) Thread.sleep(100);
@@ -144,5 +145,10 @@ class OpenPlatformBrowserQaTest {
             scheduler.shutdownNow(); tomcat.stop(); tomcat.destroy(); web.close(); factory.destroy();
             admin.execute("DROP SCHEMA " + schema + " CASCADE");
         }
+    }
+
+    private static String sessionToken(JwtTokenService jwt, com.surprising.gateway.provider.auth.state.AuthStateFixture fixture) {
+        fixture.login(7, 7001L);
+        return jwt.createSessionToken(7, "openplatformqa", List.of("USER"), 7001L, Instant.now());
     }
 }

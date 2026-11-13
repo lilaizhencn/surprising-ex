@@ -19,6 +19,13 @@ public class GatewayUserAccessBlockRepository {
         this.jdbc = jdbc;
     }
 
+    private com.surprising.gateway.provider.auth.state.AuthStateSync authState;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAuthState(com.surprising.gateway.provider.auth.state.AuthStateSync authState) {
+        this.authState = authState;
+    }
+
     public boolean blocked(long userId, String type, String value) {
         if (value == null || value.isBlank()) return false;
         return Boolean.TRUE.equals(jdbc.queryForObject("""
@@ -33,13 +40,16 @@ public class GatewayUserAccessBlockRepository {
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT (user_id, block_type, block_value) WHERE revoked_at IS NULL DO NOTHING
                 """, userId, type, value, Timestamp.from(now));
+        if (authState != null) authState.reloadUser(userId);
     }
 
     public int unblock(long userId, String type, String value, Instant now) {
-        return jdbc.update("""
+        int changed = jdbc.update("""
                 UPDATE gateway_user_access_blocks SET revoked_at = ?
                  WHERE user_id = ? AND block_type = ? AND block_value = ? AND revoked_at IS NULL
                 """, Timestamp.from(now), userId, type, value);
+        if (changed > 0 && authState != null) authState.reloadUser(userId);
+        return changed;
     }
 
     public List<BlockedAccess> active(long userId, String type) {

@@ -21,6 +21,13 @@ public class GatewayRolePermissionRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    private com.surprising.gateway.provider.auth.state.AuthStateSync authState;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAuthState(com.surprising.gateway.provider.auth.state.AuthStateSync authState) {
+        this.authState = authState;
+    }
+
     public List<Long> findPermissionIds(long roleId) {
         return jdbcTemplate.query("""
                 SELECT permission_id
@@ -70,6 +77,7 @@ public class GatewayRolePermissionRepository {
                     ON CONFLICT (role_id, permission_id) DO NOTHING
                     """, roleId, permissionId, Timestamp.from(now));
         }
+        if (authState != null) authState.roleChanged(roleId);
     }
 
     private record RolePermissionCount(long roleId, int permissionCount) {

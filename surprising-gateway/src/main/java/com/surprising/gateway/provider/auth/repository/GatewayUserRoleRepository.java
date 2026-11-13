@@ -21,6 +21,13 @@ public class GatewayUserRoleRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    private com.surprising.gateway.provider.auth.state.AuthStateSync authState;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAuthState(com.surprising.gateway.provider.auth.state.AuthStateSync authState) {
+        this.authState = authState;
+    }
+
     public List<Long> findRoleIds(long userId) {
         return jdbcTemplate.query("""
                 SELECT role_id
@@ -63,6 +70,7 @@ public class GatewayUserRoleRepository {
         for (Long roleId : roleIds) {
             add(userId, roleId, now);
         }
+        if (authState != null) authState.reloadUser(userId);
     }
 
     private record UserRoleLink(long userId, long roleId) {

@@ -17,9 +17,16 @@ public class GatewayApiKeyRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    private com.surprising.gateway.provider.auth.state.AuthStateSync authState;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAuthState(com.surprising.gateway.provider.auth.state.AuthStateSync authState) {
+        this.authState = authState;
+    }
+
     public ApiKeyRecord create(UUID apiKeyId, long userId, String apiKey, String secretCiphertext,
                                String label, String permissions, String ipAllowlist, Instant now) {
-        return jdbcTemplate.queryForObject("""
+        ApiKeyRecord created = jdbcTemplate.queryForObject("""
                 INSERT INTO gateway_api_keys (
                     api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -27,6 +34,8 @@ public class GatewayApiKeyRepository {
                           status, created_at, last_used_at, revoked_at
                 """, (rs, rowNum) -> toRecord(rs), apiKeyId, userId, apiKey, secretCiphertext,
                 label, permissions, ipAllowlist, Timestamp.from(now));
+        if (authState != null) authState.apiKeyChanged(apiKey);
+        return created;
     }
 
     public Optional<ApiKeyRecord> active(String apiKey) {
@@ -49,26 +58,23 @@ public class GatewayApiKeyRepository {
     }
 
     public boolean revoke(long userId, String apiKey, Instant now) {
-        return jdbcTemplate.update("""
+        boolean revoked = jdbcTemplate.update("""
                 UPDATE gateway_api_keys
-                   SET status = 'REVOKED', revoked_at = ?, last_used_at = last_used_at
+                   SET status = 'REVOKED', revoked_at = ?
                  WHERE user_id = ? AND api_key = ? AND status = 'ACTIVE'
                 """, Timestamp.from(now), userId, apiKey) == 1;
+        if (revoked && authState != null) authState.apiKeyChanged(apiKey);
+        return revoked;
     }
 
     public boolean update(long userId, String apiKey, String label, String permissions, String ipAllowlist) {
-        return jdbcTemplate.update("""
+        boolean updated = jdbcTemplate.update("""
                 UPDATE gateway_api_keys
                    SET label = ?, permissions = ?, ip_allowlist = ?
                  WHERE user_id = ? AND api_key = ? AND status = 'ACTIVE'
                 """, label, permissions, ipAllowlist, userId, apiKey) == 1;
-    }
-
-    public void markUsed(UUID apiKeyId, Instant now) {
-        jdbcTemplate.update("""
-                UPDATE gateway_api_keys SET last_used_at = ?
-                 WHERE api_key_id = ? AND status = 'ACTIVE'
-                """, Timestamp.from(now), apiKeyId);
+        if (updated && authState != null) authState.apiKeyChanged(apiKey);
+        return updated;
     }
 
     private ApiKeyRecord toRecord(java.sql.ResultSet rs) throws java.sql.SQLException {

@@ -77,10 +77,9 @@ public class GatewayProperties implements EnvironmentAware {
             if (origin.contains("*") || origin.endsWith("/")) failures.add("security.admin-browser-allowed-origins must contain exact origins");
         }
         if (!configuredSecurity.isBrowserCookieSecure()) failures.add("security.browser-cookie-secure must be true");
-        requireTokenTtl(failures, "security.access-token-ttl", configuredSecurity.getAccessTokenTtl(), Duration.ofMinutes(15));
-        requireTokenTtl(failures, "security.admin-access-token-ttl", configuredSecurity.getAdminAccessTokenTtl(), Duration.ofMinutes(5));
-        requireTokenTtl(failures, "security.refresh-token-ttl", configuredSecurity.getRefreshTokenTtl(), Duration.ofDays(30));
-        requireTokenTtl(failures, "security.admin-refresh-token-ttl", configuredSecurity.getAdminRefreshTokenTtl(), Duration.ofHours(8));
+        requireTokenTtl(failures, "security.session-ttl", configuredSecurity.getSessionTtl(), Duration.ofDays(30));
+        requireTokenTtl(failures, "security.admin-session-ttl", configuredSecurity.getAdminSessionTtl(), Duration.ofHours(8));
+        requireTokenTtl(failures, "security.session-token-max-lifetime", configuredSecurity.getSessionTokenMaxLifetime(), Duration.ofDays(400));
         if (!configuredSecurity.isRequireAdminMfa()) {
             failures.add("security.require-admin-mfa must be true");
         }
@@ -370,18 +369,34 @@ public class GatewayProperties implements EnvironmentAware {
         private String issuer = "surprising-ex-gateway";
         @Setter
         private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
+        /** 管理员登录会话的滑动有效期：最后一次请求之后保留多久，且不超过主认证后的该时长。 */
         @Setter
-        private Duration accessTokenTtl = Duration.ofMinutes(15);
+        private Duration adminSessionTtl = Duration.ofHours(8);
+        /** 登录令牌（JWT）自身的最长寿命；会话是否有效由 Valkey 决定，令牌到期只是兜底。 */
         @Setter
-        private Duration adminAccessTokenTtl = Duration.ofMinutes(5);
+        private Duration sessionTokenMaxLifetime = Duration.ofDays(365);
+        /** 浏览器会话 Cookie 的 Domain，例如 .tokdou.com；留空表示只对当前主机生效（本地开发）。 */
         @Setter
-        private Duration adminRefreshTokenTtl = Duration.ofHours(8);
+        private String browserCookieDomain = "";
         @Setter
         private boolean browserCookieSecure = true;
         @Setter
         private List<String> adminBrowserAllowedOrigins = List.of("https://ex-api.tokdou.com");
+        /** 普通用户登录会话的滑动有效期：最后一次请求之后保留多久。 */
         @Setter
-        private Duration refreshTokenTtl = Duration.ofDays(30);
+        private Duration sessionTtl = Duration.ofDays(7);
+        /** 同一会话在 Valkey 里续期的最小间隔，避免每个请求都写 Valkey。 */
+        @Setter
+        private Duration sessionRenewInterval = Duration.ofMinutes(10);
+        /** 网关进程内缓存登录态的时间；其它网关的变更最晚这么久后生效（失效广播丢失时）。 */
+        @Setter
+        private Duration authLocalCacheTtl = Duration.ofSeconds(4);
+        /** Valkey 不可用时，进程内已有的登录态还能继续使用多久。 */
+        @Setter
+        private Duration authLocalStaleTtl = Duration.ofSeconds(60);
+        /** 网关启动时，把 Postgres 里仍有效的会话、用户和 API Key 补进 Valkey 中缺失的部分。 */
+        @Setter
+        private boolean authStateRebuildOnStart = true;
 
         public void setAdminRoles(List<String> adminRoles) {
             this.adminRoles = adminRoles == null || adminRoles.isEmpty()

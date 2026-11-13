@@ -48,7 +48,7 @@ class GoogleLoginHttpTest {
         var request = HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/google/login"))
                 .header("Content-Type", "application/json").header("X-Device-Id", "a1111111-1111-4111-8111-111111111111");
         if (browser) request.header("X-Auth-Transport", "cookie").header("X-Auth-Client", "web");
-        if (csrf != null) request.header("X-XSRF-TOKEN", csrf);
+        if (csrf != null) request.header("X-CSRF-Token", csrf);
         return client.send(request.POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }
     @Test void googleRoutesArePublicAndBrowserLoginRequiresCsrfAndHidesRefreshSecret() throws Exception {
@@ -60,11 +60,11 @@ class GoogleLoginHttpTest {
         var csrfResponse = client.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/auth/csrf")).header("X-Auth-Client", "web").GET().build(), HttpResponse.BodyHandlers.ofString());
         String csrf = new ObjectMapper().readTree(csrfResponse.body()).get("token").asText();
         var response = post(body, true, csrf);
-        assertThat(response.statusCode()).isEqualTo(200); assertThat(response.body()).doesNotContain("refresh-secret").contains("\"browserSession\":true");
-        assertThat(response.headers().firstValue("Set-Cookie").orElseThrow()).contains("surprising-web-refresh=refresh-secret", "HttpOnly", "SameSite=Strict");
+        assertThat(response.statusCode()).isEqualTo(200); assertThat(response.body()).doesNotContain("\"access\"").contains("\"browserSession\":true");
+        assertThat(response.headers().firstValue("Set-Cookie").orElseThrow()).contains("surprising-web-session=access", "HttpOnly", "SameSite=Lax");
         assertThat(response.headers().firstValue("Cache-Control").orElseThrow()).contains("no-store");
         var mobile = post("{\"credential\":\"signed-token\",\"platform\":\"ANDROID\"}", false, null);
-        assertThat(mobile.statusCode()).isEqualTo(200); assertThat(mobile.body()).contains("refresh-secret");
+        assertThat(mobile.statusCode()).isEqualTo(200); assertThat(mobile.body()).contains("\"accessToken\":\"access\"");
     }
     @Test void upstreamGoogleKeyFailureReturnsRetryableServiceError() throws Exception {
         doThrow(new com.surprising.gateway.provider.auth.client.GoogleIdentityClient.Unavailable())
@@ -93,7 +93,7 @@ class GoogleLoginHttpTest {
         @Bean GoogleLoginService login() {
             var service = mock(GoogleLoginService.class);
             when(service.login(anyString(), any(), anyString(), any(), any())).thenReturn(new AuthResponse(new AuthenticatedUser(7, null, null, "NORMAL", List.of("USER"), Instant.now()),
-                    "access", "refresh-secret", Instant.now().plusSeconds(300), Instant.now().plusSeconds(3600)));
+                    "access", Instant.now().plusSeconds(3600)));
             return service;
         }
     }

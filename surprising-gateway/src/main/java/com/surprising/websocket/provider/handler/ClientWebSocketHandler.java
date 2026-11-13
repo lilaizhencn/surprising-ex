@@ -179,14 +179,16 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     private void authenticate(ClientConnection connection, WsClientCommand command) {
         limits.checkSocketAuthentication(connection.clientIp());
-        var principal = authenticator.principal(command.token(), connection.clientIp());
+        String token = command.token() != null && !command.token().isBlank()
+                ? command.token() : connection.browserSessionToken();
+        var principal = authenticator.principal(token, connection.clientIp());
         long userId = principal.userId();
         synchronized (connection) {
             try {
                 if (connection.authenticatedUserId() != null && connection.authenticatedUserId() != userId)
                     throw new IllegalArgumentException("websocket session is already authenticated");
                 connection.renewLimits(limits.renewSocket(connection.clientIp(), userId, connection.id()));
-                connection.authenticate(userId, command.token(), principal.expiresAt());
+                connection.authenticate(userId, token, principal.expiresAt());
             } catch (RuntimeException failure) {
                 limits.releaseSocket(connection.clientIp(), userId, connection.id());
                 connection.close(CloseStatus.SERVICE_OVERLOAD.withReason(failure instanceof com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection rejected

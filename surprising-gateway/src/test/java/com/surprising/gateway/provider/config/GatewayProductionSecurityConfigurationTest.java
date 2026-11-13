@@ -22,9 +22,9 @@ class GatewayProductionSecurityConfigurationTest {
     void productionRejectsInsecureBrowserCookiesAndExcessiveAccessLifetime() {
         var properties = new GatewayProperties(); properties.setDeploymentProfile("production");
         properties.getSecurity().setBrowserCookieSecure(false);
-        properties.getSecurity().setAccessTokenTtl(java.time.Duration.ofDays(7));
+        properties.getSecurity().setSessionTtl(java.time.Duration.ofDays(60));
         assertThatThrownBy(properties::validateProductionSecurityConfiguration).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("browser-cookie-secure").hasMessageContaining("access-token-ttl");
+                .hasMessageContaining("browser-cookie-secure").hasMessageContaining("session-ttl");
     }
 
     @Test
