@@ -170,8 +170,6 @@ public class AuthService {
         return authResponse(user, request, now);
     }
 
-    /** 登出：作废当前登录会话；Postgres 会话记录置为已撤销，Valkey 会话立即删除。 */
-    @Transactional
     /** 当前登录用户的资料（读 Valkey 用户状态），不带令牌；会话本身是滑动有效期，没有固定到期时间。 */
     public AuthResponse currentSession(JwtPrincipal principal) {
         UserState user = authState.user(principal.userId());
@@ -180,6 +178,8 @@ public class AuthService {
                 user.roles(), user.createdAt(), user.displayName()), null, null);
     }
 
+    /** 登出：作废当前登录会话；Postgres 会话记录置为已撤销，Valkey 会话立即删除。 */
+    @Transactional
     public void logout(JwtPrincipal principal) {
         if (principal == null || principal.sessionId() <= 0) return;
         repository.revokeRefreshSession(principal.sessionId(), Instant.now());
