@@ -72,8 +72,6 @@ class GatewayProductionSecurityConfigurationTest {
         properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");
         properties.getAdminRoutes().get("wallet-admin").setBasicAuthPassword("wallet-admin-secret");
 
-        properties.getWithdrawal().setValuationBaseUrl("https://price.example.com");
-
         GatewayProperties.KycDocuments documents = properties.getKycDocuments();
         documents.setEnabled(true);
         documents.setType("s3");

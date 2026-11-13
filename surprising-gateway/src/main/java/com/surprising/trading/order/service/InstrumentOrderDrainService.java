@@ -7,38 +7,34 @@ import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.trigger.service.TriggerOrderService;
 import java.time.Instant;
-import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.ObjectMapper;
 
+/** 合约进入 SETTLING 时清理订单并通过进程内 Spring 事件通知 InstrumentLifecycleReadinessService。 */
 @Service
 public class InstrumentOrderDrainService {
 
     private static final int BATCH_SIZE = 1000;
 
-    private final ObjectMapper objectMapper;
     private final TradingOrderProperties properties;
     private final OrderService orderService;
     private final AlgoOrderService algoOrderService;
     private final TriggerOrderService triggerOrderService;
-    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ApplicationEventPublisher eventPublisher;
+
     @Autowired
-    public InstrumentOrderDrainService(ObjectMapper objectMapper,
-                                       TradingOrderProperties properties,
+    public InstrumentOrderDrainService(TradingOrderProperties properties,
                                        OrderService orderService,
                                        AlgoOrderService algoOrderService,
                                        TriggerOrderService triggerOrderService,
-                                       @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
-        this.objectMapper = objectMapper;
+                                       ApplicationEventPublisher eventPublisher) {
         this.properties = properties;
         this.orderService = orderService;
         this.algoOrderService = algoOrderService;
         this.triggerOrderService = triggerOrderService;
-        this.kafkaTemplate = kafkaTemplate;
+        this.eventPublisher = eventPublisher;
     }
 
     @EventListener
@@ -53,32 +49,23 @@ public class InstrumentOrderDrainService {
                 || event.productLine() != properties.getProductLine()) {
             return;
         }
-        algoOrderService.cancelLifecycleOrders(Integer.toString(event.instrumentId()), BATCH_SIZE);
-        triggerOrderService.cancelLifecycleOrders(Integer.toString(event.instrumentId()), BATCH_SIZE);
-        orderService.requestLifecycleCancellation(Integer.toString(event.instrumentId()), BATCH_SIZE);
-        if (algoOrderService.hasLifecycleActiveOrders(Integer.toString(event.instrumentId()))
-                || triggerOrderService.hasLifecycleActiveOrders(Integer.toString(event.instrumentId()))
-                || orderService.hasLifecycleActiveOrders(Integer.toString(event.instrumentId()))) {
-            throw new IllegalStateException("订单尚未完成到期清理: " + Integer.toString(event.instrumentId()));
+        String instrumentId = Integer.toString(event.instrumentId());
+        algoOrderService.cancelLifecycleOrders(instrumentId, BATCH_SIZE);
+        triggerOrderService.cancelLifecycleOrders(instrumentId, BATCH_SIZE);
+        orderService.requestLifecycleCancellation(instrumentId, BATCH_SIZE);
+        if (algoOrderService.hasLifecycleActiveOrders(instrumentId)
+                || triggerOrderService.hasLifecycleActiveOrders(instrumentId)
+                || orderService.hasLifecycleActiveOrders(instrumentId)) {
+            throw new IllegalStateException("订单尚未完成到期清理: " + instrumentId);
         }
-        publishReady(event);
-    }
-
-    private void publishReady(InstrumentEvent event) {
-        try {
-            InstrumentLifecycleDrainEvent ready = new InstrumentLifecycleDrainEvent(
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(new InstrumentLifecycleDrainEvent(
                     InstrumentLifecycleDrainEvent.CURRENT_SCHEMA_VERSION,
-                    Integer.toString(event.instrumentId()),
+                    instrumentId,
                     event.changeId(),
                     properties.getProductLine(),
                     InstrumentLifecycleDrainComponent.ORDER,
-                    Instant.now());
-            String payload = objectMapper.writeValueAsString(ready);
-            kafkaTemplate.send(properties.getKafka().getInstrumentLifecycleDrainTopic(),
-                            Integer.toString(event.instrumentId()), payload)
-                    .get(10, TimeUnit.SECONDS);
-        } catch (Exception ex) {
-            throw new IllegalStateException("订单清理确认发布失败: " + Integer.toString(event.instrumentId()), ex);
+                    Instant.now()));
         }
     }
 }

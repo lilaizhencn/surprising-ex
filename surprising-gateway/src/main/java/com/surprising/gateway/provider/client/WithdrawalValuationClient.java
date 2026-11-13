@@ -1,67 +1,54 @@
 package com.surprising.gateway.provider.client;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.price.api.model.ExchangeRateConvertResponse;
+import com.surprising.price.index.service.ExchangeRateService;
+import com.surprising.price.index.utils.CurrencyFormats;
 import java.math.BigDecimal;
-import java.net.URI;
 import java.time.Instant;
-import java.util.Map;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpMethod;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 
+/** 直接调用进程内 ExchangeRateService 换算 USDT 估值，不再发起本地 HTTP 自调用。 */
 @Component
 public class WithdrawalValuationClient {
 
     private final GatewayProperties properties;
-    private final RestTemplate restTemplate;
+    private final ObjectProvider<ExchangeRateService> exchangeRateServiceProvider;
 
-    public WithdrawalValuationClient(GatewayProperties properties, RestTemplate restTemplate) {
+    public WithdrawalValuationClient(GatewayProperties properties,
+                                     ObjectProvider<ExchangeRateService> exchangeRateServiceProvider) {
         this.properties = properties;
-        this.restTemplate = restTemplate;
+        this.exchangeRateServiceProvider = exchangeRateServiceProvider;
     }
 
     public BigDecimal toUsdt(String asset, BigDecimal amount) {
         if (asset == null || asset.isBlank() || amount == null || amount.signum() <= 0) {
             throw new IllegalArgumentException("asset and positive amount are required");
         }
-        GatewayProperties.Withdrawal config = properties.getWithdrawal();
-        String baseUrl = config.getValuationBaseUrl();
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new ValuationUnavailableException("withdrawal valuation endpoint is not configured");
+        ExchangeRateService exchangeRateService = exchangeRateServiceProvider.getIfAvailable();
+        if (exchangeRateService == null) {
+            throw new ValuationUnavailableException("withdrawal valuation service is unavailable");
         }
-        String url = trimTrailingSlash(baseUrl) + "/api/v1/price/fx/convert?amount="
-                + java.net.URLEncoder.encode(amount.toPlainString(), java.nio.charset.StandardCharsets.UTF_8)
-                + "&fromCurrency="
-                + java.net.URLEncoder.encode(asset.trim().toUpperCase(), java.nio.charset.StandardCharsets.UTF_8)
-                + "&toCurrency=USDT";
         try {
-            Map<String, Object> response = restTemplate.exchange(
-                    URI.create(url), HttpMethod.GET, null,
-                    new ParameterizedTypeReference<Map<String, Object>>() {}).getBody();
-            if (response == null || response.get("convertedAmount") == null) {
+            ExchangeRateConvertResponse response = exchangeRateService.convert(
+                    amount, CurrencyFormats.normalize(asset), "USDT");
+            if (response == null || response.convertedAmount() == null) {
                 throw new ValuationUnavailableException("withdrawal valuation response is empty");
             }
-            BigDecimal converted = new BigDecimal(String.valueOf(response.get("convertedAmount")));
-            if (converted.signum() <= 0) {
+            if (response.convertedAmount().signum() <= 0) {
                 throw new ValuationUnavailableException("withdrawal valuation is not positive");
             }
-            Object rateTime = response.get("rateTime");
-            if (rateTime == null || Instant.parse(String.valueOf(rateTime))
-                    .plus(config.getValuationMaxAge()).isBefore(Instant.now())) {
+            if (response.rateTime() == null || response.rateTime()
+                    .plus(properties.getWithdrawal().getValuationMaxAge()).isBefore(Instant.now())) {
                 throw new ValuationUnavailableException("withdrawal valuation is stale");
             }
-            return converted;
+            return response.convertedAmount();
         } catch (ValuationUnavailableException ex) {
             throw ex;
         } catch (RuntimeException ex) {
             throw new ValuationUnavailableException("withdrawal valuation is unavailable", ex);
         }
-    }
-
-    private String trimTrailingSlash(String value) {
-        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
     public static class ValuationUnavailableException extends IllegalStateException {

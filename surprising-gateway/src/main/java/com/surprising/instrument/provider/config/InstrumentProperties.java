@@ -19,8 +19,6 @@ public class InstrumentProperties {
     @Setter
     public static class Kafka {
         private String bootstrapServers = "localhost:9092";
-        private String lifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
-        private String lifecycleDrainGroupId = "surprising-instrument-lifecycle-drain-v1";
         private String deliverySettlementsTopic;
         private String optionExercisesTopic;
 

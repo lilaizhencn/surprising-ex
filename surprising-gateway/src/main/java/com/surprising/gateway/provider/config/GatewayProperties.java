@@ -120,8 +120,6 @@ public class GatewayProperties implements EnvironmentAware {
                 || configuredWithdrawal.getDailyLimitUsdt().signum() <= 0) {
             failures.add("withdrawal.daily-limit-usdt must be positive");
         }
-        requireHttpsUrl(failures, "withdrawal.valuation-base-url",
-                configuredWithdrawal.getValuationBaseUrl());
         if (configuredWithdrawal.getFailureReconciliationDelay() == null
                 || configuredWithdrawal.getFailureReconciliationDelay().isNegative()
                 || configuredWithdrawal.getFailureReconciliationDelay().isZero()) {
@@ -479,13 +477,8 @@ public class GatewayProperties implements EnvironmentAware {
         private java.math.BigDecimal singleApprovalThresholdUsdt = new java.math.BigDecimal("10000");
         @Setter
         private java.math.BigDecimal dailyLimitUsdt = new java.math.BigDecimal("50000");
-        private String valuationBaseUrl = "http://127.0.0.1:9094";
         private Duration valuationMaxAge = Duration.ofSeconds(30);
         private Duration failureReconciliationDelay = Duration.ofSeconds(30);
-
-        public void setValuationBaseUrl(String value) {
-            this.valuationBaseUrl = value == null ? "" : value.trim();
-        }
 
         public void setValuationMaxAge(Duration value) {
             this.valuationMaxAge = value == null || value.isZero() || value.isNegative()

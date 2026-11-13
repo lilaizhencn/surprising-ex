@@ -82,8 +82,6 @@ public class TradingOrderProperties {
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         @Setter
         private ProductLine productLine;
-        @Setter
-        private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
 
         public void setClientId(String clientId) {
             if (clientId == null || clientId.isBlank()) {

@@ -4,6 +4,7 @@ import com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent;
 import com.surprising.instrument.provider.repository.InstrumentLifecycleDrainRepository;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +15,14 @@ public class InstrumentLifecycleReadinessService {
 
     public InstrumentLifecycleReadinessService(InstrumentLifecycleDrainRepository drainRepository) {
         this.drainRepository = drainRepository;
+    }
+
+    @EventListener
+    @Transactional
+    public void onDrainReady(InstrumentLifecycleDrainEvent event) {
+        if (event != null) {
+            acknowledge(event);
+        }
     }
 
     @Transactional

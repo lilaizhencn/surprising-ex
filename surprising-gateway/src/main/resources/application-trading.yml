@@ -1,17 +1,12 @@
 surprising:
   price:
     consumer:
-      bootstrap-servers: localhost:9092
-      group-id: surprising-business-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 5s
       allowed-future-skew: 1s
-      concurrency: 1
-      max-poll-records: 500
   trading:
     order:
       kafka:
         bootstrap-servers: localhost:9092
-        instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
       aeron:
         node-id: ${TRADING_NODE_ID:0}
       event-publish:

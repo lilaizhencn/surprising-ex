@@ -1,29 +1,34 @@
 package com.surprising.trading.order.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.model.InstrumentEvent;
+import com.surprising.instrument.api.model.InstrumentLifecycleDrainComponent;
+import com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
-import org.springframework.kafka.core.KafkaTemplate;
-import tools.jackson.databind.ObjectMapper;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 class InstrumentOrderDrainServiceTest {
-    private final com.surprising.trading.trigger.service.TriggerOrderService triggers = mock(com.surprising.trading.trigger.service.TriggerOrderService.class);
+    private final com.surprising.trading.trigger.service.TriggerOrderService triggers =
+            mock(com.surprising.trading.trigger.service.TriggerOrderService.class);
 
     @Test
     void waitsUntilOrdinaryOrdersReachTerminalState() {
         OrderService orderService = mock(OrderService.class);
         AlgoOrderService algoOrderService = mock(AlgoOrderService.class);
         when(orderService.hasLifecycleActiveOrders("1")).thenReturn(true);
-        InstrumentOrderDrainService service = service(orderService, algoOrderService, kafkaTemplate());
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        InstrumentOrderDrainService service = service(orderService, algoOrderService, publisher);
 
         assertThatThrownBy(() -> service.drain(event()))
                 .isInstanceOf(IllegalStateException.class)
@@ -31,61 +36,49 @@ class InstrumentOrderDrainServiceTest {
 
         verify(algoOrderService).cancelLifecycleOrders("1", 1000);
         verify(orderService).requestLifecycleCancellation("1", 1000);
+        verifyNoInteractions(publisher);
     }
 
     @Test
-    void publishesReadyAfterOrdersAndAlgosAreDrained() throws Exception {
+    void publishesReadyAfterOrdersAndAlgosAreDrained() {
         OrderService orderService = mock(OrderService.class);
         AlgoOrderService algoOrderService = mock(AlgoOrderService.class);
-        KafkaTemplate<String, String> kafkaTemplate = kafkaTemplate();
-        when(kafkaTemplate.send(
-                org.mockito.ArgumentMatchers.eq("surprising.instrument.lifecycle-drain.v1"),
-                org.mockito.ArgumentMatchers.eq("1"),
-                any(String.class))).thenReturn(CompletableFuture.completedFuture(null));
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
 
-        TradingOrderProperties properties = new TradingOrderProperties();
-        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        new InstrumentOrderDrainService(
-                new ObjectMapper(), properties, orderService, algoOrderService, triggers,
-                kafkaTemplate).drain(event());
+        service(orderService, algoOrderService, publisher).drain(event());
 
-        verify(kafkaTemplate).send(
-                org.mockito.ArgumentMatchers.eq("surprising.instrument.lifecycle-drain.v1"),
-                org.mockito.ArgumentMatchers.eq("1"),
-                any(String.class));
+        ArgumentCaptor<InstrumentLifecycleDrainEvent> captor = ArgumentCaptor.forClass(InstrumentLifecycleDrainEvent.class);
+        verify(publisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().instrumentId()).isEqualTo("1");
+        assertThat(captor.getValue().productLine()).isEqualTo(ProductLine.LINEAR_DELIVERY);
+        assertThat(captor.getValue().component()).isEqualTo(InstrumentLifecycleDrainComponent.ORDER);
     }
 
     @Test
     void pendingStopsPreventReadyAcknowledgement() {
         var orders = mock(OrderService.class);
         var algos = mock(AlgoOrderService.class);
-        var kafka = kafkaTemplate();
+        var publisher = mock(ApplicationEventPublisher.class);
         when(triggers.hasLifecycleActiveOrders("1")).thenReturn(true);
-        assertThatThrownBy(() -> service(orders, algos, kafka).drain(event())).hasMessageContaining("尚未完成");
+        assertThatThrownBy(() -> service(orders, algos, publisher).drain(event())).hasMessageContaining("尚未完成");
         verify(triggers).cancelLifecycleOrders("1", 1000);
-        org.mockito.Mockito.verifyNoInteractions(kafka);
+        verifyNoInteractions(publisher);
     }
 
     private InstrumentOrderDrainService service(OrderService orderService,
                                                 AlgoOrderService algoOrderService,
-                                                KafkaTemplate<String, String> kafkaTemplate) {
+                                                ApplicationEventPublisher publisher) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        return new InstrumentOrderDrainService(
-                new ObjectMapper(), properties, orderService, algoOrderService, triggers, kafkaTemplate);
+        return new InstrumentOrderDrainService(properties, orderService, algoOrderService, triggers, publisher);
     }
 
     private InstrumentEvent event() {
         InstrumentEvent event = mock(InstrumentEvent.class);
         when(event.status()).thenReturn(InstrumentStatus.SETTLING);
+        when(event.productLine()).thenReturn(ProductLine.LINEAR_DELIVERY);
         when(event.instrumentId()).thenReturn(1);
         when(event.changeId()).thenReturn(2L);
-        when(event.productLine()).thenReturn(ProductLine.LINEAR_DELIVERY);
         return event;
-    }
-
-    @SuppressWarnings("unchecked")
-    private KafkaTemplate<String, String> kafkaTemplate() {
-        return mock(KafkaTemplate.class);
     }
 }

@@ -155,7 +155,6 @@ surprising:
     withdrawal:
       single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT:10000}
       daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT:50000}
-      valuation-base-url: ${GATEWAY_WITHDRAWAL_VALUATION_BASE_URL:http://127.0.0.1:9094}
       valuation-max-age: ${GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE:30s}
       failure-reconciliation-delay: ${GATEWAY_WITHDRAWAL_FAILURE_RECONCILIATION_DELAY:30s}
     product-transfer:
