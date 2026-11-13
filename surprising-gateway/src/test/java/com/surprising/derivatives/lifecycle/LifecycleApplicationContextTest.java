@@ -32,7 +32,8 @@ class LifecycleApplicationContextTest {
         new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(TestLifecycleAppConfig.class, SurprisingDerivativesLifecycleApplication.class,
                         InstrumentSnapshotConfiguration.class, GatewayInstrumentSnapshotBridge.class)
-                .withPropertyValues("spring.config.name=application-lifecycle",
+                .withPropertyValues("spring.config.name=application",
+                        "management.endpoint.health.group.readiness.include=readinessState",
                         "surprising.risk.product-line=" + line,
                         "surprising.liquidation.product-line=" + line,
                         "surprising.insurance.kafka.product-line=" + line,

@@ -25,10 +25,13 @@ class MarkPriceApplicationYamlTest {
                 "PRODUCT_LINE", "LINEAR_PERPETUAL",
                 "AERON_CLUSTER_HOSTNAMES", "127.0.0.1",
                 "AERON_EGRESS_HOSTNAME", "127.0.0.1"));
-        MarkPriceProperties properties = bind(environment);
-
-        assertThat(properties.getAeron().getHostnames()).containsExactly("127.0.0.1");
-        assertThat(properties.getAeron().getEgressHostname()).isEqualTo("127.0.0.1");
+        var gatewayProducts = Binder.get(environment)
+                .bind("surprising.gateway.products", Bindable.of(com.surprising.gateway.provider.config.GatewayProductsProperties.class))
+                .get();
+        assertThat(gatewayProducts.coreFor(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL).getHostnames())
+                .containsExactly("127.0.0.1");
+        assertThat(gatewayProducts.coreFor(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL).getEgressHostname())
+                .isEqualTo("127.0.0.1");
     }
 
     @ParameterizedTest
@@ -49,7 +52,7 @@ class MarkPriceApplicationYamlTest {
         StandardEnvironment environment = new StandardEnvironment();
         environment.getPropertySources().addFirst(new MapPropertySource("matrix", overrides));
         List<PropertySource<?>> sources = new YamlPropertySourceLoader()
-                .load("application-price", new ClassPathResource("application-price.yml"));
+                .load("application", new ClassPathResource("application.yml"));
         sources.forEach(environment.getPropertySources()::addLast);
         return environment;
     }

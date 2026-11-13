@@ -19,8 +19,6 @@ spring:
   jackson:
     deserialization:
       accept-float-as-int: false
-  config:
-    import: classpath:application-trading.yml,classpath:application-account.yml,classpath:application-instrument.yml,classpath:application-price.yml,classpath:application-realtime.yml,classpath:application-lifecycle.yml
   application:
     name: surprising-gateway
   servlet:
@@ -156,17 +154,6 @@ surprising:
       symbol-scales-json: ${GATEWAY_BINANCE_SYMBOL_SCALES:{}}
     security:
       admin-browser-allowed-origins: ${GATEWAY_ADMIN_BROWSER_ALLOWED_ORIGINS:http://localhost:5174,http://127.0.0.1:5174,https://ex-api.tokdou.com}
-      user-id-header: X-User-Id
-      require-identity-for-private-routes: true
-      admin-roles:
-        - SUPPORT
-        - ADMIN
-        - SUPER_ADMIN
-      admin-ip-allowlist: []
-      require-approval-for-high-risk-admin-writes: true
-      admin-approval-header: X-Admin-Approval-Id
-      admin-approval-ttl: 30m
-      require-admin-mfa: false
       phone-registration-enabled: ${GATEWAY_PHONE_REGISTRATION_ENABLED:false}
       require-email-verification: ${GATEWAY_REQUIRE_EMAIL_VERIFICATION:false}
       resend-api-key: ${RESEND_API_KEY:}
@@ -176,14 +163,9 @@ surprising:
       simulated-verification-codes-enabled: ${GATEWAY_SIMULATED_VERIFICATION_CODES_ENABLED:false}
       verification-code-ttl: ${GATEWAY_VERIFICATION_CODE_TTL:10m}
       mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY:}
-      issuer: surprising-ex-gateway
       jwt-secret: ${GATEWAY_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
       session-ttl: ${GATEWAY_SESSION_TTL:7d}
       admin-session-ttl: ${GATEWAY_ADMIN_SESSION_TTL:8h}
-      session-token-max-lifetime: 365d
-      session-renew-interval: 10m
-      auth-local-cache-ttl: 4s
-      auth-local-stale-ttl: 60s
       browser-cookie-secure: ${GATEWAY_BROWSER_COOKIE_SECURE:true}
       browser-cookie-domain: ${GATEWAY_BROWSER_COOKIE_DOMAIN:}
     http-client:
@@ -253,6 +235,125 @@ surprising:
       mark-price-allowed-future-skew: 1s
 
 # BotFather > Login Widget: register this exact HTTPS callback URL.
+  account:
+    aeron:
+      source-identity: account-${HOSTNAME:node}
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      client-id: surprising-account-${HOSTNAME:${random.uuid}}
+      max-poll-records: 500
+  instrument:
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    lifecycle:
+      enabled: true
+      poll-delay-ms: 1000
+      batch-size: 100
+    outbox:
+      batch-size: 100
+      publish-delay-ms: 100
+      cleanup-delay-ms: 60000
+      send-timeout: 10s
+      retention: 7d
+      cleanup-batch-size: 500
+      cleanup-max-batches: 10
+  trading:
+    order:
+      kafka:
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      aeron:
+        node-id: ${TRADING_NODE_ID:0}
+      event-publish:
+        send-timeout: 3s
+      risk:
+        market-max-slippage-ppm: 10000
+        market-max-mark-age-ms: 5000
+        limit-price-protection-enabled: true
+        limit-price-band-ppm: 50000
+        limit-price-max-mark-age-ms: 15000
+      algo:
+        enabled: true
+        claim-batch-size: 100
+        claim-lease: 30s
+        scan-delay-ms: 250
+        min-interval-seconds: 1
+        max-interval-seconds: 86400
+        min-duration-seconds: 5
+        max-duration-seconds: 86400
+    trigger:
+      execution:
+        trigger-batch-size: 200
+        max-trigger-scan-pages: ${TRIGGER_MAX_SCAN_PAGES:16}
+        stale-triggering-after: 30s
+        maintenance-delay-ms: 1000
+  price:
+    consumer:
+      max-age: 5s
+      allowed-future-skew: 1s
+    index:
+      kafka:
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+        group-id: surprising-index-price-v1
+        concurrency: 2
+        max-poll-records: 500
+      http:
+        connect-timeout: 2s
+        request-timeout: 3s
+        max-concurrent-requests: 32
+        user-agent: surprising-price/1.0
+        proxy-enabled: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_ENABLED:false}
+        proxy-host: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_HOST:127.0.0.1}
+        proxy-port: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT:7897}
+      audit:
+        retention: 3d
+        cleanup-delay-ms: 60000
+        cleanup-batch-size: 10000
+        max-batches-per-run: 10
+    mark:
+      market-channel: ${PRICE_MARK_MARKET_CHANNEL:aeron:udp?endpoint=127.0.0.1:21407}
+      kafka:
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+        concurrency: 2
+        max-poll-records: 500
+      audit:
+        retention: 3d
+        cleanup-delay-ms: 60000
+        cleanup-batch-size: 10000
+        max-batches-per-run: 10
+  candlestick:
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      application-id-override: ${SURPRISING_CANDLESTICK_KAFKA_APPLICATION_ID_OVERRIDE:}
+    stream:
+      threads: 2
+      state-dir: ${CANDLESTICK_STATE_DIR:data/kafka-streams}
+  realtime:
+    router:
+      enabled: ${REALTIME_ENABLED:true}
+      directory: ${AERON_DIR:/dev/shm/aeron-router}
+      channel: ${REALTIME_ROUTER_CHANNEL:aeron:udp?endpoint=0.0.0.0:21010}
+      stream: 2101
+      node-stream: 2103
+      control-channels: {}
+  trade-export:
+    enabled: ${TRADE_EXPORT_ENABLED:false}
+    cluster-directory: ${TRADE_EXPORT_CLUSTER_DIR:}
+    aeron-directory: ${TRADE_EXPORT_AERON_DIR:}
+    archive-control-channel: ${TRADE_EXPORT_ARCHIVE_CHANNEL:}
+    checkpoint: ${TRADE_EXPORT_CHECKPOINT:}
+    cluster-id: ${TRADE_EXPORT_CLUSTER_ID:}
+    kafka-config: ${TRADE_EXPORT_KAFKA_CONFIG:}
+    checkpoint-interval: 60s
+    retry-interval: 5s
+  funding:
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  insurance:
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      concurrency: 2
+      max-poll-records: 500
+
 telegram:
   login:
     client-id: ${TELEGRAM_CLIENT_ID:}
@@ -273,3 +374,4 @@ google:
     web-client-id: ${GOOGLE_LOGIN_WEB_CLIENT_ID:}
     ios-client-id: ${GOOGLE_LOGIN_IOS_CLIENT_ID:}
     android-client-ids: ${GOOGLE_LOGIN_ANDROID_CLIENT_IDS:}
+

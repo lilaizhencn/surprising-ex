@@ -102,7 +102,8 @@ class MarketApplicationContextTest {
     private WebApplicationContextRunner context(ProductLine line, boolean routing) {
         return new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(TestRealtimeAppConfig.class, RealtimeApplication.class)
-                .withPropertyValues("spring.config.name=application-realtime",
+                .withPropertyValues("spring.config.name=application",
+                        "management.endpoint.health.group.readiness.include=readinessState",
                         "spring.data.redis.lettuce.pool.max-active=4",
                         "surprising.candlestick.kafka.product-line=" + line,
                         "surprising.realtime.router.enabled=" + routing,
