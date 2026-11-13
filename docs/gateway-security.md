@@ -4,29 +4,43 @@
 
 ## 请求与身份边界
 
-- `SecurityFilterChain` 默认拒绝未登记的入口；不启用表单登录、HTTP Basic 或 Servlet 登录会话。JWT 从既有数据库读取当前账户、角色及会话状态，同一 HTTP 请求只验证一次身份，产品/批量确定后扣除业务额度。
+- `SecurityFilterChain` 默认拒绝未登记的入口；不启用表单登录、HTTP Basic 或 Servlet 登录会话。登录后的请求只校验会话令牌并读取 Valkey 中的会话与用户状态，不访问 Postgres；同一 HTTP 请求只验证一次身份，产品/批量确定后扣除业务额度。
 - 原生和兼容 API 的 HMAC 继续由协议适配器按原始方法、路径、查询及实际正文验证。API Key 与 Bearer 不得混用。Scope、IP、用户状态和资源所有权仍逐项执行。
 - 拒绝路径中的百分号编码、分号参数、重复斜线、反斜线和非规范路径。当前路由段只使用 ASCII ID；查询内容仍可以正常 URL 编码。不要在代理层把不同路径改写成同一个受保护路径。
 - 管理 IP/权限过滤器位于安全链内；未登记管理操作默认拒绝。用户读取的服务方法另查细粒度权限；修改用户角色会撤销目标用户的会话，重新登录后才获得新权限。
 - `/actuator/**`、内部业务入口仅接收本机连接；公网 Nginx 同时阻断内部路径。管理 API 还要求管理员角色、对应权限和配置的 IP 来源，高风险审批继续生效。
 - WebSocket JWT 认证、私有订阅和周期复查均检查连接来源 IP；会话撤销、账户冻结、IP 禁用、授权到期均停止私有连接。API Key 仍使用一次性挑战、READ 权限和持续 Key/IP 复查。
 
-## 浏览器会话
+## 登录会话
 
-用户访问令牌默认 15 分钟，管理访问令牌 5 分钟。用户刷新会话默认 30 天；管理刷新会话最多自首次认证起 8 小时，刷新不能延长这个期限。生产配置禁止超过这些上限及关闭安全 Cookie。
+登录（含注册、二次验证、第三方登录）只签发一个会话令牌：HS256 签名的 JWT，携带用户 ID（`sub`）、会话 ID（`sid`）、用户名、角色和 `typ=session`，`exp` 为 `security.session-token-max-lifetime`（默认 365 天）。没有刷新令牌、没有刷新接口。令牌是否有效只由 Valkey 中的会话决定；用户 ID 直接取自验签后的令牌声明，不再按令牌查询。
 
-Web/Admin 的访问令牌只留在页面内存；刷新令牌不返回给浏览器 JavaScript。生产 Cookie 使用 `__Host-` 前缀、Secure、HttpOnly、SameSite=Strict、Path=/、不指定 Domain，避免其他子域伪造同名凭证。两个应用的刷新及 CSRF Cookie 各自独立。普通 API 仍用 Authorization 请求头，不使用 Cookie 自动认证。
+- **7 天滑动有效期**：会话保存在 `auth:session:{sid}`，最后一次请求后保留 `security.session-ttl`（默认 7 天，`GATEWAY_SESSION_TTL`）。有请求就续期，同一会话至少间隔 `security.session-renew-interval`（默认 10 分钟）才续一次，续期同时延长该用户的状态键。拥有 `security.admin-roles` 角色的账号使用 `security.admin-session-ttl`（默认 8 小时，`GATEWAY_ADMIN_SESSION_TTL`）的滑动窗口。7 天无请求则会话过期，下次请求 401，需要重新登录。
+- **登录后请求不访问 Postgres**：验签 → 读 `auth:session:{sid}`（会话存在且属于令牌用户）→ 读 `auth:user:{uid}`（冻结、角色、权限、被封 IP/设备）→ IP 检查。Postgres 只在登录时写入会话行，并在退出、踢下线、封禁、改密码、改角色权限时同步更新；它用于设备列表、管理后台和审计。
+- **Valkey 键**（均在 `auth:` 下）：`auth:session:{sid}`（uid、deviceId、authenticatedAt、ttlSeconds、renewedAt，滑动 TTL）；`auth:user:{uid}`（username、email、displayName、createdAt、status、roles、permissions、blockedIps、blockedDevices、persistent，无 API Key 的用户跟随会话滑动过期，有有效 API Key 的用户常驻）；`auth:apikey:{apiKey}`（id、uid、permissions、ipAllowlist、AES-GCM 加密的 secret，无 TTL）。频道 `auth:invalidate` 广播 `session:{sid}`、`user:{uid}`、`apikey:{key}`，其他网关节点据此立即清理本地缓存。
+- **立即生效**：退出、踢下线、改密码、封禁/冻结、改角色或角色权限、API Key 撤销和修改，都在同一个 Postgres 事务内写 Valkey（删除或重写对应键）并广播失效；Valkey 写入失败会回滚 Postgres 变更。
+- **本地缓存与 Valkey 故障**：每个网关进程缓存已读到的会话/用户/API Key `security.auth-local-cache-ttl`（默认 4 秒）。Valkey 读取失败时，本地缓存里 `security.auth-local-stale-ttl`（默认 60 秒）内的条目继续有效；没有本地缓存的请求一律按登录无效处理，返回 401，不回退查 Postgres。
+- **启动补齐**：网关启动后（`security.auth-state-rebuild-on-start`，默认开启）只把 Valkey 中缺失的有效 API Key、会话和对应用户从 Postgres 补回，不覆盖已有数据，不在请求路径上。Valkey 开启 AOF（`appendonly yes`、`appendfsync everysec`），重启后会话保留。
 
-1. 请求 `GET /api/v1/auth/csrf`，携带 `X-Auth-Client: web` 或 `admin`，并允许凭证；响应 JSON 的 `token` 作为后续 `X-XSRF-TOKEN`。
-2. 浏览器登录/注册/二次验证/第三方登录携带 `X-Auth-Transport: cookie`、同一 `X-Auth-Client` 和 CSRF 头。成功后响应 `browserSession=true`、`refreshToken=null`。
-3. 刷新和退出分别调用 `POST /api/v1/auth/browser/refresh`、`/logout`，无需在正文提供刷新凭证。页面重载通过 Cookie 恢复会话。
-4. 支持 Web Locks 的现代浏览器才开放 Cookie 登录；各浏览器应用使用 Web Locks 串行执行 Cookie 身份操作，避免旧刷新响应覆盖新登录 Cookie；仍核对用户身份，丢弃旧用户的迟到响应。退出失败明确显示错误，不伪装成功。
+生产配置禁止 `session-ttl` 超过 30 天、`admin-session-ttl` 超过 8 小时、`session-token-max-lifetime` 超过 400 天及关闭安全 Cookie。
 
-页面按剩余有效期安排续期，最多提前 30 秒、短令牌在剩余时间过半后刷新，并保留至少 1 秒间隔，避免短于 30 秒的令牌触发连续刷新。
+### 浏览器 Cookie
 
-`security.admin-browser-allowed-origins` 单独限制管理 Cookie 操作。生产默认 `https://ex-api.tokdou.com`；用户站即使在 REST CORS 名单中，也不能借用管理 Cookie 获取管理访问令牌。单独的管理域登记在管理来源名单中，REST CORS 自动合并该名单。来源必须是完整的 Origin，无路径或通配符。
+Web/Admin 使用同一个会话令牌，放在 HttpOnly Cookie `surprising-web-session` / `surprising-admin-session`（Path=/、SameSite=Lax、`Secure` 由 `security.browser-cookie-secure` 控制、`Domain` 由 `security.browser-cookie-domain` / `GATEWAY_BROWSER_COOKIE_DOMAIN` 控制，生产默认 `.tokdou.com`）。令牌不出现在响应正文，页面脚本读不到。两个应用的会话 Cookie 与 CSRF Cookie 各自独立；Cookie 带 Domain，因此不使用 `__Host-` 前缀。
 
-移动端继续使用显式刷新令牌协议，并保留安全存储。登录、刷新等凭证接口不发送旧 Bearer，私有身份操作仍发送访问令牌，避免过期令牌在安全链提前阻断刷新。Web 与 API 须部署在同站 HTTPS 域或由同源代理访问；跨站预览域不能依赖 SameSite=Strict Cookie。仅本机 HTTP 开发可设 `GATEWAY_BROWSER_COOKIE_SECURE=false`；生产校验拒绝此配置。
+网关接受两种凭证：`Authorization: Bearer <会话令牌>`（App、脚本）或会话 Cookie（浏览器）。同时带 Authorization 头与 Cookie 时以请求头为准；会话令牌与 API Key 头同时出现返回 400 `AMBIGUOUS_AUTHENTICATION`。
+
+1. 请求 `GET /api/v1/auth/csrf`，携带 `X-Auth-Client: web` 或 `admin` 并允许凭证；响应设置非 HttpOnly 的 CSRF Cookie `surprising-{client}-csrf`（SameSite=Lax），JSON 的 `token` 为同一个值。
+2. 浏览器登录/注册/二次验证/第三方登录携带 `X-Auth-Transport: cookie`、`X-Auth-Client` 和 `X-CSRF-Token`。成功后网关写入会话 Cookie（`Max-Age` 为 `session-token-max-lifetime`），响应 `browserSession=true`、`accessToken=null`。
+3. 之后同域请求带 Cookie 即可。使用 Cookie 认证的写请求（非 GET/HEAD/OPTIONS）必须带 `X-CSRF-Token`，值等于 CSRF Cookie（双重提交），否则 403。带 Authorization 头或 API Key 的请求不使用 Cookie 认证，免 CSRF 校验。
+4. 退出调用 `POST /api/v1/auth/logout`（Cookie 或 Bearer 均可）：删除当前会话并清除 Cookie，返回 204。页面重载直接带 Cookie 请求，401 即回到登录页。
+5. WebSocket 握手带同一会话 Cookie 时，`authenticate` 命令不带 `token` 即使用握手 Cookie 中的令牌；也可以照常在命令里带 Bearer 令牌。
+
+`security.admin-browser-allowed-origins` 单独限制管理 Cookie 操作。生产默认 `https://ex-api.tokdou.com`；用户站即使在 REST CORS 名单中，也不能借用管理 Cookie 获取管理访问权限。单独的管理域登记在管理来源名单中，REST CORS 自动合并该名单。来源必须是完整的 Origin，无路径或通配符。REST CORS 允许携带凭证，来源限定为 `security.cors-allowed-origins` 与管理来源名单。
+
+CSRF 的 Cookie 带 Domain 时，同域名下的兄弟子域可以写入同名 Cookie；Web 与 API 应部署在同站 HTTPS 域，不要把不受信任的服务放在 `.tokdou.com` 的子域。仅本机 HTTP 开发可设 `GATEWAY_BROWSER_COOKIE_SECURE=false`；生产校验拒绝此配置。
+
+移动端把会话令牌放在安全存储，用 `Authorization: Bearer` 发送；收到 401 回到登录页。
 
 密码直接使用 PBKDF2-HMAC-SHA256、600000 次、随机 16 字节盐、256 位结果；旧轮数不再验证，也不做登录迁移。未知用户也进行密码派生。本机密码计算最多并发 4 个，超额立即 503，不排队占满交易请求。
 

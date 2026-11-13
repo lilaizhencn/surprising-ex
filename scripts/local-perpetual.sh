@@ -209,7 +209,7 @@ else
     [[ "$VALKEY_HOST" == 127.0.0.1 ]] || fail 'managed Redis must bind localhost'
     free_port "$VALKEY_PORT"
     mkdir -p "$LOCAL_DIR/redis"
-    start redis "$(command -v redis-server)" --bind 127.0.0.1 --port "$VALKEY_PORT" --dir "$LOCAL_DIR/redis" --appendonly yes --logfile "$LOCAL_DIR/logs/redis-server.log"
+    start redis "$(command -v redis-server)" --bind 127.0.0.1 --port "$VALKEY_PORT" --dir "$LOCAL_DIR/redis" --appendonly yes --appendfsync everysec --logfile "$LOCAL_DIR/logs/redis-server.log"
   fi
   if [[ "${MANAGE_KAFKA:-false}" == true ]] && ! alive kafka; then
     [[ "$KAFKA_BOOTSTRAP_SERVERS" == 127.0.0.1:19092 ]] || fail 'managed Kafka uses 127.0.0.1:19092; disable management for external Kafka'

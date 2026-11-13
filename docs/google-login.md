@@ -7,7 +7,7 @@
 - Web：首页未登录时展示 One Tap；登录/注册页同时提供 Google 按钮与 One Tap。开始输入账号时收起提示；Google SDK 加载或授权失败时可以重试。浏览器是否展示 One Tap 仍由 Google、浏览器、账号状态及冷却期决定，按钮始终是主动登录入口。
 - App：登录/注册弹层中的“通过 Google 继续”调用原生账号选择器。取消、缺少 Google 服务、配置缺失、关闭页面以及晚到的回调均不会恢复旧会话。
 - 服务端：验签 Google 公钥，校验 issuer、Web audience、有效期与 native authorized party；Web 额外校验绑定设备、五分钟有效且只能消费一次的 nonce。Google `sub` 是唯一身份键，并发首次登录只创建一个交易用户。
-- 已有账号的冻结、访问限制、二次验证和安全会话保存继续执行；浏览器 refresh token 使用现有 HttpOnly Cookie，App 走安全存储。首次 Google 注册接受普通邀请码。
+- 已有账号的冻结、访问限制、二次验证和安全会话保存继续执行；浏览器会话令牌放在 HttpOnly Cookie，App 放安全存储。首次 Google 注册接受普通邀请码。
 
 不会仅凭 Google 返回的邮箱自动合并已有交易账户，也不会把昵称当作身份凭据。首次 Google 授权会创建独立的无密码账号；现有邮箱账户与 Google 账户的主动绑定不在本次功能范围内。密码、联系方式与安全验证沿用账户安全页面的既有能力。
 
