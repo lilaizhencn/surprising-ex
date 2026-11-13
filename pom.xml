@@ -18,7 +18,6 @@
         <module>surprising-aeron-core</module>
         <module>surprising-price</module>
         <module>surprising-trading-api</module>
-        <module>surprising-account-api</module>
         <module>surprising-derivatives-lifecycle</module>
         <module>surprising-realtime</module>
         <module>surprising-gateway</module>

@@ -12,10 +12,9 @@
     <artifactId>surprising-price</artifactId>
     <packaging>pom</packaging>
     <name>surprising-price</name>
-    <description>价格 API、消费适配层和价格服务聚合入口</description>
+    <description>价格 API（含可选 Kafka 消费适配层）和价格服务聚合入口</description>
     <modules>
         <module>surprising-price-api</module>
-        <module>surprising-price-consumer</module>
         <module>surprising-price-provider</module>
     </modules>
 </project>

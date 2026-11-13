@@ -42,12 +42,7 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-account-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-price-consumer</artifactId>
+            <artifactId>surprising-price-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

@@ -56,8 +56,7 @@ Aeron Archive records the cluster log. Archive participation does not by itself 
 | --- | --- | --- |
 | [surprising-parent](surprising-parent) | Parent POM | Dependency versions, build plugins, and shared constraints |
 | [surprising-instrument-api](surprising-instrument-api/README.md) | Library | Product identity, instrument contracts, snapshots, and shared contract mathematics |
-| [surprising-trading-api](surprising-trading-api/README.md) | Library | Trading request/response contracts, rules, and shared calculations |
-| [surprising-account-api](surprising-account-api/README.md) | Library | Account, transfer, and settlement contracts |
+| [surprising-trading-api](surprising-trading-api/README.md) | Library | Trading, account, transfer, and settlement contracts, rules, and shared calculations |
 | [surprising-aeron-core](surprising-aeron-core/README.md) | Module group | Protocol, client, service, tools, and benchmarks |
 | [surprising-gateway](surprising-gateway/README.md) | Application | Security, REST/WebSocket, local business services, and product containers |
 | [surprising-price](surprising-price/README.md) | Module group | External index prices, mark prices, FX, and option reference quotes |

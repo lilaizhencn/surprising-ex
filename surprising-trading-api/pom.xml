@@ -13,7 +13,7 @@
 
     <artifactId>surprising-trading-api</artifactId>
     <name>surprising-trading-api</name>
-    <description>Trading RPC contracts and long-based order models</description>
+    <description>Trading and account RPC contracts and long-based order, balance, and position models</description>
 
     <dependencies>
         <dependency>
