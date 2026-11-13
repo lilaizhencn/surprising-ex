@@ -1,13 +1,11 @@
 package com.surprising.price.consumer.config;
 
-import lombok.Getter;
-import lombok.Setter;
-
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.utils.ProductTopicNames;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -17,24 +15,12 @@ import org.springframework.stereotype.Component;
 public class MarkPriceConsumerProperties {
 
     @Setter
-    private String bootstrapServers = "localhost:9092";
-    @Setter
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-    @Setter
-    private String groupId = "surprising-mark-price-cache-local";
     @Setter
     private Duration maxAge = Duration.ofSeconds(3);
     @Setter
     private Duration allowedFutureSkew = Duration.ofSeconds(1);
-    @Setter
-    private int concurrency = 1;
-    @Setter
-    private int maxPollRecords = 500;
     private List<String> requiredInstrumentIds = List.of();
-
-    public String resolvedTopic() {
-        return ProductTopicNames.of(productLine).priceEventsTopic();
-    }
 
     public void setRequiredInstrumentIds(List<String> requiredInstrumentIds) {
         this.requiredInstrumentIds = requiredInstrumentIds == null ? List.of() : requiredInstrumentIds.stream()

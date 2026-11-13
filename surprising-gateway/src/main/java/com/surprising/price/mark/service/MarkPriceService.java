@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +40,7 @@ public class MarkPriceService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final LatestMarkPriceCache latestMarkPriceCache;
     private final ObjectProvider<MarkPriceCorePublisher> corePublisher;
+    private final ApplicationEventPublisher eventPublisher;
     private final String nodeId;
 
     private final ConcurrentHashMap<String, IndexPriceEvent> indexPrices = new ConcurrentHashMap<>();
@@ -49,7 +51,6 @@ public class MarkPriceService {
     private final java.util.concurrent.atomic.AtomicLong marketGeneration = new java.util.concurrent.atomic.AtomicLong();
     private volatile long restoredMarketGeneration;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public MarkPriceService(MarkPriceProperties properties,
                             MarkPriceCalculator markPriceCalculator,
                             MarkPriceCoordinationService coordinationService,
@@ -57,8 +58,22 @@ public class MarkPriceService {
                             LatestMarkPriceCache latestMarkPriceCache,
                             ObjectProvider<RealtimeJsonPublisher> realtime,
                             ObjectProvider<MarkPriceCorePublisher> corePublisher) {
+        this(properties, markPriceCalculator, coordinationService, kafkaTemplate,
+                latestMarkPriceCache, realtime, corePublisher, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public MarkPriceService(MarkPriceProperties properties,
+                            MarkPriceCalculator markPriceCalculator,
+                            MarkPriceCoordinationService coordinationService,
+                            @Qualifier("markKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
+                            LatestMarkPriceCache latestMarkPriceCache,
+                            ObjectProvider<RealtimeJsonPublisher> realtime,
+                            ObjectProvider<MarkPriceCorePublisher> corePublisher,
+                            ApplicationEventPublisher eventPublisher) {
         this.realtime = realtime;
         this.corePublisher = corePublisher;
+        this.eventPublisher = eventPublisher;
         this.properties = properties;
         this.markPriceCalculator = markPriceCalculator;
         this.coordinationService = coordinationService;
@@ -170,7 +185,11 @@ public class MarkPriceService {
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
                 fundingRates.get(instrumentId), basisAverage,
                 properties.getCalculation().getBasisWindow().toSeconds(), now);
-        kafkaTemplate.send(properties.priceEventsTopic(), instrumentId, PricePublishedEvent.mark(publication));
+        PricePublishedEvent publishedEvent = PricePublishedEvent.mark(publication);
+        kafkaTemplate.send(properties.priceEventsTopic(), instrumentId, publishedEvent);
+        if (eventPublisher != null) {
+            eventPublisher.publishEvent(publishedEvent);
+        }
         realtime.ifAvailable(publisher -> publisher.publish(properties.getProductLine(),
                 com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK, instrumentId, instrumentId,
                 event.sequence(), event.eventTime(), event));

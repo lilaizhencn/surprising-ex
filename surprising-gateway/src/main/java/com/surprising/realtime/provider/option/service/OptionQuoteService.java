@@ -16,6 +16,7 @@ import java.time.*;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 /** realtime 拥有可重建的期权价格读视图；不查询在线 Core、不写账户、不保存派生 Greeks。 */
@@ -38,6 +39,16 @@ public final class OptionQuoteService {
     public OptionQuoteService(InstrumentSnapshotCache instruments, Clock clock) {
         this.instruments = instruments;
         this.clock = clock;
+    }
+
+    @EventListener
+    public void onPrice(PricePublishedEvent publication) {
+        if (publication == null || publication.eventType() != PriceEventType.MARK_PRICE
+                || publication.markPrice() == null || publication.markPrice().result() == null) {
+            return;
+        }
+        var mark = publication.markPrice();
+        accept(InstrumentIds.parse(mark.result().instrumentId()), mark);
     }
 
     public void accept(int instrumentId, MarkPricePublishedEvent publication) {

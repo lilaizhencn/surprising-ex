@@ -2,7 +2,6 @@ package com.surprising.realtime.provider.option;
 
 import com.surprising.realtime.provider.option.controller.OptionQuoteController;
 import com.surprising.realtime.provider.option.service.OptionQuoteService;
-import com.surprising.realtime.provider.option.consumer.OptionQuotePriceConsumer;
 import com.surprising.realtime.provider.option.exception.OptionQuoteException;
 
 import static org.assertj.core.api.Assertions.*;
@@ -13,7 +12,6 @@ import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.*;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
@@ -24,8 +22,6 @@ class OptionQuoteServiceTest {
     private final InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
     private final MutableClock clock = new MutableClock();
     private final OptionQuoteService service = new OptionQuoteService(instruments, clock);
-
-    private final OptionQuotePriceConsumer consumer = new OptionQuotePriceConsumer(service, mapper);
 
     @BeforeEach void initialize() { instrument("TRADING", 7, NOW.plusSeconds(365 * 86400)); }
 
@@ -56,8 +52,8 @@ class OptionQuoteServiceTest {
                 BigDecimal.ZERO, null, 0, BigDecimal.ZERO, 0, price, price, sequence, status, time, time);
         return new MarkPricePublishedEvent(mark, index, null, null, null, BigDecimal.ZERO, 0, time);
     }
-    private void accept(MarkPricePublishedEvent event) throws Exception {
-        consumer.onPrice(new ConsumerRecord<>(consumer.topic(), 0, 1, "74", mapper.writeValueAsString(PricePublishedEvent.mark(event))));
+    private void accept(MarkPricePublishedEvent event) {
+        service.onPrice(PricePublishedEvent.mark(event));
     }
     private void unavailable() { assertThatThrownBy(() -> service.quote(74)).isInstanceOfSatisfying(OptionQuoteException.class,
             failure -> assertThat(failure.reason()).isEqualTo(OptionQuoteException.Reason.REFERENCE_UNAVAILABLE)); }
@@ -131,10 +127,9 @@ class OptionQuoteServiceTest {
         assertThatThrownBy(() -> service.quote(75)).isInstanceOfSatisfying(OptionQuoteException.class,
                 failure -> assertThat(failure.reason()).isEqualTo(OptionQuoteException.Reason.INSTRUMENT_NOT_FOUND));
         var payload = mapper.writeValueAsString(PricePublishedEvent.mark(event(1, 7, PriceStatus.HEALTHY, NOW, "8")));
-        assertThatThrownBy(() -> consumer.onPrice(new ConsumerRecord<>("wrong", 0, 1, "74", payload))).hasMessageContaining("topic");
-        assertThatThrownBy(() -> consumer.onPrice(new ConsumerRecord<>(consumer.topic(), 0, 1, "75", payload))).hasMessageContaining("key");
-        assertThatThrownBy(() -> consumer.onPrice(new ConsumerRecord<>(consumer.topic(), 0, 1, "74",
-                payload.replace("\"productLine\":\"OPTION\"", "\"productLine\":\"SPOT\"")))).hasMessageContaining("identity");
+        var spotEvent = mapper.readValue(payload.replace("\"productLine\":\"OPTION\"", "\"productLine\":\"SPOT\""),
+                PricePublishedEvent.class);
+        assertThatThrownBy(() -> service.onPrice(spotEvent)).hasMessageContaining("identity");
         accept(event(2, 7, PriceStatus.HEALTHY, NOW.plusMillis(1), "8")); unavailable();
         assertThatThrownBy(() -> new OptionQuoteController(service).quote("74", "SPOT")).isInstanceOfSatisfying(ResponseStatusException.class,
                 failure -> assertThat(failure.getStatusCode().value()).isEqualTo(404));
