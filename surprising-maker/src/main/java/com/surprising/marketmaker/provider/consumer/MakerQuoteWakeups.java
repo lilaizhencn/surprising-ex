@@ -10,6 +10,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** 做市商本地工作唤醒通知；通过 UDP 极速响应价格、成交与盘口变动，完全解耦 Kafka。 */
@@ -20,6 +21,7 @@ public class MakerQuoteWakeups {
     private final Map<String, Signal> signals = new ConcurrentHashMap<>();
     private final Map<String, MarketMakerProperties.Strategy> registeredStrategies = new ConcurrentHashMap<>();
 
+    @Autowired
     public MakerQuoteWakeups(MarketMakerProperties properties) {
         this.properties = properties;
     }
