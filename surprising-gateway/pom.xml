@@ -29,7 +29,6 @@
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-oauth2-jose</artifactId>
         </dependency>
-        <dependency><groupId>com.surprising</groupId><artifactId>surprising-realtime-api</artifactId><version>${project.version}</version></dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-protocol</artifactId>
@@ -43,11 +42,6 @@
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-trading-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-derivatives-lifecycle-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

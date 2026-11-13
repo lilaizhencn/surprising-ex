@@ -16,10 +16,8 @@
         <module>surprising-parent</module>
         <module>surprising-instrument-api</module>
         <module>surprising-aeron-core</module>
-        <module>surprising-price</module>
+        <module>surprising-price-api</module>
         <module>surprising-trading-api</module>
-        <module>surprising-derivatives-lifecycle</module>
-        <module>surprising-realtime</module>
         <module>surprising-gateway</module>
         <module>surprising-maker</module>
     </modules>

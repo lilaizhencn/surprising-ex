@@ -55,10 +55,8 @@ Aeron Archive records the cluster log. Archive participation does not by itself 
 | [surprising-instrument-api](surprising-instrument-api/README.md) | Library | Product identity, instrument contracts, snapshots, and shared contract mathematics |
 | [surprising-trading-api](surprising-trading-api/README.md) | Library | Trading, account, transfer, and settlement contracts, rules, and shared calculations |
 | [surprising-aeron-core](surprising-aeron-core/README.md) | Module group | Protocol, client, service, tools, and benchmarks |
-| [surprising-gateway](surprising-gateway/README.md) | Application | Security, REST/WebSocket, local business services, and product containers |
-| [surprising-price](surprising-price/README.md) | Module group | External index prices, mark prices, FX, and option reference quotes |
-| [surprising-realtime](surprising-realtime/README.md) | Module group | Realtime routing, read views, committed export, candles, and history |
-| [surprising-derivatives-lifecycle](surprising-derivatives-lifecycle/README.md) | Module group | Funding, risk scans, liquidation, insurance, and ADL orchestration |
+| [surprising-price-api](surprising-price-api/README.md) | Library | Shared index/mark price contracts, event models, and Kafka consumer support |
+| [surprising-gateway](surprising-gateway/README.md) | Application | Security, REST/WebSocket, local business, pricing, realtime, and derivatives lifecycle packages |
 | [surprising-maker](surprising-maker/README.md) | Application | Reference-market quoting and controlled load generation |
 
 The parent POM and the root reactor are build structures, not runtime services. The single-product backend runs as three processes: Core, Gateway (hosting Price, Realtime, and Derivatives Lifecycle as in-process packages), and Maker. Wallet is external and is not started by default.
