@@ -240,9 +240,6 @@ public class InstrumentService {
         InstrumentEvent event = new InstrumentEvent(response.instrumentId(), response.symbol(), response.lastChangeId(), response.status(),
                 eventType, eventTime, response, response.contractType().productLine(), response.lastChangeId(),
                 storageService.assetScales());
-        outboxService.enqueue("INSTRUMENT", response.lastChangeId(),
-                ProductTopicNames.INSTRUMENT_EVENTS_TOPIC, InstrumentEventKeys.key(event),
-                eventType.name(), event, eventTime);
         if (eventPublisher != null) {
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

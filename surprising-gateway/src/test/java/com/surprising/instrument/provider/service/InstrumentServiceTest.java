@@ -185,8 +185,7 @@ class InstrumentServiceTest {
                 .thenReturn(result);
         var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox, mock(MarketSummaryService.class));
         assertThat(service.upsert(request, "admin-1", "maintenance")).isEqualTo(result);
-        verify(outbox).enqueue(eq("INSTRUMENT"), eq(4L), eq("surprising.instrument.events.v1"),
-                eq("LINEAR_PERPETUAL:1"), eq("UPSERTED"), any(Object.class), any(Instant.class));
+        org.mockito.Mockito.verifyNoInteractions(outbox);
     }
 
     @Test

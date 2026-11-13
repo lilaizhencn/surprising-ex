@@ -2,10 +2,12 @@ package com.surprising.insurance.provider.config;
 
 import java.util.HashMap;
 import java.util.Map;
+import com.surprising.gateway.provider.config.KafkaBootstrapServers;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -16,10 +18,14 @@ import org.springframework.kafka.listener.ContainerProperties;
 @Configuration
 public class InsuranceKafkaConfiguration {
 
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    private String defaultBootstrapServers = "localhost:9092";
+
     @Bean
     public ConsumerFactory<String, String> insuranceConsumerFactory(InsuranceProperties properties) {
         Map<String, Object> config = new HashMap<>();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KafkaBootstrapServers.resolve(properties.getKafka().getBootstrapServers(), defaultBootstrapServers));
         config.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getKafka().getGroupId());
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);

@@ -32,7 +32,7 @@ public class AccountProperties {
     @Getter
     public static class Kafka {
         @Setter
-        private String bootstrapServers = "localhost:9092";
+        private String bootstrapServers;
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         @Setter
         private ProductLine productLine;

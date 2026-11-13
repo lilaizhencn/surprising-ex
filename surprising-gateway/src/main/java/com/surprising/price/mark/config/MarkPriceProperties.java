@@ -97,7 +97,7 @@ public class MarkPriceProperties {
     @Getter
     public static class Kafka {
         @Setter
-        private String bootstrapServers = "localhost:9092";
+        private String bootstrapServers;
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
         @Setter
         private int concurrency = 2;

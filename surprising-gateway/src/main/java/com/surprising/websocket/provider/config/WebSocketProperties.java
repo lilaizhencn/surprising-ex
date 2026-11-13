@@ -32,7 +32,7 @@ public class WebSocketProperties {
     public static class Kafka {
         @Getter
         @Setter
-        private String bootstrapServers = "localhost:9092";
+        private String bootstrapServers;
         @Getter
         private ProductLine productLine;
         @Setter

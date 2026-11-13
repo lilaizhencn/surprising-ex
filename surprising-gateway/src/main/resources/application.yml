@@ -191,7 +191,6 @@ surprising:
         basic-auth-password: ${SW_WALLET_ADMIN_PASSWORD:}
   websocket:
     kafka:
-      bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS:${spring.kafka.bootstrap-servers}}
       # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。
       group-id: ${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}
     security:
@@ -201,8 +200,6 @@ surprising:
   account:
     aeron:
       source-identity: account-${HOSTNAME:node}
-    kafka:
-      client-id: surprising-account-${HOSTNAME:${random.uuid}}
   trading:
     order:
       aeron:

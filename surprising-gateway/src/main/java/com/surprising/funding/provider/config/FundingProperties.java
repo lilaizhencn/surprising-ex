@@ -36,7 +36,7 @@ public class FundingProperties {
     @Getter
     public static class Kafka {
         @Setter
-        private String bootstrapServers = "localhost:9092";
+        private String bootstrapServers;
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
 
         public void setProductLine(ProductLine productLine) {

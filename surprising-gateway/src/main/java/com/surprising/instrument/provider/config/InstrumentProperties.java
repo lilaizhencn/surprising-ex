@@ -18,7 +18,7 @@ public class InstrumentProperties {
     @Getter
     @Setter
     public static class Kafka {
-        private String bootstrapServers = "localhost:9092";
+        private String bootstrapServers;
         private String deliverySettlementsTopic;
         private String optionExercisesTopic;
 

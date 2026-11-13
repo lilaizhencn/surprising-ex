@@ -1,6 +1,7 @@
 package com.surprising.candlestick.provider.service;
 
 import com.surprising.candlestick.provider.config.CandlestickProperties;
+import com.surprising.gateway.provider.config.KafkaBootstrapServers;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -17,6 +18,7 @@ import jakarta.annotation.PreDestroy;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
@@ -42,8 +44,10 @@ public class RecentTradeQueryService {
 
     @Autowired
     public RecentTradeQueryService(CandlestickProperties properties,
-                                   PublicTradeEventMapper tradeMapper, ObjectMapper mapper) {
-        this(properties, tradeMapper, mapper, () -> new KafkaConsumer<>(consumerConfig(properties)));
+                                   PublicTradeEventMapper tradeMapper, ObjectMapper mapper,
+                                   @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String defaultBootstrapServers) {
+        this(properties, tradeMapper, mapper,
+                () -> new KafkaConsumer<>(consumerConfig(properties, defaultBootstrapServers)));
     }
 
     RecentTradeQueryService(CandlestickProperties properties, PublicTradeEventMapper tradeMapper,
@@ -55,8 +59,13 @@ public class RecentTradeQueryService {
     }
 
     static Properties consumerConfig(CandlestickProperties properties) {
+        return consumerConfig(properties, null);
+    }
+
+    static Properties consumerConfig(CandlestickProperties properties, String defaultBootstrapServers) {
         Properties config = new Properties();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KafkaBootstrapServers.resolve(properties.getKafka().getBootstrapServers(), defaultBootstrapServers));
         config.put(ConsumerConfig.CLIENT_ID_CONFIG, "recent-trades-query-" + properties.getProductLine());
         config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");

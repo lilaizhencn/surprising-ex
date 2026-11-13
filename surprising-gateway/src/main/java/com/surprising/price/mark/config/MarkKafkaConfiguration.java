@@ -9,7 +9,9 @@ import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import com.surprising.gateway.provider.config.KafkaBootstrapServers;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -27,10 +29,14 @@ import org.springframework.util.backoff.FixedBackOff;
 @Configuration
 public class MarkKafkaConfiguration {
 
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    private String defaultBootstrapServers = "localhost:9092";
+
     @Bean
     public ProducerFactory<String, Object> markProducerFactory(MarkPriceProperties properties) {
         Map<String, Object> config = new HashMap<>();
-        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KafkaBootstrapServers.resolve(properties.getKafka().getBootstrapServers(), defaultBootstrapServers));
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JacksonJsonSerializer.class);
         config.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -50,7 +56,8 @@ public class MarkKafkaConfiguration {
     @Bean
     public ConsumerFactory<String, String> markConsumerFactory(MarkPriceProperties properties) {
         Map<String, Object> config = new HashMap<>();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KafkaBootstrapServers.resolve(properties.getKafka().getBootstrapServers(), defaultBootstrapServers));
         config.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getKafka().getGroupId());
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
@@ -96,7 +103,8 @@ public class MarkKafkaConfiguration {
     @Bean
     public ConsumerFactory<String, String> markAuditConsumerFactory(MarkPriceProperties properties) {
         Map<String, Object> config = new HashMap<>();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KafkaBootstrapServers.resolve(properties.getKafka().getBootstrapServers(), defaultBootstrapServers));
         config.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getKafka().getGroupId() + "-audit-writer");
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);

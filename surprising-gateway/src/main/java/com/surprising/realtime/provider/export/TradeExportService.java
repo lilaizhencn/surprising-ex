@@ -5,8 +5,10 @@ import com.surprising.realtime.provider.export.service.CommittedOrderProjectionS
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.candlestick.provider.config.CandlestickProperties;
+import com.surprising.gateway.provider.config.KafkaBootstrapServers;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.health.contributor.Health;
@@ -26,11 +28,17 @@ public class TradeExportService implements SmartLifecycle, HealthIndicator {
     private volatile String state = "STOPPED";
     private volatile Thread worker;
 
+    TradeExportService(TradeExportProperties config, CandlestickProperties candles,
+            CommittedOrderProjectionService orders) {
+        this(config, candles, orders, null);
+    }
+
     @org.springframework.beans.factory.annotation.Autowired
     public TradeExportService(TradeExportProperties config, CandlestickProperties candles,
-            CommittedOrderProjectionService orders) {
+            CommittedOrderProjectionService orders,
+            @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String defaultBootstrapServers) {
         this(config, new CommittedTradeExporter(config, candles.getProductLine(),
-                candles.getKafka().getBootstrapServers(), orders));
+                KafkaBootstrapServers.resolve(candles.getKafka().getBootstrapServers(), defaultBootstrapServers), orders));
     }
 
     TradeExportService(TradeExportProperties config, CommittedTradeExporter exporter) {

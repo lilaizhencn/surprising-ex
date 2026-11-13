@@ -1,7 +1,9 @@
 package com.surprising.candlestick.provider.config;
 
+import com.surprising.gateway.provider.config.KafkaBootstrapServers;
 import com.surprising.realtime.provider.RealtimeRouter;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import com.surprising.candlestick.api.model.CandlePeriod;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
@@ -49,6 +51,8 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerde;
 public class CandlestickStreamConfiguration {
     private final ObjectProvider<RealtimeRouter> realtime;
     private final tools.jackson.databind.ObjectMapper objectMapper;
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    private String defaultBootstrapServers = "localhost:9092";
 
     public CandlestickStreamConfiguration(
             ObjectProvider<RealtimeRouter> realtime,
@@ -60,7 +64,7 @@ public class CandlestickStreamConfiguration {
     @Bean
     public KafkaAdmin candleKafkaAdmin(CandlestickProperties properties) {
         return new KafkaAdmin(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG,
-                properties.getKafka().getBootstrapServers()));
+                KafkaBootstrapServers.resolve(properties.getKafka().getBootstrapServers(), defaultBootstrapServers)));
     }
 
     @Bean
@@ -95,7 +99,8 @@ public class CandlestickStreamConfiguration {
     public KafkaStreamsConfiguration defaultKafkaStreamsConfig(CandlestickProperties properties) {
         Map<String, Object> config = new HashMap<>();
         config.put(StreamsConfig.APPLICATION_ID_CONFIG, properties.getKafka().getApplicationId());
-        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
+        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KafkaBootstrapServers.resolve(properties.getKafka().getBootstrapServers(), defaultBootstrapServers));
         config.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, properties.getStream().getThreads());
         config.put(StreamsConfig.STATE_DIR_CONFIG, properties.getStream().getStateDir());
         config.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, properties.getStream().getCommitInterval().toMillis());
