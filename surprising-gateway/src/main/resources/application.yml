@@ -215,74 +215,6 @@ surprising:
       connect-timeout: 1s
       read-timeout: 30s
     routes:
-      instrument:
-        base-url: "local:"
-        target-prefix: /api/v1/instruments
-        private-route: false
-      candlestick:
-        base-url: "local:"
-        target-prefix: /api/v1/candlestick
-        private-route: false
-      price-index:
-        base-url: "local:"
-        target-prefix: /api/v1/price/index
-        private-route: false
-      price-fx:
-        base-url: "local:"
-        target-prefix: /api/v1/price/fx
-        private-route: false
-      price-mark:
-        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:local:}
-        target-prefix: /api/v1/price/mark
-        private-route: false
-      trading:
-        base-url: "local:"
-        target-prefix: /api/v1/trading/orders
-        private-route: true
-      trading-leverage:
-        base-url: "local:"
-        target-prefix: /api/v1/trading/leverage
-        private-route: true
-      trading-fees:
-        base-url: "local:"
-        target-prefix: /api/v1/trading/fees
-        private-route: true
-      trading-market:
-        base-url: "local:"
-        target-prefix: /api/v1/trading/market
-        private-route: false
-      trading-trigger:
-        base-url: "local:"
-        target-prefix: /api/v1/trading/trigger-orders
-        private-route: true
-      account:
-        base-url: "local:"
-        target-prefix: /api/v1/accounts
-        private-route: true
-      risk:
-        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:local:}
-        target-prefix: /api/v1/risk
-        private-route: true
-      risk-admin:
-        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:local:}
-        target-prefix: /api/v1/admin/risk
-        private-route: true
-      liquidation:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
-        target-prefix: /api/v1/liquidations
-        private-route: true
-      funding:
-        base-url: ${GATEWAY_ROUTE_FUNDING_BASE_URL:local:}
-        target-prefix: /api/v1/funding
-        private-route: false
-      insurance:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
-        target-prefix: /api/v1/insurance
-        private-route: true
-      adl:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
-        target-prefix: /api/v1/adl
-        private-route: true
       market-maker:
         base-url: http://localhost:9096
         target-prefix: /api/v1/market-maker
@@ -300,95 +232,7 @@ surprising:
             base-url: ${GATEWAY_ROUTE_MARKET_MAKER_INVERSE_DELIVERY_BASE_URL:}
           OPTION:
             base-url: ${GATEWAY_ROUTE_MARKET_MAKER_OPTION_BASE_URL:}
-      wallet:
-        base-url: http://localhost:8002
-        target-prefix: /wallet/v1
-        private-route: true
     admin-routes:
-      instrument:
-        base-url: "local:"
-        target-prefix: /api/v1/instruments
-        private-route: true
-      instrument-admin:
-        base-url: "local:"
-        target-prefix: /api/v1/instruments/admin
-        private-route: true
-      candlestick:
-        base-url: "local:"
-        target-prefix: /api/v1/candlestick
-        private-route: true
-      price-index:
-        base-url: "local:"
-        target-prefix: /api/v1/price/index
-        private-route: true
-      price-fx:
-        base-url: "local:"
-        target-prefix: /api/v1/price/fx
-        private-route: true
-      price-mark:
-        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:local:}
-        target-prefix: /api/v1/price/mark
-        private-route: true
-      trading:
-        base-url: "local:"
-        target-prefix: /api/v1/admin/trading/orders
-        private-route: true
-      trading-orders:
-        base-url: "local:"
-        target-prefix: /api/v1/admin/trading/orders
-        private-route: true
-      trading-leverage:
-        base-url: "local:"
-        target-prefix: /api/v1/admin/trading/leverage
-        private-route: true
-      trading-fees:
-        base-url: "local:"
-        target-prefix: /api/v1/admin/trading/fees
-        private-route: true
-      trading-market:
-        base-url: "local:"
-        target-prefix: /api/v1/trading/market
-        private-route: true
-      trading-trigger:
-        base-url: "local:"
-        target-prefix: /api/v1/admin/trading/trigger-orders
-        private-route: true
-      account:
-        base-url: "local:"
-        target-prefix: /api/v1/admin/accounts
-        private-route: true
-      account-public:
-        base-url: "local:"
-        target-prefix: /api/v1/accounts
-        private-route: true
-      risk:
-        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:local:}
-        target-prefix: /api/v1/risk
-        private-route: true
-      liquidation:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
-        target-prefix: /api/v1/liquidations
-        private-route: true
-      liquidation-admin:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
-        target-prefix: /api/v1/admin/liquidations
-        private-route: true
-      funding:
-        base-url: ${GATEWAY_ROUTE_FUNDING_BASE_URL:local:}
-        target-prefix: /api/v1/funding
-        private-route: true
-      insurance:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
-        target-prefix: /api/v1/insurance
-        private-route: true
-      insurance-admin:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
-        target-prefix: /api/v1/insurance/admin
-        private-route: true
-      adl:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
-        target-prefix: /api/v1/adl
-        private-route: true
       market-maker:
         base-url: http://localhost:9096
         target-prefix: /api/v1/admin/market-maker
@@ -406,20 +250,12 @@ surprising:
             base-url: ${GATEWAY_ROUTE_MARKET_MAKER_INVERSE_DELIVERY_BASE_URL:}
           OPTION:
             base-url: ${GATEWAY_ROUTE_MARKET_MAKER_OPTION_BASE_URL:}
-      wallet:
-        base-url: http://localhost:8002
-        target-prefix: /wallet/v1
-        private-route: true
       wallet-admin:
         base-url: http://localhost:8002
         target-prefix: /wallet/v1/admin
         private-route: true
         basic-auth-username: ${SW_WALLET_ADMIN_USERNAME:admin}
         basic-auth-password: ${SW_WALLET_ADMIN_PASSWORD:}
-      websocket-admin:
-        base-url: "local:"
-        target-prefix: /api/v1/admin/websocket
-        private-route: true
   websocket:
     kafka:
       bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
