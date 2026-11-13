@@ -31,7 +31,8 @@ class GatewayProductRoutesConfigurationTest {
         assertLocalRoute(properties.getRoutes().get("candlestick"));
         assertLocalRoute(properties.getAdminRoutes().get("trading-fees"));
         assertLocalRoute(properties.getAdminRoutes().get("account"));
-        assertProductRouteMatrix(properties.getAdminRoutes().get("market-maker"));
+        assertThat(properties.getRoutes().get("market-maker").getBaseUrl()).isEqualTo("http://localhost:9096");
+        assertThat(properties.getAdminRoutes().get("market-maker").getBaseUrl()).isEqualTo("http://localhost:9096");
 
         assertThat(properties.getRoutes().get("price-mark").getBaseUrl())
                 .isEqualTo("local:");
