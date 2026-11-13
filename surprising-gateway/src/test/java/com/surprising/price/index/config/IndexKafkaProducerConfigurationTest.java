@@ -63,18 +63,4 @@ class IndexKafkaProducerConfigurationTest {
         assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
         assertThat(config).containsEntry(JacksonJsonSerializer.ADD_TYPE_INFO_HEADERS, false);
     }
-
-    @Test
-    void cacheConsumerStartsFromLatestAndDoesNotReplayOldIndexPrices() {
-        IndexPriceProperties properties = new IndexPriceProperties();
-        properties.getKafka().setBootstrapServers("kafka-index:9092");
-
-        var factory = (DefaultKafkaConsumerFactory<String, String>)
-                new IndexKafkaProducerConfiguration().indexPriceCacheConsumerFactory(properties);
-
-        assertThat(factory.getConfigurationProperties())
-                .containsEntry(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest")
-                .containsEntry(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false)
-                .containsEntry(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-    }
 }

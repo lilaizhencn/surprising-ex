@@ -48,31 +48,6 @@ public class IndexKafkaProducerConfiguration {
     }
 
     @Bean
-    public ConsumerFactory<String, String> indexPriceCacheConsumerFactory(IndexPriceProperties properties) {
-        return consumerFactory(properties, properties.getKafka().getCacheGroupId(), "latest");
-    }
-
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> indexPriceCacheKafkaListenerContainerFactory(
-            @Qualifier("indexPriceCacheConsumerFactory") ConsumerFactory<String, String> consumerFactory,
-            IndexPriceProperties properties) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.setConcurrency(Math.max(1, properties.getKafka().getConcurrency()));
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
-        factory.getContainerProperties().setConsumerRebalanceListener(new ConsumerAwareRebalanceListener() {
-            @Override
-            public void onPartitionsAssigned(Consumer<?, ?> consumer,
-                                              Collection<org.apache.kafka.common.TopicPartition> partitions) {
-                if (consumer != null && partitions != null && !partitions.isEmpty()) {
-                    consumer.seekToEnd(partitions);
-                }
-            }
-        });
-        return factory;
-    }
-
-    @Bean
     public ConsumerFactory<String, String> indexAuditConsumerFactory(IndexPriceProperties properties) {
         return consumerFactory(properties, properties.getKafka().getGroupId() + "-audit-writer", "earliest");
     }

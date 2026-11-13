@@ -112,10 +112,6 @@ public class MarkPriceProperties {
             return ProductTopicNames.of(productLine).consumerGroup("mark-price");
         }
 
-        public String getInstrumentSnapshotGroupId() {
-            return "surprising-" + productLine.topicSegment() + "-mark-instrument-snapshot-v1";
-        }
-
     }
 
     @Getter

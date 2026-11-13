@@ -92,17 +92,8 @@ public class TradingOrderProperties {
             this.clientId = clientId.trim();
         }
 
-        public String getFeeScheduleEventsTopic() {
-            return productTopics().feeScheduleEventsTopic();
-        }
         public String getInstrumentLifecycleGroupId() {
             return productTopics().consumerGroup("order-instrument-lifecycle");
-        }
-        public String getInstrumentSnapshotGroupId() {
-            return productTopics().consumerGroup("order-instrument-snapshot");
-        }
-        public String getFeeScheduleSnapshotGroupId() {
-            return productTopics().consumerGroup("order-fee-snapshot");
         }
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);

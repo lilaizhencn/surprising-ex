@@ -3,9 +3,6 @@ surprising:
     kafka:
       bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      cache-group-id: surprising-funding-rate-cache-${HOSTNAME:${random.uuid}}
-      concurrency: 1
-      max-poll-records: 500
   risk:
     product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
     aeron:
@@ -21,10 +18,6 @@ surprising:
       max-poll-records: 500
   price:
     consumer:
-      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      group-id: surprising-adl-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 5s
       allowed-future-skew: 1s
-      concurrency: 1
-      max-poll-records: 500

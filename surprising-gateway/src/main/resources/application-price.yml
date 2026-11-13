@@ -5,7 +5,6 @@ surprising:
         bootstrap-servers: localhost:9092
         product-line: ${PRODUCT_LINE}
         group-id: surprising-index-price-v1
-        cache-group-id: surprising-index-price-cache-${HOSTNAME:${random.uuid}}
         concurrency: 2
         max-poll-records: 500
       http:

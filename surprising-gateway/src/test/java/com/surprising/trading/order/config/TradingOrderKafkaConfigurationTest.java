@@ -38,8 +38,6 @@ class TradingOrderKafkaConfigurationTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
 
-        assertThat(properties.getKafka().getFeeScheduleEventsTopic())
-                .isEqualTo("surprising.linear-perp.fee.schedule.events.v1");
         assertThat(properties.getKafka().getInstrumentLifecycleDrainTopic())
                 .isEqualTo("surprising.instrument.lifecycle-drain.v1");
     }

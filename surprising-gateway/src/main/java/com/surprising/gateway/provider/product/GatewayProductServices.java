@@ -207,7 +207,6 @@ public final class GatewayProductServices implements AutoCloseable {
             values.put(prefix + ".response-timeout", core.getResponseTimeout().toMillis() + "ms");
             values.put(prefix + ".client-connections", core.getClientConnections());
         }
-        values.put("surprising.price.consumer.group-id", "gateway-mark-" + product + "-" + UUID.randomUUID());
         return values;
     }
 

@@ -38,12 +38,6 @@ public class FundingProperties {
         @Setter
         private String bootstrapServers = "localhost:9092";
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        @Setter
-        private String cacheGroupId = "surprising-funding-rate-cache-local";
-        @Setter
-        private int concurrency = 1;
-        @Setter
-        private int maxPollRecords = 500;
 
         public void setProductLine(ProductLine productLine) {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;

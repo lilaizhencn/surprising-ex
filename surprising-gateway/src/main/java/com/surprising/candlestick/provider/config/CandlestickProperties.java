@@ -51,10 +51,6 @@ public class CandlestickProperties {
             return productTopics().candleEventsTopic();
         }
 
-        public String getInstrumentSnapshotGroupId() {
-            return "surprising-" + productLine.topicSegment() + "-candlestick-instrument-snapshot-v1";
-        }
-
         public String getApplicationId() {
             if (applicationIdOverride != null && !applicationIdOverride.isBlank()) {
                 return applicationIdOverride.trim();

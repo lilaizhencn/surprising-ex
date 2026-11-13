@@ -48,11 +48,6 @@ public class InsuranceProperties {
             return productTopics().accountLiquidationFeeEventsTopic();
         }
 
-
-        public String getInstrumentSnapshotGroupId() {
-            return "surprising-" + productLine.topicSegment() + "-insurance-instrument-snapshot-v1";
-        }
-
         public String getUserCommandsTopic() {
             return productTopics().accountUserCommandsTopic();
         }

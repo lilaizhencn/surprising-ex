@@ -60,8 +60,6 @@ public class IndexPriceProperties {
         @Setter
         private String groupId = "surprising-index-price-v1";
         @Setter
-        private String cacheGroupId = "surprising-index-price-cache-local";
-        @Setter
         private int concurrency = 2;
         @Setter
         private int maxPollRecords = 500;
@@ -72,10 +70,6 @@ public class IndexPriceProperties {
 
         public String getPriceEventsTopic() {
             return productTopics().priceEventsTopic();
-        }
-
-        public String getInstrumentSnapshotGroupId() {
-            return "surprising-" + productLine.topicSegment() + "-index-instrument-snapshot-v1";
         }
 
         private ProductTopicNames productTopics() {
