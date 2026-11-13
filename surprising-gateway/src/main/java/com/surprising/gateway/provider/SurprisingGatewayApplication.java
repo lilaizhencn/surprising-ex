@@ -14,20 +14,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         "com.surprising.gateway.provider", "com.surprising.gateway.c2c",
         "com.surprising.websocket.provider",
         "com.surprising.instrument.provider",
-        "com.surprising.price",
-        "com.surprising.realtime.provider", "com.surprising.candlestick.provider",
-        "com.surprising.derivatives.lifecycle",
-        "com.surprising.risk.provider", "com.surprising.liquidation.provider",
-        "com.surprising.insurance.provider", "com.surprising.adl.provider",
         "com.surprising.asset", "com.surprising.affiliate"
 })
 @org.springframework.context.annotation.ComponentScan(basePackages = {
         "com.surprising.gateway.provider", "com.surprising.gateway.c2c", "com.surprising.websocket.provider",
-        "com.surprising.instrument.provider", "com.surprising.price",
-        "com.surprising.realtime.provider", "com.surprising.candlestick.provider",
-        "com.surprising.derivatives.lifecycle",
-        "com.surprising.risk.provider", "com.surprising.liquidation.provider",
-        "com.surprising.insurance.provider", "com.surprising.adl.provider",
+        "com.surprising.instrument.provider",
         "com.surprising.asset", "com.surprising.affiliate"
 }, excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(
         type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
@@ -35,7 +26,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
                 com.surprising.websocket.provider.config.WebSocketKafkaConfiguration.class}))
 @EnableConfigurationProperties({GatewayProperties.class, WebSocketProperties.class,
         com.surprising.gateway.provider.config.GatewayProductsProperties.class,
-        com.surprising.instrument.provider.config.InstrumentProperties.class})
+        com.surprising.instrument.provider.config.InstrumentProperties.class,
+        com.surprising.realtime.provider.config.RealtimeRouterProperties.class})
+@org.springframework.context.annotation.Import({
+        com.surprising.realtime.provider.RealtimeRouter.class,
+        com.surprising.gateway.config.GatewayExchangeRateConfiguration.class})
 @EnableKafka
 @EnableScheduling
 public class SurprisingGatewayApplication {

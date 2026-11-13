@@ -14,6 +14,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.client.topology.AeronClusterTopologyProvider;
 import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PreDestroy;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
@@ -193,7 +194,9 @@ public final class GatewayProductServices implements AutoCloseable {
         var core = configuration.getCores().get(product);
         Map<String, Object> values = new HashMap<>();
         for (String prefix : List.of("surprising.account.kafka", "surprising.trading.order.kafka",
-                "surprising.trading.trigger", "surprising.price.consumer", "surprising.websocket.kafka"))
+                "surprising.trading.trigger", "surprising.price.consumer", "surprising.websocket.kafka",
+                "surprising.price.index.kafka", "surprising.price.mark.kafka", "surprising.candlestick.kafka",
+                "surprising.risk", "surprising.insurance.kafka", "surprising.funding.kafka"))
             values.put(prefix + ".product-line", product.name());
         List<String> hosts = (topologyProvider != null)
                 ? topologyProvider.lookupHostnames(product)
@@ -201,13 +204,40 @@ public final class GatewayProductServices implements AutoCloseable {
         if (hosts == null || hosts.isEmpty()) {
             hosts = core.getHostnames();
         }
-        for (String prefix : List.of("surprising.account.aeron", "surprising.trading.order.aeron", "surprising.trading.trigger.aeron")) {
-            values.put(prefix + ".hostnames", String.join(",", hosts));
+        String joinedHosts = String.join(",", hosts);
+        for (String prefix : List.of("surprising.account.aeron", "surprising.trading.order.aeron",
+                "surprising.trading.trigger.aeron", "surprising.risk.aeron")) {
+            values.put(prefix + ".hostnames", joinedHosts);
             values.put(prefix + ".egress-hostname", core.getEgressHostname());
             values.put(prefix + ".response-timeout", core.getResponseTimeout().toMillis() + "ms");
             values.put(prefix + ".client-connections", core.getClientConnections());
         }
+        values.put("surprising.price.mark.aeron.hostnames", joinedHosts);
+        values.put("surprising.price.mark.aeron.egress-hostname", core.getEgressHostname());
+        values.put("surprising.price.mark.aeron.response-timeout", core.getResponseTimeout().toMillis() + "ms");
+        var env = parent != null ? parent.getEnvironment() : null;
+        String baseStateDir = env != null
+                ? env.getProperty("surprising.candlestick.stream.state-dir", "data/kafka-streams")
+                : "data/kafka-streams";
+        values.put("surprising.candlestick.stream.state-dir",
+                Path.of(baseStateDir, product.name().toLowerCase(Locale.ROOT)).toString());
+        String baseMarketChannel = env != null
+                ? env.getProperty("surprising.price.mark.market-channel", "aeron:udp?endpoint=127.0.0.1:21407")
+                : "aeron:udp?endpoint=127.0.0.1:21407";
+        values.put("surprising.price.mark.market-channel", perProductChannel(baseMarketChannel, product));
         return values;
+    }
+
+    private static String perProductChannel(String baseChannel, ProductLine product) {
+        if (baseChannel == null || baseChannel.isBlank()) return baseChannel;
+        int colon = baseChannel.lastIndexOf(':');
+        if (colon < 0 || colon == baseChannel.length() - 1) return baseChannel;
+        try {
+            int port = Integer.parseInt(baseChannel.substring(colon + 1).trim());
+            return baseChannel.substring(0, colon + 1) + (port + product.ordinal());
+        } catch (NumberFormatException ignored) {
+            return baseChannel;
+        }
     }
 
     @Override @PreDestroy

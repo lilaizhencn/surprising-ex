@@ -21,7 +21,8 @@ import tools.jackson.databind.ObjectMapper;
 
 class InstrumentInitializationConfigurationTest {
     @Configuration(proxyBeanMethods = false)
-    @ComponentScan(basePackages = {"com.surprising.account.provider", "com.surprising.trading.order"},
+    @ComponentScan(basePackages = {"com.surprising.account.provider", "com.surprising.trading.order",
+            "com.surprising.instrument.provider.config"},
             useDefaultFilters = false,
             includeFilters = @ComponentScan.Filter(type = FilterType.REGEX,
                     pattern = ".*\\.InstrumentSnapshot(Configuration|Initializer|Consumer)"))
@@ -45,6 +46,8 @@ class InstrumentInitializationConfigurationTest {
                     .doesNotHaveBean("accountInstrumentSnapshotCache")
                     .doesNotHaveBean("instrumentSnapshotInitializer");
             var cache = ctx.getBean(InstrumentSnapshotCache.class);
+            var loaded = instruments.snapshot(line);
+            cache.replace(line, loaded.instruments(), loaded.assetScales());
             assertThat(cache.ready(line)).isTrue();
             assertThat(cache.current(line, 1)).isPresent();
             assertThat(cache.scale(line, "USDT")).contains(100000000L);
@@ -60,6 +63,8 @@ class InstrumentInitializationConfigurationTest {
         context(line, instruments).run(ctx -> {
             assertThat(ctx).hasNotFailed();
             var cache = ctx.getBean(InstrumentSnapshotCache.class);
+            var loaded = instruments.snapshot(line);
+            cache.replace(line, loaded.instruments(), loaded.assetScales());
             assertThat(cache.initialized(line)).isTrue();
             assertThat(cache.ready(line)).isFalse();
             assertThat(cache.current(line)).isEmpty();

@@ -17,8 +17,31 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 /** 仅注册进指定产品线的业务容器；公共 Gateway 扫描范围不包括此配置。 */
 @Configuration(proxyBeanMethods = false)
-@ComponentScan(basePackages = {"com.surprising.account.provider", "com.surprising.trading", "com.surprising.price.consumer"})
-@EnableConfigurationProperties({AccountProperties.class, TriggerProperties.class})
+@ComponentScan(basePackages = {
+        "com.surprising.account.provider", "com.surprising.trading",
+        "com.surprising.price",
+        "com.surprising.realtime.provider", "com.surprising.candlestick.provider",
+        "com.surprising.derivatives.lifecycle",
+        "com.surprising.risk.provider", "com.surprising.liquidation.provider",
+        "com.surprising.insurance.provider", "com.surprising.adl.provider"
+}, excludeFilters = @ComponentScan.Filter(
+        type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
+        classes = {
+                com.surprising.realtime.provider.RealtimeRouter.class,
+                com.surprising.realtime.provider.RealtimeApplication.class,
+                com.surprising.derivatives.lifecycle.SurprisingDerivativesLifecycleApplication.class,
+                com.surprising.derivatives.lifecycle.config.LifecycleSchedulingConfiguration.class,
+                com.surprising.price.index.controller.ExchangeRateController.class,
+                com.surprising.price.index.service.ExchangeRateService.class,
+                com.surprising.price.index.repository.ExchangeRateRepository.class,
+                com.surprising.price.index.service.ExchangeRateSnapshotCache.class,
+                com.surprising.price.index.client.FiatRateClient.class,
+                com.surprising.price.index.client.ExternalSpotPriceClient.class
+        }))
+@EnableConfigurationProperties({
+        AccountProperties.class, TriggerProperties.class,
+        com.surprising.candlestick.provider.config.CandlestickProperties.class,
+        com.surprising.risk.provider.config.RiskProperties.class})
 @Import({com.surprising.realtime.api.ValkeyUserQueries.class,
         com.surprising.websocket.provider.config.WebSocketKafkaConfiguration.class,
         com.surprising.websocket.provider.consumer.KafkaFanoutConsumer.class})
@@ -44,7 +67,7 @@ public class ProductBusinessConfiguration {
     org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler productScheduler(
             AccountProperties properties) {
         var scheduler = new org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(2);
+        scheduler.setPoolSize(6);
         scheduler.setThreadNamePrefix("gateway-" + properties.getProductLine() + "-scheduled-");
         scheduler.setRemoveOnCancelPolicy(true);
         scheduler.setAwaitTerminationSeconds(5);

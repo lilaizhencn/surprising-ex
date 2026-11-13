@@ -19,7 +19,15 @@ public final class ProductInternalHandlerMapping extends AbstractHandlerMapping 
     public static boolean isProductEndpoint(String path) {
         return path.startsWith("/api/v1/accounts/") || path.startsWith("/api/v1/trading/")
                 || path.equals("/api/v1/trading/orders") || path.startsWith("/internal/v1/accounts/")
-                || path.startsWith("/internal/v1/trading/");
+                || path.startsWith("/internal/v1/trading/")
+                || path.startsWith("/api/v1/price/index") || path.startsWith("/api/v1/price/mark")
+                || path.startsWith("/api/v1/price/market-probe")
+                || path.startsWith("/api/v1/candlestick")
+                || path.startsWith("/api/v1/risk") || path.startsWith("/api/v1/admin/risk")
+                || path.startsWith("/api/v1/liquidations") || path.startsWith("/api/v1/admin/liquidations")
+                || path.startsWith("/api/v1/funding")
+                || path.startsWith("/api/v1/insurance")
+                || path.startsWith("/api/v1/adl");
     }
     @Override protected Object getHandlerInternal(HttpServletRequest request) throws Exception {
         if (!isProductEndpoint(request.getRequestURI())) return null;

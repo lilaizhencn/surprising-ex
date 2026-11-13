@@ -43,4 +43,73 @@ class ProductBusinessConfigurationTest {
             }
         }
     }
+
+    @Test void eachChildBindsPriceCandlestickAndLifecyclePropertiesPerProduct() {
+        var gatewayConfig = new com.surprising.gateway.provider.config.GatewayProductsProperties();
+        for (var line : ProductLine.values()) {
+            gatewayConfig.getCores().put(line, new com.surprising.gateway.provider.config.GatewayProductsProperties.Core());
+        }
+        try (var parent = new AnnotationConfigApplicationContext()) {
+            parent.getEnvironment().getPropertySources().addFirst(new MapPropertySource("parent", Map.of(
+                    "surprising.candlestick.stream.state-dir", "/tmp/candles",
+                    "surprising.price.mark.market-channel", "aeron:udp?endpoint=127.0.0.1:21407")));
+            ConfigurationPropertySources.attach(parent.getEnvironment());
+            parent.refresh();
+            var services = new GatewayProductServices(
+                    parent,
+                    gatewayConfig,
+                    org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayProductSettings.class));
+            java.util.Set<String> stateDirs = new java.util.HashSet<>();
+            java.util.Set<String> marketChannels = new java.util.HashSet<>();
+            for (var line : ProductLine.values()) {
+                try (var child = new AnnotationConfigApplicationContext()) {
+                    child.setParent(parent);
+                    child.getEnvironment().merge(parent.getEnvironment());
+                    child.getEnvironment().getPropertySources().addFirst(
+                            new MapPropertySource("product-" + line, services.productProperties(line)));
+                    ConfigurationPropertySources.attach(child.getEnvironment());
+                    child.register(
+                            LifecyclePropertiesConfig.class,
+                            com.surprising.price.settings.config.PriceInfrastructureConfiguration.class,
+                            com.surprising.derivatives.lifecycle.config.LifecycleInfrastructureConfiguration.class);
+                    child.refresh();
+                    assertThat(child.getBean(com.surprising.price.index.config.IndexPriceProperties.class).getProductLine())
+                            .isEqualTo(line);
+                    assertThat(child.getBean(com.surprising.price.mark.config.MarkPriceProperties.class).getProductLine())
+                            .isEqualTo(line);
+                    var candles = child.getBean(com.surprising.candlestick.provider.config.CandlestickProperties.class);
+                    assertThat(candles.getProductLine()).isEqualTo(line);
+                    assertThat(stateDirs.add(candles.getStream().getStateDir())).isTrue();
+                    assertThat(marketChannels.add(child.getEnvironment().getProperty("surprising.price.mark.market-channel")))
+                            .isTrue();
+                    var risk = child.getBean(com.surprising.risk.provider.config.RiskProperties.class);
+                    assertThat(risk.getProductLine()).isEqualTo(line);
+                    assertThat(child.getBean(com.surprising.liquidation.provider.config.LiquidationProperties.class).getProductLine())
+                            .isEqualTo(line);
+                    assertThat(child.getBean(com.surprising.insurance.provider.config.InsuranceProperties.class).getProductLine())
+                            .isEqualTo(line);
+                    assertThat(child.getBean(com.surprising.adl.provider.config.AdlProperties.class).getProductLine())
+                            .isEqualTo(line);
+                    var funding = new com.surprising.derivatives.lifecycle.config.FundingConfiguration()
+                            .fundingProperties(child.getEnvironment(), risk);
+                    assertThat(funding.getProductLine()).isEqualTo(line);
+                }
+            }
+        }
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/price/mark/latest")).isTrue();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/price/index/latest")).isTrue();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/price/fx/latest")).isFalse();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/candlestick/candles")).isTrue();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/risk/rules")).isTrue();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/admin/risk/rules")).isTrue();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/liquidations/orders")).isTrue();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/funding/rates/latest")).isTrue();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/insurance/balances")).isTrue();
+        assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/adl/queue")).isTrue();
+    }
+
+    @EnableConfigurationProperties({
+            com.surprising.candlestick.provider.config.CandlestickProperties.class,
+            com.surprising.risk.provider.config.RiskProperties.class})
+    static class LifecyclePropertiesConfig { }
 }
