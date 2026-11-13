@@ -20,7 +20,7 @@ spring:
     deserialization:
       accept-float-as-int: false
   config:
-    import: classpath:application-trading.yml,classpath:application-account.yml,classpath:application-instrument.yml
+    import: classpath:application-trading.yml,classpath:application-account.yml,classpath:application-instrument.yml,classpath:application-price.yml,classpath:application-realtime.yml,classpath:application-lifecycle.yml
   application:
     name: surprising-gateway
   cloud:
@@ -155,7 +155,7 @@ surprising:
     withdrawal:
       single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT:10000}
       daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT:50000}
-      valuation-base-url: ${GATEWAY_WITHDRAWAL_VALUATION_BASE_URL:http://localhost:9082}
+      valuation-base-url: ${GATEWAY_WITHDRAWAL_VALUATION_BASE_URL:http://127.0.0.1:9094}
       valuation-max-age: ${GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE:30s}
       failure-reconciliation-delay: ${GATEWAY_WITHDRAWAL_FAILURE_RECONCILIATION_DELAY:30s}
     product-transfer:
@@ -247,7 +247,7 @@ surprising:
         target-prefix: /api/v1/instruments
         private-route: false
       candlestick:
-        base-url: http://localhost:9095
+        base-url: "local:"
         target-prefix: /api/v1/candlestick
         private-route: false
         product-routes:
@@ -264,7 +264,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_CANDLESTICK_OPTION_BASE_URL:}
       price-index:
-        base-url: http://localhost:9082
+        base-url: "local:"
         target-prefix: /api/v1/price/index
         private-route: false
         product-routes:
@@ -281,11 +281,11 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_PRICE_INDEX_OPTION_BASE_URL:}
       price-fx:
-        base-url: http://localhost:9082
+        base-url: "local:"
         target-prefix: /api/v1/price/fx
         private-route: false
       price-mark:
-        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9082}
+        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:local:}
         target-prefix: /api/v1/price/mark
         private-route: false
         product-routes:
@@ -326,7 +326,7 @@ surprising:
         target-prefix: /api/v1/accounts
         private-route: true
       risk:
-        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:local:}
         target-prefix: /api/v1/risk
         private-route: true
         product-routes:
@@ -343,7 +343,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       risk-admin:
-        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:local:}
         target-prefix: /api/v1/admin/risk
         private-route: true
         product-routes:
@@ -360,7 +360,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       liquidation:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
         target-prefix: /api/v1/liquidations
         private-route: true
         product-routes:
@@ -377,7 +377,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL:}
       funding:
-        base-url: ${GATEWAY_ROUTE_FUNDING_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_FUNDING_BASE_URL:local:}
         target-prefix: /api/v1/funding
         private-route: false
         product-routes:
@@ -394,7 +394,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_FUNDING_OPTION_BASE_URL:}
       insurance:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
         target-prefix: /api/v1/insurance
         private-route: true
         product-routes:
@@ -411,7 +411,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       adl:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
         target-prefix: /api/v1/adl
         private-route: true
         product-routes:
@@ -458,7 +458,7 @@ surprising:
         target-prefix: /api/v1/instruments/admin
         private-route: true
       candlestick:
-        base-url: http://localhost:9095
+        base-url: "local:"
         target-prefix: /api/v1/candlestick
         private-route: true
         product-routes:
@@ -475,7 +475,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_CANDLESTICK_OPTION_BASE_URL:}
       price-index:
-        base-url: http://localhost:9082
+        base-url: "local:"
         target-prefix: /api/v1/price/index
         private-route: true
         product-routes:
@@ -492,11 +492,11 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_PRICE_INDEX_OPTION_BASE_URL:}
       price-fx:
-        base-url: http://localhost:9082
+        base-url: "local:"
         target-prefix: /api/v1/price/fx
         private-route: true
       price-mark:
-        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9082}
+        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:local:}
         target-prefix: /api/v1/price/mark
         private-route: true
         product-routes:
@@ -545,7 +545,7 @@ surprising:
         target-prefix: /api/v1/accounts
         private-route: true
       risk:
-        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_RISK_BASE_URL:local:}
         target-prefix: /api/v1/risk
         private-route: true
         product-routes:
@@ -562,7 +562,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       liquidation:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
         target-prefix: /api/v1/liquidations
         private-route: true
         product-routes:
@@ -579,7 +579,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL:}
       liquidation-admin:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
         target-prefix: /api/v1/admin/liquidations
         private-route: true
         product-routes:
@@ -596,7 +596,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL:}
       funding:
-        base-url: ${GATEWAY_ROUTE_FUNDING_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_FUNDING_BASE_URL:local:}
         target-prefix: /api/v1/funding
         private-route: true
         product-routes:
@@ -613,7 +613,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_FUNDING_OPTION_BASE_URL:}
       insurance:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
         target-prefix: /api/v1/insurance
         private-route: true
         product-routes:
@@ -630,7 +630,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       insurance-admin:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
         target-prefix: /api/v1/insurance/admin
         private-route: true
         product-routes:
@@ -647,7 +647,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       adl:
-        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:local:}
         target-prefix: /api/v1/adl
         private-route: true
         product-routes:

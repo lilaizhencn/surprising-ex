@@ -22,31 +22,28 @@ This guide describes the current source layout. Arrows in class flowcharts show 
 ```mermaid
 flowchart TB
     Clients[Web / mobile / administration / API clients] --> Gateway[Gateway process]
-    Gateway --> Business[Local trading / account / instrument services]
+    Gateway --> Business[Local trading / account / instrument / price / realtime / lifecycle packages]
     Business --> Client[Aeron command clients]
     Maker[Maker process] --> Client
-    Lifecycle[Derivatives Lifecycle process] --> Client
-    Price[Price process] --> Client
     Client --> Cluster[Aeron Cluster ordered log]
     Cluster --> Archive[Archive recordings]
     Cluster --> Core[Trading Core process]
     Core --> Reply[Command terminal responses]
     Reply --> Client
     Core --> Live[Committed realtime frames]
-    Live --> Realtime[Realtime process]
+    Live --> Business
     Archive --> Export[Committed trade exporter]
-    Export --> Realtime
-    Realtime --> Views[Valkey read views / PostgreSQL projections / Kafka events]
+    Export --> Business
+    Business --> Views[Valkey read views / PostgreSQL projections / Kafka events]
     Views --> Gateway
-    Realtime --> WS[Gateway WebSocket delivery]
+    Business --> WS[Gateway WebSocket delivery]
     WS --> Clients
-    External[External market feeds] --> Price
+    External[External market feeds] --> Business
     External --> Maker
-    Price --> Lifecycle
     Gateway --> DB[Application PostgreSQL]
 ```
 
-Gateway is the unified application for authentication, trading, accounts, and instrument administration. These are Java package boundaries inside Gateway, not four separate production processes. Trading authority remains in Core. PostgreSQL and Valkey projections are query and workflow stores; they must not become competing sources of balances, frozen funds, positions, or matching truth.
+Gateway is the unified application for authentication, trading, accounts, instrument administration, index/mark pricing, realtime routing/candlesticks, and derivatives lifecycle (risk, liquidation, funding, insurance, ADL). These are independent Java packages and Maven modules composed into the Gateway process, not separate production processes. Trading authority remains in Core. PostgreSQL and Valkey projections are query and workflow stores; they must not become competing sources of balances, frozen funds, positions, or matching truth.
 
 Aeron Archive records the cluster log. Archive participation does not by itself establish a per-response filesystem `fsync` guarantee. Lossy realtime delivery and reliable committed-log export are separate paths.
 
@@ -64,7 +61,7 @@ Aeron Archive records the cluster log. Archive participation does not by itself 
 | [surprising-derivatives-lifecycle](surprising-derivatives-lifecycle/README.md) | Module group | Funding, risk scans, liquidation, insurance, and ADL orchestration |
 | [surprising-maker](surprising-maker/README.md) | Application | Reference-market quoting and controlled load generation |
 
-The parent POM and the root reactor are build structures, not runtime services. The six-process single-product backend consists of Core, Gateway, Price, Realtime, Derivatives Lifecycle, and Maker. Wallet is external and is not started by default.
+The parent POM and the root reactor are build structures, not runtime services. The single-product backend runs as three processes: Core, Gateway (hosting Price, Realtime, and Derivatives Lifecycle as in-process packages), and Maker. Wallet is external and is not started by default.
 
 ## State and thread ownership
 

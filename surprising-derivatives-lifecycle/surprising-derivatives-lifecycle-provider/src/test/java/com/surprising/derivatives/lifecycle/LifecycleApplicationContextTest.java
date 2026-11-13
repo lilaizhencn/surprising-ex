@@ -30,8 +30,9 @@ class LifecycleApplicationContextTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"SPOT"}, mode = EnumSource.Mode.EXCLUDE)
     void mergedApplicationLoadsForEachDerivative(ProductLine line) {
-        new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer()).withUserConfiguration(SurprisingDerivativesLifecycleApplication.class)
-                .withPropertyValues("surprising.risk.product-line=" + line,
+        new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer()).withUserConfiguration(TestLifecycleAppConfig.class, SurprisingDerivativesLifecycleApplication.class)
+                .withPropertyValues("spring.config.name=application-lifecycle",
+                        "surprising.risk.product-line=" + line,
                         "surprising.liquidation.product-line=" + line,
                         "surprising.insurance.kafka.product-line=" + line,
                         "surprising.adl.kafka.product-line=" + line,
@@ -98,5 +99,23 @@ class LifecycleApplicationContextTest {
                     mvc.perform(get("/api/v1/funding/admin/runtime-config").header("X-Admin-User-Id", "merge-test"))
                             .andExpect(line.isFundingProduct() ? status().isOk() : status().isNotFound());
                 });
+    }
+
+    @org.springframework.boot.autoconfigure.SpringBootApplication
+    @org.springframework.context.annotation.ComponentScan(
+            basePackages = {
+                    "com.surprising.derivatives.lifecycle",
+                    "com.surprising.price.consumer",
+                    "com.surprising.risk.provider", "com.surprising.liquidation.provider",
+                    "com.surprising.insurance.provider", "com.surprising.adl.provider"
+            },
+            nameGenerator = org.springframework.context.annotation.FullyQualifiedAnnotationBeanNameGenerator.class,
+            excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(
+                    type = org.springframework.context.annotation.FilterType.REGEX,
+                    pattern = "com\\.surprising\\.funding\\.provider\\..*"))
+    @org.springframework.cloud.openfeign.EnableFeignClients(clients = com.surprising.instrument.api.client.InstrumentRpcApi.class)
+    @org.springframework.scheduling.annotation.EnableScheduling
+    @org.springframework.kafka.annotation.EnableKafka
+    static class TestLifecycleAppConfig {
     }
 }

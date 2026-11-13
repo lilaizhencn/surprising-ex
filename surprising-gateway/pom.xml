@@ -32,6 +32,11 @@
         <dependency><groupId>com.surprising</groupId><artifactId>surprising-realtime-api</artifactId><version>${project.version}</version></dependency>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-realtime-provider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-protocol</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -42,12 +47,22 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
+            <artifactId>surprising-price-provider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
             <artifactId>surprising-trading-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-derivatives-lifecycle-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-derivatives-lifecycle-provider</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

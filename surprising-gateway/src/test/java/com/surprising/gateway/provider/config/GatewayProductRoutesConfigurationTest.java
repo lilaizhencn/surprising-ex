@@ -34,9 +34,9 @@ class GatewayProductRoutesConfigurationTest {
         assertProductRouteMatrix(properties.getAdminRoutes().get("market-maker"));
 
         assertThat(properties.getRoutes().get("price-mark").getBaseUrl())
-                .isEqualTo("http://localhost:9082");
+                .isEqualTo("local:");
         assertThat(properties.getAdminRoutes().get("price-mark").getBaseUrl())
-                .isEqualTo("http://localhost:9082");
+                .isEqualTo("local:");
 
         GatewayProperties.BackendRoute trading = properties.getRoutes().get("trading");
         GatewayProperties.BackendRoute optionRoute = trading.resolve(ProductLine.OPTION);

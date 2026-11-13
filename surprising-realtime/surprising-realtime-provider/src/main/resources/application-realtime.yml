@@ -1,66 +1,3 @@
-server:
-  port: ${REALTIME_ROUTER_PORT:9095}
-
-spring:
-  lifecycle:
-    timeout-per-shutdown-phase: 120s
-  application:
-    name: surprising-realtime-market-data
-  task:
-    scheduling:
-      pool:
-        size: 2
-      thread-name-prefix: market-data-
-      shutdown:
-        await-termination: true
-        await-termination-period: 10s
-  datasource:
-    url: jdbc:postgresql://localhost:5432/surprising_exchange?reWriteBatchedInserts=true
-    username: surprising
-    password: surprising
-    hikari:
-      maximum-pool-size: 20
-      minimum-idle: 4
-      connection-timeout: 3000
-      validation-timeout: 1000
-      data-source-properties:
-        reWriteBatchedInserts: true
-
-  data:
-    redis:
-      host: ${VALKEY_HOST:127.0.0.1}
-      port: ${VALKEY_PORT:6379}
-      username: ${VALKEY_USERNAME:default}
-      password: ${VALKEY_PASSWORD:}
-      lettuce:
-        pool:
-          enabled: true
-          max-active: 4
-          max-idle: 4
-          min-idle: 1
-          max-wait: 500ms
-      connect-timeout: 500ms
-      timeout: 500ms
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics,prometheus
-  metrics:
-    tags:
-      application: ${spring.application.name}
-    distribution:
-      percentiles-histogram:
-        http.server.requests: true
-      percentiles:
-        http.server.requests: 0.5, 0.9, 0.95, 0.99, 0.999
-      slo:
-        http.server.requests: 10ms, 50ms, 100ms, 200ms, 500ms, 1s, 2s
-  endpoint:
-    health:
-      probes:
-        enabled: true
-
 surprising:
   trade-export:
     enabled: ${TRADE_EXPORT_ENABLED:false}
@@ -108,5 +45,4 @@ surprising:
       channel: ${REALTIME_ROUTER_CHANNEL:aeron:udp?endpoint=0.0.0.0:21010}
       stream: 2101
       node-stream: 2103
-      # Explicit per-product control destinations are required; see module README.
       control-channels: {}

@@ -8,11 +8,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 /**
  * K 线服务使用的合约快照基础组件。
  */
-@Configuration
+@Configuration("candlestickInstrumentSnapshotConfiguration")
 public class InstrumentSnapshotConfiguration {
 
     @Bean
-    @ConditionalOnMissingBean(InstrumentSnapshotCache.class)
+    @ConditionalOnMissingBean(name = "candlestickInstrumentSnapshotCache")
     public InstrumentSnapshotCache candlestickInstrumentSnapshotCache() {
         return new InstrumentSnapshotCache();
     }

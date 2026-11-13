@@ -14,7 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * K 线服务消费 Instrument 增量事件并刷新 instrumentId 和精度快照。
  */
-@Component
+@Component("candlestickInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;

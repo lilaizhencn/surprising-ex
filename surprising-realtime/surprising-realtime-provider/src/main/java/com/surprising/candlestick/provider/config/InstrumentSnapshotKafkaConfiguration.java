@@ -12,7 +12,7 @@ import org.springframework.util.backoff.FixedBackOff;
 /**
  * K 线服务的 Instrument 增量事件消费者配置。
  */
-@Configuration
+@Configuration("candlestickInstrumentSnapshotKafkaConfiguration")
 public class InstrumentSnapshotKafkaConfiguration {
 
     @Bean

@@ -102,8 +102,10 @@ class MarketApplicationContextTest {
 
     private WebApplicationContextRunner context(ProductLine line, boolean routing) {
         return new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
-                .withUserConfiguration(RealtimeApplication.class)
-                .withPropertyValues("surprising.candlestick.kafka.product-line=" + line,
+                .withUserConfiguration(TestRealtimeAppConfig.class, RealtimeApplication.class)
+                .withPropertyValues("spring.config.name=application-realtime",
+                        "spring.data.redis.lettuce.pool.max-active=4",
+                        "surprising.candlestick.kafka.product-line=" + line,
                         "surprising.realtime.router.enabled=" + routing,
                         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration")
                 .withBean("symbolRegistryService", SymbolRegistryService.class, () -> mock(SymbolRegistryService.class))
@@ -120,5 +122,13 @@ class MarketApplicationContextTest {
                         return bean;
                     }
                 });
+    }
+
+    @org.springframework.boot.autoconfigure.SpringBootApplication(scanBasePackages = {
+            "com.surprising.realtime.provider", "com.surprising.candlestick.provider"
+    })
+    @org.springframework.scheduling.annotation.EnableScheduling
+    @org.springframework.kafka.annotation.EnableKafka
+    static class TestRealtimeAppConfig {
     }
 }

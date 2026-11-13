@@ -4,27 +4,11 @@ import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.mark.config.MarkPriceProperties;
-import com.surprising.price.consumer.config.MarkPriceConsumerConfiguration;
-import com.surprising.price.consumer.MarkPriceKafkaConsumer;
 import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.SpringBootConfiguration;
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.cloud.openfeign.EnableFeignClients;
-import org.springframework.context.annotation.ComponentScan;
-import org.springframework.context.annotation.FilterType;
-import org.springframework.kafka.annotation.EnableKafka;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.context.annotation.Configuration;
 import jakarta.annotation.PostConstruct;
 
-@SpringBootConfiguration
-@EnableAutoConfiguration
-@ComponentScan(basePackages = "com.surprising", excludeFilters = @ComponentScan.Filter(
-        type = FilterType.ASSIGNABLE_TYPE,
-        classes = {MarkPriceConsumerConfiguration.class, MarkPriceKafkaConsumer.class}))
-@EnableFeignClients(basePackages = "com.surprising")
-@EnableKafka
-@EnableScheduling
+@Configuration("priceProviderConfiguration")
 @Slf4j
 public class SurprisingPriceApplication {
 
@@ -62,9 +46,5 @@ public class SurprisingPriceApplication {
                 indexProperties.getWebSocket().getReconnectInitialDelay(),
                 indexProperties.getWebSocket().getReconnectMaxDelay(),
                 indexProperties.getWebSocket().getHealthCheckInterval());
-    }
-
-    public static void main(String[] args) {
-        SpringApplication.run(SurprisingPriceApplication.class, args);
     }
 }

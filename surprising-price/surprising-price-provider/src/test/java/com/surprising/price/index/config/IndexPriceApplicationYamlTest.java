@@ -43,7 +43,7 @@ class IndexPriceApplicationYamlTest {
         environment.getPropertySources().addFirst(new MapPropertySource("integration",
                 overrides));
         List<PropertySource<?>> sources = new YamlPropertySourceLoader()
-                .load("application", new ClassPathResource("application.yml"));
+                .load("application-price", new ClassPathResource("application-price.yml"));
         sources.forEach(environment.getPropertySources()::addLast);
 
         return new com.surprising.price.settings.config.PriceInfrastructureConfiguration().indexPriceProperties(environment);

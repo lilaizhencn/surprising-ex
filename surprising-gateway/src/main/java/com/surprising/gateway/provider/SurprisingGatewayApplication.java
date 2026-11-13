@@ -14,11 +14,21 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         "com.surprising.gateway.provider", "com.surprising.gateway.c2c",
         "com.surprising.websocket.provider",
         "com.surprising.instrument.provider",
+        "com.surprising.price",
+        "com.surprising.realtime.provider", "com.surprising.candlestick.provider",
+        "com.surprising.derivatives.lifecycle",
+        "com.surprising.risk.provider", "com.surprising.liquidation.provider",
+        "com.surprising.insurance.provider", "com.surprising.adl.provider",
         "com.surprising.asset", "com.surprising.affiliate"
 })
 @org.springframework.context.annotation.ComponentScan(basePackages = {
         "com.surprising.gateway.provider", "com.surprising.gateway.c2c", "com.surprising.websocket.provider",
-        "com.surprising.instrument.provider", "com.surprising.asset", "com.surprising.affiliate"
+        "com.surprising.instrument.provider", "com.surprising.price",
+        "com.surprising.realtime.provider", "com.surprising.candlestick.provider",
+        "com.surprising.derivatives.lifecycle",
+        "com.surprising.risk.provider", "com.surprising.liquidation.provider",
+        "com.surprising.insurance.provider", "com.surprising.adl.provider",
+        "com.surprising.asset", "com.surprising.affiliate"
 }, excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(
         type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
         classes = {com.surprising.websocket.provider.consumer.KafkaFanoutConsumer.class,
@@ -28,6 +38,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         com.surprising.instrument.provider.config.InstrumentProperties.class})
 @EnableKafka
 @EnableScheduling
+@org.springframework.cloud.openfeign.EnableFeignClients(clients = com.surprising.instrument.api.client.InstrumentRpcApi.class)
 public class SurprisingGatewayApplication {
 
     public static void main(String[] args) {

@@ -49,7 +49,7 @@ class MarkPriceApplicationYamlTest {
         StandardEnvironment environment = new StandardEnvironment();
         environment.getPropertySources().addFirst(new MapPropertySource("matrix", overrides));
         List<PropertySource<?>> sources = new YamlPropertySourceLoader()
-                .load("application", new ClassPathResource("application.yml"));
+                .load("application-price", new ClassPathResource("application-price.yml"));
         sources.forEach(environment.getPropertySources()::addLast);
         return environment;
     }

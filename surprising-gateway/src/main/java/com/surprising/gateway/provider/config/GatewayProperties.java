@@ -276,21 +276,21 @@ public class GatewayProperties implements EnvironmentAware {
     private static Map<String, BackendRoute> defaultRoutes() {
         Map<String, BackendRoute> routes = new LinkedHashMap<>();
         routes.put("instrument", new BackendRoute("local:", "/api/v1/instruments", false));
-        routes.put("candlestick", new BackendRoute("http://localhost:9095", "/api/v1/candlestick", false));
-        routes.put("price-index", new BackendRoute("http://localhost:9082", "/api/v1/price/index", false));
-        routes.put("price-fx", new BackendRoute("http://localhost:9082", "/api/v1/price/fx", false));
-        routes.put("price-mark", new BackendRoute("http://localhost:9082", "/api/v1/price/mark", false));
+        routes.put("candlestick", new BackendRoute("local:", "/api/v1/candlestick", false));
+        routes.put("price-index", new BackendRoute("local:", "/api/v1/price/index", false));
+        routes.put("price-fx", new BackendRoute("local:", "/api/v1/price/fx", false));
+        routes.put("price-mark", new BackendRoute("local:", "/api/v1/price/mark", false));
         routes.put("trading", new BackendRoute("local:", "/api/v1/trading/orders", true));
         routes.put("trading-leverage", new BackendRoute("local:", "/api/v1/trading/leverage", true));
         routes.put("trading-fees", new BackendRoute("local:", "/api/v1/trading/fees", true));
         routes.put("trading-market", new BackendRoute("local:", "/api/v1/trading/market", false));
         routes.put("trading-trigger", new BackendRoute("local:", "/api/v1/trading/trigger-orders", true));
         routes.put("account", new BackendRoute("local:", "/api/v1/accounts", true));
-        routes.put("risk", new BackendRoute("http://localhost:9087", "/api/v1/risk", true));
-        routes.put("liquidation", new BackendRoute("http://localhost:9087", "/api/v1/liquidations", true));
-        routes.put("funding", new BackendRoute("http://localhost:9087", "/api/v1/funding", false));
-        routes.put("insurance", new BackendRoute("http://localhost:9087", "/api/v1/insurance", true));
-        routes.put("adl", new BackendRoute("http://localhost:9087", "/api/v1/adl", true));
+        routes.put("risk", new BackendRoute("local:", "/api/v1/risk", true));
+        routes.put("liquidation", new BackendRoute("local:", "/api/v1/liquidations", true));
+        routes.put("funding", new BackendRoute("local:", "/api/v1/funding", false));
+        routes.put("insurance", new BackendRoute("local:", "/api/v1/insurance", true));
+        routes.put("adl", new BackendRoute("local:", "/api/v1/adl", true));
         routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/market-maker", true));
         routes.put("wallet", new BackendRoute("http://localhost:8002", "/wallet/v1", true));
         return routes;
@@ -300,10 +300,10 @@ public class GatewayProperties implements EnvironmentAware {
         Map<String, BackendRoute> routes = new LinkedHashMap<>();
         routes.put("instrument", new BackendRoute("local:", "/api/v1/instruments", true));
         routes.put("instrument-admin", new BackendRoute("local:", "/api/v1/instruments/admin", true));
-        routes.put("candlestick", new BackendRoute("http://localhost:9095", "/api/v1/candlestick", true));
-        routes.put("price-index", new BackendRoute("http://localhost:9082", "/api/v1/price/index", true));
-        routes.put("price-fx", new BackendRoute("http://localhost:9082", "/api/v1/price/fx", true));
-        routes.put("price-mark", new BackendRoute("http://localhost:9082", "/api/v1/price/mark", true));
+        routes.put("candlestick", new BackendRoute("local:", "/api/v1/candlestick", true));
+        routes.put("price-index", new BackendRoute("local:", "/api/v1/price/index", true));
+        routes.put("price-fx", new BackendRoute("local:", "/api/v1/price/fx", true));
+        routes.put("price-mark", new BackendRoute("local:", "/api/v1/price/mark", true));
         routes.put("trading", new BackendRoute("local:", "/api/v1/admin/trading/orders", true));
         routes.put("trading-orders", new BackendRoute("local:", "/api/v1/admin/trading/orders", true));
         routes.put("trading-leverage", new BackendRoute("local:", "/api/v1/admin/trading/leverage", true));
@@ -312,14 +312,14 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("trading-trigger", new BackendRoute("local:", "/api/v1/admin/trading/trigger-orders", true));
         routes.put("account", new BackendRoute("local:", "/api/v1/admin/accounts", true));
         routes.put("account-public", new BackendRoute("local:", "/api/v1/accounts", true));
-        routes.put("risk", new BackendRoute("http://localhost:9087", "/api/v1/risk", true));
-        routes.put("risk-admin", new BackendRoute("http://localhost:9087", "/api/v1/admin/risk", true));
-        routes.put("liquidation", new BackendRoute("http://localhost:9087", "/api/v1/liquidations", true));
-        routes.put("liquidation-admin", new BackendRoute("http://localhost:9087", "/api/v1/admin/liquidations", true));
-        routes.put("funding", new BackendRoute("http://localhost:9087", "/api/v1/funding", true));
-        routes.put("insurance", new BackendRoute("http://localhost:9087", "/api/v1/insurance", true));
-        routes.put("insurance-admin", new BackendRoute("http://localhost:9087", "/api/v1/insurance/admin", true));
-        routes.put("adl", new BackendRoute("http://localhost:9087", "/api/v1/adl", true));
+        routes.put("risk", new BackendRoute("local:", "/api/v1/risk", true));
+        routes.put("risk-admin", new BackendRoute("local:", "/api/v1/admin/risk", true));
+        routes.put("liquidation", new BackendRoute("local:", "/api/v1/liquidations", true));
+        routes.put("liquidation-admin", new BackendRoute("local:", "/api/v1/admin/liquidations", true));
+        routes.put("funding", new BackendRoute("local:", "/api/v1/funding", true));
+        routes.put("insurance", new BackendRoute("local:", "/api/v1/insurance", true));
+        routes.put("insurance-admin", new BackendRoute("local:", "/api/v1/insurance/admin", true));
+        routes.put("adl", new BackendRoute("local:", "/api/v1/adl", true));
         routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/admin/market-maker", true));
         routes.put("wallet", new BackendRoute("http://localhost:8002", "/wallet/v1", true));
         routes.put("wallet-admin", walletAdminRoute());
@@ -479,7 +479,7 @@ public class GatewayProperties implements EnvironmentAware {
         private java.math.BigDecimal singleApprovalThresholdUsdt = new java.math.BigDecimal("10000");
         @Setter
         private java.math.BigDecimal dailyLimitUsdt = new java.math.BigDecimal("50000");
-        private String valuationBaseUrl = "http://localhost:9082";
+        private String valuationBaseUrl = "http://127.0.0.1:9094";
         private Duration valuationMaxAge = Duration.ofSeconds(30);
         private Duration failureReconciliationDelay = Duration.ofSeconds(30);
 
