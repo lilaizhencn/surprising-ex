@@ -27,7 +27,7 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-price-provider</artifactId>
+            <artifactId>surprising-gateway</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

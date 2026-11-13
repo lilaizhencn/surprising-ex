@@ -15,6 +15,5 @@
     <description>实时查询 API 与行情服务聚合入口</description>
     <modules>
         <module>surprising-realtime-api</module>
-        <module>surprising-realtime-provider</module>
     </modules>
 </project>

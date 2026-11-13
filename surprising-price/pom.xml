@@ -15,6 +15,5 @@
     <description>价格 API（含可选 Kafka 消费适配层）和价格服务聚合入口</description>
     <modules>
         <module>surprising-price-api</module>
-        <module>surprising-price-provider</module>
     </modules>
 </project>

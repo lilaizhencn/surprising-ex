@@ -15,6 +15,5 @@
     <description>衍生品生命周期 API 与后台服务聚合入口</description>
     <modules>
         <module>surprising-derivatives-lifecycle-api</module>
-        <module>surprising-derivatives-lifecycle-provider</module>
     </modules>
 </project>
