@@ -1,13 +1,12 @@
 package com.surprising.gateway.provider.notification.service;
 
-import java.sql.Timestamp;
+import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -21,11 +20,11 @@ public class DeviceLoginAlertService {
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneId.systemDefault());
 
-    private final JdbcTemplate jdbcTemplate;
+    private final GatewayLoginLogRepository loginLogRepository;
     private final PushDispatcher pushDispatcher;
 
-    public DeviceLoginAlertService(JdbcTemplate jdbcTemplate, PushDispatcher pushDispatcher) {
-        this.jdbcTemplate = jdbcTemplate;
+    public DeviceLoginAlertService(GatewayLoginLogRepository loginLogRepository, PushDispatcher pushDispatcher) {
+        this.loginLogRepository = loginLogRepository;
         this.pushDispatcher = pushDispatcher;
     }
 
@@ -42,17 +41,10 @@ public class DeviceLoginAlertService {
             Instant thirtyDaysAgo = Instant.now().minus(30, ChronoUnit.DAYS);
 
             // 查询过去30天内，排除当前这条登录，是否存在相同的 IP
-            Integer knownIpCount = jdbcTemplate.queryForObject("""
-                    SELECT count(*)
-                      FROM gateway_login_logs
-                     WHERE user_id = ?
-                       AND result = 'SUCCESS'
-                       AND ip_address = ?
-                       AND created_at >= ?
-                    """, Integer.class, userId, ipAddress.trim(), Timestamp.from(thirtyDaysAgo));
+            int knownIpCount = loginLogRepository.countSuccessfulLoginsFromIpSince(userId, ipAddress.trim(), thirtyDaysAgo);
 
             // 如果该 IP 在过去30天内使用次数为 1（说明本次就是首次）或者为 0，视为新设备/异地登录
-            boolean isNewLocation = (knownIpCount == null || knownIpCount <= 1);
+            boolean isNewLocation = knownIpCount <= 1;
 
             if (isNewLocation) {
                 String timeStr = TIME_FMT.format(Instant.now());

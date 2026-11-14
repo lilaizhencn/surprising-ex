@@ -82,6 +82,18 @@ public class GatewayLoginLogRepository {
                         row.getTimestamp("last_seen").toInstant()), userId, limit, offset);
     }
 
+    public int countSuccessfulLoginsFromIpSince(long userId, String ipAddress, Instant since) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT count(*)
+                  FROM gateway_login_logs
+                 WHERE user_id = ?
+                   AND result = 'SUCCESS'
+                   AND ip_address = ?
+                   AND created_at >= ?
+                """, Integer.class, userId, ipAddress, Timestamp.from(since));
+        return count != null ? count : 0;
+    }
+
     public record KnownIp(String ipAddress, long loginCount, Instant lastSeen) { }
 
     private Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {

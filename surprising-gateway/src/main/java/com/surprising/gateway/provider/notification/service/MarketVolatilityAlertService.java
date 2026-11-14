@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.notification.service;
 
+import com.surprising.gateway.provider.notification.repository.NotificationPreferenceRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -8,8 +9,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
@@ -19,12 +18,13 @@ import org.springframework.stereotype.Service;
 public class MarketVolatilityAlertService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketVolatilityAlertService.class);
+    private static final int ALERT_BATCH_LIMIT = 500;
 
-    private final JdbcTemplate jdbcTemplate;
+    private final NotificationPreferenceRepository preferenceRepository;
     private final PushDispatcher pushDispatcher;
 
-    public MarketVolatilityAlertService(JdbcTemplate jdbcTemplate, PushDispatcher pushDispatcher) {
-        this.jdbcTemplate = jdbcTemplate;
+    public MarketVolatilityAlertService(NotificationPreferenceRepository preferenceRepository, PushDispatcher pushDispatcher) {
+        this.preferenceRepository = preferenceRepository;
         this.pushDispatcher = pushDispatcher;
     }
 
@@ -38,14 +38,7 @@ public class MarketVolatilityAlertService {
         String hourKey = DateTimeFormatter.ofPattern("yyyyMMdd_HH").withZone(ZoneId.systemDefault()).format(Instant.now());
 
         // 查询开启了行情推送、且波动阈值 <= 当前波动率的用户列表
-        List<Long> targetUserIds = jdbcTemplate.query("""
-                SELECT u.user_id
-                  FROM gateway_users u
-                  JOIN gateway_user_notification_preferences p ON u.user_id = p.user_id
-                 WHERE (p.market_volatility_push = true OR p.market_volatility_in_app = true)
-                   AND p.market_volatility_threshold_pct <= ?
-                 LIMIT 500
-                """, (rs, rowNum) -> rs.getLong("user_id"), absChange);
+        List<Long> targetUserIds = preferenceRepository.findVolatilityAlertUserIds(absChange, ALERT_BATCH_LIMIT);
 
         if (targetUserIds.isEmpty()) return;
 
@@ -67,27 +60,5 @@ public class MarketVolatilityAlertService {
 
         log.info("Dispatched market volatility alert for symbol={}, change={}, targetUsersCount={}",
                 symbol, pctStr, targetUserIds.size());
-    }
-
-    /**
-     * 定时任务：从系统最新行情快照或数据库中扫描是否有标的突破阈值
-     */
-    @Scheduled(fixedDelay = 60000)
-    public void scanTopMarketsVolatility() {
-        try {
-            // 从网关或行情聚合表中读取主流标的最新价格与波动
-            // 默认兜底示例检测 BTC/USDT 与 ETH/USDT
-            jdbcTemplate.query("""
-                    SELECT instrument_name, last_price, change_24h
-                      FROM (
-                          -- 优先读取如果有行情投影表，否则安全静默
-                          SELECT NULL as instrument_name, NULL as last_price, NULL as change_24h WHERE 1=0
-                      ) sub
-                    """, (rs) -> {
-                // 如果有数据则逐一 evaluateMarketMovement
-            });
-        } catch (Exception e) {
-            log.debug("Market scan tick: {}", e.getMessage());
-        }
     }
 }

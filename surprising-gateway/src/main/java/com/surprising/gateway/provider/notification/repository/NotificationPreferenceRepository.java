@@ -95,4 +95,14 @@ public class NotificationPreferenceRepository {
                 pref.c2cOrderPush(), pref.c2cOrderInApp(),
                 ts, ts);
     }
+
+    public java.util.List<Long> findVolatilityAlertUserIds(BigDecimal absChangePct, int limit) {
+        return jdbcTemplate.query("""
+                SELECT user_id
+                  FROM gateway_user_notification_preferences
+                 WHERE (market_volatility_push = true OR market_volatility_in_app = true)
+                   AND market_volatility_threshold_pct <= ?
+                 LIMIT ?
+                """, (rs, rowNum) -> rs.getLong("user_id"), absChangePct, limit);
+    }
 }

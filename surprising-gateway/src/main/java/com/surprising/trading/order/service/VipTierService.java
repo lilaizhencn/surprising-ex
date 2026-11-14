@@ -7,22 +7,22 @@ import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.trading.order.model.VipTierModels;
 import com.surprising.trading.order.model.VipTierModels.UserVipStatusResponse;
 import com.surprising.trading.order.model.VipTierModels.VipTierDefinition;
+import com.surprising.trading.order.repository.TradeProjectionRepository;
 import java.time.Instant;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
 public class VipTierService {
     private static final Logger log = LoggerFactory.getLogger(VipTierService.class);
 
-    private final JdbcTemplate jdbc;
+    private final TradeProjectionRepository tradeProjectionRepository;
     private final TradingFeeService tradingFeeService;
 
-    public VipTierService(JdbcTemplate jdbc, TradingFeeService tradingFeeService) {
-        this.jdbc = jdbc;
+    public VipTierService(TradeProjectionRepository tradeProjectionRepository, TradingFeeService tradingFeeService) {
+        this.tradeProjectionRepository = tradeProjectionRepository;
         this.tradingFeeService = tradingFeeService;
     }
 
@@ -106,15 +106,7 @@ public class VipTierService {
     private long query30DayVolumeUsd(long userId) {
         try {
             long sinceEpochMs = System.currentTimeMillis() - 30L * 24 * 3600 * 1000;
-            // 从核心已提交成交事实中聚合过去 30 天名义成交量 (折算 USD)
-            String sql = """
-                    SELECT COALESCE(SUM((price_ticks::numeric * quantity_steps::numeric) / 10000.0), 0)
-                    FROM core_execution_projection
-                    WHERE (taker_user_id = ? OR maker_user_id = ?)
-                      AND occurred_at_epoch_ms >= ?
-                    """;
-            Number sum = jdbc.queryForObject(sql, Number.class, userId, userId, sinceEpochMs);
-            return sum != null ? sum.longValue() : 0L;
+            return tradeProjectionRepository.sumUserVolumeUsdSince(userId, sinceEpochMs);
         } catch (Exception ex) {
             log.debug("Volume query fallback for userId {}: {}", userId, ex.getMessage());
             return 0L;

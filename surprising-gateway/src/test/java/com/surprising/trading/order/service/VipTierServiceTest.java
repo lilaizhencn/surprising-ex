@@ -3,9 +3,9 @@ package com.surprising.trading.order.service;
 import com.surprising.trading.order.model.VipTierModels;
 import com.surprising.trading.order.model.VipTierModels.UserVipStatusResponse;
 import com.surprising.trading.order.model.VipTierModels.VipTierDefinition;
+import com.surprising.trading.order.repository.TradeProjectionRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -13,9 +13,9 @@ import static org.mockito.Mockito.*;
 
 class VipTierServiceTest {
 
-    private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    private final TradeProjectionRepository tradeProjectionRepository = mock(TradeProjectionRepository.class);
     private final TradingFeeService tradingFeeService = mock(TradingFeeService.class);
-    private final VipTierService service = new VipTierService(jdbc, tradingFeeService);
+    private final VipTierService service = new VipTierService(tradeProjectionRepository, tradingFeeService);
 
     @Test
     @DisplayName("测试不同交易量正确匹配 VIP 梯级与费率标准")
@@ -46,7 +46,7 @@ class VipTierServiceTest {
     @Test
     @DisplayName("测试计算用户 VIP 状态并计算晋级所需差额")
     void shouldCalculateUserVipStatusWithProgression() {
-        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(1001L), eq(1001L), anyLong()))
+        when(tradeProjectionRepository.sumUserVolumeUsdSince(eq(1001L), anyLong()))
                 .thenReturn(700_000L); // 70 万 USD，达到 VIP1 (10万)，距 VIP2 (100万) 还差 30 万
 
         UserVipStatusResponse status = service.getUserVipStatus(1001L);

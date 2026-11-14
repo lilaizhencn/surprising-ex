@@ -132,6 +132,16 @@ public class TradeProjectionRepository {
         }
     }
 
+    public long sumUserVolumeUsdSince(long userId, long sinceEpochMs) {
+        Number sum = jdbc.queryForObject("""
+                SELECT COALESCE(SUM((price_ticks::numeric * quantity_steps::numeric) / 10000.0), 0)
+                FROM core_execution_projection
+                WHERE (taker_user_id = ? OR maker_user_id = ?)
+                  AND occurred_at_epoch_ms >= ?
+                """, Number.class, userId, userId, sinceEpochMs);
+        return sum != null ? sum.longValue() : 0L;
+    }
+
     /** 必要关联只读：core_execution_projection_initialization按同产品确认本投影已完整初始化。
      * 标记与数据必须由同一SQL快照读取，避免重建时把旧READY与新空数据混合；
      * LEFT JOIN保留未就绪/已就绪但无数据的区别。仅关联完成性标记，不聚合业务或写其他表。 */
