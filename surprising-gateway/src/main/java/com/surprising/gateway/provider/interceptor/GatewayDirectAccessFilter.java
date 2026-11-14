@@ -275,6 +275,12 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
 
     private HttpServletRequest wrapHeaders(HttpServletRequest request, ProductLine product, Identity identity) {
         Map<String, String> injected = new LinkedHashMap<>();
+        String userIdHeader = properties.getSecurity().getUserIdHeader();
+        injected.put(userIdHeader, null);
+        injected.put("X-User-Id", null);
+        injected.put("X-Admin-User-Id", null);
+        injected.put("X-Admin-Username", null);
+        injected.put("X-Admin-Roles", null);
         if (product != null) {
             injected.put("X-Product-Line", product.name());
         }
@@ -284,11 +290,8 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
                 if (identity.username() != null) injected.put("X-Admin-Username", identity.username());
                 injected.put("X-Admin-Roles", String.join(",", identity.roles()));
             } else {
-                injected.put(properties.getSecurity().getUserIdHeader(), identity.userId());
+                injected.put(userIdHeader, identity.userId());
             }
-        }
-        if (injected.isEmpty()) {
-            return request;
         }
         return new InjectedHeadersRequestWrapper(request, injected);
     }
@@ -330,8 +333,8 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
         @Override
         public String getHeader(String name) {
             if (name != null) {
-                String overridden = overrides.get(name.toLowerCase(Locale.ROOT));
-                if (overridden != null) return overridden;
+                String key = name.toLowerCase(Locale.ROOT);
+                if (overrides.containsKey(key)) return overrides.get(key);
             }
             return super.getHeader(name);
         }
@@ -339,8 +342,11 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
         @Override
         public Enumeration<String> getHeaders(String name) {
             if (name != null) {
-                String overridden = overrides.get(name.toLowerCase(Locale.ROOT));
-                if (overridden != null) return Collections.enumeration(List.of(overridden));
+                String key = name.toLowerCase(Locale.ROOT);
+                if (overrides.containsKey(key)) {
+                    String overridden = overrides.get(key);
+                    return overridden == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(overridden));
+                }
             }
             return super.getHeaders(name);
         }
