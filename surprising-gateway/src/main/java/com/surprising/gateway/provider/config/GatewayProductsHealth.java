@@ -11,10 +11,12 @@ import io.aeron.driver.MediaDriver;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 
 @Configuration(proxyBeanMethods = false)
 public class GatewayProductsHealth {
@@ -47,6 +49,12 @@ public class GatewayProductsHealth {
                 "surprising-gateway-command-" + ProcessHandle.current().pid()
                         + "-" + UUID.randomUUID()).toString();
         return SurprisingAeronClient.newMediaDriver(directory);
+    }
+
+    @Bean("gatewaySharedJsonProducerFactory")
+    public DefaultKafkaProducerFactory<String, Object> gatewaySharedJsonProducerFactory(
+            @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String defaultBootstrapServers) {
+        return new DefaultKafkaProducerFactory<>(KafkaBootstrapServers.jsonProducerConfig(defaultBootstrapServers));
     }
 
     @Bean("markPriceReadiness")

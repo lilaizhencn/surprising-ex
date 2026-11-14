@@ -16,17 +16,12 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @ComponentScan(basePackages = {
         "com.surprising.account.provider", "com.surprising.trading",
         "com.surprising.price",
-        "com.surprising.realtime.provider", "com.surprising.candlestick.provider",
-        "com.surprising.derivatives.lifecycle",
-        "com.surprising.risk.provider", "com.surprising.liquidation.provider",
-        "com.surprising.insurance.provider", "com.surprising.adl.provider"
+        "com.surprising.realtime.provider", "com.surprising.candlestick.provider"
 }, excludeFilters = @ComponentScan.Filter(
         type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
         classes = {
                 com.surprising.realtime.provider.RealtimeRouter.class,
                 com.surprising.realtime.provider.RealtimeApplication.class,
-                com.surprising.derivatives.lifecycle.SurprisingDerivativesLifecycleApplication.class,
-                com.surprising.derivatives.lifecycle.config.LifecycleSchedulingConfiguration.class,
                 com.surprising.price.index.controller.ExchangeRateController.class,
                 com.surprising.price.index.service.ExchangeRateService.class,
                 com.surprising.price.index.repository.ExchangeRateRepository.class,
@@ -36,8 +31,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
         }))
 @EnableConfigurationProperties({
         AccountProperties.class, TriggerProperties.class,
-        com.surprising.candlestick.provider.config.CandlestickProperties.class,
-        com.surprising.risk.provider.config.RiskProperties.class})
+        com.surprising.candlestick.provider.config.CandlestickProperties.class})
 @Import({com.surprising.realtime.api.ValkeyUserQueries.class,
         com.surprising.websocket.provider.config.WebSocketKafkaConfiguration.class,
         com.surprising.websocket.provider.consumer.KafkaFanoutConsumer.class})

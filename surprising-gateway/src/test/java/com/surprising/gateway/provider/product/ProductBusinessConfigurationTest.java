@@ -108,6 +108,49 @@ class ProductBusinessConfigurationTest {
         assertThat(ProductInternalHandlerMapping.isProductEndpoint("/api/v1/adl/queue")).isTrue();
     }
 
+    @Test void spotDoesNotLoadDerivativesBusinessConfiguration() {
+        try (var spot = new AnnotationConfigApplicationContext()) {
+            spot.getEnvironment().getPropertySources().addFirst(new MapPropertySource("spot", Map.of(
+                    "surprising.risk.product-line", ProductLine.SPOT.name())));
+            ConfigurationPropertySources.attach(spot.getEnvironment());
+            spot.register(com.surprising.gateway.config.DerivativesBusinessConfiguration.class);
+            spot.refresh();
+            assertThat(spot.getBeansOfType(com.surprising.derivatives.lifecycle.DerivativesAeronClient.class)).isEmpty();
+        }
+    }
+
+    @Test void childContextsReuseParentSharedJsonProducerFactoryWithoutDestroyingItOnChildClose() throws Exception {
+        @SuppressWarnings("unchecked")
+        org.springframework.kafka.core.ProducerFactory<String, Object> shared =
+                org.mockito.Mockito.mock(org.springframework.kafka.core.ProducerFactory.class,
+                        org.mockito.Mockito.withSettings().extraInterfaces(org.springframework.beans.factory.DisposableBean.class));
+        try (var parent = new AnnotationConfigApplicationContext()) {
+            parent.registerBean("gatewaySharedJsonProducerFactory",
+                    org.springframework.kafka.core.ProducerFactory.class, () -> shared);
+            parent.refresh();
+            try (var child = new AnnotationConfigApplicationContext()) {
+                child.setParent(parent);
+                var markProps = new com.surprising.price.mark.config.MarkPriceProperties();
+                var indexProps = new com.surprising.price.index.config.IndexPriceProperties();
+                var fundingProps = new com.surprising.funding.provider.config.FundingProperties();
+                child.registerBean(com.surprising.price.mark.config.MarkPriceProperties.class, () -> markProps);
+                child.registerBean(com.surprising.price.index.config.IndexPriceProperties.class, () -> indexProps);
+                child.registerBean(com.surprising.funding.provider.config.FundingProperties.class, () -> fundingProps);
+                child.register(
+                        com.surprising.price.mark.config.MarkKafkaConfiguration.class,
+                        com.surprising.price.index.config.IndexKafkaProducerConfiguration.class,
+                        com.surprising.funding.provider.config.FundingKafkaConfiguration.class);
+                child.refresh();
+                child.getBean("markProducerFactory", org.springframework.kafka.core.ProducerFactory.class).createProducer();
+                child.getBean("indexProducerFactory", org.springframework.kafka.core.ProducerFactory.class).createProducer();
+                child.getBean("fundingProducerFactory", org.springframework.kafka.core.ProducerFactory.class).createProducer();
+                org.mockito.Mockito.verify(shared, org.mockito.Mockito.times(3)).createProducer();
+            }
+            org.mockito.Mockito.verify((org.springframework.beans.factory.DisposableBean) shared,
+                    org.mockito.Mockito.never()).destroy();
+        }
+    }
+
     @EnableConfigurationProperties({
             com.surprising.candlestick.provider.config.CandlestickProperties.class,
             com.surprising.risk.provider.config.RiskProperties.class})

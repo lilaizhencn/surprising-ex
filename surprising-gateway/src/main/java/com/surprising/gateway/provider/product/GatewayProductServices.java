@@ -102,6 +102,9 @@ public final class GatewayProductServices implements AutoCloseable {
             org.springframework.boot.context.properties.source.ConfigurationPropertySources.attach(child.getEnvironment());
             child.register(com.surprising.gateway.config.ProductBusinessConfiguration.class, LocalBusinessApi.class,
                     TradingLocalRoutes.class, AccountLocalRoutes.class, InstrumentLocalRoutes.class);
+            if (product.isDerivative()) {
+                child.register(com.surprising.gateway.config.DerivativesBusinessConfiguration.class);
+            }
             child.refresh();
             var mapping = new RequestMappingHandlerMapping();
             mapping.setApplicationContext(child);
