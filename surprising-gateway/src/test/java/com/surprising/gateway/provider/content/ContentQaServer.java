@@ -5,7 +5,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.gateway.provider.announcement.controller.*;
 import com.surprising.gateway.provider.announcement.repository.*;
 import com.surprising.gateway.provider.announcement.service.AnnouncementService;
-import com.surprising.gateway.provider.announcement.exception.AnnouncementExceptionHandler;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
@@ -29,14 +29,13 @@ import org.springframework.web.cors.*;
 @TestConfiguration(proxyBeanMethods=false)
 @EnableAutoConfiguration
 @EnableTransactionManagement
-@Import({AdminAnnouncementController.class,ClientAnnouncementController.class,AnnouncementExceptionHandler.class,
+@Import({AdminAnnouncementController.class,ClientAnnouncementController.class,GlobalGatewayExceptionHandler.class,
         AnnouncementService.class,AnnouncementRepository.class,AnnouncementTranslationRepository.class,
         AnnouncementTargetRepository.class,AnnouncementReadRepository.class,AnnouncementAuditRepository.class,
         ContentMediaConfiguration.class,ContentR2Storage.class,com.surprising.gateway.provider.content.service.ArticleRenderingService.class,ContentMediaController.class,ContentMediaRepository.class,ContentMediaService.class,
         com.surprising.gateway.provider.content.repository.ContentMediaReferenceRepository.class,
         com.surprising.gateway.provider.legal.controller.AdminLegalController.class,
         com.surprising.gateway.provider.legal.controller.LegalController.class,
-        com.surprising.gateway.provider.legal.exception.LegalExceptionHandler.class,
         com.surprising.gateway.provider.legal.service.LegalCmsService.class,
         com.surprising.gateway.provider.legal.service.LegalDocumentService.class,
         com.surprising.gateway.provider.legal.service.LegalConsentService.class,

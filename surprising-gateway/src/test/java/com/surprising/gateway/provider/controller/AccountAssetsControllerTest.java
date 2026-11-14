@@ -28,7 +28,7 @@ class AccountAssetsControllerTest {
     private final GatewayProductSelection selection = new GatewayProductSelection(products, new ObjectMapper());
     private final MockMvc mvc = MockMvcBuilders.standaloneSetup(
             new AccountAssetsController(auth, selection, products))
-            .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.ReadViewHttpErrors()).build();
+            .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler()).build();
 
     AccountAssetsControllerTest() {
         when(auth.authenticateBearer("Bearer own")).thenReturn(

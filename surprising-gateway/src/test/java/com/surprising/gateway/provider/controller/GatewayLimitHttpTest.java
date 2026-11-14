@@ -99,9 +99,9 @@ class GatewayLimitHttpTest {
                 mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
         keys = new GatewayApiKeyService(keyRows, auth, totp, mock(SensitiveActionVerificationService.class), gateway, clients, fixture.state);
         var testController = new LimitTestEndpointController();
-        var compatibility = new BinanceApiController(gateway, mock(com.surprising.instrument.provider.controller.InstrumentRequestHandler.class),
-                mock(com.surprising.trading.order.controller.OrderRequestHandler.class),
-                mock(com.surprising.account.provider.controller.AccountRequestHandler.class),
+        var compatibility = new BinanceApiController(gateway, mock(com.surprising.instrument.provider.service.InstrumentService.class),
+                mock(com.surprising.trading.order.service.OrderService.class),
+                mock(com.surprising.account.provider.service.AccountService.class),
                 mock(com.surprising.trading.matching.service.MatchingMarketDataService.class),
                 keys, null, auth, null, null, null, json);
         return MockMvcBuilders.standaloneSetup(testController, compatibility, new AsyncReads(auth, pending))

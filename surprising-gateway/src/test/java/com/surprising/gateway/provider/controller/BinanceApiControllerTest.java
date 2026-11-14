@@ -15,7 +15,7 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
-import com.surprising.account.provider.controller.AccountRequestHandler;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.service.AuthService;
@@ -25,7 +25,7 @@ import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationS
 import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
-import com.surprising.instrument.provider.controller.InstrumentRequestHandler;
+import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
@@ -37,7 +37,7 @@ import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
-import com.surprising.trading.order.controller.OrderRequestHandler;
+import com.surprising.trading.order.service.OrderService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -70,12 +70,12 @@ class BinanceApiControllerTest {
         scale.setQuantityScale(6);
         properties.getBinanceApi().setSymbolScales(Map.of("USDT", scale));
         AuthService authService = bearerAuth();
-        AccountRequestHandler accountRequests = mock(AccountRequestHandler.class);
+        AccountService accountRequests = mock(AccountService.class);
         when(accountRequests.transfer(any(ProductTransferRequest.class)))
                 .thenReturn(new ProductTransferResponse(7123L, 42L, AccountType.SPOT, AccountType.USDT_PERPETUAL, "USDT", 1_250_000L, "ref", "COMPLETED", null, null, Instant.now()));
 
         BinanceApiController controller = new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class), mock(OrderRequestHandler.class),
+                mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
                 mock(ComplianceService.class), mock(CustodyWalletClient.class),
@@ -107,12 +107,12 @@ class BinanceApiControllerTest {
         GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
         scale.setQuantityScale(6);
         properties.getBinanceApi().setSymbolScales(Map.of("USDT", scale));
-        AccountRequestHandler accountRequests = mock(AccountRequestHandler.class);
+        AccountService accountRequests = mock(AccountService.class);
         when(accountRequests.transfer(any(ProductTransferRequest.class)))
                 .thenReturn(new ProductTransferResponse(7124L, 42L, AccountType.SPOT, AccountType.COIN_PERPETUAL, "USDT", 1_000_000L, "ref", "COMPLETED", null, null, Instant.now()));
 
         BinanceApiController controller = new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class), mock(OrderRequestHandler.class),
+                mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), bearerAuth(),
                 mock(ComplianceService.class), mock(CustodyWalletClient.class),
@@ -172,8 +172,8 @@ class BinanceApiControllerTest {
         CustodyWalletClient custodyWalletClient = mock(CustodyWalletClient.class);
 
         BinanceApiController controller = new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class), mock(OrderRequestHandler.class),
-                mock(AccountRequestHandler.class), mock(MatchingMarketDataService.class),
+                mock(InstrumentService.class), mock(OrderService.class),
+                mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,
                 custodyWalletClient, withdrawalService, new ObjectMapper());
 
@@ -204,7 +204,7 @@ class BinanceApiControllerTest {
         AuthService authService = mock(AuthService.class);
         when(authService.authenticateBearer("Bearer token"))
                 .thenReturn(new JwtPrincipal(1001L, "alice", "ACTIVE", List.of(), Instant.now().plusSeconds(60)));
-        OrderRequestHandler orderRequests = mock(OrderRequestHandler.class);
+        OrderService orderRequests = mock(OrderService.class);
         OrderResponse order2 = new OrderResponse(2L, 1001L, "b", "1", OrderSide.SELL, OrderType.LIMIT,
                 TimeInForce.GTC, 12345L, 2000L, 2000L, 0L, MarginMode.CROSS, PositionSide.NET,
                 0L, 0L, false, false, OrderStatus.FILLED, null,
@@ -225,8 +225,8 @@ class BinanceApiControllerTest {
         request.setParameter("startTime", "1754006400000");
 
         BinanceApiController controller = new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class), orderRequests,
-                mock(AccountRequestHandler.class), mock(MatchingMarketDataService.class),
+                mock(InstrumentService.class), orderRequests,
+                mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
                 mock(ComplianceService.class),
                 mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
@@ -245,13 +245,13 @@ class BinanceApiControllerTest {
     void accountReportsWithdrawalCapabilityOnlyWhenWalletAndKycAreReady() throws Exception {
         GatewayProperties properties = new GatewayProperties();
         properties.getCustodyWallet().setEnabled(true);
-        AccountRequestHandler accountRequests = mock(AccountRequestHandler.class);
+        AccountService accountRequests = mock(AccountService.class);
         when(accountRequests.balances(1001L)).thenReturn(new BalanceQueryResponse(0, List.of()));
         ComplianceService compliance = mock(ComplianceService.class);
         when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "STANDARD", "PENDING", "US",
                 "PASSPORT", "SELF", null, null, null, null, null, null, null));
         BinanceApiController controller = new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class), mock(OrderRequestHandler.class),
+                mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), bearerAuth(),
                 compliance, mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
@@ -283,8 +283,8 @@ class BinanceApiControllerTest {
                 Map.of("chain", "ETH", "enabled", true, "withdrawalEnabled", false,
                         "assetSymbols", List.of("USDT"))));
         BinanceApiController controller = new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class), mock(OrderRequestHandler.class),
-                mock(AccountRequestHandler.class), mock(MatchingMarketDataService.class),
+                mock(InstrumentService.class), mock(OrderService.class),
+                mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
                 mock(ComplianceService.class), walletClient, mock(CustodyWithdrawalService.class), new ObjectMapper());
 
@@ -324,8 +324,8 @@ class BinanceApiControllerTest {
                         List.of(new OrderBookLevel(12355L, 3000L, 1L)),
                         Instant.now()));
         BinanceApiController controller = new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class), mock(OrderRequestHandler.class),
-                mock(AccountRequestHandler.class), marketData,
+                mock(InstrumentService.class), mock(OrderService.class),
+                mock(AccountService.class), marketData,
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class),
                 bearerAuth(), mock(ComplianceService.class), mock(CustodyWalletClient.class),
                 mock(CustodyWithdrawalService.class), new ObjectMapper());
@@ -348,8 +348,8 @@ class BinanceApiControllerTest {
         when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "BASIC", "VERIFIED", "US",
                 "PASSPORT", "self", null, null, null, null, null, null, null));
         return new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class), mock(OrderRequestHandler.class),
-                mock(AccountRequestHandler.class), mock(MatchingMarketDataService.class),
+                mock(InstrumentService.class), mock(OrderService.class),
+                mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,
                 mock(CustodyWalletClient.class), withdrawalService, new ObjectMapper());
     }

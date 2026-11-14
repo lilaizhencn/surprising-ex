@@ -7,15 +7,18 @@ import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
+import com.surprising.gateway.provider.service.WalletFundingService;
 import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,13 +39,14 @@ public class CustodyWalletController {
     private final ComplianceService complianceService;
     private final CustodyWithdrawalService withdrawalService;
     private final UserDepositAddressRepository addressRepository;
+    private final WalletFundingService fundingService;
 
     public CustodyWalletController(AuthService authService,
                                    CustodyWalletClient walletClient,
                                    SensitiveActionVerificationService verificationService,
                                    ComplianceService complianceService,
                                    CustodyWithdrawalService withdrawalService) {
-        this(authService, walletClient, verificationService, complianceService, withdrawalService, null);
+        this(authService, walletClient, verificationService, complianceService, withdrawalService, null, null);
     }
 
     public CustodyWalletController(AuthService authService,
@@ -51,12 +55,50 @@ public class CustodyWalletController {
                                    ComplianceService complianceService,
                                    CustodyWithdrawalService withdrawalService,
                                    UserDepositAddressRepository addressRepository) {
+        this(authService, walletClient, verificationService, complianceService, withdrawalService, addressRepository, null);
+    }
+
+    @Autowired
+    public CustodyWalletController(AuthService authService,
+                                   CustodyWalletClient walletClient,
+                                   SensitiveActionVerificationService verificationService,
+                                   ComplianceService complianceService,
+                                   CustodyWithdrawalService withdrawalService,
+                                   UserDepositAddressRepository addressRepository,
+                                   WalletFundingService fundingService) {
         this.authService = authService;
         this.walletClient = walletClient;
         this.verificationService = verificationService;
         this.complianceService = complianceService;
         this.withdrawalService = withdrawalService;
         this.addressRepository = addressRepository;
+        this.fundingService = fundingService;
+    }
+
+    @GetMapping("/assets")
+    public List<WalletFundingService.FundingAsset> assets(@RequestHeader("Authorization") String authorization,
+                                                          @RequestParam(defaultValue = "deposit") String operation) {
+        principal(authorization);
+        try {
+            return fundingService.catalog(operation);
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        }
+    }
+
+    @PostMapping("/deposit-address")
+    public WalletFundingService.DepositAddress depositAddress(@RequestHeader("Authorization") String authorization,
+                                                              @Valid @RequestBody DepositAddressRequest request) {
+        JwtPrincipal principal = principal(authorization);
+        try {
+            return fundingService.depositAddress(principal.userId(), request.asset(), request.network());
+        } catch (IllegalArgumentException ex) {
+            throw badRequest(ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        }
     }
 
     @PostMapping("/addresses")
@@ -224,6 +266,10 @@ public class CustodyWalletController {
 
     private ResponseStatusException badRequest(IllegalArgumentException ex) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+    }
+
+    public record DepositAddressRequest(@NotBlank @Pattern(regexp = "[A-Z0-9]{2,20}") String asset,
+                                        @NotBlank @Pattern(regexp = "[A-Z0-9][A-Z0-9_-]{0,31}") String network) {
     }
 
     public record CreateAddressRequest(@NotBlank @Size(max = 32) String chain,

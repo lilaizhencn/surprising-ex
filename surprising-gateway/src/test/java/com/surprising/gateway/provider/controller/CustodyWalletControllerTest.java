@@ -104,4 +104,26 @@ class CustodyWalletControllerTest {
         assertThat(result.get("address")).isEqualTo("0xlocal");
         verify(walletClient, org.mockito.Mockito.never()).createAddress(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
     }
+
+    @Test
+    void delegatesDepositAddressAndAssetsToFundingService() {
+        AuthService authService = mock(AuthService.class);
+        com.surprising.gateway.provider.service.WalletFundingService fundingService =
+                mock(com.surprising.gateway.provider.service.WalletFundingService.class);
+        CustodyWalletController controller = new CustodyWalletController(
+                authService, mock(CustodyWalletClient.class), mock(SensitiveActionVerificationService.class),
+                mock(ComplianceService.class), mock(CustodyWithdrawalService.class), null, fundingService);
+        when(authService.authenticateBearer("Bearer token"))
+                .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of(), Instant.now().plusSeconds(600)));
+        var expectedAddress = new com.surprising.gateway.provider.service.WalletFundingService.DepositAddress(
+                "USDT", "ETH", "0xabc", "memo1");
+        when(fundingService.depositAddress(42L, "USDT", "ETH")).thenReturn(expectedAddress);
+        when(fundingService.catalog("deposit")).thenReturn(List.of());
+
+        assertThat(controller.depositAddress("Bearer token",
+                new CustodyWalletController.DepositAddressRequest("USDT", "ETH"))).isEqualTo(expectedAddress);
+        assertThat(controller.assets("Bearer token", "deposit")).isEmpty();
+        verify(fundingService).depositAddress(42L, "USDT", "ETH");
+        verify(fundingService).catalog("deposit");
+    }
 }

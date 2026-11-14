@@ -96,7 +96,7 @@ class InternalLiquidityOperationsControllerTest {
         when(leverage.set(any())).thenThrow(new com.surprising.trading.order.exception.OrderCommandRejectedException(
                 com.surprising.aeron.protocol.CoreResultCode.LEVERAGE_UPDATE_BLOCKED));
         var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller(token))
-                .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.OrderRejectionHttpAdvice()).build();
+                .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler()).build();
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/internal/v1/operations/liquidity/leverage")
                 .with(request->{request.setRemoteAddr("127.0.0.1");return request;})
                 .header("X-Operations-Token",token).header("X-Operation-Id","original-leverage")

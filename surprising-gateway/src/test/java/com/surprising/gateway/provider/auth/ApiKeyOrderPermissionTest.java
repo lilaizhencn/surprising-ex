@@ -12,13 +12,15 @@ import com.surprising.gateway.provider.auth.repository.GatewayApiKeyRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.TotpService;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.controller.BinanceApiController;
-import com.surprising.instrument.provider.controller.InstrumentRequestHandler;
+import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
-import com.surprising.trading.order.controller.OrderRequestHandler;
+import com.surprising.trading.order.exception.OrderCommandRejectedException;
+import com.surprising.trading.order.service.OrderService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -37,26 +39,25 @@ class ApiKeyOrderPermissionTest {
     final GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
     final AuthService auth = mock(AuthService.class);
     final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
-    final OrderRequestHandler orderRequests = mock(OrderRequestHandler.class);
+    final OrderService orderService = mock(OrderService.class);
 
     @Test void readOnlyKeyCannotEnterTheCancellationBusiness() {
         record("READ");
         var response = controller().handle(request(), null);
         assertThat(response.getStatusCode().value()).isEqualTo(403);
-        verifyNoInteractions(orderRequests);
+        verifyNoInteractions(orderService);
     }
 
     @Test void tradeKeyCancellationUsesTheInternalPostContract() {
         record("READ,TRADE");
         UUID cmdId = UUID.randomUUID();
-        when(orderRequests.cancel(any(CancelOrderRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(
-                        ResponseEntity.status(409).body(new OrderCommandReceipt(
-                                cmdId, "REJECTED", "CONFLICT", "conflict",
-                                OrderCommandReceipt.commandResultUrl(cmdId),
-                                List.of(), null, null))));
-        assertThat(controller().handle(request(), null).getStatusCode().value()).isEqualTo(409);
-        verify(orderRequests).cancel(any(CancelOrderRequest.class));
+        when(orderService.cancelCommandAsync(any(CancelOrderRequest.class)))
+                .thenReturn(CompletableFuture.completedFuture(new OrderCommandReceipt(
+                        cmdId, "ACCEPTED", "OK", "ok",
+                        OrderCommandReceipt.commandResultUrl(cmdId),
+                        List.of(), null, null)));
+        assertThat(controller().handle(request(), null).getStatusCode().value()).isEqualTo(200);
+        verify(orderService).cancelCommandAsync(any(CancelOrderRequest.class));
     }
 
     private void record(String permissions) {
@@ -78,9 +79,9 @@ class ApiKeyOrderPermissionTest {
 
     private BinanceApiController controller() {
         return new BinanceApiController(properties,
-                mock(InstrumentRequestHandler.class),
-                orderRequests,
-                mock(AccountRequestHandler.class),
+                mock(InstrumentService.class),
+                orderService,
+                mock(AccountService.class),
                 mock(MatchingMarketDataService.class),
                 keys, null, auth, null, null, null, new ObjectMapper());
     }

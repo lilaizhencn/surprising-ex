@@ -10,7 +10,7 @@ import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
-import com.surprising.gateway.provider.controller.advice.ProductAvailabilityHttpAdvice;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.gateway.provider.exception.ProductUnavailableException;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
@@ -39,7 +39,7 @@ class ProductUnavailableHttpBoundaryTest {
                 new JwtPrincipal(42,"user","NORMAL",List.of(),Instant.now().plusSeconds(60)));
         var mvc=MockMvcBuilders.standaloneSetup(new AccountAssetsController(auth,
                 new GatewayProductSelection(products,new ObjectMapper()),products))
-                .setControllerAdvice(new ProductAvailabilityHttpAdvice()).build();
+                .setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
         for(String path:List.of("balances","product-balances")) {
             mvc.perform(get("/api/v1/gateway/account/"+path).header("Authorization","Bearer own")
                     .header("X-Product-Line",line.name()).param("userId","42").param("accountType",accountType.name()))
@@ -55,7 +55,7 @@ class ProductUnavailableHttpBoundaryTest {
         String token="host-operation-product-availability-secret";
         var mvc=MockMvcBuilders.standaloneSetup(new InternalLiquidityOperationsController(token,
                 new LiquidityOperationsService(products,instruments,audit),new ObjectMapper()))
-                .setControllerAdvice(new ProductAvailabilityHttpAdvice()).build();
+                .setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
         mvc.perform(get("/internal/v1/operations/liquidity/leverage").with(request->{request.setRemoteAddr("127.0.0.1");return request;})
                 .header("X-Operations-Token",token).param("userId","42").param("instrumentId","604")
                 .param("productLine",line.name()).param("marginMode","CROSS"))

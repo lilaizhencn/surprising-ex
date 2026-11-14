@@ -5,7 +5,7 @@ import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
-import com.surprising.account.provider.controller.AccountRequestHandler;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
@@ -17,7 +17,7 @@ import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationS
 import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
-import com.surprising.instrument.provider.controller.InstrumentRequestHandler;
+import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
@@ -32,7 +32,8 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
-import com.surprising.trading.order.controller.OrderRequestHandler;
+import com.surprising.trading.order.model.ActiveOrderPageQuery;
+import com.surprising.trading.order.service.OrderService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
@@ -68,9 +69,9 @@ public class BinanceApiController {
 
     private final ApiKeyRequestBinding apiKeyRequests;
     private final GatewayProperties properties;
-    private final InstrumentRequestHandler instrumentRequests;
-    private final OrderRequestHandler orderRequests;
-    private final AccountRequestHandler accountRequests;
+    private final InstrumentService instrumentService;
+    private final OrderService orderService;
+    private final AccountService accountService;
     private final MatchingMarketDataService marketDataService;
     private final GatewayApiKeyService apiKeyService;
     private final SensitiveActionVerificationService verificationService;
@@ -82,9 +83,9 @@ public class BinanceApiController {
     private final ObjectMapper objectMapper;
 
     public BinanceApiController(GatewayProperties properties,
-                                InstrumentRequestHandler instrumentRequests,
-                                OrderRequestHandler orderRequests,
-                                AccountRequestHandler accountRequests,
+                                InstrumentService instrumentService,
+                                OrderService orderService,
+                                AccountService accountService,
                                 MatchingMarketDataService marketDataService,
                                 GatewayApiKeyService apiKeyService,
                                 SensitiveActionVerificationService verificationService,
@@ -93,16 +94,16 @@ public class BinanceApiController {
                                 CustodyWalletClient custodyWalletClient,
                                 CustodyWithdrawalService withdrawalService,
                                 ObjectMapper objectMapper) {
-        this(properties, instrumentRequests, orderRequests, accountRequests, marketDataService,
+        this(properties, instrumentService, orderService, accountService, marketDataService,
                 apiKeyService, verificationService, authService, complianceService, custodyWalletClient,
                 withdrawalService, null, objectMapper);
     }
 
     @Autowired
     public BinanceApiController(GatewayProperties properties,
-                                InstrumentRequestHandler instrumentRequests,
-                                OrderRequestHandler orderRequests,
-                                AccountRequestHandler accountRequests,
+                                InstrumentService instrumentService,
+                                OrderService orderService,
+                                AccountService accountService,
                                 MatchingMarketDataService marketDataService,
                                 GatewayApiKeyService apiKeyService,
                                 SensitiveActionVerificationService verificationService,
@@ -114,9 +115,9 @@ public class BinanceApiController {
                                 ObjectMapper objectMapper) {
         this.properties = properties;
         this.apiKeyRequests = new ApiKeyRequestBinding(properties);
-        this.instrumentRequests = instrumentRequests;
-        this.orderRequests = orderRequests;
-        this.accountRequests = accountRequests;
+        this.instrumentService = instrumentService;
+        this.orderService = orderService;
+        this.accountService = accountService;
         this.marketDataService = marketDataService;
         this.apiKeyService = apiKeyService;
         this.verificationService = verificationService;
@@ -157,7 +158,7 @@ public class BinanceApiController {
             }
             if (path.endsWith("/exchangeInfo")) {
                 ProductLine product = productLine(request);
-                return json(HttpStatus.OK, instrumentRequests.list(null, null, product.name(), product.name(), false, false));
+                return json(HttpStatus.OK, instrumentService.publicCatalog(product, null, null, false).instruments());
             }
             if (path.endsWith("/depth")) {
                 return depth(request);
@@ -239,7 +240,7 @@ public class BinanceApiController {
                 idempotencyKey.trim(),
                 "binance asset transfer"
         );
-        ProductTransferResponse result = accountRequests.transfer(transferRequest);
+        ProductTransferResponse result = accountService.transfer(transferRequest);
         return json(HttpStatus.OK, Map.of("tranId", result.transferId()));
     }
 
@@ -435,20 +436,19 @@ public class BinanceApiController {
                     reduceOnly,
                     postOnly
             );
-            ResponseEntity<OrderCommandReceipt> receiptEntity;
+            OrderCommandReceipt receipt;
             try {
-                receiptEntity = orderRequests.place(placeRequest).toCompletableFuture().join();
+                receipt = orderService.placeCommandAsync(placeRequest).toCompletableFuture().join();
             } catch (Exception ex) {
                 Throwable cause = ex instanceof java.util.concurrent.CompletionException ? ex.getCause() : ex;
                 if (cause instanceof ResponseStatusException rse) {
                     throw rse;
                 }
+                if (cause instanceof com.surprising.trading.order.exception.OrderCommandRejectedException rejected) {
+                    throw rejected;
+                }
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, cause != null ? cause.getMessage() : ex.getMessage(), cause);
             }
-            if (receiptEntity.getStatusCode().isError()) {
-                return ResponseEntity.status(receiptEntity.getStatusCode()).body(jsonBytes(receiptEntity.getBody()));
-            }
-            OrderCommandReceipt receipt = receiptEntity.getBody();
             if (receipt != null && receipt.result() instanceof OrderResponse resp) {
                 return json(HttpStatus.OK, orderView(resp, symbol, scale));
             }
@@ -474,21 +474,20 @@ public class BinanceApiController {
         }
         if ("DELETE".equals(method)) {
             Long orderId = longParameter(params, "orderId");
-            ResponseEntity<OrderCommandReceipt> receiptEntity;
+            OrderCommandReceipt receipt;
             try {
-                receiptEntity = orderRequests.cancel(new CancelOrderRequest(userId, orderId)).toCompletableFuture().join();
+                receipt = orderService.cancelCommandAsync(new CancelOrderRequest(userId, orderId)).toCompletableFuture().join();
             } catch (Exception ex) {
                 Throwable cause = ex instanceof java.util.concurrent.CompletionException ? ex.getCause() : ex;
                 if (cause instanceof ResponseStatusException rse) {
                     throw rse;
                 }
+                if (cause instanceof com.surprising.trading.order.exception.OrderCommandRejectedException rejected) {
+                    throw rejected;
+                }
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, cause != null ? cause.getMessage() : ex.getMessage(), cause);
             }
-            if (receiptEntity.getStatusCode().isError()) {
-                return ResponseEntity.status(receiptEntity.getStatusCode()).body(jsonBytes(receiptEntity.getBody()));
-            }
             GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
-            OrderCommandReceipt receipt = receiptEntity.getBody();
             if (receipt != null && receipt.result() instanceof OrderResponse resp) {
                 return json(HttpStatus.OK, orderView(resp, symbol, scale));
             }
@@ -514,11 +513,11 @@ public class BinanceApiController {
         String clientOrderId = first(params, "origClientOrderId", "clientOrderId");
         GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
         if (orderId != null) {
-            OrderResponse orderResp = orderRequests.get(userId, Long.parseLong(orderId), null);
+            OrderResponse orderResp = orderService.get(userId, Long.parseLong(orderId), null);
             return json(HttpStatus.OK, orderView(orderResp, symbol, scale));
         }
         if (clientOrderId != null) {
-            OrderResponse orderResp = orderRequests.getByClientOrderId(userId, clientOrderId, null);
+            OrderResponse orderResp = orderService.getByClientOrderId(userId, clientOrderId, null);
             return json(HttpStatus.OK, orderView(orderResp, symbol, scale));
         }
         throw new IllegalArgumentException("orderId or origClientOrderId is required");
@@ -533,7 +532,7 @@ public class BinanceApiController {
                 ? properties.getBinanceApi().backendInstrumentId(symbol, productLine(request))
                 : null;
         int limit = capped(request.getParameter("limit"));
-        OrderQueryResponse openOrdersResp = orderRequests.openOrders(userId, instrumentId, limit, null, null);
+        OrderQueryResponse openOrdersResp = orderService.openOrders(userId, instrumentId, new ActiveOrderPageQuery(limit, 0L), null);
         List<Map<String, Object>> result = new ArrayList<>();
         if (openOrdersResp.orders() != null) {
             for (OrderResponse ord : openOrdersResp.orders()) {
@@ -555,7 +554,7 @@ public class BinanceApiController {
         Long orderId = longParameter(request, "orderId");
         Long startTime = longParameter(request, "startTime");
         Long endTime = longParameter(request, "endTime");
-        OrderQueryResponse historyResp = orderRequests.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, null, null, null);
+        OrderQueryResponse historyResp = orderService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, null, null, null);
         List<OrderResponse> list = new ArrayList<>(historyResp.orders() != null ? historyResp.orders() : List.of());
         list.sort(java.util.Comparator.comparingLong(OrderResponse::orderId));
         List<Map<String, Object>> result = new ArrayList<>();
@@ -569,7 +568,7 @@ public class BinanceApiController {
     }
 
     private ResponseEntity<byte[]> account(HttpServletRequest request, long userId) {
-        BalanceQueryResponse balanceResp = accountRequests.balances(userId);
+        BalanceQueryResponse balanceResp = accountService.balances(userId);
         boolean canWithdraw = properties.getCustodyWallet().isEnabled()
                 && isKycVerified(complianceService.kyc(userId));
         List<Map<String, Object>> balances = new ArrayList<>();

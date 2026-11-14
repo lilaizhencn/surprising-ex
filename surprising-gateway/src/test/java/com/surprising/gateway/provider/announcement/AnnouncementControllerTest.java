@@ -10,7 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.surprising.gateway.provider.announcement.controller.*;
 import com.surprising.gateway.provider.announcement.exception.AnnouncementProblem;
-import com.surprising.gateway.provider.announcement.exception.AnnouncementExceptionHandler;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.gateway.provider.announcement.model.AnnouncementModels.*;
 import com.surprising.gateway.provider.announcement.service.AnnouncementService;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
@@ -29,7 +29,7 @@ class AnnouncementControllerTest {
     private final AdminApprovalService approvals=mock(AdminApprovalService.class);
     private final JsonMapper json=JsonMapper.builder().findAndAddModules().build();
     private final MockMvc mvc=MockMvcBuilders.standaloneSetup(new AdminAnnouncementController(service,approvals,json),new ClientAnnouncementController(service))
-            .setControllerAdvice(new AnnouncementExceptionHandler()).build();
+            .setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
     private SaveRequest valid() { return new SaveRequest("GENERAL",10,List.of("CENTER"),List.of("SPOT"),List.of("WEB"),Instant.parse("2026-10-01T00:00:00Z"),null,List.of(new TranslationInput("en-US","Title","Summary","Body",null)),null); }
 
     @Test void malformedDraftsNeverReachBusinessAggregation() throws Exception {

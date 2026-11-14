@@ -29,6 +29,10 @@ public class WalletFundingService {
         this.addressRepository = addressRepository;
     }
 
+    public List<Map<String, Object>> custodyChains() {
+        return custody.chains();
+    }
+
     public List<FundingAsset> catalog(String operation) {
         if (!Set.of("deposit", "withdraw").contains(operation)) throw new IllegalArgumentException("invalid funding operation");
         var chains = custody.chains();

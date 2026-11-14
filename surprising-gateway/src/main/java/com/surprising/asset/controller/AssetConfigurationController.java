@@ -39,6 +39,12 @@ public class AssetConfigurationController {
         return service.list(listedOnly);
     }
 
+    @GetMapping("/custody-chains")
+    public List<java.util.Map<String, Object>> custodyChains(@RequestHeader("Authorization") String authorization) {
+        auth.requireAdminPermission(authorization, "admin.wallet.read");
+        return execute(funding::custodyChains);
+    }
+
     @PostMapping
     public Asset save(@RequestHeader("Authorization") String authorization, @RequestBody byte[] body, HttpServletRequest request) {
         long operatorId = requireWrite(authorization, request, body);
