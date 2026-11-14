@@ -59,7 +59,7 @@ public class GatewaySecurityConfiguration {
                 .addFilterBefore(addresses, GatewayBearerFilter.class)
                 .addFilterBefore(permissions, AuthorizationFilter.class)
                 .authorizeHttpRequests(access -> access
-                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
+                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC, DispatcherType.FORWARD).permitAll()
                         .requestMatchers("/actuator/**", "/internal/**", "/api/v1/accounts/**", "/api/v1/trading/**")
                             .access((authentication, context) -> new org.springframework.security.authorization.AuthorizationDecision(
                                     List.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(context.getRequest().getRemoteAddr())))

@@ -72,6 +72,8 @@ public class GatewayProxyController {
     private final ObjectMapper objectMapper;
     private final ProductTransferService productTransferCoordinator;
     private final ProductTransferSecurityService productTransferSecurityService;
+    @Autowired(required = false)
+    private org.springframework.web.servlet.DispatcherServlet dispatcherServlet;
 
     @Autowired
     public GatewayProxyController(GatewayProperties properties,
@@ -270,14 +272,17 @@ public class GatewayProxyController {
                                             HttpServletRequest request,
                                             GatewayIdentity identity,
                                             GatewayProperties.BackendRoute route) {
-        if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
+        if ("local".equalsIgnoreCase(target.getScheme())) {
             HttpHeaders trustedHeaders = headers(request, identity, route);
             ProductLine product = productSelection.resolve(request, body, !isSharedLocalService(service, request));
             if (product != null) trustedHeaders.set("X-Product-Line", product.name());
             else trustedHeaders.remove("X-Product-Line");
-            var local = isSharedLocalService(service, request) ? sharedBusinessApi : products.local(product);
-            return local.invoke(service, target, method, trustedHeaders, body,
-                    properties.getHttpClient().getReadTimeout());
+            if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
+                var local = isSharedLocalService(service, request) ? sharedBusinessApi : products.local(product);
+                return local.invoke(service, target, method, trustedHeaders, body,
+                        properties.getHttpClient().getReadTimeout());
+            }
+            return forwardLocalController(request, target, method, trustedHeaders, body);
         }
         try {
             return restTemplate.exchange(target, method, new HttpEntity<>(body, headers(request, identity, route)),
@@ -391,8 +396,188 @@ public class GatewayProxyController {
     }
 
     private boolean isSharedLocalService(String service, HttpServletRequest request) {
-        return java.util.Set.of("instrument", "instrument-admin", "websocket-admin").contains(service.toLowerCase(Locale.ROOT))
+        return java.util.Set.of("instrument", "instrument-admin", "websocket-admin", "price-fx")
+                .contains(service.toLowerCase(Locale.ROOT))
                 && !request.getRequestURI().endsWith("/order-settings");
+    }
+
+    private ResponseEntity<byte[]> forwardLocalController(HttpServletRequest request, URI target, HttpMethod method,
+                                                          HttpHeaders trustedHeaders, byte[] body) {
+        var attrs = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        var response = attrs instanceof org.springframework.web.context.request.ServletRequestAttributes sra
+                ? sra.getResponse() : null;
+        if (response == null) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "servlet response unavailable");
+        }
+        var wrappedRequest = new LocalForwardRequestWrapper(request, target, method.name(), trustedHeaders, body);
+        var capturedResponse = new LocalForwardResponseWrapper(response);
+        try {
+            if (dispatcherServlet != null) {
+                dispatcherServlet.service(wrappedRequest, capturedResponse);
+            } else {
+                request.getRequestDispatcher(target.getRawPath()).forward(wrappedRequest, capturedResponse);
+            }
+            byte[] payload = capturedResponse.bytes();
+            HttpHeaders outHeaders = new HttpHeaders();
+            for (String headerName : capturedResponse.getHeaderNames()) {
+                if (HttpHeaders.CONTENT_LENGTH.equalsIgnoreCase(headerName)
+                        || HttpHeaders.TRANSFER_ENCODING.equalsIgnoreCase(headerName)) {
+                    continue;
+                }
+                outHeaders.addAll(headerName, List.copyOf(capturedResponse.getHeaders(headerName)));
+            }
+            if (capturedResponse.getContentType() != null && !outHeaders.containsHeader(HttpHeaders.CONTENT_TYPE)) {
+                outHeaders.set(HttpHeaders.CONTENT_TYPE, capturedResponse.getContentType());
+            }
+            return ResponseEntity.status(capturedResponse.getStatus()).headers(outHeaders).body(payload);
+        } catch (jakarta.servlet.ServletException | java.io.IOException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "local controller forward failed", ex);
+        }
+    }
+
+    private static final class LocalForwardRequestWrapper extends jakarta.servlet.http.HttpServletRequestWrapper {
+        private final URI target;
+        private final String method;
+        private final HttpHeaders headers;
+        private final byte[] body;
+        private final java.util.Map<String, Object> localAttributes = new java.util.LinkedHashMap<>();
+
+        LocalForwardRequestWrapper(HttpServletRequest request, URI target, String method, HttpHeaders headers, byte[] body) {
+            super(request);
+            this.target = target;
+            this.method = method;
+            this.headers = headers;
+            this.body = body == null ? new byte[0] : body;
+        }
+
+        @Override public String getMethod() { return method; }
+        @Override public String getRequestURI() { return target.getRawPath(); }
+        @Override public String getServletPath() { return target.getRawPath(); }
+        @Override public String getPathInfo() { return null; }
+        @Override public String getQueryString() { return target.getRawQuery() != null ? target.getRawQuery() : super.getQueryString(); }
+        @Override public Object getAttribute(String name) {
+            if (localAttributes.containsKey(name)) return localAttributes.get(name);
+            if (name != null && (name.startsWith("org.springframework.web.servlet.HandlerMapping.")
+                    || name.startsWith("org.springframework.web.util.ServletRequestPathUtils."))) {
+                return null;
+            }
+            return super.getAttribute(name);
+        }
+        @Override public void setAttribute(String name, Object o) { localAttributes.put(name, o); }
+        @Override public void removeAttribute(String name) { localAttributes.remove(name); }
+        @Override public String getHeader(String name) { return headers.getFirst(name); }
+        @Override public java.util.Enumeration<String> getHeaders(String name) {
+            List<String> values = headers.get(name);
+            return java.util.Collections.enumeration(values == null ? List.of() : values);
+        }
+        @Override public java.util.Enumeration<String> getHeaderNames() {
+            return java.util.Collections.enumeration(headers.headerNames());
+        }
+        @Override public int getContentLength() { return body.length; }
+        @Override public long getContentLengthLong() { return body.length; }
+        @Override public String getContentType() { return headers.getFirst(HttpHeaders.CONTENT_TYPE); }
+        @Override public jakarta.servlet.ServletInputStream getInputStream() {
+            var bais = new java.io.ByteArrayInputStream(body);
+            return new jakarta.servlet.ServletInputStream() {
+                @Override public boolean isFinished() { return bais.available() == 0; }
+                @Override public boolean isReady() { return true; }
+                @Override public void setReadListener(jakarta.servlet.ReadListener readListener) { }
+                @Override public int read() { return bais.read(); }
+            };
+        }
+        @Override public java.io.BufferedReader getReader() {
+            return new java.io.BufferedReader(new java.io.InputStreamReader(getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
+    private static final class LocalForwardResponseWrapper extends jakarta.servlet.http.HttpServletResponseWrapper {
+        private final java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        private final HttpHeaders headers = new HttpHeaders();
+        private int status = HttpStatus.OK.value();
+        private String contentType;
+        private String characterEncoding = java.nio.charset.StandardCharsets.UTF_8.name();
+        private boolean committed;
+        private jakarta.servlet.ServletOutputStream outputStream;
+        private java.io.PrintWriter writer;
+
+        LocalForwardResponseWrapper(jakarta.servlet.http.HttpServletResponse response) {
+            super(response);
+        }
+
+        @Override public int getStatus() { return status; }
+        @Override public void setStatus(int sc) { this.status = sc; }
+        @Override public void sendError(int sc) { sendError(sc, null); }
+        @Override public void sendError(int sc, String msg) {
+            resetBuffer();
+            this.status = sc;
+            this.committed = true;
+        }
+        @Override public void setHeader(String name, String value) {
+            if (value == null) headers.remove(name);
+            else headers.set(name, value);
+        }
+        @Override public void addHeader(String name, String value) {
+            if (value != null) headers.add(name, value);
+        }
+        @Override public void setIntHeader(String name, int value) { setHeader(name, Integer.toString(value)); }
+        @Override public void addIntHeader(String name, int value) { addHeader(name, Integer.toString(value)); }
+        @Override public void setDateHeader(String name, long date) { headers.setDate(name, date); }
+        @Override public void addDateHeader(String name, long date) { headers.setDate(name, date); }
+        @Override public boolean containsHeader(String name) { return headers.containsHeader(name); }
+        @Override public String getHeader(String name) { return headers.getFirst(name); }
+        @Override public java.util.Collection<String> getHeaders(String name) {
+            List<String> values = headers.get(name);
+            return values == null ? List.of() : values;
+        }
+        @Override public java.util.Collection<String> getHeaderNames() { return headers.headerNames(); }
+        @Override public String getContentType() { return contentType != null ? contentType : headers.getFirst(HttpHeaders.CONTENT_TYPE); }
+        @Override public void setContentType(String type) {
+            this.contentType = type;
+            if (type != null) headers.set(HttpHeaders.CONTENT_TYPE, type);
+        }
+        @Override public String getCharacterEncoding() { return characterEncoding; }
+        @Override public void setCharacterEncoding(String charset) {
+            if (charset != null) this.characterEncoding = charset;
+        }
+        @Override public void setContentLength(int len) { }
+        @Override public void setContentLengthLong(long len) { }
+        @Override public boolean isCommitted() { return committed; }
+        @Override public void resetBuffer() {
+            buffer.reset();
+            if (writer != null) writer.flush();
+        }
+        @Override public void reset() {
+            resetBuffer();
+            headers.clear();
+            status = HttpStatus.OK.value();
+            contentType = null;
+            committed = false;
+        }
+        @Override public jakarta.servlet.ServletOutputStream getOutputStream() {
+            if (outputStream == null) {
+                outputStream = new jakarta.servlet.ServletOutputStream() {
+                    @Override public boolean isReady() { return true; }
+                    @Override public void setWriteListener(jakarta.servlet.WriteListener writeListener) { }
+                    @Override public void write(int b) { buffer.write(b); }
+                    @Override public void write(byte[] b, int off, int len) { buffer.write(b, off, len); }
+                };
+            }
+            return outputStream;
+        }
+        @Override public java.io.PrintWriter getWriter() throws java.io.UnsupportedEncodingException {
+            if (writer == null) {
+                writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(getOutputStream(), characterEncoding), true);
+            }
+            return writer;
+        }
+        @Override public void flushBuffer() {
+            if (writer != null) writer.flush();
+            committed = true;
+        }
+        byte[] bytes() {
+            if (writer != null) writer.flush();
+            return buffer.toByteArray();
+        }
     }
 
     private GatewayProperties.BackendRoute resolveRoute(String service, boolean admin,
