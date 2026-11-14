@@ -27,6 +27,7 @@ import org.springframework.stereotype.Component;
 @Component
 @ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true")
 public final class MarkPriceMarketSubscription implements AutoCloseable {
+    private static final CoreOrderSide[] ORDER_SIDES = CoreOrderSide.values();
     private final MarkPriceProperties properties;
     private final MarkPriceService prices;
     private final MarkPriceEncodingService encodings;
@@ -104,12 +105,12 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
             long ticks = bytes.getLong(), quantity = bytes.getLong();
             bytes.getLong();
             int side = Byte.toUnsignedInt(bytes.get());
-            if (ticks <= 0 || quantity <= 0 || side >= CoreOrderSide.values().length)
+            if (ticks <= 0 || quantity <= 0 || side >= ORDER_SIDES.length)
                 throw new IllegalArgumentException("invalid market trade");
             prices.acceptTrade(new PerpTradeEvent(frame.instrumentId(), frame.entityId(), frame.sequence(), time,
                     price(ticks, encoding), BigDecimal.valueOf(quantity).multiply(BigDecimal.valueOf(encoding.quantityStepUnits()))
                     .divide(BigDecimal.valueOf(encoding.baseScaleUnits()), 18, RoundingMode.HALF_UP),
-                    CoreOrderSide.values()[side].name()));
+                    ORDER_SIDES[side].name()));
         }
     }
 

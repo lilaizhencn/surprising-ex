@@ -18,7 +18,7 @@ class WebSocketApplicationYamlTest {
 
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.group-id"))
-                .contains("${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}");
+                .contains("surprising-websocket-${random.uuid}");
         assertThat(new WebSocketProperties.Kafka().getMaxPollRecords()).isEqualTo(1000);
         assertThat(sources)
                 .extracting(source -> source.getProperty("surprising.websocket.kafka.product-line"))

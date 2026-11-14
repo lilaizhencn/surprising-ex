@@ -1,14 +1,11 @@
 package com.surprising.gateway.provider.interceptor;
 
 import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
-import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
-import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
+import com.surprising.gateway.provider.interceptor.GatewayAccessSupport.GatewayIdentity;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.product.api.ProductLine;
 import jakarta.servlet.FilterChain;
@@ -17,9 +14,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
@@ -29,7 +23,6 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.server.ResponseStatusException;
@@ -41,8 +34,6 @@ import org.springframework.web.server.ResponseStatusException;
 public class GatewayDirectAccessFilter extends OncePerRequestFilter {
 
     private record DirectRoute(String service, boolean privateRoute, boolean admin, boolean shared) {}
-
-    private record Identity(String userId, String username, List<String> roles, boolean admin) {}
 
     private final GatewayProperties properties;
     private final AuthService authService;
@@ -79,17 +70,20 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
         }
         long startedNanos = System.nanoTime();
         byte[] body = cachedBody(request);
-        Identity identity = null;
+        GatewayIdentity identity = null;
         String bodyHash = null;
         HttpStatus failureStatus = null;
         String failureReason = null;
         try {
             ProductLine product = productSelection == null ? null
                     : productSelection.resolve(request, body, !route.shared());
-            identity = route.admin() ? enforceAdminIdentity(request) : enforceIdentity(route, request, body);
+            identity = route.admin()
+                    ? GatewayAccessSupport.authenticateAdmin(authService, properties, request, "admin route requires auth service")
+                    : enforceIdentity(route, request, body);
             if (route.admin()) {
-                enforceAdminPermission(route.service(), request.getMethod(), identity);
-                bodyHash = bodySha256(body);
+                GatewayAccessSupport.enforceAdminPermission(authService, route.service(),
+                        GatewayAccessSupport.isReadMethod(request.getMethod()), identity);
+                bodyHash = GatewayAccessSupport.bodySha256(body, true);
                 enforceAdminApprovalIfRequired(route.service(), request, bodyHash, identity);
             } else if (identity != null) {
                 enforceQueryUserIdOwnership(request, identity);
@@ -102,27 +96,13 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
             GatewaySecurityErrors.write(response, ex.getStatusCode().value(),
                     ex.getReason() != null ? ex.getReason() : ex.getStatusCode().toString());
         } finally {
-            if (route.admin() && identity != null && adminOperations != null) {
+            if (route.admin()) {
                 int status = failureStatus != null ? failureStatus.value() : response.getStatus();
                 boolean success = failureStatus == null && status < 400;
                 long elapsedMs = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, System.nanoTime() - startedNanos));
-                adminOperations.recordGatewayOperation(new AdminOperationRecord(
-                        parseLong(identity.userId()),
-                        identity.username(),
-                        identity.roles(),
-                        route.service(),
-                        request.getMethod(),
-                        request.getRequestURI(),
-                        request.getQueryString(),
-                        request.getRequestURI(),
-                        bodyHash,
-                        status,
-                        elapsedMs,
-                        success,
-                        failureReason,
-                        request.getHeader(HttpHeaders.USER_AGENT),
-                        request.getRemoteAddr(),
-                        Instant.now()));
+                GatewayAccessSupport.recordAdminOperation(adminOperations, identity, route.service(),
+                        request.getMethod(), request, request.getRequestURI(), bodyHash, status,
+                        elapsedMs, success, failureReason, request.getRemoteAddr());
             }
         }
     }
@@ -211,7 +191,7 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
         return null;
     }
 
-    private Identity enforceIdentity(DirectRoute route, HttpServletRequest request, byte[] body) {
+    private GatewayIdentity enforceIdentity(DirectRoute route, HttpServletRequest request, byte[] body) {
         if (!route.privateRoute() || !properties.getSecurity().isRequireIdentityForPrivateRoutes()) {
             return null;
         }
@@ -222,72 +202,23 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "choose bearer or API key authentication");
             }
             String requiredScope;
-            if (isReadMethod(request.getMethod())) {
+            if (GatewayAccessSupport.isReadMethod(request.getMethod())) {
                 requiredScope = "READ";
             } else if (supportsTradeApiKey(route.service())) {
                 requiredScope = "TRADE";
             } else {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "API key writes are not supported for this endpoint");
             }
-            try {
-                long user = apiKeys.authenticate(apiKeyRequests.bindNative(request, body), requiredScope);
-                return new Identity(Long.toString(user), null, List.of(), false);
-            } catch (ApiKeyAccessBlockedException blocked) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, blocked.getMessage(), blocked);
-            } catch (IllegalArgumentException invalid) {
-                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, invalid.getMessage(), invalid);
-            }
+            return GatewayAccessSupport.authenticateApiKey(apiKeys, apiKeyRequests, request, body, requiredScope);
         }
         if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            if (authService == null) {
-                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "user auth service is not configured");
-            }
-            try {
-                JwtPrincipal principal = authService.authenticateBearer(authorization);
-                return new Identity(Long.toString(principal.userId()), principal.username(), principal.roles(), false);
-            } catch (IllegalArgumentException ex) {
-                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-            } catch (IllegalStateException ex) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-            }
+            return GatewayAccessSupport.authenticateBearerUser(authService, authorization);
         }
         throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "private route requires bearer token");
     }
 
-    private Identity enforceAdminIdentity(HttpServletRequest request) {
-        String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (authService == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin route requires auth service");
-        }
-        try {
-            JwtPrincipal principal = authService.authenticateBearer(authorization);
-            if (principal.roles().stream().noneMatch(properties.getSecurity().getAdminRoles()::contains)) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin role required");
-            }
-            return new Identity(Long.toString(principal.userId()), principal.username(), principal.roles(), true);
-        } catch (ResponseStatusException ex) {
-            throw ex;
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
-    }
-
-    private void enforceAdminPermission(String service, String method, Identity identity) {
-        String action = isReadMethod(method) ? "read" : "write";
-        String permission = "admin.gateway." + service + "." + action;
-        try {
-            authService.requireAdminPermission(Long.parseLong(identity.userId()), identity.roles(), permission);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
-    }
-
     private void enforceAdminApprovalIfRequired(String service, HttpServletRequest request,
-                                                String bodyHash, Identity identity) {
+                                                String bodyHash, GatewayIdentity identity) {
         if (!properties.getSecurity().isRequireApprovalForHighRiskAdminWrites()) {
             return;
         }
@@ -297,33 +228,18 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
         if (!adminOperations.requiresGatewayApproval(service, request.getMethod(), request.getRequestURI(), true)) {
             return;
         }
-        String approvalHeader = request.getHeader(properties.getSecurity().getAdminApprovalHeader());
-        if (approvalHeader == null || approvalHeader.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "admin approval required");
-        }
-        long approvalId;
-        try {
-            approvalId = Long.parseLong(approvalHeader.trim());
-        } catch (NumberFormatException ex) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "invalid admin approval id", ex);
-        }
-        try {
-            adminOperations.consumeGatewayApproval(approvalId, Long.parseLong(identity.userId()),
-                    service, request.getMethod(), request.getRequestURI(), request.getQueryString(),
-                    bodyHash, Instant.now());
-        } catch (AdminApprovalRequiredException ex) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
-        }
+        GatewayAccessSupport.consumeAdminApproval(adminOperations, properties, service,
+                request.getMethod(), request, bodyHash, identity);
     }
 
-    private static void enforceQueryUserIdOwnership(HttpServletRequest request, Identity identity) {
+    private static void enforceQueryUserIdOwnership(HttpServletRequest request, GatewayIdentity identity) {
         String requestedUserId = request.getParameter("userId");
         if (requestedUserId != null && !requestedUserId.isBlank() && !identity.userId().equals(requestedUserId.trim())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "userId does not match authenticated user");
         }
     }
 
-    private HttpServletRequest wrapHeaders(HttpServletRequest request, ProductLine product, Identity identity) {
+    private HttpServletRequest wrapHeaders(HttpServletRequest request, ProductLine product, GatewayIdentity identity) {
         Map<String, String> injected = new LinkedHashMap<>();
         String userIdHeader = properties.getSecurity().getUserIdHeader();
         injected.put(userIdHeader, null);
@@ -351,31 +267,11 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
         return attr instanceof byte[] bytes ? bytes : null;
     }
 
-    private static boolean isReadMethod(String method) {
-        return HttpMethod.GET.matches(method) || HttpMethod.HEAD.matches(method) || HttpMethod.OPTIONS.matches(method);
-    }
-
     private static boolean supportsTradeApiKey(String service) {
         return switch (service) {
             case "trading", "trading-orders", "trading-trigger", "trading-leverage", "account" -> true;
             default -> false;
         };
-    }
-
-    private static String bodySha256(byte[] body) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(body == null ? new byte[0] : body);
-            StringBuilder sb = new StringBuilder(digest.length * 2);
-            for (byte b : digest) sb.append(String.format("%02x", b));
-            return sb.toString();
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 unavailable", ex);
-        }
-    }
-
-    private static Long parseLong(String value) {
-        try { return value == null ? null : Long.parseLong(value); }
-        catch (NumberFormatException ex) { return null; }
     }
 
     private static final class InjectedHeadersRequestWrapper extends HttpServletRequestWrapper {

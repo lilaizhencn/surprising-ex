@@ -17,6 +17,7 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
     private final String topic;
     private final ProductLine product;
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final CoreOrderSide[] ORDER_SIDES = CoreOrderSide.values();
     private final ObjectMapper mapper = MAPPER;
     private long tradeSequence;
     private long nextFailureLogNanos;
@@ -55,7 +56,7 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
                                 frame.entityId(),
                                 Math.incrementExact(tradeSequence),
                                 frame.instrumentId(),
-                                OrderSide.valueOf(CoreOrderSide.values()[side].name()),
+                                OrderSide.valueOf(ORDER_SIDES[side].name()),
                                 price,
                                 quantity,
                                 Instant.ofEpochMilli(frame.timestamp()));

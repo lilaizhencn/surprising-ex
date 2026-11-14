@@ -23,8 +23,8 @@ class MarkPriceApplicationYamlTest {
     void singleNodeClusterAddressBindsToMarkPriceCorePublisher() throws IOException {
         StandardEnvironment environment = environment(Map.of(
                 "PRODUCT_LINE", "LINEAR_PERPETUAL",
-                "AERON_CLUSTER_HOSTNAMES", "127.0.0.1",
-                "AERON_EGRESS_HOSTNAME", "127.0.0.1"));
+                "surprising.gateway.products.default-core.hostnames", "127.0.0.1",
+                "surprising.gateway.products.default-core.egress-hostname", "127.0.0.1"));
         var gatewayProducts = Binder.get(environment)
                 .bind("surprising.gateway.products", Bindable.of(com.surprising.gateway.provider.config.GatewayProductsProperties.class))
                 .get();

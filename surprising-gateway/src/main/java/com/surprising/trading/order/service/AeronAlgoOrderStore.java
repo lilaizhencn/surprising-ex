@@ -25,6 +25,8 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 
 @Service
 public class AeronAlgoOrderStore {
+    private static final AlgoOrderType[] ALGO_ORDER_TYPES = AlgoOrderType.values();
+    private static final AlgoOrderStatus[] ALGO_ORDER_STATUSES = AlgoOrderStatus.values();
     private final OrderAeronGateway aeron;
     private final TradingOrderProperties properties;
 
@@ -81,11 +83,11 @@ public class AeronAlgoOrderStore {
         var productLine = properties.getProductLine();
 
         return new AlgoOrderRecord(value.algoOrderId(), productLine, value.userId(), empty(value.clientAlgoOrderId()),
-                value.instrumentId(), AlgoOrderType.values()[value.algoTypeCode()], OrderSide.valueOf(value.side().name()),
+                value.instrumentId(), ALGO_ORDER_TYPES[value.algoTypeCode()], OrderSide.valueOf(value.side().name()),
                 value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(), value.intervalSeconds(),
                 value.durationSeconds(), MarginMode.valueOf(value.marginMode().name()),
                 PositionSide.valueOf(value.positionSide().name()), value.reduceOnly(),
-                TimeInForce.valueOf(value.timeInForce().name()), AlgoOrderStatus.values()[value.statusCode()],
+                TimeInForce.valueOf(value.timeInForce().name()), ALGO_ORDER_STATUSES[value.statusCode()],
                 value.currentOrderId() == 0 ? null : value.currentOrderId(), empty(value.rejectReason()),
                 instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()), instant(value.createdAtEpochMillis()), instant(value.updatedAtEpochMillis()));
     }

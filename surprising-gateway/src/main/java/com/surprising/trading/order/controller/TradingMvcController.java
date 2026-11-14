@@ -40,6 +40,7 @@ public class TradingMvcController {
     private final TradingFeeRequestHandler tradingFeeRequests;
     private final MatchingMarketDataService marketDataService;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TradingMvcController(OrderRequestHandler orderRequests,
                                 TriggerOrderRequestHandler triggerOrderRequests,
                                 LeverageRequestHandler leverageRequests,
@@ -50,6 +51,14 @@ public class TradingMvcController {
         this.leverageRequests = leverageRequests;
         this.tradingFeeRequests = tradingFeeRequests;
         this.marketDataService = marketDataService;
+    }
+
+    public TradingMvcController(OrderRequestHandler orderRequests) {
+        this(orderRequests, null, null, null, null);
+    }
+
+    public TradingMvcController(MatchingMarketDataService marketDataService) {
+        this(null, null, null, null, marketDataService);
     }
 
     @GetMapping("/api/v1/trading/orders/trades")
@@ -133,10 +142,18 @@ public class TradingMvcController {
     }
 
     @GetMapping("/api/v1/trading/market/orderbook")
-    public Object orderBook(
+    public com.surprising.trading.api.model.OrderBookSnapshotResponse orderBook(
             @RequestParam("instrumentId") String instrumentId,
             @RequestParam(value = "depth", defaultValue = "30") int depth) {
-        return marketDataService.orderBookSnapshot(instrumentId, depth);
+        try {
+            return marketDataService.orderBookSnapshot(instrumentId, depth);
+        } catch (com.surprising.realtime.api.exception.ReadViewUnavailableException unavailable) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, unavailable.getMessage(), unavailable);
+        } catch (IllegalArgumentException ex) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping("/api/v1/trading/fees/effective")

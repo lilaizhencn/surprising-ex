@@ -85,14 +85,14 @@ public class BinanceApiController {
         }
         String path = request.getRequestURI();
         boolean supported = ACCOUNT_PATHS.contains(path);
-        for (String prefix : java.util.List.of("/api/v3", "/fapi/v1", "/dapi/v1", "/eapi/v1"))
+        for (String prefix : COMPATIBLE_PREFIXES)
             if (path.startsWith(prefix + "/") && MARKET_PATHS.contains(path.substring(prefix.length()))) supported = true;
         if (!supported) return error(HttpStatus.NOT_FOUND, -1003, "unsupported compatible endpoint");
         String method = request.getMethod();
         boolean orderEndpoint = path.endsWith("/order");
         boolean writeEndpoint = path.endsWith("/asset/transfer") || path.endsWith("/capital/withdraw/apply");
         boolean methodAllowed;
-        if (orderEndpoint) methodAllowed = java.util.Set.of("GET", "POST", "DELETE").contains(method);
+        if (orderEndpoint) methodAllowed = ORDER_METHODS.contains(method);
         else if (writeEndpoint) methodAllowed = "POST".equals(method);
         else methodAllowed = "GET".equals(method);
         if (!methodAllowed) return error(HttpStatus.METHOD_NOT_ALLOWED, -1100, "HTTP method is not supported for this endpoint");
@@ -379,6 +379,10 @@ public class BinanceApiController {
         throw new IllegalArgumentException("orderId or origClientOrderId is required");
     }
 
+    private static final List<String> COMPATIBLE_PREFIXES = List.of("/api/v3", "/fapi/v1", "/dapi/v1", "/eapi/v1");
+    private static final java.util.Set<String> ORDER_METHODS = java.util.Set.of("GET", "POST", "DELETE");
+    private static final List<String> HISTORY_FILTER_PARAMS = List.of("orderId", "startTime", "endTime");
+
     private ResponseEntity<byte[]> orders(HttpServletRequest request, long userId) {
         String symbol = request.getParameter("symbol");
         String query = "userId=" + userId + "&limit=" + capped(request.getParameter("limit"));
@@ -386,15 +390,7 @@ public class BinanceApiController {
         ResponseEntity<byte[]> response = proxy("trading", "/open", request, null, userId, query);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> payload = readMap(response.getBody());
-        List<Map<String, Object>> result = new ArrayList<>();
-        Object rows = payload.get("orders");
-        if (rows instanceof List<?> list) {
-            for (Object row : list) {
-                result.add(orderView(mapValue(row), symbol == null ? properties.getBinanceApi().externalSymbol(stringValue(mapValue(row).get("instrumentId")), productLine(request)) : symbol,
-                        properties.getBinanceApi().scale(symbol == null ? properties.getBinanceApi().externalSymbol(stringValue(mapValue(row).get("instrumentId")), productLine(request)) : symbol)));
-            }
-        }
-        return json(HttpStatus.OK, result);
+        return json(HttpStatus.OK, mapOrderRows(payload.get("orders"), symbol, productLine(request)));
     }
 
     private ResponseEntity<byte[]> historyOrders(HttpServletRequest request, long userId) {
@@ -403,26 +399,30 @@ public class BinanceApiController {
         if (symbol != null && !symbol.isBlank()) {
             query += "&instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)));
         }
-        for (String parameter : List.of("orderId", "startTime", "endTime")) {
+        for (String parameter : HISTORY_FILTER_PARAMS) {
             String value = request.getParameter(parameter);
             if (value != null && !value.isBlank()) query += "&" + parameter + "=" + encode(value);
         }
         ResponseEntity<byte[]> response = proxy("trading", "/history", request, null, userId, query);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> payload = readMap(response.getBody());
+        List<Map<String, Object>> result = mapOrderRows(payload.get("orders"), symbol, productLine(request));
+        result.sort((left, right) -> Long.compare(number(left.get("orderId")),
+                number(right.get("orderId"))));
+        return json(HttpStatus.OK, result);
+    }
+
+    private List<Map<String, Object>> mapOrderRows(Object rows, String symbol, com.surprising.product.api.ProductLine productLine) {
         List<Map<String, Object>> result = new ArrayList<>();
-        Object rows = payload.get("orders");
         if (rows instanceof List<?> list) {
             for (Object row : list) {
                 Map<String, Object> value = mapValue(row);
                 String rowSymbol = symbol == null || symbol.isBlank()
-                        ? properties.getBinanceApi().externalSymbol(stringValue(value.get("instrumentId")), productLine(request)) : symbol;
+                        ? properties.getBinanceApi().externalSymbol(stringValue(value.get("instrumentId")), productLine) : symbol;
                 result.add(orderView(value, rowSymbol, properties.getBinanceApi().scale(rowSymbol)));
             }
         }
-        result.sort((left, right) -> Long.compare(number(left.get("orderId")),
-                number(right.get("orderId"))));
-        return json(HttpStatus.OK, result);
+        return result;
     }
 
     private ResponseEntity<byte[]> account(HttpServletRequest request, long userId) {

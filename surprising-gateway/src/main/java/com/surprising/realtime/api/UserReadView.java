@@ -23,6 +23,8 @@ public record UserReadView(
             long maintenanceMarginUnits,
             long marginRatioPpm,
             String status) {
+        private static final CorePositionSide[] POSITION_SIDES = CorePositionSide.values();
+
         public static PositionRisk decode(RealtimeFrame frame) {
             var b =
                     java.nio.ByteBuffer.wrap(frame.payload())
@@ -34,7 +36,7 @@ public record UserReadView(
                     ratio = b.getLong();
             return new PositionRisk(
                     frame.instrumentId(),
-                    CorePositionSide.values()[b.get()],
+                    POSITION_SIDES[b.get()],
                     Long.toString(price),
                     equity,
                     pnl,

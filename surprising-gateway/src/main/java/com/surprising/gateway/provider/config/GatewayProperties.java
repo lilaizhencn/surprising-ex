@@ -15,13 +15,9 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.context.EnvironmentAware;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
 
 @ConfigurationProperties(prefix = "surprising.gateway")
 public class GatewayProperties implements EnvironmentAware {
-
-    private static final ObjectMapper JSON = new ObjectMapper();
 
     private Environment environment = new StandardEnvironment();
     @Getter
@@ -244,32 +240,6 @@ public class GatewayProperties implements EnvironmentAware {
     }
 
     public void setKyc(Kyc kyc) { this.kyc = kyc == null ? new Kyc() : kyc; }
-
-    private static Map<?, ?> readJsonObject(String value) {
-        if (value == null || value.isBlank() || value.trim().equals("{}")) {
-            return Map.of();
-        }
-        try {
-            Object parsed = JSON.readValue(value, Object.class);
-            if (!(parsed instanceof Map<?, ?> map)) {
-                throw new IllegalArgumentException("configuration JSON must be an object");
-            }
-            return map;
-        } catch (JacksonException ex) {
-            throw new IllegalArgumentException("configuration JSON is invalid", ex);
-        }
-    }
-
-    private static Map<String, String> readStringMap(String value) {
-        Map<String, String> result = new LinkedHashMap<>();
-        readJsonObject(value).forEach((key, item) -> {
-            if (key == null || item == null) {
-                throw new IllegalArgumentException("configuration map contains null entry");
-            }
-            result.put(key.toString(), item.toString());
-        });
-        return result;
-    }
 
     private static Map<String, BackendRoute> defaultRoutes() {
         Map<String, BackendRoute> routes = new LinkedHashMap<>();
@@ -501,39 +471,8 @@ public class GatewayProperties implements EnvironmentAware {
             this.symbolAliases = symbolAliases == null ? Map.of() : Map.copyOf(symbolAliases);
         }
 
-        public void setSymbolAliasesJson(String symbolAliasesJson) {
-            if (symbolAliasesJson != null && !symbolAliasesJson.trim().equals("{}")) {
-                setSymbolAliases(readStringMap(symbolAliasesJson));
-            }
-        }
-
         public void setSymbolScales(Map<String, SymbolScale> symbolScales) {
             this.symbolScales = symbolScales == null ? Map.of() : Map.copyOf(symbolScales);
-        }
-
-        public void setSymbolScalesJson(String symbolScalesJson) {
-            if (symbolScalesJson == null || symbolScalesJson.trim().equals("{}")) {
-                return;
-            }
-            Map<String, SymbolScale> result = new LinkedHashMap<>();
-            readJsonObject(symbolScalesJson).forEach((key, value) -> {
-                if (!(value instanceof Map<?, ?> scale)) {
-                    throw new IllegalArgumentException("symbol scale must be an object");
-                }
-                SymbolScale target = new SymbolScale();
-                target.setPriceScale(integer(scale.get("priceScale"), "priceScale"));
-                target.setQuantityScale(integer(scale.get("quantityScale"), "quantityScale"));
-                result.put(key.toString(), target);
-            });
-            setSymbolScales(result);
-        }
-
-        private static int integer(Object value, String field) {
-            try {
-                return Integer.parseInt(String.valueOf(value));
-            } catch (NumberFormatException ex) {
-                throw new IllegalArgumentException("symbol scale " + field + " is invalid", ex);
-            }
         }
 
         public String backendInstrumentId(String symbol, com.surprising.product.api.ProductLine line) {

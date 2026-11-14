@@ -1,5 +1,5 @@
 server:
-  address: ${GATEWAY_BIND_ADDRESS:127.0.0.1}
+  address: 127.0.0.1
   port: 9094
   max-http-request-header-size: 16KB
   tomcat:
@@ -13,11 +13,11 @@ server:
 
 spring:
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: localhost:9092
   data:
     redis:
-      connect-timeout: ${GATEWAY_VALKEY_CONNECT_TIMEOUT:200ms}
-      timeout: ${GATEWAY_VALKEY_TIMEOUT:200ms}
+      connect-timeout: 200ms
+      timeout: 200ms
   jackson:
     deserialization:
       accept-float-as-int: false
@@ -25,8 +25,8 @@ spring:
     name: surprising-gateway
   servlet:
     multipart:
-      max-file-size: ${GATEWAY_MULTIPART_MAX_FILE_SIZE:64MB}
-      max-request-size: ${GATEWAY_MULTIPART_MAX_REQUEST_SIZE:68MB}
+      max-file-size: 64MB
+      max-request-size: 68MB
   main:
     keep-alive: true
   threads:
@@ -45,8 +45,8 @@ spring:
     username: surprising
     password: surprising
     hikari:
-      maximum-pool-size: ${BUSINESS_DB_MAX_POOL_SIZE:30}
-      minimum-idle: ${BUSINESS_DB_MIN_IDLE:4}
+      maximum-pool-size: 30
+      minimum-idle: 4
       connection-timeout: 3000
 management:
   endpoint:
@@ -74,102 +74,102 @@ management:
 surprising:
   content:
     r2:
-      enabled: ${GATEWAY_CONTENT_R2_ENABLED:false}
-      endpoint: ${GATEWAY_CONTENT_R2_ENDPOINT:}
-      access-key-id: ${GATEWAY_CONTENT_R2_ACCESS_KEY_ID:}
-      secret-access-key: ${GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY:}
+      enabled: false
+      endpoint: ""
+      access-key-id: ""
+      secret-access-key: ""
       bucket: surprising-ex-public
       public-base-url: https://ex-cdn.tokdou.com
   c2c:
-    enabled: ${C2C_ENABLED:false}
+    enabled: false
     r2:
-      enabled: ${C2C_R2_ENABLED:false}
-      type: ${C2C_R2_TYPE:s3}
-      endpoint: ${C2C_R2_ENDPOINT:}
-      account-id: ${C2C_R2_ACCOUNT_ID:}
-      access-key-id: ${C2C_R2_ACCESS_KEY_ID:}
-      secret-access-key: ${C2C_R2_SECRET_ACCESS_KEY:}
-      bucket: ${C2C_R2_BUCKET:app-private}
-      region: ${C2C_R2_REGION:us-east-1}
-      prefix: ${C2C_R2_PREFIX:private/trading/c2c/}
-      presigned-url-expiry-seconds: ${C2C_R2_PRESIGNED_URL_EXPIRY_SECONDS:300}
-      root-path: ${C2C_R2_ROOT_PATH:/tmp/surprising-c2c-attachments}
+      enabled: false
+      type: s3
+      endpoint: ""
+      account-id: ""
+      access-key-id: ""
+      secret-access-key: ""
+      bucket: app-private
+      region: us-east-1
+      prefix: private/trading/c2c/
+      presigned-url-expiry-seconds: 300
+      root-path: /tmp/surprising-c2c-attachments
   gateway:
     products:
       default-core:
-        hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost}
-        egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
-        response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
-        client-connections: ${AERON_CLIENT_CONNECTIONS:4}
+        hostnames: localhost
+        egress-hostname: localhost
+        response-timeout: 5s
+        client-connections: 4
     withdrawal:
-      single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT:10000}
-      daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT:50000}
-      valuation-max-age: ${GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE:30s}
-      failure-reconciliation-delay: ${GATEWAY_WITHDRAWAL_FAILURE_RECONCILIATION_DELAY:30s}
+      single-approval-threshold-usdt: 10000
+      daily-limit-usdt: 50000
+      valuation-max-age: 30s
+      failure-reconciliation-delay: 30s
     product-transfer:
-      verification-threshold-usdt: ${GATEWAY_PRODUCT_TRANSFER_VERIFICATION_THRESHOLD_USDT:10000}
-      reconciliation-delay: ${GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_DELAY:5s}
-      reconciliation-batch-size: ${GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_BATCH_SIZE:100}
+      verification-threshold-usdt: 10000
+      reconciliation-delay: 5s
+      reconciliation-batch-size: 100
     custody-wallet:
-      enabled: ${GATEWAY_CUSTODY_WALLET_ENABLED:false}
-      base-url: ${GATEWAY_CUSTODY_WALLET_BASE_URL:http://localhost:8002}
-      api-key: ${GATEWAY_CUSTODY_WALLET_API_KEY:}
-      api-secret: ${GATEWAY_CUSTODY_WALLET_API_SECRET:}
-      webhook-secret: ${GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET:}
-      request-timeout: ${GATEWAY_CUSTODY_WALLET_REQUEST_TIMEOUT:10s}
+      enabled: false
+      base-url: http://localhost:8002
+      api-key: ""
+      api-secret: ""
+      webhook-secret: ""
+      request-timeout: 10s
     kyc-documents:
-      enabled: ${GATEWAY_KYC_DOCUMENTS_ENABLED:false}
-      type: ${GATEWAY_KYC_DOCUMENTS_TYPE:s3}
-      endpoint: ${GATEWAY_KYC_DOCUMENTS_ENDPOINT:}
-      bucket: ${GATEWAY_KYC_DOCUMENTS_BUCKET:}
-      region: ${GATEWAY_KYC_DOCUMENTS_REGION:us-east-1}
-      access-key: ${GATEWAY_KYC_DOCUMENTS_ACCESS_KEY:}
-      secret-key: ${GATEWAY_KYC_DOCUMENTS_SECRET_KEY:}
-      root-path: ${GATEWAY_KYC_DOCUMENTS_ROOT_PATH:/tmp/surprising-kyc-documents}
-      prefix: ${GATEWAY_KYC_DOCUMENTS_PREFIX:kyc}
-      max-file-size-bytes: ${GATEWAY_KYC_DOCUMENTS_MAX_FILE_SIZE_BYTES:15728640}
+      enabled: false
+      type: s3
+      endpoint: ""
+      bucket: ""
+      region: us-east-1
+      access-key: ""
+      secret-key: ""
+      root-path: /tmp/surprising-kyc-documents
+      prefix: kyc
+      max-file-size-bytes: 15728640
     kyc:
-      provider: ${GATEWAY_KYC_PROVIDER:SUMSUB}
-      validity: ${GATEWAY_KYC_VALIDITY:365d}
-      simulation-enabled: ${GATEWAY_KYC_SIMULATION_ENABLED:true}
+      provider: SUMSUB
+      validity: 365d
+      simulation-enabled: true
       sumsub:
-        app-token: ${GATEWAY_KYC_SUMSUB_APP_TOKEN:}
-        secret-key: ${GATEWAY_KYC_SUMSUB_SECRET_KEY:}
-        webhook-secret: ${GATEWAY_KYC_SUMSUB_WEBHOOK_SECRET:}
+        app-token: ""
+        secret-key: ""
+        webhook-secret: ""
         level-names:
-          INDIVIDUAL_BASIC: ${GATEWAY_KYC_SUMSUB_LEVEL_NAME:basic-kyc-level}
-          INDIVIDUAL_STANDARD: ${GATEWAY_KYC_SUMSUB_INDIVIDUAL_STANDARD_LEVEL_NAME:}
-          INDIVIDUAL_ENHANCED: ${GATEWAY_KYC_SUMSUB_INDIVIDUAL_ENHANCED_LEVEL_NAME:}
-          BUSINESS_BASIC: ${GATEWAY_KYC_SUMSUB_BUSINESS_BASIC_LEVEL_NAME:}
-          BUSINESS_STANDARD: ${GATEWAY_KYC_SUMSUB_BUSINESS_STANDARD_LEVEL_NAME:}
-          BUSINESS_ENHANCED: ${GATEWAY_KYC_SUMSUB_BUSINESS_ENHANCED_LEVEL_NAME:}
-        base-url: ${GATEWAY_KYC_SUMSUB_BASE_URL:https://api.sumsub.com}
+          INDIVIDUAL_BASIC: basic-kyc-level
+          INDIVIDUAL_STANDARD: ""
+          INDIVIDUAL_ENHANCED: ""
+          BUSINESS_BASIC: ""
+          BUSINESS_STANDARD: ""
+          BUSINESS_ENHANCED: ""
+        base-url: https://api.sumsub.com
       veriff:
-        kyc-level: ${GATEWAY_KYC_VERIFF_LEVEL:BASIC}
-        api-key: ${GATEWAY_KYC_VERIFF_API_KEY:}
-        shared-secret: ${GATEWAY_KYC_VERIFF_SHARED_SECRET:}
-        base-url: ${GATEWAY_KYC_VERIFF_BASE_URL:https://stationapi.veriff.com}
-        callback-url: ${GATEWAY_KYC_VERIFF_CALLBACK_URL:}
+        kyc-level: BASIC
+        api-key: ""
+        shared-secret: ""
+        base-url: https://stationapi.veriff.com
+        callback-url: ""
     binance-api:
-      enabled: ${GATEWAY_BINANCE_API_ENABLED:true}
-      symbol-aliases-json: ${GATEWAY_BINANCE_SYMBOL_ALIASES:{}}
-      symbol-scales-json: ${GATEWAY_BINANCE_SYMBOL_SCALES:{}}
+      enabled: true
+      symbol-aliases: {}
+      symbol-scales: {}
     security:
-      admin-browser-allowed-origins: ${GATEWAY_ADMIN_BROWSER_ALLOWED_ORIGINS:http://localhost:5174,http://127.0.0.1:5174,https://ex-api.tokdou.com}
-      phone-registration-enabled: ${GATEWAY_PHONE_REGISTRATION_ENABLED:false}
-      require-email-verification: ${GATEWAY_REQUIRE_EMAIL_VERIFICATION:false}
-      resend-api-key: ${RESEND_API_KEY:}
-      resend-from: ${RESEND_FROM:}
-      resend-base-url: ${RESEND_BASE_URL:https://api.resend.com}
-      verification-code-pepper: ${GATEWAY_VERIFICATION_CODE_PEPPER:local-dev-verification-pepper-change-me}
-      simulated-verification-codes-enabled: ${GATEWAY_SIMULATED_VERIFICATION_CODES_ENABLED:false}
-      verification-code-ttl: ${GATEWAY_VERIFICATION_CODE_TTL:10m}
-      mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY:}
-      jwt-secret: ${GATEWAY_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
-      session-ttl: ${GATEWAY_SESSION_TTL:7d}
-      admin-session-ttl: ${GATEWAY_ADMIN_SESSION_TTL:8h}
-      browser-cookie-secure: ${GATEWAY_BROWSER_COOKIE_SECURE:true}
-      browser-cookie-domain: ${GATEWAY_BROWSER_COOKIE_DOMAIN:}
+      admin-browser-allowed-origins: http://localhost:5174,http://127.0.0.1:5174,https://ex-api.tokdou.com
+      phone-registration-enabled: false
+      require-email-verification: false
+      resend-api-key: ""
+      resend-from: ""
+      resend-base-url: https://api.resend.com
+      verification-code-pepper: local-dev-verification-pepper-change-me
+      simulated-verification-codes-enabled: false
+      verification-code-ttl: 10m
+      mfa-secret-encryption-key: ""
+      jwt-secret: local-dev-change-me-surprising-ex-gateway-secret-2026
+      session-ttl: 7d
+      admin-session-ttl: 8h
+      browser-cookie-secure: true
+      browser-cookie-domain: ""
     http-client:
       connect-timeout: 1s
       read-timeout: 30s
@@ -187,80 +187,78 @@ surprising:
         base-url: http://localhost:8002
         target-prefix: /wallet/v1/admin
         private-route: true
-        basic-auth-username: ${SW_WALLET_ADMIN_USERNAME:admin}
-        basic-auth-password: ${SW_WALLET_ADMIN_PASSWORD:}
+        basic-auth-username: admin
+        basic-auth-password: ""
   websocket:
     kafka:
       # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。
-      group-id: ${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}
+      group-id: surprising-websocket-${random.uuid}
     security:
       allowed-origins:
-        - ${SURPRISING_WS_ALLOWED_ORIGIN:*}
+        - "*"
     netty:
       enabled: true
       port: 8081
 
   account:
     aeron:
-      source-identity: account-${HOSTNAME:node}
+      source-identity: account-node
   trading:
     order:
       aeron:
-        node-id: ${TRADING_NODE_ID:0}
+        node-id: 0
       risk:
         limit-price-protection-enabled: true
         limit-price-max-mark-age-ms: 15000
     trigger:
       execution:
-        max-trigger-scan-pages: ${TRIGGER_MAX_SCAN_PAGES:16}
+        max-trigger-scan-pages: 16
   price:
     consumer:
       max-age: 5s
     index:
       http:
-        proxy-enabled: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_ENABLED:false}
-        proxy-host: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_HOST:127.0.0.1}
-        proxy-port: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT:7897}
+        proxy-enabled: false
+        proxy-host: 127.0.0.1
+        proxy-port: 7897
     mark:
-      market-channel: ${PRICE_MARK_MARKET_CHANNEL:aeron:udp?endpoint=127.0.0.1:21407}
+      market-channel: "aeron:udp?endpoint=127.0.0.1:21407"
   candlestick:
     kafka:
-      application-id-override: ${SURPRISING_CANDLESTICK_KAFKA_APPLICATION_ID_OVERRIDE:}
+      application-id-override: ""
     stream:
       threads: 2
-      state-dir: ${CANDLESTICK_STATE_DIR:data/kafka-streams}
+      state-dir: data/kafka-streams
   realtime:
     router:
-      enabled: ${REALTIME_ENABLED:true}
-      directory: ${AERON_DIR:/dev/shm/aeron-router}
-      channel: ${REALTIME_ROUTER_CHANNEL:aeron:udp?endpoint=0.0.0.0:21010}
+      enabled: true
+      directory: /dev/shm/aeron-router
+      channel: "aeron:udp?endpoint=0.0.0.0:21010"
   trade-export:
-    enabled: ${TRADE_EXPORT_ENABLED:false}
-    cluster-directory: ${TRADE_EXPORT_CLUSTER_DIR:}
-    aeron-directory: ${TRADE_EXPORT_AERON_DIR:}
-    archive-control-channel: ${TRADE_EXPORT_ARCHIVE_CHANNEL:}
-    checkpoint: ${TRADE_EXPORT_CHECKPOINT:}
-    cluster-id: ${TRADE_EXPORT_CLUSTER_ID:}
-    kafka-config: ${TRADE_EXPORT_KAFKA_CONFIG:}
+    enabled: false
+    cluster-directory: ""
+    aeron-directory: ""
+    archive-control-channel: ""
+    checkpoint: ""
+    cluster-id: ""
+    kafka-config: ""
 
 telegram:
   login:
-    client-id: ${TELEGRAM_CLIENT_ID:}
-    client-secret: ${TELEGRAM_CLIENT_SECRET:}
-    redirect-uri: ${TELEGRAM_REDIRECT_URI:}
+    client-id: ""
+    client-secret: ""
+    redirect-uri: ""
   bot:
-    token: ${TELEGRAM_BOT_TOKEN:8346418637:AAH6bA3FgFhPKGUndtVcJ4OOjv_ji8QZ9Rw}
-    username: ${TELEGRAM_BOT_USERNAME:leelz_openClaw_bot}
-    webhook-url: ${TELEGRAM_BOT_WEBHOOK_URL:}
-    webhook-secret: ${TELEGRAM_BOT_WEBHOOK_SECRET:surprising_webhook_sec_8346418637}
-    webapp-url: ${TELEGRAM_BOT_WEBAPP_URL:https://app.surprising.exchange}
-    alert-chat-id: ${TELEGRAM_ALERT_CHAT_ID:8458892560}
-
+    token: "8346418637:AAH6bA3FgFhPKGUndtVcJ4OOjv_ji8QZ9Rw"
+    username: leelz_openClaw_bot
+    webhook-url: ""
+    webhook-secret: surprising_webhook_sec_8346418637
+    webapp-url: https://app.surprising.exchange
+    alert-chat-id: 8458892560
 
 # Google Identity Services / native Google Sign-In. Empty IDs keep the provider disabled.
 google:
   login:
-    web-client-id: ${GOOGLE_LOGIN_WEB_CLIENT_ID:}
-    ios-client-id: ${GOOGLE_LOGIN_IOS_CLIENT_ID:}
-    android-client-ids: ${GOOGLE_LOGIN_ANDROID_CLIENT_IDS:}
-
+    web-client-id: ""
+    ios-client-id: ""
+    android-client-ids: ""

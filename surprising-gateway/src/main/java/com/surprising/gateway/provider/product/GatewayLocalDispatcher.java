@@ -59,11 +59,13 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class GatewayLocalDispatcher {
     private static final ParameterNameDiscoverer PARAMETER_NAMES = new DefaultParameterNameDiscoverer();
+    private static final byte[] USER_ID_FIELD = "\"userId\"".getBytes(StandardCharsets.UTF_8);
 
     private final GatewayProductServices products;
     private final RequestMappingHandlerMapping parentMapping;
     private final RequestMappingHandlerAdapter handlerAdapter;
     private final HandlerMethodArgumentResolverComposite argumentResolvers;
+    private final ServletRequestDataBinderFactory dataBinderFactory;
     private final ObjectMapper mapper;
 
     public GatewayLocalDispatcher(
@@ -78,6 +80,8 @@ public class GatewayLocalDispatcher {
         if (handlerAdapter != null && handlerAdapter.getArgumentResolvers() != null) {
             this.argumentResolvers.addResolvers(handlerAdapter.getArgumentResolvers());
         }
+        this.dataBinderFactory = new ServletRequestDataBinderFactory(
+                null, handlerAdapter == null ? null : handlerAdapter.getWebBindingInitializer());
         this.mapper = mapper;
     }
 
@@ -110,8 +114,7 @@ public class GatewayLocalDispatcher {
 
             InvocableHandlerMethod invocable = new InvocableHandlerMethod(handlerMethod);
             invocable.setHandlerMethodArgumentResolvers(argumentResolvers);
-            invocable.setDataBinderFactory(new ServletRequestDataBinderFactory(
-                    null, handlerAdapter.getWebBindingInitializer()));
+            invocable.setDataBinderFactory(dataBinderFactory);
             invocable.setParameterNameDiscoverer(PARAMETER_NAMES);
 
             Object result = invocable.invokeForRequest(new ServletWebRequest(localRequest), new ModelAndViewContainer());
@@ -146,6 +149,9 @@ public class GatewayLocalDispatcher {
         String userId = headers.getFirst("X-User-Id");
         String adminUserId = headers.getFirst("X-Admin-User-Id");
         if (userId == null || userId.isBlank() || (adminUserId != null && !adminUserId.isBlank())) {
+            return;
+        }
+        if (!com.surprising.gateway.provider.interceptor.GatewayAccessSupport.containsAscii(body, USER_ID_FIELD)) {
             return;
         }
         try {

@@ -25,9 +25,7 @@ public class AccountMvcController {
 
     @PostMapping("/api/v1/accounts/admin/product-balance-adjustments")
     public Object adjustProductBalance(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @Valid @RequestBody ProductBalanceAdjustmentRequest request) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
         return accountRequests.adjustProductBalance(request);
     }
 
@@ -47,9 +45,7 @@ public class AccountMvcController {
 
     @PostMapping("/api/v1/accounts/admin/balance-adjustments")
     public Object adjustBalance(
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @Valid @RequestBody BalanceAdjustmentRequest request) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
         return accountRequests.adjustBalance(request);
     }
 

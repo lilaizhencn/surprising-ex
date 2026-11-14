@@ -349,9 +349,18 @@ public class GatewayProxyController {
         }
     }
 
+    private static final byte[] INSTRUMENT_CHANGE_ID_FIELD = "\"instrumentChangeId\"".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] COMMAND_RESULT_URL_FIELD = "\"commandResultUrl\"".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
     private boolean containsJsonField(byte[] body, String fieldName) {
-        String text = new String(body, java.nio.charset.StandardCharsets.UTF_8);
-        return text.contains("\"" + fieldName + "\"");
+        if ("instrumentChangeId".equals(fieldName)) {
+            return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.containsAscii(body, INSTRUMENT_CHANGE_ID_FIELD);
+        }
+        if ("commandResultUrl".equals(fieldName)) {
+            return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.containsAscii(body, COMMAND_RESULT_URL_FIELD);
+        }
+        return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.containsAscii(
+                body, ("\"" + fieldName + "\"").getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     public URI targetUri(String service, GatewayProperties.BackendRoute route, HttpServletRequest request) {
@@ -449,52 +458,24 @@ public class GatewayProxyController {
                     || request.getRequestURI().endsWith("/position-mode")
                     || request.getRequestURI().endsWith("/position-margin-adjustments")))) permission = "TRADE";
             else throw new ResponseStatusException(HttpStatus.FORBIDDEN, "API key writes are not supported for this endpoint");
-            try {
-                long user = apiKeys.authenticate(apiKeyRequests.bindNative(request, body), permission);
-                return userIdentity(Long.toString(user));
-            } catch (com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException blocked) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, blocked.getMessage(), blocked);
-            } catch (IllegalArgumentException invalid) {
-                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, invalid.getMessage(), invalid);
-            }
+            com.surprising.gateway.provider.interceptor.GatewayAccessSupport.GatewayIdentity id =
+                    com.surprising.gateway.provider.interceptor.GatewayAccessSupport.authenticateApiKey(
+                            apiKeys, apiKeyRequests, request, body, permission);
+            return userIdentity(id.userId());
         }
         if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            if (authService == null) {
-                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "user auth service is not configured");
-            }
-            try {
-                JwtPrincipal principal = authService.authenticateBearer(authorization);
-                return new GatewayIdentity(Long.toString(principal.userId()), principal.username(),
-                        principal.status(), principal.roles(), false);
-            } catch (IllegalArgumentException ex) {
-                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-            } catch (IllegalStateException ex) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-            }
+            com.surprising.gateway.provider.interceptor.GatewayAccessSupport.GatewayIdentity id =
+                    com.surprising.gateway.provider.interceptor.GatewayAccessSupport.authenticateBearerUser(authService, authorization);
+            return new GatewayIdentity(id.userId(), id.username(), id.status(), id.roles(), false);
         }
         throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "private gateway route requires bearer token");
     }
 
     private GatewayIdentity enforceAdminIdentity(HttpServletRequest request) {
-        String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (authService == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin gateway route requires auth service");
-        }
-        try {
-            JwtPrincipal principal = authService.authenticateBearer(authorization);
-            if (principal.roles().stream().noneMatch(properties.getSecurity().getAdminRoles()::contains)) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin role required");
-            }
-            return new GatewayIdentity(Long.toString(principal.userId()), principal.username(), principal.status(),
-                    principal.roles(), true);
-        } catch (ResponseStatusException ex) {
-            throw ex;
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
+        com.surprising.gateway.provider.interceptor.GatewayAccessSupport.GatewayIdentity id =
+                com.surprising.gateway.provider.interceptor.GatewayAccessSupport.authenticateAdmin(
+                        authService, properties, request, "admin gateway route requires auth service");
+        return new GatewayIdentity(id.userId(), id.username(), id.status(), id.roles(), true);
     }
 
     private HttpHeaders headers(HttpServletRequest request,
@@ -536,60 +517,24 @@ public class GatewayProxyController {
         if (!requiresHighRiskAdminApproval(service, method, request)) {
             return;
         }
-        if (identity == null || !identity.admin()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin identity required");
-        }
-        if (adminOperations == null) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "admin approval repository is not available");
-        }
-        String approvalIdHeader = request.getHeader(properties.getSecurity().getAdminApprovalHeader());
-        if (approvalIdHeader == null || approvalIdHeader.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "admin approval required");
-        }
-        long approvalId;
-        try {
-            approvalId = Long.parseLong(approvalIdHeader.trim());
-        } catch (NumberFormatException ex) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, "invalid admin approval id", ex);
-        }
-        try {
-            adminOperations.consumeGatewayApproval(
-                    approvalId,
-                    Long.parseLong(identity.userId()),
-                    service,
-                    method == null ? "GET" : method.name(),
-                    request.getRequestURI(),
-                    request.getQueryString(),
-                    bodyHash,
-                    Instant.now());
-        } catch (AdminApprovalRequiredException ex) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
-        }
+        com.surprising.gateway.provider.interceptor.GatewayAccessSupport.consumeAdminApproval(
+                adminOperations,
+                properties,
+                service,
+                method == null ? "GET" : method.name(),
+                request,
+                bodyHash,
+                identity == null ? null : new com.surprising.gateway.provider.interceptor.GatewayAccessSupport.GatewayIdentity(
+                        identity.userId(), identity.username(), identity.status(), identity.roles(), identity.admin()));
     }
 
     private void enforceAdminPermission(String service, HttpMethod method, GatewayIdentity identity) {
-        if (identity == null || !identity.admin()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin identity required");
-        }
-        try {
-            authService.requireAdminPermission(
-                    Long.parseLong(identity.userId()),
-                    identity.roles(),
-                    adminGatewayPermission(service, method));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
-    }
-
-    private String adminGatewayPermission(String service, HttpMethod method) {
-        String normalizedService = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
-        if (!normalizedService.matches("[a-z0-9][a-z0-9_-]{0,63}")) {
-            throw new IllegalArgumentException("invalid admin gateway service");
-        }
-        String action = method == null || isReadMethod(method) ? "read" : "write";
-        return "admin.gateway." + normalizedService + "." + action;
+        com.surprising.gateway.provider.interceptor.GatewayAccessSupport.enforceAdminPermission(
+                authService,
+                service,
+                method == null || isReadMethod(method),
+                identity == null ? null : new com.surprising.gateway.provider.interceptor.GatewayAccessSupport.GatewayIdentity(
+                        identity.userId(), identity.username(), identity.status(), identity.roles(), identity.admin()));
     }
 
     private void enforceUserStatusRestrictions(String service,
@@ -607,12 +552,14 @@ public class GatewayProxyController {
     }
 
     private boolean isReadMethod(HttpMethod method) {
-        return HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method) || HttpMethod.OPTIONS.equals(method);
+        return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.isReadMethod(method);
     }
+
+    private static final List<String> TRADING_SERVICES = List.of("trading", "trading-trigger");
 
     private boolean isTradingWrite(String service, HttpServletRequest request) {
         String normalizedService = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
-        if (!List.of("trading", "trading-trigger").contains(normalizedService)) {
+        if (!TRADING_SERVICES.contains(normalizedService)) {
             return false;
         }
         String path = request.getRequestURI() == null ? "" : request.getRequestURI().toLowerCase(Locale.ROOT);
@@ -645,23 +592,20 @@ public class GatewayProxyController {
         if (adminOperations == null || identity == null || !identity.admin()) {
             return;
         }
-        adminOperations.recordGatewayOperation(new AdminOperationRecord(
-                parseLong(identity.userId()),
-                identity.username(),
-                identity.roles(),
-                service == null ? "unknown" : service,
+        com.surprising.gateway.provider.interceptor.GatewayAccessSupport.recordAdminOperation(
+                adminOperations,
+                new com.surprising.gateway.provider.interceptor.GatewayAccessSupport.GatewayIdentity(
+                        identity.userId(), identity.username(), identity.status(), identity.roles(), true),
+                service,
                 method == null ? "GET" : method.name(),
-                request.getRequestURI(),
-                request.getQueryString(),
+                request,
                 target == null ? null : target.toString(),
                 bodyHash,
                 responseStatus,
                 durationMs,
                 success,
                 errorMessage,
-                request.getHeader(HttpHeaders.USER_AGENT),
-                clientIp(request),
-                Instant.now()));
+                clientIp(request));
     }
 
     private long elapsedMillis(long startedNanos) {
@@ -669,26 +613,11 @@ public class GatewayProxyController {
     }
 
     private Long parseLong(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException ex) {
-            return null;
-        }
+        return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.parseLong(value);
     }
 
     private String bodySha256(byte[] body) {
-        if (body == null || body.length == 0) {
-            return null;
-        }
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(body);
-            return java.util.HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
-        }
+        return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.bodySha256(body, false);
     }
 
     private String clientIp(HttpServletRequest request) {

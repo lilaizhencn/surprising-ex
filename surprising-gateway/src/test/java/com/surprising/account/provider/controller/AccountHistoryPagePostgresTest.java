@@ -59,7 +59,7 @@ class AccountHistoryPagePostgresTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void actualHistoryEntrancesKeepUserAccountFiltersAndOddLongCursorsForEachProduct(ProductLine line) throws Exception {
-        seed(line);var requests=requests(line);var mvc=MockMvcBuilders.standaloneSetup(new AccountInternalController(requests)).build();
+        seed(line);var requests=requests(line);var mvc=MockMvcBuilders.standaloneSetup(new AccountMvcController(requests)).build();
         for(String path:List.of("ledger","product-ledger","transfers"))for(String sort:List.of("createdAt.asc","createdAt.desc")) {
             String rows=path.equals("transfers")?"transfers":"entries";
             var firstPage=read(mvc,path,line,sort,null);
@@ -89,7 +89,7 @@ class AccountHistoryPagePostgresTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void productMismatchAndFundingNeverReachProductHistoryRepository(ProductLine line) throws Exception {
-        var mvc=MockMvcBuilders.standaloneSetup(new AccountInternalController(requests(line))).build();
+        var mvc=MockMvcBuilders.standaloneSetup(new AccountMvcController(requests(line))).build();
         var wrong=line==ProductLine.SPOT?AccountType.OPTION:AccountType.SPOT;
         for(AccountType type:List.of(wrong,AccountType.FUNDING)) {
             mvc.perform(get("/api/v1/accounts/product-ledger").header("X-User-Id","42").param("accountType",type.name()))
@@ -100,7 +100,7 @@ class AccountHistoryPagePostgresTest {
 
     @ParameterizedTest @ValueSource(strings={"low-limit","high-limit","sort","asset","reference","cursor","time","user"})
     void malformedHistoryQueryFailsBeforeAnyRepository(String invalid) throws Exception {
-        var mvc=MockMvcBuilders.standaloneSetup(new AccountInternalController(requests(ProductLine.SPOT))).build();
+        var mvc=MockMvcBuilders.standaloneSetup(new AccountMvcController(requests(ProductLine.SPOT))).build();
         var request=get("/api/v1/accounts/ledger").header("X-User-Id",invalid.equals("user")?"-1":"42");
         switch(invalid) {
             case "low-limit" -> request.param("limit","0");

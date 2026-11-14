@@ -29,11 +29,11 @@ class AccountInternalControllerTest {
 
     private final BalanceAdjustmentRequest request = new BalanceAdjustmentRequest(42L, "USDT", 1_250_000L, "custody-wallet:event-1:deposit.confirmed", "custody wallet deposit");
 
-    private AccountInternalController controller;
+    private AccountMvcController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new AccountInternalController(new com.surprising.account.provider.controller.AccountRequestHandler(accountService, history, commandGateway));
+        controller = new AccountMvcController(new com.surprising.account.provider.controller.AccountRequestHandler(accountService, history, commandGateway));
     }
 
     @Test
@@ -58,7 +58,7 @@ class AccountInternalControllerTest {
     void exposesUserProductTransferRecordsThroughAccountGateway() {
         ProductTransferRecordQueryResponse expected = new ProductTransferRecordQueryResponse(0, List.of(), null, false, "createdAt.desc", 50);
         when(history.productTransfers(42L, AccountType.SPOT, "USDT", new com.surprising.account.provider.model.AccountHistoryPageQuery(50,null,true))).thenReturn(expected);
-        ProductTransferRecordQueryResponse actual = controller.userProductTransfers(42L, AccountType.SPOT, "USDT", 50, null, null);
+        ProductTransferRecordQueryResponse actual = (ProductTransferRecordQueryResponse) controller.userProductTransfers("42", AccountType.SPOT, "USDT", 50, null, null);
         assertThat(actual).isSameAs(expected);
         verify(history).productTransfers(42L, AccountType.SPOT, "USDT", new com.surprising.account.provider.model.AccountHistoryPageQuery(50,null,true));
     }

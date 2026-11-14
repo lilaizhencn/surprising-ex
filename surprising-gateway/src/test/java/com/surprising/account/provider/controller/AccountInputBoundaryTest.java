@@ -31,7 +31,7 @@ class AccountInputBoundaryTest {
     void setup(ProductLine line) {
         var properties=new AccountProperties();properties.getKafka().setProductLine(line);
         var commands=new AccountCommandGateway(properties,aeron,mock(BalanceAdjustmentRepository.class));service=new AccountService(properties,commands,views);
-        mvc=MockMvcBuilders.standaloneSetup(new AccountInternalController(new AccountRequestHandler(service,mock(AccountQueryService.class),commands))).setControllerAdvice(new com.surprising.gateway.provider.controller.advice.ReadViewHttpErrors()).build();
+        mvc=MockMvcBuilders.standaloneSetup(new AccountMvcController(new AccountRequestHandler(service,mock(AccountQueryService.class),commands))).setControllerAdvice(new com.surprising.gateway.provider.controller.advice.ReadViewHttpErrors()).build();
     }
     @ParameterizedTest @ValueSource(strings={"position", "positions", "position-margin", "position-mode"})
     void spotRejectsUnsupportedPositionQueriesBeforeReadingOrSubmitting(String route) throws Exception {

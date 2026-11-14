@@ -37,6 +37,7 @@ public class AlgoOrderService {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(AlgoOrderService.class);
 
     private static final int MAX_OPEN_CANCEL_LIMIT = 1000;
+    private static final AlgoOrderStatus[] ALGO_ORDER_STATUSES = AlgoOrderStatus.values();
 
     private final TradingOrderProperties properties;
     private final OrderService orderService;
@@ -129,7 +130,7 @@ public class AlgoOrderService {
         String instrumentId = request.instrumentId() == null || request.instrumentId().isBlank()
                 ? null : normalizeSymbol(request.instrumentId());
         List<AlgoOrderResponse> canceled = store.query(request.userId(), instrumentId, 0, limit).stream()
-                .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
+                .filter(value -> !isTerminal(ALGO_ORDER_STATUSES[value.statusCode()]))
                 .map(value -> cancel(new CancelAlgoOrderRequest(value.userId(), value.algoOrderId())))
                 .toList();
         List<AlgoOrderBatchItemResponse> results = new ArrayList<>(canceled.size());
@@ -140,12 +141,15 @@ public class AlgoOrderService {
     }
 
     public AlgoOrderResponse get(long userId, long algoOrderId) {
+        if (algoOrderId <= 0) throw new IllegalArgumentException("algoOrderId must be positive");
+        if (userId <= 0) throw new IllegalArgumentException("invalid algo owner");
         var view = projection.byId(currentProductLine(), userId, algoOrderId);
         if (view == null) throw new java.util.NoSuchElementException( "algo order is not present in the committed read view");
         return store.response(view);
     }
 
     public com.surprising.trading.api.model.AlgoOrderSubmissionResponse submission(long userId, String clientKey) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         String key = emptyToNull(clientKey);
         if (key == null || key.length() > 64) throw new IllegalArgumentException("clientAlgoOrderId is required and must be at most 64 characters");
         var product = currentProductLine();
@@ -168,7 +172,7 @@ public class AlgoOrderService {
         String normalizedSymbol = normalizeSymbol(instrumentId);
         List<AlgoOrderRecord> orders = store.query(0, normalizedSymbol, 0,
                         Math.max(1, Math.min(limit, MAX_OPEN_CANCEL_LIMIT))).stream()
-                .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
+                .filter(value -> !isTerminal(ALGO_ORDER_STATUSES[value.statusCode()]))
                 .map(store::record).toList();
         orders.forEach(order -> cancelRecord(order, null));
         return orders.size();
@@ -176,7 +180,7 @@ public class AlgoOrderService {
 
     public boolean hasLifecycleActiveOrders(String instrumentId) {
         return store.query(0, normalizeSymbol(instrumentId), 0, 1).stream()
-                .anyMatch(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]));
+                .anyMatch(value -> !isTerminal(ALGO_ORDER_STATUSES[value.statusCode()]));
     }
 
     public AlgoOrderQueryResponse openOrders(long userId, String instrumentId, int limit) {
@@ -185,6 +189,10 @@ public class AlgoOrderService {
         }
         if (limit < 1 || limit > MAX_OPEN_CANCEL_LIMIT) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
+        }
+        instrumentId = instrumentId == null || instrumentId.isBlank() ? null : instrumentId;
+        if (instrumentId != null) {
+            com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         }
         List<AlgoOrderResponse> orders = projection.openOrders(currentProductLine(), userId, instrumentId, limit).stream()
                 .map(store::response).toList();
@@ -232,7 +240,7 @@ public class AlgoOrderService {
             cancelRecord(store.record(current), null);
             return;
         }
-        if (isTerminal(AlgoOrderStatus.values()[current.statusCode()])) return;
+        if (isTerminal(ALGO_ORDER_STATUSES[current.statusCode()])) return;
         current = recoverUnlinkedChild(current);
         record = store.record(current);
         if (current.executedQuantitySteps() >= record.quantitySteps()
@@ -290,7 +298,7 @@ public class AlgoOrderService {
             }
         }
         current = store.get(record.userId(), record.algoOrderId());
-        if (isTerminal(AlgoOrderStatus.values()[current.statusCode()])) return store.response(current);
+        if (isTerminal(ALGO_ORDER_STATUSES[current.statusCode()])) return store.response(current);
         if (current.activeChildOrderCount() > 0) {
             if (cancellationFailure != null) throw cancellationFailure;
             return store.response(current);

@@ -34,6 +34,7 @@ public final class RealtimeWebSocketBridge
     private final java.util.concurrent.atomic.AtomicLong nextCleanupLog = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicBoolean continuityLost = new java.util.concurrent.atomic.AtomicBoolean();
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(RealtimeWebSocketBridge.class);
+    private static final CoreOrderSide[] ORDER_SIDES = CoreOrderSide.values();
 
     public RealtimeWebSocketBridge(
             SubscriptionRegistry registry,
@@ -228,7 +229,7 @@ public final class RealtimeWebSocketBridge
                                 "quantitySteps",
                                 b.getLong(),
                                 "side",
-                                CoreOrderSide.values()[b.get()].name(),
+                                ORDER_SIDES[b.get()].name(),
                                 "maker",
                                 b.get() == 1);
                     }
@@ -301,7 +302,7 @@ public final class RealtimeWebSocketBridge
                 "priceTicks", payload.getLong(),
                 "quantitySteps", payload.getLong(),
                 "coreSequence", Long.toString(payload.getLong()),
-                "side", CoreOrderSide.values()[payload.get()].name(),
+                "side", ORDER_SIDES[payload.get()].name(),
                 "eventTime", Instant.ofEpochMilli(frame.timestamp()).toString());
     }
 

@@ -66,15 +66,15 @@ class OrderControllerTest {
         var algo=mock(AlgoOrderService.class);
         when(algo.get(7,99)).thenThrow(new java.util.NoSuchElementException("algo order is not present in the committed read view"));
         var requests=new OrderRequestHandler(mock(OrderService.class),algo,mock(CancelAllAfterService.class));
-        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new OrderInternalController(requests)).build();
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new TradingMvcController(requests)).build();
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/trading/orders/algo/99").param("userId","7"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
     }
 
     @Test void cancellationPlanAndBatchAreReadOnlyUncachedAndReportUnavailability() {
         var service = mock(OrderService.class);
-        var controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(
-                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        var controller = new com.surprising.trading.order.controller.OrderRequestHandler(
+                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         var plan = new com.surprising.trading.api.model.CancellationPlanResponse(1001,
                 com.surprising.product.api.ProductLine.SPOT, "1", List.of(91L));
         when(service.cancellationPlan(1001, "1")).thenReturn(plan);
@@ -98,8 +98,8 @@ class OrderControllerTest {
 
     @Test void amendmentLookupReturnsTerminalUnknownAndUnavailableWithoutCaching() {
         var service = mock(OrderService.class);
-        var controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(
-                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        var controller = new com.surprising.trading.order.controller.OrderRequestHandler(
+                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         when(service.amendment(1001, "edit-1")).thenReturn(receipt("TERMINAL", "NONE"));
         assertThat(controller.amendment(1001, "edit-1").getStatusCode()).isEqualTo(HttpStatus.OK);
         when(service.amendment(1001, "edit-1")).thenReturn(receipt("RESULT_UNKNOWN", "RESULT_UNKNOWN"));
@@ -112,8 +112,8 @@ class OrderControllerTest {
 
     @Test void cancellationLookupDistinguishesTerminalUnknownInvalidAndUnavailable() {
         var service = mock(OrderService.class);
-        var controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(
-                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        var controller = new com.surprising.trading.order.controller.OrderRequestHandler(
+                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         when(service.cancellation(1001, 91)).thenReturn(receipt("TERMINAL", "NONE"));
         assertThat(controller.cancellation(1001, 91).getStatusCode()).isEqualTo(HttpStatus.OK);
         when(service.cancellation(1001, 91)).thenReturn(receipt("RESULT_UNKNOWN", "RESULT_UNKNOWN"));
@@ -133,7 +133,7 @@ class OrderControllerTest {
         OrderService orderService = mock(OrderService.class);
         String continuation = "eyJvcmRlciI6MTIzfQ";
         when(orderService.openOrders(1001L, "1", com.surprising.trading.order.controller.OrderRequestHandler.activePage(10, null), null)).thenThrow(new ProjectionReadResult.ResponseTooLargeException(12L, 0L, continuation));
-        OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        OrderRequestHandler controller = new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         assertThatThrownBy(() -> controller.openOrders(1001L, "1", 10, null, null)).isInstanceOf(ResponseStatusException.class).satisfies(throwable -> {
             ResponseStatusException response = (ResponseStatusException) throwable;
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
@@ -144,7 +144,7 @@ class OrderControllerTest {
     @Test
     void mapsConflictBackpressureAndUnknownSeparately() {
         OrderService orderService = mock(OrderService.class);
-        OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        OrderRequestHandler controller = new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-1", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);
         when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("TERMINAL", "NONE"));
         assertThat(controller.place(request).toCompletableFuture().join().getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -167,7 +167,7 @@ class OrderControllerTest {
     void mapsAsynchronousPlacementStateFailureToConflict() {
         OrderService orderService = mock(OrderService.class);
         when(orderService.placeCommandAsync(any())).thenReturn(CompletableFuture.failedFuture(new IllegalStateException("core rejected order")));
-        OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        OrderRequestHandler controller = new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         assertThatThrownBy(() -> controller.place(new PlaceOrderRequest(1001L, "client-async-failure", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false)).toCompletableFuture().join()).satisfies(throwable -> assertThat(responseStatus(throwable).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
     }
 
@@ -176,7 +176,7 @@ class OrderControllerTest {
     void mapsEveryRawOrderCheckFailureTo503(String code) {
         OrderService orderService = mock(OrderService.class);
         when(orderService.placeCommandAsync(any())).thenReturn(completedReceipt("NOT_ACCEPTED", code));
-        OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        OrderRequestHandler controller = new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         ResponseEntity<OrderCommandReceipt> response = controller.place(new PlaceOrderRequest(1001L, "client-1", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false)).toCompletableFuture().join();
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(response.getBody().code()).isEqualTo(code);
@@ -186,7 +186,7 @@ class OrderControllerTest {
     @Test
     void commandResultEndpointDistinguishesCommittedUnknownAndUnavailable() {
         OrderService orderService = mock(OrderService.class);
-        OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        OrderRequestHandler controller = new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         UUID commandId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         when(orderService.commandResult(1001L, commandId)).thenReturn(receipt("TERMINAL", "NONE"));
         assertThat(controller.commandResult(1001L, commandId).getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -201,7 +201,7 @@ class OrderControllerTest {
     @Test
     void mapsMatchingPendingOrderCheckAndQueryToAcceptedWithOriginalCommandIdentity() {
         OrderService orderService = mock(OrderService.class);
-        OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        OrderRequestHandler controller = new com.surprising.trading.order.controller.OrderRequestHandler(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class));
         PlaceOrderRequest request = new PlaceOrderRequest(1001L, "client-pending", "1", OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC, 60_000L, 1L, false, false);
         UUID commandId = UUID.fromString("33333333-3333-3333-3333-333333333333");
         OrderCommandReceipt pending = receipt("MATCHING_PENDING", "MATCHING_PENDING", commandId);
