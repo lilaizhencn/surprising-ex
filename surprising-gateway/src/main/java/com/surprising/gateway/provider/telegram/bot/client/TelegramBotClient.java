@@ -24,11 +24,11 @@ public class TelegramBotClient {
     private final TelegramBotProperties properties;
     private final RestTemplate restTemplate;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public TelegramBotClient(TelegramBotProperties properties) {
         this(properties, new RestTemplate());
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TelegramBotClient(TelegramBotProperties properties, RestTemplate restTemplate) {
         this.properties = properties;
         this.restTemplate = restTemplate;

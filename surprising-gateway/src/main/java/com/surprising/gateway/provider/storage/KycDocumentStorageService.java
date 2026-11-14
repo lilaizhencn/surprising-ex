@@ -35,10 +35,15 @@ public class KycDocumentStorageService {
     private final HttpClient httpClient;
 
     public KycDocumentStorageService(GatewayProperties properties) {
-        this.properties = properties;
-        this.httpClient = HttpClient.newBuilder()
+        this(properties, HttpClient.newBuilder()
                 .connectTimeout(properties.getHttpClient().getConnectTimeout())
-                .build();
+                .build());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public KycDocumentStorageService(GatewayProperties properties, HttpClient httpClient) {
+        this.properties = properties;
+        this.httpClient = httpClient;
     }
 
     public void ensureEnabled() {

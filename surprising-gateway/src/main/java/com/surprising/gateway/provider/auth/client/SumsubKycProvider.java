@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Optional;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -26,8 +27,18 @@ import tools.jackson.databind.ObjectMapper;
 public class SumsubKycProvider implements KycProvider {
     private final GatewayProperties properties;
     private final ObjectMapper mapper;
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-    public SumsubKycProvider(GatewayProperties properties, ObjectMapper mapper) { this.properties = properties; this.mapper = mapper; }
+    private final HttpClient http;
+
+    public SumsubKycProvider(GatewayProperties properties, ObjectMapper mapper) {
+        this(properties, mapper, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
+    }
+
+    @Autowired
+    public SumsubKycProvider(GatewayProperties properties, ObjectMapper mapper, HttpClient http) {
+        this.properties = properties;
+        this.mapper = mapper;
+        this.http = http;
+    }
     @Override public String code() { return "SUMSUB"; }
 
     @Override public KycProviderSession start(long userId, KycSubmissionRequest request, List<KycDocument> documents) {

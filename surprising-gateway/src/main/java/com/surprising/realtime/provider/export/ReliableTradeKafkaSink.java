@@ -16,7 +16,8 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
     private final Producer<String, String> producer;
     private final String topic;
     private final ProductLine product;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private final ObjectMapper mapper = MAPPER;
     private long tradeSequence;
     private long nextFailureLogNanos;
 

@@ -50,25 +50,27 @@ public class AeronOrderProjectionRepository {
         this.maxEncodedResponseBytes = validateMaxEncodedResponseBytes(maxEncodedResponseBytes);
     }
 
+    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper();
+
     public AeronOrderProjectionRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new ProjectionWatermarkWaiter(jdbcTemplate), new ObjectMapper(),
+        this(jdbcTemplate, new ProjectionWatermarkWaiter(jdbcTemplate), DEFAULT_OBJECT_MAPPER,
                 DEFAULT_MAX_ENCODED_RESPONSE_BYTES);
     }
 
     public AeronOrderProjectionRepository(JdbcTemplate jdbcTemplate, int maxEncodedResponseBytes) {
-        this(jdbcTemplate, new ProjectionWatermarkWaiter(jdbcTemplate), new ObjectMapper(),
+        this(jdbcTemplate, new ProjectionWatermarkWaiter(jdbcTemplate), DEFAULT_OBJECT_MAPPER,
                 maxEncodedResponseBytes);
     }
 
     public AeronOrderProjectionRepository(JdbcTemplate jdbcTemplate,
                                           ProjectionWatermarkWaiter watermarkWaiter) {
-        this(jdbcTemplate, watermarkWaiter, new ObjectMapper(), DEFAULT_MAX_ENCODED_RESPONSE_BYTES);
+        this(jdbcTemplate, watermarkWaiter, DEFAULT_OBJECT_MAPPER, DEFAULT_MAX_ENCODED_RESPONSE_BYTES);
     }
 
     public AeronOrderProjectionRepository(JdbcTemplate jdbcTemplate,
                                           ProjectionWatermarkWaiter watermarkWaiter,
                                           int maxEncodedResponseBytes) {
-        this(jdbcTemplate, watermarkWaiter, new ObjectMapper(), maxEncodedResponseBytes);
+        this(jdbcTemplate, watermarkWaiter, DEFAULT_OBJECT_MAPPER, maxEncodedResponseBytes);
     }
 
     public ProjectionReadResult byOrder(ProductLine productLine, Long userId, long orderId,

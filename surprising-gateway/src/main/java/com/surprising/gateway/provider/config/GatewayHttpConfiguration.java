@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.config;
 
 import java.io.IOException;
+import java.net.http.HttpClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,6 +13,14 @@ import org.springframework.web.client.RestTemplate;
 
 @Configuration
 public class GatewayHttpConfiguration {
+
+    @Bean
+    @Primary
+    public HttpClient gatewayHttpClient(GatewayProperties properties) {
+        return HttpClient.newBuilder()
+                .connectTimeout(properties.getHttpClient().getConnectTimeout())
+                .build();
+    }
 
     @Bean
     @Primary

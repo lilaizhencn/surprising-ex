@@ -8,6 +8,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.kafka.annotation.EnableKafka;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(exclude = org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration.class, scanBasePackages = {
@@ -32,6 +33,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         com.surprising.realtime.provider.RealtimeRouter.class,
         com.surprising.gateway.config.GatewayExchangeRateConfiguration.class})
 @EnableKafka
+@EnableAsync
 @EnableScheduling
 public class SurprisingGatewayApplication {
 

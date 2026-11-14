@@ -5,6 +5,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -12,11 +13,19 @@ public class ResendEmailMessageSender implements EmailMessageSender {
 
     private final GatewayProperties properties;
     private final com.surprising.gateway.provider.service.GatewayRequestLimits limits;
-    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(3)).build();
+    private final HttpClient httpClient;
 
     public ResendEmailMessageSender(GatewayProperties properties, com.surprising.gateway.provider.service.GatewayRequestLimits limits) {
+        this(properties, limits, HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(3)).build());
+    }
+
+    @Autowired
+    public ResendEmailMessageSender(GatewayProperties properties,
+                                    com.surprising.gateway.provider.service.GatewayRequestLimits limits,
+                                    HttpClient httpClient) {
         this.properties = properties;
         this.limits = limits;
+        this.httpClient = httpClient;
     }
 
     @Override
