@@ -7,7 +7,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import org.springframework.stereotype.Service;
 
-@Service
+@Service("markPricePublicTradeEventMapper")
 public class PublicTradeEventMapper {
 
     private static final int DISPLAY_SCALE = 18;

@@ -11,6 +11,7 @@ import com.surprising.derivatives.lifecycle.repository.LifecycleBusinessSettings
 import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
+import java.time.Instant;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -38,6 +39,11 @@ public class LifecycleBusinessSettingsService {
     }
     @PostConstruct
     public void initialize() {
+        if (!line.isDerivative()) {
+            install(new LifecycleSettingsSnapshot(1L, LifecycleBusinessSettings.initial(),
+                    "SYSTEM", "spot non-derivative", Instant.now()));
+            return;
+        }
         settings.initialize(line, LifecycleBusinessSettings.initial());
         reload();
     }
@@ -48,6 +54,9 @@ public class LifecycleBusinessSettingsService {
     }
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public synchronized LifecycleSettingsSnapshot save(LifecycleBusinessSettings value, long expectedVersion, String admin, String reason) {
+        if (!line.isDerivative()) {
+            throw new IllegalArgumentException("spot product line has no derivatives lifecycle settings");
+        }
         if (current().version() != expectedVersion)
             throw new OptimisticLockingFailureException("lifecycle settings changed; reload before saving");
         var saved = settings.save(line, value, expectedVersion, admin, reason)
@@ -56,6 +65,9 @@ public class LifecycleBusinessSettingsService {
         return current;
     }
     public synchronized void reload() {
+        if (!line.isDerivative()) {
+            return;
+        }
         var value = settings.find(line);
         if (value == null) throw new IllegalStateException("lifecycle business settings are missing");
         if (current == null || value.version() > current.version()) install(value);

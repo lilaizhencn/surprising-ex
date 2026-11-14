@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 /**
  * 将撮合公开成交事件转换为 K 线聚合事件，并在服务层组合品种与资产精度。
  */
-@Service
+@Service("candlestickPublicTradeEventMapper")
 public class PublicTradeEventMapper {
 
     private static final int DISPLAY_SCALE = 18;
