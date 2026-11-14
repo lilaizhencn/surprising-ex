@@ -11,7 +11,7 @@ import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 /** User algo reads use only the latest state produced by realtime committed Archive replay. */
 @Repository
-public final class AlgoOrderProjectionRepository {
+public class AlgoOrderProjectionRepository {
     private final JdbcTemplate jdbc;
     public AlgoOrderProjectionRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 

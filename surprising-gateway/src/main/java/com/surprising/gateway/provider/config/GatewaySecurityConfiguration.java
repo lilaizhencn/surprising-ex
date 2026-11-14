@@ -1,9 +1,13 @@
 package com.surprising.gateway.provider.config;
 
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.interceptor.*;
+import com.surprising.gateway.provider.product.GatewayProductSelection;
 import jakarta.servlet.DispatcherType;
 import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.*;
@@ -38,7 +42,13 @@ public class GatewaySecurityConfiguration {
     @Bean
     public SecurityFilterChain gatewaySecurity(HttpSecurity http, AuthService auth, GatewayProperties properties,
             AdminIpWhitelistFilter addresses, AdminPermissionFilter permissions,
+            ObjectProvider<AuthService> authProvider,
+            ObjectProvider<GatewayApiKeyService> apiKeyProvider,
+            ObjectProvider<AdminApprovalService> approvalProvider,
+            ObjectProvider<GatewayProductSelection> productSelectionProvider,
             @Qualifier("gatewayCorsSource") CorsConfigurationSource cors) throws Exception {
+        var directAccess = new GatewayDirectAccessFilter(
+                properties, authProvider, apiKeyProvider, approvalProvider, productSelectionProvider);
         var csrf = new com.surprising.gateway.provider.auth.controller.BrowserCsrfTokens(properties);
         http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .securityContext(context -> context.requireExplicitSave(true))
@@ -58,8 +68,9 @@ public class GatewaySecurityConfiguration {
                 .addFilterBefore(new GatewayBearerFilter(auth, properties), AnonymousAuthenticationFilter.class)
                 .addFilterBefore(addresses, GatewayBearerFilter.class)
                 .addFilterBefore(permissions, AuthorizationFilter.class)
+                .addFilterAfter(directAccess, AuthorizationFilter.class)
                 .authorizeHttpRequests(access -> access
-                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC, DispatcherType.FORWARD).permitAll()
+                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
                         .requestMatchers("/actuator/**", "/internal/**", "/api/v1/accounts/**", "/api/v1/trading/**")
                             .access((authentication, context) -> new org.springframework.security.authorization.AuthorizationDecision(
                                     List.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(context.getRequest().getRemoteAddr())))
@@ -78,7 +89,9 @@ public class GatewaySecurityConfiguration {
                                 "/api/v1/compliance/kyc/webhooks/{provider}", "/api/v1/internal/wallet/webhooks/custody").permitAll()
                         .requestMatchers(HttpMethod.GET, "/ws/v1").permitAll()
                         // These adapters validate HMAC and scope against the exact wire body/query, or bearer for private operations.
-                        .requestMatchers("/api/v1/gateway/**", "/api/v3/**", "/sapi/v1/**", "/fapi/v1/**", "/dapi/v1/**", "/eapi/v1/**").permitAll()
+                        .requestMatchers("/api/v1/gateway/**", "/api/v3/**", "/sapi/v1/**", "/fapi/v1/**", "/dapi/v1/**", "/eapi/v1/**",
+                                "/api/v1/price/**", "/api/v1/candlestick/**", "/api/v1/funding/**",
+                                "/api/v1/risk/**", "/api/v1/liquidations/**", "/api/v1/insurance/**", "/api/v1/adl/**").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/session", "/api/v1/auth/verify-email", "/api/v1/auth/resend-email-verification",
                                 "/api/v1/legal/status", "/api/v1/legal/consents",
                                 "/api/v1/security/**", "/api/v1/users/scan", "/api/v1/notifications/**", "/api/v1/wallet/**",

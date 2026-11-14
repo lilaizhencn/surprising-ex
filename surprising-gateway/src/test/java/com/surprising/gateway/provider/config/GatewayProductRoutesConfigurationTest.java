@@ -26,18 +26,15 @@ class GatewayProductRoutesConfigurationTest {
         assertThat(properties.getRoutes().get("trading-market").getBaseUrl()).isEqualTo("local:");
         assertLocalRoute(properties.getRoutes().get("trading-trigger"));
         assertLocalRoute(properties.getRoutes().get("account"));
-        assertLocalRoute(properties.getRoutes().get("risk"));
-        assertLocalRoute(properties.getRoutes().get("price-mark"));
-        assertLocalRoute(properties.getRoutes().get("candlestick"));
+        assertThat(properties.getRoutes()).doesNotContainKeys("risk", "price-mark", "price-index", "price-fx",
+                "candlestick", "funding", "liquidation", "insurance", "adl");
         assertLocalRoute(properties.getAdminRoutes().get("trading-fees"));
         assertLocalRoute(properties.getAdminRoutes().get("account"));
+        assertThat(properties.getAdminRoutes()).doesNotContainKeys("risk", "risk-admin", "price-mark", "price-index",
+                "price-fx", "candlestick", "funding", "liquidation", "liquidation-admin", "insurance",
+                "insurance-admin", "adl");
         assertThat(properties.getRoutes().get("market-maker").getBaseUrl()).isEqualTo("http://localhost:9096");
         assertThat(properties.getAdminRoutes().get("market-maker").getBaseUrl()).isEqualTo("http://localhost:9096");
-
-        assertThat(properties.getRoutes().get("price-mark").getBaseUrl())
-                .isEqualTo("local:");
-        assertThat(properties.getAdminRoutes().get("price-mark").getBaseUrl())
-                .isEqualTo("local:");
 
         GatewayProperties.BackendRoute trading = properties.getRoutes().get("trading");
         GatewayProperties.BackendRoute optionRoute = trading.resolve(ProductLine.OPTION);

@@ -14,7 +14,7 @@ import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 /** Reads realtime committed trigger facts with their documented initialization association. */
 @Repository
-public final class TriggerOrderProjectionRepository {
+public class TriggerOrderProjectionRepository {
     private final JdbcTemplate jdbc;
     public TriggerOrderProjectionRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 

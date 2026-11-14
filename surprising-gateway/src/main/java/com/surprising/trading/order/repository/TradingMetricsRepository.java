@@ -10,7 +10,7 @@ import org.springframework.stereotype.Repository;
 
 /** 只读取core_trading_statistics_snapshot表的原始快照行；业务校验、榜单和HTTP参数不进入Repository。 */
 @Repository
-public final class TradingMetricsRepository {
+public class TradingMetricsRepository {
     private final JdbcTemplate jdbc;
     public TradingMetricsRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
     public Optional<StoredTradingMetrics> find(ProductLine product, int windowMinutes) {

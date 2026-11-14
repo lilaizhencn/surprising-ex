@@ -13,7 +13,7 @@ import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 /** User fills and admin history read the realtime-owned committed execution table only. */
 @Repository
-public final class TradeProjectionRepository {
+public class TradeProjectionRepository {
     private final JdbcTemplate jdbc;
     public TradeProjectionRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
