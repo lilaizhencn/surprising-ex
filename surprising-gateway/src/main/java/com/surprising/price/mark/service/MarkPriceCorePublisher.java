@@ -8,6 +8,7 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.mark.config.MarkPriceProperties;
+import io.aeron.driver.MediaDriver;
 import jakarta.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -22,6 +23,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -41,12 +43,22 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
     private final AtomicBoolean draining = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    @Autowired
     public MarkPriceCorePublisher(MarkPriceProperties properties) {
-        this(new AeronClientPool("price-mark", properties.getProductLine(),
-                properties.getAeron().getHostnames(), properties.getAeron().getEgressHostname(),
-                properties.getAeron().getResponseTimeout(), properties.getAeron().getClientConnections(),
-                "price-mark-core"));
+        this(properties, null);
+    }
+
+    @Autowired
+    public MarkPriceCorePublisher(MarkPriceProperties properties,
+                                  @Autowired(required = false) @Qualifier("productCommandMediaDriver") MediaDriver driver) {
+        this(driver != null
+                ? new AeronClientPool("price-mark", properties.getProductLine(),
+                        properties.getAeron().getHostnames(), properties.getAeron().getEgressHostname(),
+                        properties.getAeron().getResponseTimeout(), properties.getAeron().getClientConnections(),
+                        "price-mark-core", driver)
+                : new AeronClientPool("price-mark", properties.getProductLine(),
+                        properties.getAeron().getHostnames(), properties.getAeron().getEgressHostname(),
+                        properties.getAeron().getResponseTimeout(), properties.getAeron().getClientConnections(),
+                        "price-mark-core"));
     }
 
     MarkPriceCorePublisher(Transport transport) {

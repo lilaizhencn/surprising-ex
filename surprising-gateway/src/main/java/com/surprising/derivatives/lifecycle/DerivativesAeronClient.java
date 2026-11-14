@@ -8,9 +8,12 @@ import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.risk.provider.config.RiskProperties;
+import io.aeron.driver.MediaDriver;
 import jakarta.annotation.PreDestroy;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /** Owns the single Aeron client pool shared by all derivatives lifecycle services. */
@@ -21,6 +24,13 @@ public final class DerivativesAeronClient implements AutoCloseable {
 
     public DerivativesAeronClient(RiskProperties risk, LiquidationProperties liquidation,
                                   InsuranceProperties insurance, AdlProperties adl) {
+        this(risk, liquidation, insurance, adl, null);
+    }
+
+    @Autowired
+    public DerivativesAeronClient(RiskProperties risk, LiquidationProperties liquidation,
+                                  InsuranceProperties insurance, AdlProperties adl,
+                                  @Autowired(required = false) @Qualifier("productCommandMediaDriver") MediaDriver driver) {
         ProductLine productLine = risk.getProductLine();
         if (liquidation.getProductLine() != productLine
                 || insurance.getProductLine() != productLine
@@ -28,8 +38,12 @@ public final class DerivativesAeronClient implements AutoCloseable {
             throw new IllegalStateException("all lifecycle providers must use the same product line");
         }
         RiskProperties.Aeron aeron = risk.getAeron();
-        pool = new AeronClientPool("derivatives-lifecycle", productLine, aeron.getHostnames(),
-                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections());
+        pool = driver != null
+                ? new AeronClientPool("derivatives-lifecycle", productLine, aeron.getHostnames(),
+                        aeron.getEgressHostname(), aeron.getResponseTimeout(), 1,
+                        "derivatives-lifecycle", driver)
+                : new AeronClientPool("derivatives-lifecycle", productLine, aeron.getHostnames(),
+                        aeron.getEgressHostname(), aeron.getResponseTimeout(), 1);
     }
 
     public CoreResponse query(CoreMessageType type, UUID commandId, long userId, byte[] payload) {

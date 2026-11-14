@@ -65,9 +65,10 @@ public class ProductBusinessConfiguration {
     }
     @org.springframework.context.annotation.Bean("taskScheduler")
     org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler productScheduler(
-            AccountProperties properties) {
+            AccountProperties properties,
+            @org.springframework.beans.factory.annotation.Value("${surprising.gateway.product-scheduler-pool-size:2}") int poolSize) {
         var scheduler = new org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(6);
+        scheduler.setPoolSize(Math.max(1, poolSize));
         scheduler.setThreadNamePrefix("gateway-" + properties.getProductLine() + "-scheduled-");
         scheduler.setRemoveOnCancelPolicy(true);
         scheduler.setAwaitTerminationSeconds(5);
