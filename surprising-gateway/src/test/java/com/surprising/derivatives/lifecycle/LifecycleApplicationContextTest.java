@@ -62,6 +62,8 @@ class LifecycleApplicationContextTest {
                 .with(runner -> line.isFundingProduct() ? runner.withBean(com.surprising.funding.provider.task.FundingMaintenanceTask.class.getName(),
                         com.surprising.funding.provider.task.FundingMaintenanceTask.class,
                         () -> mock(com.surprising.funding.provider.task.FundingMaintenanceTask.class)) : runner)
+                .withBean("gatewaySharedJsonProducerFactory", org.springframework.kafka.core.ProducerFactory.class,
+                        () -> mock(org.springframework.kafka.core.ProducerFactory.class))
                 .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
                 .withBean(org.springframework.transaction.PlatformTransactionManager.class,
                         () -> mock(org.springframework.transaction.PlatformTransactionManager.class))

@@ -6,11 +6,8 @@ import java.util.Collection;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
-import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.StringSerializer;
 import com.surprising.gateway.provider.config.KafkaBootstrapServers;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -18,13 +15,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
-import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.ConsumerAwareRebalanceListener;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
 import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
@@ -33,20 +28,10 @@ public class MarkKafkaConfiguration {
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String defaultBootstrapServers = "localhost:9092";
 
-    public ProducerFactory<String, Object> markProducerFactory(MarkPriceProperties properties) {
-        return markProducerFactory(properties, null);
-    }
-
     @Bean
     public ProducerFactory<String, Object> markProducerFactory(
-            MarkPriceProperties properties,
-            @Autowired(required = false) @Qualifier("gatewaySharedJsonProducerFactory")
-            ProducerFactory<String, Object> shared) {
-        String resolved = KafkaBootstrapServers.resolve(properties.getKafka().getBootstrapServers(), defaultBootstrapServers);
-        if (shared != null && resolved.equals(KafkaBootstrapServers.resolve(null, defaultBootstrapServers))) {
-            return KafkaBootstrapServers.nonDisposableDelegate(shared);
-        }
-        return new DefaultKafkaProducerFactory<>(KafkaBootstrapServers.jsonProducerConfig(resolved));
+            @Qualifier("gatewaySharedJsonProducerFactory") ProducerFactory<String, Object> shared) {
+        return KafkaBootstrapServers.nonDisposableDelegate(shared);
     }
 
     @Bean

@@ -42,13 +42,11 @@ class FundingKafkaConfigurationTest {
 
     @Test
     void producerUsesDurableIdempotentSettings() {
-        FundingProperties properties = new FundingProperties();
-        properties.getKafka().setBootstrapServers("kafka-h:9092");
+        var shared = new com.surprising.gateway.provider.config.GatewayProductsHealth()
+                .gatewaySharedJsonProducerFactory("kafka-h:9092");
+        var delegated = new FundingKafkaConfiguration().fundingProducerFactory(shared);
 
-        var factory = (DefaultKafkaProducerFactory<String, Object>)
-                new FundingKafkaConfiguration().fundingProducerFactory(properties);
-
-        Map<String, Object> config = factory.getConfigurationProperties();
+        Map<String, Object> config = delegated.getConfigurationProperties();
         assertThat(config).containsEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-h:9092");
         assertThat(config).containsEntry(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         assertThat(config).containsEntry(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JacksonJsonSerializer.class);

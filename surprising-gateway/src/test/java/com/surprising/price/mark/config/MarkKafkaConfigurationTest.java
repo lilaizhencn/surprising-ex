@@ -59,13 +59,11 @@ class MarkKafkaConfigurationTest {
 
     @Test
     void producerUsesDurableIdempotentSettings() {
-        MarkPriceProperties properties = new MarkPriceProperties();
-        properties.getKafka().setBootstrapServers("kafka-price:9092");
+        var shared = new com.surprising.gateway.provider.config.GatewayProductsHealth()
+                .gatewaySharedJsonProducerFactory("kafka-price:9092");
+        var delegated = new MarkKafkaConfiguration().markProducerFactory(shared);
 
-        var factory = (DefaultKafkaProducerFactory<String, Object>)
-                new MarkKafkaConfiguration().markProducerFactory(properties);
-
-        Map<String, Object> config = factory.getConfigurationProperties();
+        Map<String, Object> config = delegated.getConfigurationProperties();
         assertThat(config).containsEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-price:9092");
         assertThat(config).containsEntry(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         assertThat(config).containsEntry(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JacksonJsonSerializer.class);

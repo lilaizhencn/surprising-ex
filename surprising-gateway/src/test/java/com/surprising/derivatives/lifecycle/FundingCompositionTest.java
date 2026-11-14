@@ -43,6 +43,8 @@ class FundingCompositionTest {
                 })
                 .withBean(LatestMarkPriceCache.class, () -> mock(LatestMarkPriceCache.class))
                 .withBean("derivativesInstrumentSnapshotCache", InstrumentSnapshotCache.class, InstrumentSnapshotCache::new)
+                .withBean("gatewaySharedJsonProducerFactory", org.springframework.kafka.core.ProducerFactory.class,
+                        () -> mock(org.springframework.kafka.core.ProducerFactory.class))
                 .withBean(ObjectMapper.class, ObjectMapper::new);
     }
 
