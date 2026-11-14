@@ -3,8 +3,10 @@ package com.surprising.price.index.service;
 import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.price.index.config.IndexPriceProperties;
 import java.util.List;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 
 /** 维护指数价格运行时使用的不可变配置快照。 */
@@ -18,7 +20,8 @@ public class IndexInstrumentConfigService {
         this.configLoader = configLoader;
     }
 
-    @EventListener(ApplicationReadyEvent.class)
+    @Order(Ordered.HIGHEST_PRECEDENCE)
+    @EventListener(ContextRefreshedEvent.class)
     public void onApplicationReady() {
         refresh();
     }

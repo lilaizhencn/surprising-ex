@@ -31,8 +31,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -63,7 +65,8 @@ public class ExternalSpotWebSocketManager {
                 .build();
     }
 
-    @EventListener(ApplicationReadyEvent.class)
+    @Order(Ordered.LOWEST_PRECEDENCE)
+    @EventListener(ContextRefreshedEvent.class)
     public void start() {
         running = true;
         Map<String, List<TrackedSource>> grouped = properties.getWebSocket().isEnabled() ? groupedSources() : Map.of();

@@ -8,7 +8,7 @@ import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.product.api.ProductLine;
 import java.util.Set;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -28,7 +28,7 @@ public class SymbolRegistryService {
         this.snapshotCache = snapshotCache;
     }
 
-    @EventListener(ApplicationReadyEvent.class)
+    @EventListener(ContextRefreshedEvent.class)
     public void onApplicationReady() {
         if (snapshotCache.initialized(properties.getProductLine())) {
             refresh();
