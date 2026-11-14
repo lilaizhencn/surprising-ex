@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.client.CustodyWalletClient;
+import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
 
 import com.surprising.asset.model.AssetConfiguration.*;
 import com.surprising.asset.repository.AssetRepository;
@@ -8,17 +9,24 @@ import com.surprising.asset.repository.AssetNetworkRepository;
 import java.util.*;
 import org.springframework.stereotype.Service;
 
-/** Admin configuration controls visibility; custody owns supported chains and user addresses. */
+/** Admin configuration controls visibility; local persistence caches addresses; custody owns supported chains and user addresses. */
 @Service
 public class WalletFundingService {
     private final AssetRepository assets;
     private final AssetNetworkRepository networks;
     private final CustodyWalletClient custody;
+    private final UserDepositAddressRepository addressRepository;
 
     public WalletFundingService(AssetRepository assets, AssetNetworkRepository networks, CustodyWalletClient custody) {
+        this(assets, networks, custody, null);
+    }
+
+    public WalletFundingService(AssetRepository assets, AssetNetworkRepository networks,
+                                CustodyWalletClient custody, UserDepositAddressRepository addressRepository) {
         this.assets = assets;
         this.networks = networks;
         this.custody = custody;
+        this.addressRepository = addressRepository;
     }
 
     public List<FundingAsset> catalog(String operation) {
@@ -49,9 +57,22 @@ public class WalletFundingService {
         var route = networks.list(asset.assetId()).stream()
                 .filter(n -> n.networkCode().equals(networkCode) && n.depositEnabled()).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("deposit network is disabled or does not belong to this asset"));
-        if (custody.chains().stream().noneMatch(c -> supports(c, asset.asset(), route.networkCode(), "deposit"))) {
-            throw new IllegalStateException("custody does not support this deposit network and asset");
+
+        // 1. 本地持久化查询（0 穿透）
+        if (addressRepository != null) {
+            var cached = addressRepository.find(userId, route.networkCode(), 1L);
+            if (cached.isPresent()) {
+                var record = cached.get();
+                return new DepositAddress(asset.asset(), route.networkCode(), record.address(), record.memo());
+            }
         }
+
+        // 2. 本地未命中时，校验 Custody 链支持并在 Custody 端注册/分配地址
+        var chains = custody.chains();
+        var chainConfig = chains.stream().filter(c -> supports(c, asset.asset(), route.networkCode(), "deposit"))
+                .findFirst().orElseThrow(() -> new IllegalStateException("custody does not support this deposit network and asset"));
+        String family = chainConfig.get("family") instanceof String f ? f.toLowerCase(Locale.ROOT) : "generic";
+
         // Custody atomically returns the existing address or allocates one for this stable tuple.
         var response = custody.createAddress(userId, route.networkCode(), 1L);
         if (response == null || !(response.get("address") instanceof String address) || address.isBlank()
@@ -60,8 +81,14 @@ public class WalletFundingService {
                 || !"ACTIVE".equals(response.get("status"))) {
             throw new IllegalStateException("custody returned an invalid or inactive deposit address");
         }
-        return new DepositAddress(asset.asset(), route.networkCode(), address,
-                Objects.toString(response.get("memo"), ""));
+        String memo = Objects.toString(response.get("memo"), "");
+
+        // 3. 落库本地持久化，后续直接走本地查询
+        if (addressRepository != null) {
+            addressRepository.save(userId, route.networkCode(), family, address, memo, 1L);
+        }
+
+        return new DepositAddress(asset.asset(), route.networkCode(), address, memo);
     }
 
     public void validateNetwork(int assetId, NetworkRequest request) {

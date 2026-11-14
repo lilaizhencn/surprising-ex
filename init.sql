@@ -2457,6 +2457,32 @@ CREATE TABLE IF NOT EXISTS gateway_wallet_webhook_events (
 CREATE INDEX IF NOT EXISTS gateway_wallet_webhook_events_status_idx
     ON gateway_wallet_webhook_events (status, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS gateway_user_deposit_addresses (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    network_code        TEXT NOT NULL,
+    address_family      TEXT NOT NULL,
+    address             TEXT NOT NULL,
+    memo                TEXT NOT NULL DEFAULT '',
+    address_version     BIGINT NOT NULL DEFAULT 1,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT gateway_user_deposit_addresses_uq UNIQUE (user_id, network_code, address_version)
+);
+
+CREATE INDEX IF NOT EXISTS gateway_user_deposit_addresses_user_network_idx
+    ON gateway_user_deposit_addresses (user_id, network_code);
+
+CREATE INDEX IF NOT EXISTS gateway_user_deposit_addresses_user_family_idx
+    ON gateway_user_deposit_addresses (user_id, address_family);
+
+COMMENT ON TABLE gateway_user_deposit_addresses IS '用户在各公链网络的确定性充值地址本地持久化表，实现 0 网络穿透查询与公链地址隔离';
+COMMENT ON COLUMN gateway_user_deposit_addresses.network_code IS '网络代码，如 ETH, BASE, TRON, BTC';
+COMMENT ON COLUMN gateway_user_deposit_addresses.address_family IS '公链族，如 evm, tron, bitcoin, solana';
+COMMENT ON COLUMN gateway_user_deposit_addresses.address IS '用户充值地址文本';
+COMMENT ON COLUMN gateway_user_deposit_addresses.memo IS 'Tag/Memo 备注，用于特定多用户共用公链地址';
+COMMENT ON COLUMN gateway_user_deposit_addresses.address_version IS '地址版本号，用于大版本密钥轮换';
+
 CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawals (
     withdrawal_id        UUID PRIMARY KEY,
     user_id              BIGINT NOT NULL REFERENCES gateway_users(user_id),

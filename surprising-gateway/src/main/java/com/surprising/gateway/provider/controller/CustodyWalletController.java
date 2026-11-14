@@ -7,12 +7,15 @@ import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
+import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,17 +35,28 @@ public class CustodyWalletController {
     private final SensitiveActionVerificationService verificationService;
     private final ComplianceService complianceService;
     private final CustodyWithdrawalService withdrawalService;
+    private final UserDepositAddressRepository addressRepository;
 
     public CustodyWalletController(AuthService authService,
                                    CustodyWalletClient walletClient,
                                    SensitiveActionVerificationService verificationService,
                                    ComplianceService complianceService,
                                    CustodyWithdrawalService withdrawalService) {
+        this(authService, walletClient, verificationService, complianceService, withdrawalService, null);
+    }
+
+    public CustodyWalletController(AuthService authService,
+                                   CustodyWalletClient walletClient,
+                                   SensitiveActionVerificationService verificationService,
+                                   ComplianceService complianceService,
+                                   CustodyWithdrawalService withdrawalService,
+                                   UserDepositAddressRepository addressRepository) {
         this.authService = authService;
         this.walletClient = walletClient;
         this.verificationService = verificationService;
         this.complianceService = complianceService;
         this.withdrawalService = withdrawalService;
+        this.addressRepository = addressRepository;
     }
 
     @PostMapping("/addresses")
@@ -50,7 +64,36 @@ public class CustodyWalletController {
                                              @Valid @RequestBody CreateAddressRequest request) {
         try {
             JwtPrincipal principal = principal(authorization);
-            return walletClient.createAddress(principal.userId(), request.chain(), request.addressVersion());
+            long version = request.addressVersion() == null ? 1L : request.addressVersion();
+            if (addressRepository != null) {
+                var cached = addressRepository.find(principal.userId(), request.chain(), version);
+                if (cached.isPresent()) {
+                    var r = cached.get();
+                    return Map.of(
+                            "address", r.address(),
+                            "chain", r.networkCode(),
+                            "subject", "user:" + principal.userId(),
+                            "status", "ACTIVE",
+                            "addressVersion", r.addressVersion(),
+                            "memo", r.memo()
+                    );
+                }
+            }
+            Map<String, Object> response = walletClient.createAddress(principal.userId(), request.chain(), version);
+            if (response != null && addressRepository != null && response.get("address") instanceof String address && !address.isBlank()) {
+                String memo = Objects.toString(response.get("memo"), "");
+                String family = "generic";
+                try {
+                    for (var c : walletClient.chains()) {
+                        if (request.chain().equals(c.get("chain")) && c.get("family") instanceof String f) {
+                            family = f.toLowerCase(Locale.ROOT);
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) {}
+                addressRepository.save(principal.userId(), request.chain(), family, address, memo, version);
+            }
+            return response;
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         } catch (IllegalStateException ex) {

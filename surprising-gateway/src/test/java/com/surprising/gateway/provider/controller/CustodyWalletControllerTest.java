@@ -86,4 +86,22 @@ class CustodyWalletControllerTest {
                 .containsExactly(Map.of("chain", "ETH", "enabled", true));
         verify(walletClient).chains();
     }
+
+    @Test
+    void createAddressReturnsCachedAddressWithoutCallingWalletClient() {
+        AuthService authService = mock(AuthService.class);
+        CustodyWalletClient walletClient = mock(CustodyWalletClient.class);
+        com.surprising.gateway.provider.repository.UserDepositAddressRepository repo = mock(com.surprising.gateway.provider.repository.UserDepositAddressRepository.class);
+        CustodyWalletController controller = new CustodyWalletController(
+                authService, walletClient, mock(SensitiveActionVerificationService.class),
+                mock(ComplianceService.class), mock(CustodyWithdrawalService.class), repo);
+        when(authService.authenticateBearer("Bearer token"))
+                .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of(), Instant.now().plusSeconds(600)));
+        when(repo.find(42L, "ETH", 1L)).thenReturn(java.util.Optional.of(
+                new com.surprising.gateway.provider.repository.UserDepositAddressRecord(
+                        1L, 42L, "ETH", "evm", "0xlocal", "tag", 1L, Instant.now(), Instant.now())));
+        var result = controller.createAddress("Bearer token", new CustodyWalletController.CreateAddressRequest("ETH", 1L));
+        assertThat(result.get("address")).isEqualTo("0xlocal");
+        verify(walletClient, org.mockito.Mockito.never()).createAddress(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
 }

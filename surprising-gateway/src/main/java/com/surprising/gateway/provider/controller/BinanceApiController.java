@@ -47,6 +47,7 @@ import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -77,7 +78,25 @@ public class BinanceApiController {
     private final ComplianceService complianceService;
     private final CustodyWalletClient custodyWalletClient;
     private final CustodyWithdrawalService withdrawalService;
+    private final UserDepositAddressRepository depositAddressRepository;
     private final ObjectMapper objectMapper;
+
+    public BinanceApiController(GatewayProperties properties,
+                                InstrumentRequestHandler instrumentRequests,
+                                OrderRequestHandler orderRequests,
+                                AccountRequestHandler accountRequests,
+                                MatchingMarketDataService marketDataService,
+                                GatewayApiKeyService apiKeyService,
+                                SensitiveActionVerificationService verificationService,
+                                AuthService authService,
+                                ComplianceService complianceService,
+                                CustodyWalletClient custodyWalletClient,
+                                CustodyWithdrawalService withdrawalService,
+                                ObjectMapper objectMapper) {
+        this(properties, instrumentRequests, orderRequests, accountRequests, marketDataService,
+                apiKeyService, verificationService, authService, complianceService, custodyWalletClient,
+                withdrawalService, null, objectMapper);
+    }
 
     @Autowired
     public BinanceApiController(GatewayProperties properties,
@@ -91,6 +110,7 @@ public class BinanceApiController {
                                 ComplianceService complianceService,
                                 CustodyWalletClient custodyWalletClient,
                                 CustodyWithdrawalService withdrawalService,
+                                @Autowired(required = false) UserDepositAddressRepository depositAddressRepository,
                                 ObjectMapper objectMapper) {
         this.properties = properties;
         this.apiKeyRequests = new ApiKeyRequestBinding(properties);
@@ -104,6 +124,7 @@ public class BinanceApiController {
         this.complianceService = complianceService;
         this.custodyWalletClient = custodyWalletClient;
         this.withdrawalService = withdrawalService;
+        this.depositAddressRepository = depositAddressRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -225,9 +246,35 @@ public class BinanceApiController {
     private ResponseEntity<byte[]> depositAddress(HttpServletRequest request) {
         long userId = authenticate(request, "READ");
         String chain = requiredParameter(request, "network");
+        if (depositAddressRepository != null) {
+            var cached = depositAddressRepository.find(userId, chain, 1L);
+            if (cached.isPresent()) {
+                var r = cached.get();
+                return json(HttpStatus.OK, Map.of(
+                        "coin", requiredParameter(request, "coin"),
+                        "address", r.address(),
+                        "tag", r.memo(),
+                        "url", ""
+                ));
+            }
+        }
         Map<String, Object> result = custodyWalletClient.createAddress(userId, chain, null);
+        if (result != null && depositAddressRepository != null && result.get("address") instanceof String address && !address.isBlank()) {
+            String memo = Objects.toString(result.get("memo"), "");
+            String family = "generic";
+            try {
+                for (var c : custodyWalletClient.chains()) {
+                    if (chain.equals(c.get("chain")) && c.get("family") instanceof String f) {
+                        family = f.toLowerCase(Locale.ROOT);
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+            depositAddressRepository.save(userId, chain, family, address, memo, 1L);
+        }
         return json(HttpStatus.OK, Map.of("coin", requiredParameter(request, "coin"),
-                "address", stringValue(result.get("address")), "tag", stringValue(result.get("memo"))));
+                "address", stringValue(result.get("address")), "tag", stringValue(result.get("memo")),
+                "url", ""));
     }
 
     private ResponseEntity<byte[]> depositHistory(HttpServletRequest request) {

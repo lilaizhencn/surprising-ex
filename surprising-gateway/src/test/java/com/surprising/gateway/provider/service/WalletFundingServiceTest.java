@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.client.CustodyWalletClient;
+import com.surprising.gateway.provider.repository.UserDepositAddressRecord;
+import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
 
 import com.surprising.asset.model.AssetConfiguration.*;
 import com.surprising.asset.repository.*;
@@ -15,7 +17,9 @@ class WalletFundingServiceTest {
     private final AssetRepository assets = mock();
     private final AssetNetworkRepository networks = mock();
     private final CustodyWalletClient custody = mock();
+    private final UserDepositAddressRepository addressRepository = mock();
     private final WalletFundingService service = new WalletFundingService(assets, networks, custody);
+    private final WalletFundingService cachingService = new WalletFundingService(assets, networks, custody, addressRepository);
     private Asset asset() { return new Asset(1, "USDT", "Tether", "/assets/usdt.svg", 100000000, true, true, 1, Instant.now()); }
     private Network network(boolean deposit) { return new Network(1, 1, "ETH", "Ethereum", "0x123", false, 6, deposit, true,
         BigDecimal.ONE, BigDecimal.TEN, BigDecimal.ONE, 12, 1, Instant.now()); }
@@ -84,5 +88,25 @@ class WalletFundingServiceTest {
         assertThatThrownBy(() -> service.depositAddress(42,"USDT","ETH")).isInstanceOf(IllegalStateException.class);
         when(custody.createAddress(42,"ETH",1L)).thenReturn(Map.of("address","0xabc","subject","user:42","chain","ETH","status","DISABLED"));
         assertThatThrownBy(() -> service.depositAddress(42,"USDT","ETH")).isInstanceOf(IllegalStateException.class);
+    }
+    @Test void returnsCachedAddressLocallyWithoutCallingCustody() {
+        setup();
+        when(addressRepository.find(42, "ETH", 1L)).thenReturn(Optional.of(
+                new UserDepositAddressRecord(1L, 42L, "ETH", "evm", "0xlocal", "tag1", 1L, Instant.now(), Instant.now())));
+        var result = cachingService.depositAddress(42, "USDT", "ETH");
+        assertThat(result.address()).isEqualTo("0xlocal");
+        assertThat(result.memo()).isEqualTo("tag1");
+        verify(custody, never()).createAddress(anyLong(), anyString(), any());
+    }
+    @Test void allocatesAndPersistsLocallyWhenNotCached() {
+        setup();
+        when(addressRepository.find(42, "ETH", 1L)).thenReturn(Optional.empty());
+        when(custody.createAddress(42, "ETH", 1L)).thenReturn(
+                Map.of("address", "0xabc", "subject", "user:42", "chain", "ETH", "status", "ACTIVE", "memo", "memo1"));
+        var result = cachingService.depositAddress(42, "USDT", "ETH");
+        assertThat(result.address()).isEqualTo("0xabc");
+        assertThat(result.memo()).isEqualTo("memo1");
+        verify(custody, times(1)).createAddress(42, "ETH", 1L);
+        verify(addressRepository, times(1)).save(42L, "ETH", "evm", "0xabc", "memo1", 1L);
     }
 }
