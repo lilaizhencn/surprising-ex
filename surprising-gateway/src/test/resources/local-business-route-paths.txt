@@ -41,7 +41,6 @@
 /api/v1/admin/trading/trigger-orders
 /api/v1/admin/trading/trigger-orders/{triggerOrderId}
 /api/v1/admin/trading/trigger-orders/{triggerOrderId}/timeline
-/api/v1/admin/websocket/metrics
 /api/v1/instruments/admin/list
 /api/v1/instruments/admin/upsert
 /api/v1/instruments/admin/{instrumentId}

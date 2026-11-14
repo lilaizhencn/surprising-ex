@@ -163,6 +163,9 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
         if (uri.startsWith("/api/v1/adl")) {
             return new DirectRoute("adl", true, hasAdminSegment, false);
         }
+        if (uri.startsWith("/api/v1/admin/websocket")) {
+            return new DirectRoute("websocket-admin", true, true, true);
+        }
         return null;
     }
 

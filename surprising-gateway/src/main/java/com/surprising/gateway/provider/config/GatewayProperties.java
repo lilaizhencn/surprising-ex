@@ -300,7 +300,6 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/admin/market-maker", true));
         routes.put("wallet", new BackendRoute("http://localhost:8002", "/wallet/v1", true));
         routes.put("wallet-admin", walletAdminRoute());
-        routes.put("websocket-admin", new BackendRoute("local:", "/api/v1/admin/websocket", true));
         return routes;
     }
 

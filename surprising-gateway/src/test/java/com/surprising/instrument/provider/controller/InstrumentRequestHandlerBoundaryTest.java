@@ -76,8 +76,7 @@ class InstrumentRequestHandlerBoundaryTest {
 
     @Test void actualLocalDispatchMapsBadCursorAndNativeMissingInstrumentWithoutCreatingHttpRoutes() {
         try (var validation = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
-            var api = LocalBusinessApi.shared(controller, JsonMapper.builder().findAndAddModules().build(), validation.getValidator(),
-                    mock(com.surprising.websocket.provider.service.SubscriptionRegistry.class));
+            var api = LocalBusinessApi.shared(controller, JsonMapper.builder().findAndAddModules().build(), validation.getValidator());
             var headers = new HttpHeaders(); headers.set("X-Admin-User-Id", "1");
             var response = api.invoke("instrument-admin", URI.create("http://local/api/v1/instruments/admin/list?productLine=SPOT&sort=updatedAt.desc&cursor=broken"),
                     HttpMethod.GET, headers, null, Duration.ofSeconds(1));

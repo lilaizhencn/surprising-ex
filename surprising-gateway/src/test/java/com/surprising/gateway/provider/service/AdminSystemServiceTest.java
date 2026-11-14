@@ -59,7 +59,7 @@ class AdminSystemServiceTest {
         var properties = new GatewayProperties();
         properties.setAdminRoutes(Map.of(
                 "account", new GatewayProperties.BackendRoute("local:", "/api/v1/admin/accounts", true),
-                "websocket-admin", new GatewayProperties.BackendRoute("http://localhost:9094", "/api/v1/admin/websocket", true)));
+                "trading", new GatewayProperties.BackendRoute("local:", "/api/v1/admin/trading/orders", true)));
         properties.setRoutes(Map.of("instrument", new GatewayProperties.BackendRoute(
                 "http://old-instrument:9080", "/api/v1/instruments", false)));
         var http = mock(RestTemplate.class);

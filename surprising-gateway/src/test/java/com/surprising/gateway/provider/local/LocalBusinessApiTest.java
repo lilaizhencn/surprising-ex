@@ -257,8 +257,6 @@ class LocalBusinessApiTest {
         verify(accounts).balances(42L);
     }
 
-    private final com.surprising.websocket.provider.service.SubscriptionRegistry websocket = mock(com.surprising.websocket.provider.service.SubscriptionRegistry.class);
-
     private final com.surprising.trading.order.controller.OrderRequestHandler orders = mock(com.surprising.trading.order.controller.OrderRequestHandler.class);
 
     private final com.surprising.trading.order.controller.TradingFeeRequestHandler fees = mock(com.surprising.trading.order.controller.TradingFeeRequestHandler.class);
@@ -285,7 +283,7 @@ class LocalBusinessApiTest {
     }
 
     private LocalBusinessApi api() {
-        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler.class), leverage, fees, orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
+        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler.class), leverage, fees, orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), accountProperties, tradingProperties);
     }
 
     private ResponseEntity<byte[]> invoke(String service, String path, HttpMethod method, HttpHeaders headers, String body) {
@@ -300,30 +298,8 @@ class LocalBusinessApiTest {
     }
 
     @Test
-    void websocketMetricsCallsLocalControllerWithTrustedAdminIdentity() {
-        assertThat(LocalBusinessApi.isLocalService("websocket-admin")).isTrue();
-        var headers = new HttpHeaders();
-        headers.set("X-Admin-User-Id", "7");
-        headers.set("X-Admin-Username", "admin");
-        assertThat(invoke("websocket-admin", "/api/v1/admin/websocket/metrics", HttpMethod.GET, headers, null).getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(websocket).metrics("7", "admin");
-        assertThat(invoke("websocket-admin", "/api/v1/admin/websocket/metrics", HttpMethod.POST, headers, null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(invoke("websocket-admin", "/api/v1/admin/websocket/unknown", HttpMethod.GET, headers, null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        verifyNoMoreInteractions(websocket);
-    }
-
-    @Test
-    void websocketMetricsRejectsMissingAdminAndForgedRawHttpHeaders() throws Exception {
-        assertThat(invoke("websocket-admin", "/api/v1/admin/websocket/metrics", HttpMethod.GET, userHeaders(), null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        verifyNoInteractions(websocket);
-        var proxy = mock(com.surprising.gateway.provider.controller.GatewayProxyController.class);
-        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
-                proxy).build();
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/admin/websocket/metrics")
-                .header("X-Admin-User-Id", "7"))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
-        verifyNoInteractions(proxy);
-
+    void websocketAdminIsNoLongerLocalBusinessService() {
+        assertThat(LocalBusinessApi.isLocalService("websocket-admin")).isFalse();
     }
 
     @Test
@@ -431,16 +407,6 @@ class LocalBusinessApiTest {
         assertThat(mapper.readTree(response.getBody()).path("message").asText())
                 .contains("request was not accepted");
         verify(orders, times(1)).cancel(any());
-    }
-
-    @Test
-    void conflictingProductSelectorsFailClosedIncludingNestedCommands() {
-        var request = new MockHttpServletRequest();
-        request.addHeader("X-Product-Line", "LINEAR_PERPETUAL");
-        request.addParameter("accountType", "SPOT");
-        assertThatThrownBy(() -> api().validateProductSelectors(request, null)).isInstanceOf(ResponseStatusException.class);
-        assertThatThrownBy(() -> api().validateProductSelectors(new MockHttpServletRequest(), "{\"orders\":[{\"productLine\":\"OPTION\"}]}".getBytes())).isInstanceOf(ResponseStatusException.class);
-        verifyNoInteractions(orders, accounts);
     }
 
     @Test

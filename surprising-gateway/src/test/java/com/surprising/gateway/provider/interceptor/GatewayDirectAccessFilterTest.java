@@ -266,5 +266,14 @@ class GatewayDirectAccessFilterTest {
         var forbiddenAdminRes = new MockHttpServletResponse();
         f.doFilter(forbiddenAdminReq, forbiddenAdminRes, (r, s) -> {});
         assertThat(forbiddenAdminRes.getStatus()).isEqualTo(403);
+
+        var wsAdminReq = new MockHttpServletRequest("GET", "/api/v1/admin/websocket/metrics");
+        wsAdminReq.addHeader("Authorization", "Bearer adminTok");
+        var wsAdminRes = new MockHttpServletResponse();
+        var seenWsAdmin = new AtomicReference<String>();
+        f.doFilter(wsAdminReq, wsAdminRes, (r, s) -> seenWsAdmin.set(((HttpServletRequest) r).getHeader("X-Admin-User-Id")));
+        assertThat(wsAdminRes.getStatus()).isEqualTo(200);
+        assertThat(seenWsAdmin.get()).isEqualTo("3");
+        verify(auth).requireAdminPermission(3L, List.of("ADMIN"), "admin.gateway.websocket-admin.read");
     }
 }

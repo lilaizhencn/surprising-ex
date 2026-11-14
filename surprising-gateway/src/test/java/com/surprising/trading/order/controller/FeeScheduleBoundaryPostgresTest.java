@@ -84,7 +84,7 @@ class FeeScheduleBoundaryPostgresTest {
         if (validation != null) validation.close();
         validation = Validation.buildDefaultValidatorFactory();
         api = new LocalBusinessApi(routes, null, null, json, validation.getValidator(),
-                null, null, properties);
+                null, properties);
     }
 
     @AfterEach void cleanup() { if (validation != null) validation.close(); if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }

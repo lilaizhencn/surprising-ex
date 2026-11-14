@@ -394,7 +394,7 @@ public class GatewayProxyController {
     }
 
     private boolean isSharedLocalService(String service, HttpServletRequest request) {
-        return java.util.Set.of("instrument", "instrument-admin", "websocket-admin")
+        return java.util.Set.of("instrument", "instrument-admin")
                 .contains(service.toLowerCase(Locale.ROOT))
                 && !request.getRequestURI().endsWith("/order-settings");
     }
@@ -403,8 +403,7 @@ public class GatewayProxyController {
                                                          HttpServletRequest request, byte[] body) {
         GatewayProperties.BackendRoute configured = route(service, admin);
         if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
-            ProductLine requested = productSelection.resolve(request, body, !isSharedLocalService(service, request));
-            if (requested != null && !isSharedLocalService(service, request)) products.local(requested).validateProductSelectors(request, body);
+            productSelection.resolve(request, body, !isSharedLocalService(service, request));
             return configured;
         }
         return resolveProductRoute(configured, request, body);

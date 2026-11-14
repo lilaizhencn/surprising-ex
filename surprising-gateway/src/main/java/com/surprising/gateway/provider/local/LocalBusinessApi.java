@@ -19,9 +19,6 @@ import tools.jackson.databind.ObjectMapper;
 
 /** 保留公共 API 的响应契约，将已鉴权的请求直接交给进程内业务入口。 */
 public final class LocalBusinessApi {
-    private static final org.springframework.web.util.pattern.PathPattern WEBSOCKET_METRICS =
-            org.springframework.web.util.pattern.PathPatternParser.defaultInstance.parse("/api/v1/admin/websocket/metrics");
-    private final com.surprising.websocket.provider.service.SubscriptionRegistry websocket;
     private final TradingLocalRoutes trading;
     private final AccountLocalRoutes account;
     private final InstrumentLocalRoutes instrument;
@@ -32,10 +29,8 @@ public final class LocalBusinessApi {
 
     public LocalBusinessApi(TradingLocalRoutes trading, AccountLocalRoutes account,
                             InstrumentLocalRoutes instrument, ObjectMapper mapper, Validator validator,
-                            com.surprising.websocket.provider.service.SubscriptionRegistry websocket,
                             com.surprising.account.provider.config.AccountProperties accountProperties,
                             com.surprising.trading.order.config.TradingOrderProperties tradingProperties) {
-        this.websocket = websocket;
         this.trading = trading;
         this.account = account;
         this.instrument = instrument;
@@ -59,76 +54,15 @@ public final class LocalBusinessApi {
     }
 
     public static LocalBusinessApi shared(com.surprising.instrument.provider.controller.InstrumentRequestHandler instruments,
-                                         ObjectMapper mapper, Validator validator,
-                                         com.surprising.websocket.provider.service.SubscriptionRegistry websocket) {
+                                         ObjectMapper mapper, Validator validator) {
         return new LocalBusinessApi(null, null, new InstrumentLocalRoutes(instruments, null), mapper, validator,
-                websocket, null, null);
-    }
-
-    public void validateProductSelectors(jakarta.servlet.http.HttpServletRequest request, byte[] body) {
-        String path = request.getRequestURI();
-        if (path != null) {
-            if (path.startsWith("/fapi/")) validateProduct("LINEAR_PERPETUAL");
-            if (path.startsWith("/dapi/")) validateProduct("INVERSE_PERPETUAL");
-            if (path.startsWith("/eapi/")) validateProduct("OPTION");
-        }
-        for (String name : java.util.List.of("X-Product-Line", "X-Account-Type", "X-Contract-Type")) {
-            validateProduct(request.getHeader(name));
-        }
-        for (String name : java.util.List.of("productLine", "product-line", "product_line", "accountType",
-                "account-type", "account_type", "contractType", "contract-type", "contract_type")) {
-            String[] values = request.getParameterValues(name);
-            if (values != null) {
-                for (String value : values) {
-                    validateProduct(value);
-                }
-            }
-        }
-        if (body != null && body.length > 0) {
-            try {
-                validateBodyProduct(mapper.readTree(body));
-            } catch (tools.jackson.core.JacksonException exception) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid JSON body", exception);
-            }
-        }
-    }
-
-    private void validateBodyProduct(tools.jackson.databind.JsonNode node) {
-        if (node == null) {
-            return;
-        }
-        if (node.isObject()) {
-            for (String name : java.util.List.of("productLine", "product-line", "product_line", "accountType",
-                    "account-type", "account_type", "contractType", "contract-type", "contract_type")) {
-                var value = node.get(name);
-                if (value != null && !value.isNull()) {
-                    validateProduct(value.asText());
-                }
-            }
-        }
-        if ((node.isObject() || node.isArray())) {
-            for (var child : node) {
-                validateBodyProduct(child);
-            }
-        }
-    }
-
-    private void validateProduct(String value) {
-        if (value == null || value.isBlank()) {
-            return;
-        }
-        var selected = "FUNDING".equalsIgnoreCase(value)
-                ? com.surprising.product.api.ProductLine.SPOT
-                : com.surprising.product.api.ProductLine.fromExternalCode(value).orElse(null);
-        if (selected != productLine()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "product is not enabled in this application");
-        }
+                null, null);
     }
 
     public static boolean isLocalService(String service) {
         return switch (service.toLowerCase(java.util.Locale.ROOT)) {
             case "trading-market", "trading", "trading-orders", "trading-fees", "trading-leverage", "trading-trigger",
-                 "account", "account-public", "instrument", "instrument-admin", "websocket-admin" -> true;
+                 "account", "account-public", "instrument", "instrument-admin" -> true;
             default -> false;
         };
     }
@@ -142,13 +76,6 @@ public final class LocalBusinessApi {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin identity is required");
             }
             Object result = switch (service.toLowerCase(java.util.Locale.ROOT)) {
-                case "websocket-admin" -> {
-                    if (!request.matches(HttpMethod.GET, WEBSOCKET_METRICS)) {
-                        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown websocket admin route");
-                    }
-                    yield websocket.metrics(request.header("X-Admin-User-Id", String.class, null, true),
-                            request.header("X-Admin-Username", String.class, null, false));
-                }
                 case "account", "account-public" -> account.invoke(request);
                 case "instrument", "instrument-admin" -> instrument.invoke(request);
                 default -> trading.invoke(request);

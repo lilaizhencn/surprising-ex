@@ -34,9 +34,8 @@ public class GatewayProductsHealth {
     @Bean
     com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi(
             com.surprising.instrument.provider.controller.InstrumentRequestHandler instruments,
-            tools.jackson.databind.ObjectMapper mapper, jakarta.validation.Validator validator,
-            com.surprising.websocket.provider.service.SubscriptionRegistry websocket) {
-        return com.surprising.gateway.provider.local.LocalBusinessApi.shared(instruments, mapper, validator, websocket);
+            tools.jackson.databind.ObjectMapper mapper, jakarta.validation.Validator validator) {
+        return com.surprising.gateway.provider.local.LocalBusinessApi.shared(instruments, mapper, validator);
     }
 
     @Bean("markPriceReadiness")
