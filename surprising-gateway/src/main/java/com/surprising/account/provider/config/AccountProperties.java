@@ -4,9 +4,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.utils.ProductTopicNames;
 import java.time.Duration;
-import java.util.UUID;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @Getter
@@ -31,47 +29,9 @@ public class AccountProperties {
 
     @Getter
     public static class Kafka {
-        @Setter
-        private String bootstrapServers;
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         @Setter
         private ProductLine productLine;
-        /** 账户 Kafka 消费者的实例标识。 */
-        private String clientId = "account-provider-" + UUID.randomUUID();
-        @Setter
-        private int maxPollRecords = 500;
-
-        public String getGroupId() {
-            return productTopics().consumerGroup("account");
-        }
-
-        public void setClientId(String clientId) {
-            if (clientId == null || clientId.isBlank()) {
-                throw new IllegalArgumentException("账户节点 clientId 不能为空");
-            }
-            this.clientId = clientId.trim();
-        }
-
-        public String getDeliverySettlementsTopic() {
-            return productTopics().deliverySettlementsTopic();
-        }
-
-        public boolean isDeliverySettlementsTopicEnabled() {
-            return productLine == ProductLine.LINEAR_DELIVERY
-                    || productLine == ProductLine.INVERSE_DELIVERY;
-        }
-
-        public String getOptionExercisesTopic() {
-            return productTopics().optionExercisesTopic();
-        }
-
-        public boolean isOptionExercisesTopicEnabled() {
-            return productLine.isOptionProduct();
-        }
-
-        private ProductTopicNames productTopics() {
-            return ProductTopicNames.of(productLine);
-        }
     }
 
     @Getter

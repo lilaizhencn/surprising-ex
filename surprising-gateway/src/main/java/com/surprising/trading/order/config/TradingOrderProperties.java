@@ -4,7 +4,6 @@ import lombok.Getter;
 import lombok.Setter;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.utils.ProductTopicNames;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import jakarta.annotation.PostConstruct;
@@ -75,8 +74,6 @@ public class TradingOrderProperties {
 
     @Getter
     public static class Kafka {
-        @Setter
-        private String bootstrapServers = "localhost:9092";
         /** 结果广播消费组的实例唯一标识；每个订单节点必须使用不同值。 */
         private String clientId = "trading-provider-" + java.util.UUID.randomUUID();
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
@@ -88,13 +85,6 @@ public class TradingOrderProperties {
                 throw new IllegalArgumentException("订单节点 clientId 不能为空");
             }
             this.clientId = clientId.trim();
-        }
-
-        public String getInstrumentLifecycleGroupId() {
-            return productTopics().consumerGroup("order-instrument-lifecycle");
-        }
-        private ProductTopicNames productTopics() {
-            return ProductTopicNames.of(productLine);
         }
     }
 

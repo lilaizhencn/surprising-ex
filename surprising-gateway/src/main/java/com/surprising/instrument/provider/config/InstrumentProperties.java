@@ -11,18 +11,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "surprising.instrument")
 public class InstrumentProperties {
 
-    private Kafka kafka = new Kafka();
     private Lifecycle lifecycle = new Lifecycle();
     private Outbox outbox = new Outbox();
-
-    @Getter
-    @Setter
-    public static class Kafka {
-        private String bootstrapServers;
-        private String deliverySettlementsTopic;
-        private String optionExercisesTopic;
-
-    }
 
     @Getter
     @Setter

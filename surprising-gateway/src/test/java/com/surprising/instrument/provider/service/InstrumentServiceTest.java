@@ -59,7 +59,7 @@ class InstrumentServiceTest {
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
         verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L),
-                eq("surprising.linear-delivery.delivery.settlements.v1"),
+                eq("LINEAR_DELIVERY"),
                 eq("1"), eq("DELIVERY_SETTLEMENT"), event.capture(), any(Instant.class));
         assertThat(event.getValue()).isInstanceOf(DeliverySettlementEvent.class);
         DeliverySettlementEvent deliveryEvent = (DeliverySettlementEvent) event.getValue();
@@ -81,7 +81,7 @@ class InstrumentServiceTest {
 
         ArgumentCaptor<Object> event = ArgumentCaptor.forClass(Object.class);
         verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L),
-                eq("surprising.option.option.exercises.v1"),
+                eq("OPTION"),
                 eq("1"), eq("OPTION_EXERCISE"), event.capture(), any(Instant.class));
         assertThat(event.getValue()).isInstanceOf(OptionExerciseEvent.class);
         OptionExerciseEvent optionEvent = (OptionExerciseEvent) event.getValue();
@@ -102,24 +102,11 @@ class InstrumentServiceTest {
         service.publishProductLifecycleEvent(instrument, 0L, 71_000_000_000L);
         var event = ArgumentCaptor.forClass(Object.class);
         verify(outbox).enqueue(eq("INSTRUMENT"), eq(2L),
-                eq("surprising.option.option.exercises.v1"), eq("1"),
+                eq("OPTION"), eq("1"),
                 eq("OPTION_EXERCISE"), event.capture(), any(Instant.class));
         // 21,000,000,000 intrinsic units / option tick 10,000,000 * multiplier 10,000.
         assertThat(((OptionExerciseEvent) event.getValue()).cashSettlementUnitsPerContract())
                 .isEqualTo(21_000_000L);
-    }
-
-    @Test
-    void usesConfiguredLifecycleTopicOverrides() {
-        InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);
-        InstrumentProperties properties = new InstrumentProperties();
-        properties.getKafka().setDeliverySettlementsTopic("custom.delivery.settlements");
-        InstrumentService service = service(outboxService, properties);
-
-        service.publishProductLifecycleEvent(delivery("BTC-USDT-260327", InstrumentStatus.CLOSED), 100_000L, 0L);
-
-        verify(outboxService).enqueue(eq("INSTRUMENT"), eq(2L), eq("custom.delivery.settlements"),
-                eq("1"), eq("DELIVERY_SETTLEMENT"), any(Object.class), any(Instant.class));
     }
 
     @Test

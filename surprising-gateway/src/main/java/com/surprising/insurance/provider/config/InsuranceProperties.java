@@ -4,7 +4,6 @@ import lombok.Getter;
 import lombok.Setter;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.utils.ProductTopicNames;
 
 @Getter
 public class InsuranceProperties {
@@ -27,37 +26,14 @@ public class InsuranceProperties {
 
     @Getter
     public static class Kafka {
-        @Setter
-        private String bootstrapServers;
         private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-        @Setter
-        private int concurrency = 2;
-        @Setter
-        private int maxPollRecords = 500;
 
         public void setProductLine(ProductLine productLine) {
             this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
         }
 
-        public String getGroupId() {
-            return productTopics().consumerGroup("insurance");
-        }
-
-
-        public String getLiquidationFeeEventsTopic() {
-            return productTopics().accountLiquidationFeeEventsTopic();
-        }
-
-        public String getUserCommandsTopic() {
-            return productTopics().accountUserCommandsTopic();
-        }
-
         public String getAccountType() {
             return productLine.accountTypeCode();
-        }
-
-        private ProductTopicNames productTopics() {
-            return ProductTopicNames.of(productLine);
         }
     }
 

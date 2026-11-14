@@ -17,7 +17,6 @@ import com.surprising.instrument.provider.model.InstrumentPageQuery;
 import com.surprising.instrument.provider.model.InstrumentCatalog;
 import com.surprising.instrument.provider.exception.InstrumentOperationException;
 import static com.surprising.instrument.provider.exception.InstrumentOperationException.Reason.*;
-import com.surprising.product.api.utils.ProductTopicNames;
 import java.nio.charset.StandardCharsets;
 import java.math.BigInteger;
 import java.security.MessageDigest;
@@ -266,7 +265,7 @@ public class InstrumentService {
                                              long underlyingSettlementPriceUnits) {
         Instant eventTime = Instant.now();
         if (response.instrumentType() == InstrumentType.DELIVERY) {
-            outboxService.enqueue("INSTRUMENT", response.lastChangeId(), deliverySettlementsTopic(response),
+            outboxService.enqueue("INSTRUMENT", response.lastChangeId(), response.contractType().productLine().name(),
                     Integer.toString(response.instrumentId()), "DELIVERY_SETTLEMENT", new DeliverySettlementEvent(
                     Integer.toString(response.instrumentId()),
                     response.changeId(),
@@ -281,7 +280,7 @@ public class InstrumentService {
             return;
         }
         if (response.instrumentType() == InstrumentType.OPTION) {
-            outboxService.enqueue("INSTRUMENT", response.lastChangeId(), optionExercisesTopic(response),
+            outboxService.enqueue("INSTRUMENT", response.lastChangeId(), response.contractType().productLine().name(),
                     Integer.toString(response.instrumentId()), "OPTION_EXERCISE", new OptionExerciseEvent(
                     Integer.toString(response.instrumentId()),
                     response.changeId(),
@@ -367,22 +366,6 @@ public class InstrumentService {
         return quotientAndRemainder[0]
                 .multiply(BigInteger.valueOf(option.notionalMultiplierUnits()))
                 .longValueExact();
-    }
-
-    private String deliverySettlementsTopic(InstrumentResponse response) {
-        String override = properties.getKafka().getDeliverySettlementsTopic();
-        if (override != null && !override.isBlank()) {
-            return override;
-        }
-        return ProductTopicNames.of(response.contractType().productLine()).deliverySettlementsTopic();
-    }
-
-    private String optionExercisesTopic(InstrumentResponse response) {
-        String override = properties.getKafka().getOptionExercisesTopic();
-        if (override != null && !override.isBlank()) {
-            return override;
-        }
-        return ProductTopicNames.of(response.contractType().productLine()).optionExercisesTopic();
     }
 
     private String normalizeSymbol(String symbol) {
