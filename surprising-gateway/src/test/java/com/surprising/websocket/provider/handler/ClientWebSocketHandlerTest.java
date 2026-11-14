@@ -3,6 +3,8 @@ package com.surprising.websocket.provider.handler;
 import com.surprising.websocket.provider.service.WebSocketAuthenticator;
 import com.surprising.websocket.provider.service.SubscriptionRegistry;
 import com.surprising.websocket.provider.session.ClientConnection;
+import com.surprising.websocket.provider.session.WsCloseStatus;
+import com.surprising.websocket.provider.session.WsTransportSession;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -19,8 +21,6 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.*;
-import org.springframework.http.HttpHeaders;
-import org.springframework.web.socket.*;
 import tools.jackson.databind.ObjectMapper;
 
 class ClientWebSocketHandlerTest {
@@ -34,21 +34,21 @@ class ClientWebSocketHandlerTest {
     private final com.surprising.websocket.provider.service.WebSocketSessionAuthorization authorization = new com.surprising.websocket.provider.service.WebSocketSessionAuthorization(registry, new WebSocketAuthenticator(auth, mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class)), java.util.Optional.of(chat));
     private final com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTask authorizationTask = new com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTask(registry, authorization, new com.surprising.websocket.provider.config.WebSocketAuthorizationConfiguration().websocketAuthorizationChecks(properties));
     private final List<String> frames=new CopyOnWriteArrayList<>();
-    private final List<WebSocketSession> sessions=new ArrayList<>();
+    private final List<WsTransportSession> sessions=new ArrayList<>();
     @BeforeEach void setup() {
         handler.c2c(chat);
         when(auth.authenticateBearer("Bearer qa-7")).thenReturn(new JwtPrincipal(7,"qa","NORMAL",List.of("USER"),Instant.now().plusSeconds(60)));
     }
-    @AfterEach void cleanup() {authorizationTask.close();for(var session:sessions)registry.remove(session.getId());}
-    private WebSocketSession session() throws Exception {
-        var session=mock(WebSocketSession.class);when(session.getId()).thenReturn(UUID.randomUUID().toString());when(session.isOpen()).thenReturn(true);
-        when(session.getAttributes()).thenReturn(new HashMap<>(Map.of(ClientConnection.CLIENT_IP,"203.0.113.7")));
-        var headers=new HttpHeaders();headers.set("X-User-Id","99");when(session.getHandshakeHeaders()).thenReturn(headers);
-        when(session.getUri()).thenReturn(URI.create("ws://localhost/ws/v1?userId=99"));
-        doAnswer(call->{frames.add(((TextMessage)call.getArgument(0)).getPayload());return null;}).when(session).sendMessage(any());
+    @AfterEach void cleanup() {authorizationTask.close();for(var session:sessions)registry.remove(session.id());}
+    private WsTransportSession session() throws Exception {
+        var session=mock(WsTransportSession.class);when(session.id()).thenReturn(UUID.randomUUID().toString());when(session.isOpen()).thenReturn(true);
+        when(session.clientIp()).thenReturn("203.0.113.7");
+        when(session.sendText(anyString())).thenAnswer(call->{frames.add(call.getArgument(0));return true;});
+        when(session.sendBatch(anyList())).thenAnswer(call->{frames.addAll(call.getArgument(0));return true;});
+        when(session.sendFrames(anyList(), anyList())).thenAnswer(call->{frames.addAll(call.getArgument(1));return true;});
         handler.afterConnectionEstablished(session);sessions.add(session);return session;
     }
-    private void command(WebSocketSession session,Map<String,?> value) {handler.handleTextMessage(session,new TextMessage(json.writeValueAsString(value)));}
+    private void command(WsTransportSession session,Map<String,?> value) {handler.handleTextMessage(session,json.writeValueAsString(value));}
     private void awaitFrame(String value) throws Exception {
         long until=System.nanoTime()+2_000_000_000L;
         while(System.nanoTime()<until && frames.stream().noneMatch(s->s.contains(value)))Thread.sleep(10);
@@ -56,24 +56,24 @@ class ClientWebSocketHandlerTest {
     }
     @Test void aBlockedJwtIpIsRejectedOnAuthenticationAndClosesAnExistingSession() throws Exception {
         var session = session();
-        var connection = registry.connection(session.getId());
+        var connection = registry.connection(session.id());
         command(session, Map.of("op", "authenticate", "token", "qa-7"));
         doThrow(new IllegalStateException("IP is blocked")).when(auth).requireIpAccessAllowed(7, connection.clientIp());
         authorization.revalidate(connection);
-        verify(session, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        verify(session, timeout(1000)).close(argThat(status -> status.code() == 1008));
         assertThat(connection.isOpen()).isFalse();
         var second = session();
         command(second, Map.of("op", "authenticate", "token", "qa-7"));
         awaitFrame("IP is blocked");
-        assertThat(registry.connection(second.getId()).authenticatedUserId()).isNull();
+        assertThat(registry.connection(second.id()).authenticatedUserId()).isNull();
     }
     @Test void handshakeHeadersAndQueryParametersNeverAuthenticateAUser() throws Exception {
-        var session=session();assertThat(registry.connection(session.getId()).authenticatedUserId()).isNull();
+        var session=session();assertThat(registry.connection(session.id()).authenticatedUserId()).isNull();
         command(session,Map.of("op","subscribe","channel","orders","productLine","SPOT"));
         awaitFrame("private websocket channel requires authenticated user");
     }
     @Test void marketChatAndHeartbeatUseTheExactSameAuthenticatedConnectionAndQueue() throws Exception {
-        var session=session();var connection=registry.connection(session.getId());
+        var session=session();var connection=registry.connection(session.id());
         doAnswer(call->{
             assertThat(call.getArgument(0,ClientConnection.class)).isSameAs(connection);
             connection.send("{\"op\":\"c2c.changed\",\"channel\":\"c2c.inbox\"}");return null;
@@ -85,7 +85,7 @@ class ClientWebSocketHandlerTest {
         command(session,Map.of("op","ping","id","shared-heartbeat"));
         awaitFrame("c2c.inbox");awaitFrame("\"channel\":\"trades\"");awaitFrame("pong");
         assertThat(connection.authenticatedUserId()).isEqualTo(7);verify(auth,times(1)).authenticateBearer("Bearer qa-7");
-        verify(session,never()).close(any(CloseStatus.class));
+        verify(session,never()).close(any(WsCloseStatus.class));
     }
     @Test void privateSubscriptionsRecheckTheTradingSessionAndRejectAnotherUser() throws Exception {
         var session=session();command(session,Map.of("op","authenticate","token","qa-7"));
@@ -110,17 +110,17 @@ class ClientWebSocketHandlerTest {
                 .when(auth).authenticateBearer("Bearer qa-7");
         Thread.sleep(3100);
         authorizationTask.revalidateSessions();
-        verify(revoked, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
-        verify(healthy, never()).close(any(CloseStatus.class));
+        verify(revoked, timeout(1000)).close(argThat(status -> status.code() == 1008));
+        verify(healthy, never()).close(any(WsCloseStatus.class));
         assertThat(registry.subscriberCount(topic)).isEqualTo(1);
-        org.mockito.Mockito.verify(revoked, timeout(1000)).close(any(CloseStatus.class));
+        org.mockito.Mockito.verify(revoked, timeout(1000)).close(any(WsCloseStatus.class));
         long cleanupDeadline = System.nanoTime() + 1_000_000_000L;
         while (registry.activeConnectionCount() > 1 && System.nanoTime() < cleanupDeadline) Thread.sleep(5);
         assertThat(registry.activeConnectionCount()).isEqualTo(1);
         clearInvocations(revoked);
         registry.publish(topic, "private-after-revocation", Instant.now());
         awaitFrame("private-after-revocation");
-        verify(revoked, never()).sendMessage(argThat(message -> message.getPayload().toString().contains("private-after-revocation")));
+        verify(revoked, never()).sendFrames(anyList(), argThat(list -> list.stream().anyMatch(s -> s.contains("private-after-revocation"))));
 
     }
 
@@ -129,11 +129,11 @@ class ClientWebSocketHandlerTest {
         command(session, Map.of("op", "authenticate", "token", "qa-7"));
         command(session, Map.of("op", "subscribe", "channel", "orders", "productLine", "SPOT"));
         awaitFrame("subscribed");
-        var connection = registry.connection(session.getId());
+        var connection = registry.connection(session.id());
         connection.renewAuthorization("qa-7", Instant.now().minusMillis(1));
         var topic = new SubscriptionTopic(WsChannel.ORDERS, "*", null, 7L, ProductLine.SPOT);
         registry.publish(topic, "never-deliver-after-expiry", Instant.now());
-        verify(session, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        verify(session, timeout(1000)).close(argThat(status -> status.code() == 1008));
         assertThat(registry.subscriberCount(topic)).isZero();
         assertThat(connection.queuedMessages()).isZero();
         assertThat(frames).noneMatch(frame -> frame.contains("never-deliver-after-expiry"));
@@ -142,24 +142,24 @@ class ClientWebSocketHandlerTest {
     @Test void idleExpiredConnectionIsClosedAndFrozenAccountFailsThePeriodicCheck() throws Exception {
         var expired = session();
         command(expired, Map.of("op", "authenticate", "token", "qa-7"));
-        registry.connection(expired.getId()).renewAuthorization("qa-7", Instant.now().minusMillis(1));
+        registry.connection(expired.id()).renewAuthorization("qa-7", Instant.now().minusMillis(1));
         authorizationTask.revalidateSessions();
-        verify(expired, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        verify(expired, timeout(1000)).close(argThat(status -> status.code() == 1008));
         var frozen = session();
         command(frozen, Map.of("op", "authenticate", "token", "qa-7"));
         command(frozen, Map.of("op", "subscribe", "channel", "orders", "productLine", "SPOT"));
         doThrow(new IllegalStateException("user is not active")).when(auth).authenticateBearer("Bearer qa-7");
         Thread.sleep(3100);
         authorizationTask.revalidateSessions();
-        verify(frozen, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        verify(frozen, timeout(1000)).close(argThat(status -> status.code() == 1008));
         long cleanupDeadline = System.nanoTime() + 1_000_000_000L;
         while (registry.activeConnectionCount() > 0 && System.nanoTime() < cleanupDeadline) Thread.sleep(5);
         assertThat(registry.activeConnectionCount()).isZero();
     }
 
     @Test void disconnectCleansChatSubscriptionsAlongWithMarketSubscriptions() throws Exception {
-        var session=session();handler.afterConnectionClosed(session,CloseStatus.NORMAL);
-        verify(chat).closed(session.getId());assertThatThrownBy(()->registry.connection(session.getId())).isInstanceOf(IllegalStateException.class);
+        var session=session();handler.afterConnectionClosed(session,WsCloseStatus.NORMAL);
+        verify(chat).closed(session.id());assertThatThrownBy(()->registry.connection(session.id())).isInstanceOf(IllegalStateException.class);
     }
     @Test void aChatErrorDoesNotBecomeAMarketConnectionError() throws Exception {
         var session=session();command(session,Map.of("op","authenticate","token","qa-7"));
@@ -168,7 +168,7 @@ class ClientWebSocketHandlerTest {
         command(session,Map.of("op","ping","id","still-live"));
         awaitFrame("c2c.error");awaitFrame("pong");
         assertThat(frames.stream().noneMatch(s->s.contains("\"op\":\"error\""))).isTrue();
-        verify(session,never()).close(any(CloseStatus.class));
+        verify(session,never()).close(any(WsCloseStatus.class));
     }
     private static com.surprising.gateway.provider.service.GatewayRequestLimits disabledLimits() {
         var properties = new com.surprising.gateway.provider.config.GatewayLimitProperties();

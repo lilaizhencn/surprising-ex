@@ -23,7 +23,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.web.socket.*;
+import com.surprising.websocket.provider.session.WsTransportSession;
 import tools.jackson.databind.ObjectMapper;
 
 @EnabledIfEnvironmentVariable(named = "GATEWAY_LIMIT_TEST_REDIS_PORT", matches = "[0-9]+")
@@ -71,7 +71,7 @@ class WebSocketLimitsRedisTest {
         var rejected = socket(second, "same-id", "192.0.2.7");
         assertThat(first.registry().activeConnectionCount()).isEqualTo(1);
         assertThat(second.registry().activeConnectionCount()).isZero();
-        verify(rejected).close(argThat(status -> status.getCode() == 1013 && status.getReason().equals("WEBSOCKET_CONNECTION_LIMIT")));
+        verify(rejected).close(argThat(status -> status.code() == 1013 && status.reason().equals("WEBSOCKET_CONNECTION_LIMIT")));
         verify(admitted, never()).close(any());
         assertThat(redis.opsForZSet().zCard(policies.getNamespace() + ":{ip:192.0.2.7}:sockets")).isEqualTo(1);
     }
@@ -81,9 +81,9 @@ class WebSocketLimitsRedisTest {
         var admitted = socket(first, "same-id", "192.0.2.7");
         var rejected = socket(second, "same-id", "192.0.2.8");
         authenticate(first, admitted); authenticate(second, rejected);
-        assertThat(first.registry().connection(admitted.getId()).authenticatedUserId()).isEqualTo(42);
-        verify(rejected, timeout(2000)).close(argThat(status -> status.getCode() == 1013
-                && status.getReason().equals("WEBSOCKET_CONNECTION_LIMIT")));
+        assertThat(first.registry().connection(admitted.id()).authenticatedUserId()).isEqualTo(42);
+        verify(rejected, timeout(2000)).close(argThat(status -> status.code() == 1013
+                && status.reason().equals("WEBSOCKET_CONNECTION_LIMIT")));
         await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> assertThat(second.registry().activeConnectionCount()).isZero());
         assertThat(redis.opsForZSet().zCard(policies.getNamespace() + ":{user:42}:sockets")).isEqualTo(1);
     }
@@ -91,7 +91,7 @@ class WebSocketLimitsRedisTest {
     @Test void theNodeCapRejectsBeforeCreatingConnectionWorkers() throws Exception {
         policies.setSocketsPerGateway(1); var node = node();
         socket(node, "first", "192.0.2.7"); var rejected = socket(node, "second", "192.0.2.8");
-        verify(rejected).close(argThat(status -> status.getCode() == 1013 && status.getReason().equals("GATEWAY_BUSY")));
+        verify(rejected).close(argThat(status -> status.code() == 1013 && status.reason().equals("GATEWAY_BUSY")));
         assertThat(node.registry().activeConnectionCount()).isEqualTo(1);
     }
 
@@ -100,7 +100,7 @@ class WebSocketLimitsRedisTest {
         for (var product : com.surprising.product.api.ProductLine.values())
             for (String channel : List.of("accountState", "orders", "triggerOrders", "positions", "positionRisk", "executionReports"))
                 command(node, socket, Map.of("op", "subscribe", "productLine", product.name(), "channel", channel));
-        assertThat(node.registry().connection(socket.getId()).isOpen()).isTrue();
+        assertThat(node.registry().connection(socket.id()).isOpen()).isTrue();
         await().atMost(Duration.ofSeconds(3)).untilAsserted(() ->
                 assertThat(frames.stream().filter(frame -> frame.contains("\"op\":\"subscribed\""))).hasSize(36));
         verify(socket, never()).close(any());
@@ -111,21 +111,21 @@ class WebSocketLimitsRedisTest {
         command(node, socket, Map.of("op", "ping", "id", "first"));
         command(node, socket, Map.of("op", "ping", "id", "second"));
         for (int i = 0; i < 3; i++) command(node, socket, Map.of("op", "ping", "id", "blocked-" + i));
-        verify(socket, timeout(2000)).close(argThat(status -> status.getCode() == 1013 && status.getReason().equals("RATE_LIMITED")));
+        verify(socket, timeout(2000)).close(argThat(status -> status.code() == 1013 && status.reason().equals("RATE_LIMITED")));
         assertThat(frames).noneMatch(value -> value.contains("blocked-"));
     }
 
     @Test void anExpiredLeaseStopsPublicationAndReleasesBothNodeAndIpCapacity() throws Exception {
         policies.setSocketsPerGateway(1); policies.setSocketsPerIp(1); var node = node();
-        var socket = socket(node, "one", "192.0.2.7"); var connection = node.registry().connection(socket.getId());
+        var socket = socket(node, "one", "192.0.2.7"); var connection = node.registry().connection(socket.id());
         connection.renewLimits(System.nanoTime() - 1);
         assertThat(connection.send("never-after-expiry")).isFalse();
-        verify(socket, timeout(2000)).close(argThat(status -> status.getCode() == 1013));
+        verify(socket, timeout(2000)).close(argThat(status -> status.code() == 1013));
         await().atMost(Duration.ofSeconds(3)).untilAsserted(() -> {
             try (var permit = node.limits().admitSocket()) { assertThat(permit).isNotNull(); }
         });
         var next = socket(node, "two", "192.0.2.7");
-        assertThat(node.registry().connection(next.getId()).isOpen()).isTrue();
+        assertThat(node.registry().connection(next.id()).isOpen()).isTrue();
         assertThat(frames).doesNotContain("never-after-expiry");
     }
 
@@ -136,21 +136,23 @@ class WebSocketLimitsRedisTest {
                 mock(GatewayProductServices.class), limits);
         var node = new Node(limits, registry, handler); nodes.add(node); return node;
     }
-    private WebSocketSession socket(Node node, String id, String ip) throws Exception {
-        var socket = mock(WebSocketSession.class); var open = new AtomicBoolean(true);
-        when(socket.getId()).thenReturn(id); when(socket.isOpen()).thenAnswer(call -> open.get());
-        when(socket.getAttributes()).thenReturn(Map.of(ClientConnection.CLIENT_IP, ip));
+    private WsTransportSession socket(Node node, String id, String ip) throws Exception {
+        var socket = mock(WsTransportSession.class); var open = new AtomicBoolean(true);
+        when(socket.id()).thenReturn(id); when(socket.isOpen()).thenAnswer(call -> open.get());
+        when(socket.clientIp()).thenReturn(ip);
         doAnswer(call -> { open.set(false); return null; }).when(socket).close(any());
-        doAnswer(call -> { frames.add(((TextMessage) call.getArgument(0)).getPayload()); return null; }).when(socket).sendMessage(any());
+        when(socket.sendText(anyString())).thenAnswer(call -> { frames.add(call.getArgument(0)); return true; });
+        when(socket.sendBatch(anyList())).thenAnswer(call -> { frames.addAll(call.getArgument(0)); return true; });
+        when(socket.sendFrames(anyList(), anyList())).thenAnswer(call -> { frames.addAll(call.getArgument(1)); return true; });
         node.handler().afterConnectionEstablished(socket); return socket;
     }
-    private void authenticate(Node node, WebSocketSession socket) {
+    private void authenticate(Node node, WsTransportSession socket) {
         command(node, socket, Map.of("op", "apiChallenge"));
-        String challenge = node.registry().connection(socket.getId()).apiChallenge().challenge(); long now = System.currentTimeMillis();
+        String challenge = node.registry().connection(socket.id()).apiChallenge().challenge(); long now = System.currentTimeMillis();
         command(node, socket, Map.of("op", "authenticateApiKey", "apiKey", key, "timestamp", now,
                 "signature", keys.sign("secret", "WS\n/ws/v1\n" + challenge + "\n" + key + "\n" + now)));
     }
-    private void command(Node node, WebSocketSession socket, Map<String, ?> command) {
-        node.handler().handleTextMessage(socket, new TextMessage(json.writeValueAsString(command)));
+    private void command(Node node, WsTransportSession socket, Map<String, ?> command) {
+        node.handler().handleTextMessage(socket, json.writeValueAsString(command));
     }
 }

@@ -27,9 +27,13 @@ public final class ClientIpResolver {
         if (request == null) {
             return null;
         }
-        String remoteAddress = literalValue(request.getRemoteAddr());
+        return resolve(request.getRemoteAddr(), request::getHeader);
+    }
+
+    public String resolve(String rawRemoteAddr, java.util.function.Function<String, String> headerLookup) {
+        String remoteAddress = literalValue(rawRemoteAddr);
         if (remoteAddress == null) {
-            return request.getRemoteAddr();
+            return rawRemoteAddr;
         }
         List<String> trustedProxies = properties.getSecurity().getTrustedProxyIpAllowlist();
         if (!isAllowed(remoteAddress, trustedProxies)) {
@@ -38,18 +42,18 @@ public final class ClientIpResolver {
         // These headers are only meaningful when the trusted ingress overwrites them and the
         // application cannot be reached directly around that ingress.
         for (String header : CLIENT_IP_HEADERS) {
-            String candidate = directHeaderIp(request.getHeader(header), header);
+            String candidate = directHeaderIp(headerLookup.apply(header), header);
             if (candidate != null) {
                 return candidate;
             }
         }
         // Alibaba SLB/ALB, Tencent CLB, AWS ALB, Azure, Huawei ELB, and Google Cloud
         // load balancers use X-Forwarded-For; resolve it as a trusted hop chain.
-        String forwardedClient = forwardedChainClientIp(request.getHeader("X-Forwarded-For"),
+        String forwardedClient = forwardedChainClientIp(headerLookup.apply("X-Forwarded-For"),
                 remoteAddress, trustedProxies);
         if (forwardedClient != null) return forwardedClient;
         for (String header : FALLBACK_CLIENT_IP_HEADERS) {
-            String candidate = literalValue(request.getHeader(header));
+            String candidate = literalValue(headerLookup.apply(header));
             if (candidate != null) return candidate;
         }
         return remoteAddress;

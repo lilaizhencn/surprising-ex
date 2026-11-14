@@ -2,8 +2,8 @@ package com.surprising.websocket.provider.service;
 
 import com.surprising.gateway.c2c.websocket.C2cChatRealtime;
 import com.surprising.websocket.provider.session.ClientConnection;
+import com.surprising.websocket.provider.session.WsCloseStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.web.socket.CloseStatus;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -48,7 +48,7 @@ public final class WebSocketSessionAuthorization {
             synchronized (connection) {
                 // A slow result for the previous token must not invalidate a concurrent token rotation.
                 if (!Objects.equals(token, connection.accessToken()) || !Objects.equals(apiKey, connection.apiKey())) return;
-                connection.close(CloseStatus.POLICY_VIOLATION.withReason("websocket authorization unavailable"));
+                connection.close(WsCloseStatus.POLICY_VIOLATION.withReason("websocket authorization unavailable"));
                 chat.ifPresent(value -> value.closed(connection.id()));
                 registry.remove(connection.id());
             }

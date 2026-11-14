@@ -1,6 +1,8 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.websocket.provider.session.ClientConnection;
+import com.surprising.websocket.provider.session.WsCloseStatus;
+import com.surprising.websocket.provider.session.WsTransportSession;
 
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.service.C2cAccess;
@@ -16,8 +18,6 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.springframework.http.HttpHeaders;
-import org.springframework.web.socket.*;
 
 @EnabledIfEnvironmentVariable(named="INSTRUMENT_TEST_JDBC_URL",matches=".+")
 class C2cChatRealtimePostgresTest {
@@ -30,16 +30,16 @@ class C2cChatRealtimePostgresTest {
         socket=new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),2);
     }
     @AfterEach void cleanup() {if(socket!=null)socket.stop();for(var wire:wires.values())wire.close();if(fixture!=null)fixture.close();}
-    private WebSocketSession session(String suffix) throws Exception {
-        var session=mock(WebSocketSession.class);when(session.getId()).thenReturn(suffix);when(session.isOpen()).thenReturn(true);
-        when(session.getUri()).thenReturn(URI.create("ws://127.0.0.1/ws/v1"));
-        var headers=new HttpHeaders();headers.set("X-User-Id","9");when(session.getHandshakeHeaders()).thenReturn(headers);
-        doAnswer(call->{frames.add(((TextMessage)call.getArgument(0)).getPayload());return null;}).when(session).sendMessage(any());
-        var wire=new com.surprising.websocket.provider.session.ClientConnection(session,null,4,java.time.Duration.ofSeconds(2));
+    private WsTransportSession session(String suffix) throws Exception {
+        var session=mock(WsTransportSession.class);when(session.id()).thenReturn(suffix);when(session.isOpen()).thenReturn(true);
+        when(session.sendText(anyString())).thenAnswer(call->{frames.add(call.getArgument(0));return true;});
+        when(session.sendBatch(anyList())).thenAnswer(call->{frames.addAll(call.getArgument(0));return true;});
+        when(session.sendFrames(anyList(), anyList())).thenAnswer(call->{frames.addAll(call.getArgument(1));return true;});
+        var wire=new com.surprising.websocket.provider.session.ClientConnection(session,null);
         wires.put(suffix,wire);return session;
     }
-    private void command(WebSocketSession session,Map<String,?> command) {
-        var wire=wires.get(session.getId());
+    private void command(WsTransportSession session,Map<String,?> command) {
+        var wire=wires.get(session.id());
         if("authenticate".equals(command.get("op"))) {
             String token=(String)command.get("token");var principal=new com.surprising.websocket.provider.service.WebSocketAuthenticator(fixture.auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class)).principal(token, wire.clientIp());long id=principal.userId();
             wire.authenticate(id,token,principal.expiresAt());wire.send("{\"op\":\"authenticated\",\"userId\":\""+id+"\"}");
@@ -59,7 +59,7 @@ class C2cChatRealtimePostgresTest {
         var session=session("first");command(session,Map.of("op","authenticate","token","qa-12"));
         command(session,Map.of("op","c2c.watch","conversationId",id.toString(),"after","0","afterEvent","0"));
         awaitFrame("断线前的消息");assertThat(frames.stream().anyMatch(frame->frame.contains("\"userId\":\"12\""))).isTrue();
-        socket.closed(session.getId());wires.remove(session.getId()).close();frames.clear();
+        socket.closed(session.id());wires.remove(session.id()).close();frames.clear();
         var second=fixture.bean(C2cMessages.class).send(11,id,UUID.randomUUID(),"断线后的消息",null);
         var resumed=session("resumed");command(resumed,Map.of("op","authenticate","token","qa-12"));
         command(resumed,Map.of("op","c2c.watch","conversationId",id.toString(),"after",Long.toString(original.messageId()),"afterEvent","0"));
@@ -79,13 +79,13 @@ class C2cChatRealtimePostgresTest {
         var session=session("revoked");command(session,Map.of("op","authenticate","token","qa-12"));awaitFrame("authenticated");
         command(session,Map.of("op","c2c.inbox"));
         doThrow(new IllegalArgumentException("revoked session")).when(fixture.auth).authenticateBearer("Bearer qa-12");
-        socket.poll();verify(session,timeout(1000)).close(CloseStatus.POLICY_VIOLATION);
+        socket.poll();verify(session,timeout(1000)).close(WsCloseStatus.POLICY_VIOLATION);
         verify(fixture.auth,times(3)).authenticateBearer("Bearer qa-12");
     }
     @Test void forgedHandshakeIdentityAndForeignConversationNeverGrantAccess() throws Exception {
         UUID id=UUID.fromString((String)fixture.bean(C2cConversations.class).start(12,null,11L).get("conversationId"));
         var unauthenticated=session("without-token");assertThatThrownBy(()->command(unauthenticated,Map.of("op","c2c.watch","conversationId",id.toString()))).isInstanceOf(C2cProblem.class);
-        verify(unauthenticated,timeout(1000)).close(CloseStatus.POLICY_VIOLATION);
+        verify(unauthenticated,timeout(1000)).close(WsCloseStatus.POLICY_VIOLATION);
         var stranger=session("stranger");command(stranger,Map.of("op","authenticate","token","qa-13"));
         assertThatThrownBy(()->command(stranger,Map.of("op","c2c.watch","conversationId",id.toString()))).isInstanceOf(C2cProblem.class);
         assertThat(frames.stream().noneMatch(frame->frame.contains("\"messages\""))).isTrue();
@@ -94,7 +94,7 @@ class C2cChatRealtimePostgresTest {
         for(String id:List.of("one","two")) {var session=session(id);command(session,Map.of("op","authenticate","token","qa-12"));command(session,Map.of("op","c2c.inbox"));}
         var third=session("three");command(third,Map.of("op","authenticate","token","qa-12"));
         assertThatThrownBy(()->command(third,Map.of("op","c2c.inbox"))).isInstanceOf(C2cProblem.class);
-        verify(third,never()).close(any(CloseStatus.class));
+        verify(third,never()).close(any(WsCloseStatus.class));
     }
     @Test void anAuthenticatedConnectionCannotSwitchTradingUsers() throws Exception {
         var session=session("one-user");command(session,Map.of("op","authenticate","token","qa-12"));awaitFrame("authenticated");
@@ -106,8 +106,8 @@ class C2cChatRealtimePostgresTest {
         socket=new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),conversations,fixture.bean(C2cMessages.class),2);
         var session=session("storage-outage");command(session,Map.of("op","authenticate","token","qa-12"));
         command(session,Map.of("op","c2c.inbox"));socket.poll();awaitFrame("c2c.error");
-        verify(session,never()).close(any(CloseStatus.class));
-        wires.get(session.getId()).send("{\"channel\":\"trades\",\"data\":\"market-still-live\"}");
+        verify(session,never()).close(any(WsCloseStatus.class));
+        wires.get(session.id()).send("{\"channel\":\"trades\",\"data\":\"market-still-live\"}");
         awaitFrame("market-still-live");
         assertThat(frames.stream().noneMatch(frame->frame.contains("synthetic storage outage"))).isTrue();
     }

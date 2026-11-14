@@ -32,13 +32,13 @@ import com.surprising.gateway.c2c.service.C2cAdminQueryService;
 
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.websocket.provider.config.WebSocketProperties;
+import com.surprising.websocket.provider.netty.NettyWebSocketServer;
 import com.surprising.websocket.provider.service.*;
 import jakarta.servlet.MultipartConfigElement;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.*;
 import org.apache.catalina.startup.Tomcat;
-import org.apache.tomcat.websocket.server.WsSci;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -48,7 +48,6 @@ import org.springframework.web.context.support.AnnotationConfigWebApplicationCon
 import org.springframework.web.multipart.support.StandardServletMultipartResolver;
 import org.springframework.web.servlet.DispatcherServlet;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
-import org.springframework.web.socket.config.annotation.*;
 
 /** 显式启用的浏览器联调夹具：仅本机、独占 schema、合成身份及受控 Core；不代表资金端到端验收。 */
 @EnabledIfEnvironmentVariable(named="C2C_BROWSER_QA_DIR",matches=".+")
@@ -56,8 +55,7 @@ class C2cBrowserQaTest {
     private static C2cHttpFixture fixture;
     @Configuration
     @EnableWebMvc
-    @EnableWebSocket
-    static class Web implements WebSocketConfigurer {
+    static class Web {
         @Bean C2cChatController chat() {return new C2cChatController(fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),fixture.bean(C2cAttachments.class));}
         @Bean C2cStatusController status() {return new C2cStatusController(true,fixture.bean(C2cMarketService.class),fixture.products);}
         @Bean C2cMeController me() {return new C2cMeController(fixture.bean(C2cAccess.class),fixture.bean(C2cProfiles.class));}
@@ -69,7 +67,12 @@ class C2cBrowserQaTest {
         @Bean C2cChatRealtime realtime() {return new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),10);}
         @Bean SubscriptionRegistry registry() {return new SubscriptionRegistry(fixture.json,new WebSocketProperties());}
         @Bean ClientWebSocketHandler handler() {return new ClientWebSocketHandler(fixture.json,registry(),new WebSocketProperties(),new WebSocketAuthenticator(fixture.auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class)),fixture.products, disabledLimits());}
-        @Override public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {registry.addHandler(handler(),"/ws/v1").setAllowedOriginPatterns("http://127.0.0.1:17173");}
+        @Bean NettyWebSocketServer nettyWebSocketServer() {
+            var props = new WebSocketProperties();
+            props.getSecurity().setAllowedOrigins(List.of("http://127.0.0.1:17173"));
+            props.getNetty().setPort(0);
+            return new NettyWebSocketServer(handler(), props, new com.surprising.gateway.provider.config.GatewayProperties());
+        }
     }
 
     @Test @Timeout(900)
@@ -94,15 +97,16 @@ class C2cBrowserQaTest {
             tomcat.setBaseDir(runtime.toString());tomcat.setPort(0);
             tomcat.getConnector().setProperty("address","127.0.0.1");
             var context=tomcat.addContext("",runtime.toString());
-            context.addServletContainerInitializer(new WsSci(),Set.of());
             web.register(Web.class);
             var servlet=Tomcat.addServlet(context,"gateway",new DispatcherServlet(web));
             servlet.setLoadOnStartup(1);servlet.setMultipartConfigElement(new MultipartConfigElement(runtime.toString(),10485760,11000000,0));
             context.addServletMappingDecoded("/","gateway");
             tomcat.start();
+            var nettyWs=web.getBean(NettyWebSocketServer.class);
+            nettyWs.start();
             scheduler.setPoolSize(1);scheduler.setThreadNamePrefix("c2c-browser-qa-");scheduler.initialize();
             scheduler.scheduleWithFixedDelay(web.getBean(C2cChatRealtime.class)::poll,Duration.ofSeconds(1));
-            Files.writeString(output.resolve("runtime.json"),fixture.json.writeValueAsString(Map.of("port",tomcat.getConnector().getLocalPort(),"orderId",order,"conversationId",id,"fixture","synthetic-auth-controlled-core-real-postgres")));
+            Files.writeString(output.resolve("runtime.json"),fixture.json.writeValueAsString(Map.of("port",tomcat.getConnector().getLocalPort(),"wsPort",nettyWs.getPort(),"orderId",order,"conversationId",id,"fixture","synthetic-auth-controlled-core-real-postgres")));
             long deadline=System.nanoTime()+840_000_000_000L;
             while(!Files.exists(output.resolve("done")) && System.nanoTime()<deadline) Thread.sleep(100);
         } finally {

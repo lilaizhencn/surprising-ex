@@ -163,7 +163,7 @@ public class SubscriptionRegistry {
     public void invalidateRealtime() {
         synchronized (this) { depthBaselines.clear(); }
         for (ClientConnection connection : connections())
-            connection.close(org.springframework.web.socket.CloseStatus.SERVICE_RESTARTED);
+            connection.close(com.surprising.websocket.provider.session.WsCloseStatus.SERVICE_RESTARTED);
     }
 
     /** Lease cleanup runs on the recovery task after clients have already been closed. */
@@ -372,12 +372,32 @@ public class SubscriptionRegistry {
     private void sendEncodedBatch(SubscriptionTopic subscription, List<String> messages) {
         Set<ClientConnection> connections = subscribers.get(subscription);
         if (connections == null || connections.isEmpty()) return;
-        for (ClientConnection connection : connections) {
-            boolean accepted = messages.size() == 1
-                    ? connection.send(messages.getFirst()) : connection.sendBatch(messages);
-            if (!accepted) {
-                backpressureRejections.increment();
-                disconnect(connection);
+        List<io.netty.buffer.ByteBuf> frames = null;
+        try {
+            for (ClientConnection connection : connections) {
+                boolean accepted;
+                if (connection.supportsZeroCopyFrames()) {
+                    if (frames == null) {
+                        frames = new ArrayList<>(messages.size());
+                        for (String msg : messages) {
+                            frames.add(io.netty.buffer.ByteBufUtil.writeUtf8(io.netty.buffer.ByteBufAllocator.DEFAULT, msg));
+                        }
+                    }
+                    accepted = connection.sendFrames(frames, messages);
+                } else {
+                    accepted = messages.size() == 1
+                            ? connection.send(messages.getFirst()) : connection.sendBatch(messages);
+                }
+                if (!accepted) {
+                    backpressureRejections.increment();
+                    disconnect(connection);
+                }
+            }
+        } finally {
+            if (frames != null) {
+                for (io.netty.buffer.ByteBuf frame : frames) {
+                    frame.release();
+                }
             }
         }
     }

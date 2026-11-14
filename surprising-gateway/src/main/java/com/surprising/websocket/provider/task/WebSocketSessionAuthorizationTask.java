@@ -2,10 +2,10 @@ package com.surprising.websocket.provider.task;
 
 import com.surprising.websocket.provider.service.SubscriptionRegistry;
 import com.surprising.websocket.provider.service.WebSocketSessionAuthorization;
+import com.surprising.websocket.provider.session.WsCloseStatus;
 import jakarta.annotation.PreDestroy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.web.socket.CloseStatus;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
@@ -35,10 +35,10 @@ public final class WebSocketSessionAuthorizationTask implements AutoCloseable {
         long monotonicNow = System.nanoTime();
         for (var connection : registry.connections()) {
             if (connection.limitLeaseExpired(monotonicNow))
-                connection.close(CloseStatus.SERVICE_OVERLOAD.withReason("websocket limit lease expired"));
+                connection.close(WsCloseStatus.SERVICE_OVERLOAD.withReason("websocket limit lease expired"));
             // Expiry is enforced even if every database worker is currently blocked.
             if (connection.authorizationExpired(now))
-                connection.close(CloseStatus.POLICY_VIOLATION.withReason("websocket authorization expired"));
+                connection.close(WsCloseStatus.POLICY_VIOLATION.withReason("websocket authorization expired"));
             if (connection.isOpen() && !connection.authorizationRefreshDue(now)) continue;
             if (!checking.add(connection.id())) continue;
             try {

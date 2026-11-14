@@ -60,6 +60,21 @@ public final class BrowserSessionCookies {
         return null;
     }
 
+    /** 从原始 Cookie 请求头中提取任一浏览器登录 Cookie 令牌（供 Netty WebSocket 握手使用）。 */
+    public static String anySessionToken(String cookieHeader) {
+        if (cookieHeader == null || cookieHeader.isBlank()) return null;
+        var decoded = io.netty.handler.codec.http.cookie.ServerCookieDecoder.LAX.decode(cookieHeader);
+        for (String client : CLIENTS) {
+            String name = sessionCookieName(client);
+            for (var cookie : decoded) {
+                if (name.equals(cookie.name()) && cookie.value() != null && !cookie.value().isBlank()) {
+                    return cookie.value();
+                }
+            }
+        }
+        return null;
+    }
+
     public static ResponseCookie sessionCookie(GatewayProperties properties, String client, String token, Duration maxAge) {
         var builder = ResponseCookie.from(sessionCookieName(client), token).httpOnly(true)
                 .secure(properties.getSecurity().isBrowserCookieSecure()).sameSite("Lax").path("/").maxAge(maxAge);

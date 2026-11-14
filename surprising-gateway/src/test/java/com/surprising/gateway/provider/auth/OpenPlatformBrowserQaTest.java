@@ -14,13 +14,13 @@ import com.surprising.gateway.provider.service.GatewayRequestLimits;
 import com.surprising.product.api.ProductLine;
 import com.surprising.websocket.provider.config.*;
 import com.surprising.websocket.provider.handler.ClientWebSocketHandler;
+import com.surprising.websocket.provider.netty.NettyWebSocketServer;
 import com.surprising.websocket.provider.service.*;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.file.*;
 import java.time.*;
 import java.util.*;
 import org.apache.catalina.startup.Tomcat;
-import org.apache.tomcat.websocket.server.WsSci;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.context.annotation.*;
@@ -35,7 +35,6 @@ import org.springframework.web.context.support.AnnotationConfigWebApplicationCon
 import org.springframework.web.filter.*;
 import org.springframework.web.servlet.DispatcherServlet;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
-import org.springframework.web.socket.config.annotation.*;
 import tools.jackson.databind.ObjectMapper;
 
 /** Owned loopback HTTP/WS fixture: real JWT, Key crypto/PostgreSQL and Valkey; simulated OTP, no trading Core. */
@@ -50,16 +49,17 @@ class OpenPlatformBrowserQaTest {
     static GatewayProductServices products;
     static WebSocketProperties websocket;
 
-    @Configuration @EnableWebMvc @EnableWebSocket
-    static class Web implements WebSocketConfigurer {
+    @Configuration @EnableWebMvc
+    static class Web {
         @Bean UserApiKeyController keyController() { return new UserApiKeyController(keys, properties); }
         @Bean GatewayLimitErrors errors() { return new GatewayLimitErrors(); }
         @Bean Probes probes() { return new Probes(); }
         @Bean SubscriptionRegistry subscriptions() { return new SubscriptionRegistry(json, websocket); }
         @Bean ClientWebSocketHandler handler() { return new ClientWebSocketHandler(json, subscriptions(), websocket,
                 new WebSocketAuthenticator(auth, keys), products, limits); }
-        @Override public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-            new WebSocketServerConfiguration(handler(), websocket, properties).registerWebSocketHandlers(registry);
+        @Bean NettyWebSocketServer nettyWebSocketServer() {
+            websocket.getNetty().setPort(0);
+            return new NettyWebSocketServer(handler(), websocket, properties);
         }
     }
 
@@ -120,7 +120,7 @@ class OpenPlatformBrowserQaTest {
             websocket = new WebSocketProperties(); websocket.getSecurity().setAllowedOrigins(List.of("http://127.0.0.1:17174"));
             var cors = new GatewayCorsConfig().gatewayCorsSource(properties, websocket);
             tomcat.setBaseDir(runtime.toString()); tomcat.setPort(19084); tomcat.getConnector().setProperty("address", "127.0.0.1");
-            var context = tomcat.addContext("", runtime.toString()); context.addServletContainerInitializer(new WsSci(), Set.of());
+            var context = tomcat.addContext("", runtime.toString());
             context.addApplicationListener("org.springframework.web.context.request.RequestContextListener");
             var rate = new org.apache.tomcat.util.descriptor.web.FilterDef(); rate.setFilterName("limits");
             rate.setFilter(new GatewayLimitFilter(limits, binding, properties, json, cors)); rate.setAsyncSupported("true"); context.addFilterDef(rate);
@@ -130,13 +130,15 @@ class OpenPlatformBrowserQaTest {
             var corsMap = new org.apache.tomcat.util.descriptor.web.FilterMap(); corsMap.setFilterName("cors"); corsMap.addURLPattern("/*"); context.addFilterMap(corsMap);
             web.register(Web.class); var servlet = Tomcat.addServlet(context, "gateway", new DispatcherServlet(web));
             servlet.setLoadOnStartup(1); context.addServletMappingDecoded("/", "gateway"); tomcat.start();
+            var nettyWs = web.getBean(NettyWebSocketServer.class);
+            nettyWs.start();
             var authorization = new WebSocketSessionAuthorization(web.getBean(SubscriptionRegistry.class), new WebSocketAuthenticator(auth, keys), Optional.empty());
             scheduler.scheduleWithFixedDelay(() -> {
                 for (var connection : web.getBean(SubscriptionRegistry.class).connections())
                     if (connection.authenticatedUserId() != null) authorization.revalidate(connection);
             }, 1, 1, java.util.concurrent.TimeUnit.SECONDS);
             Path state = output.resolve("qa-runtime.json");
-            Files.writeString(state, json.writeValueAsString(Map.of("port", 19084, "userId", 7,
+            Files.writeString(state, json.writeValueAsString(Map.of("port", 19084, "wsPort", nettyWs.getPort(), "userId", 7,
                     "token", sessionToken(jwt, fixture), "schema", schema)));
             Files.setPosixFilePermissions(state, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
             long deadline = System.nanoTime() + 1740_000_000_000L;

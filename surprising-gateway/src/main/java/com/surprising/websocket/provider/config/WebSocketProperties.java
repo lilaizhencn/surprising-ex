@@ -20,6 +20,7 @@ public class WebSocketProperties {
     private Session session = new Session();
     private Security security = new Security();
     private Fanout fanout = new Fanout();
+    private Netty netty = new Netty();
 
     public ProductLine getProductLine() {
         return kafka.getProductLine();
@@ -104,5 +105,18 @@ public class WebSocketProperties {
         private Duration markPriceMaxAge = Duration.ofSeconds(3);
         private Duration markPriceAllowedFutureSkew = Duration.ofSeconds(1);
 
+    }
+
+    @Getter
+    @Setter
+    public static class Netty {
+        private boolean enabled = true;
+        private int port = 8081;
+        private int bossThreads = 1;
+        private int workerThreads = 0;
+        private int maxFramePayloadLength = 65536;
+        private int writeBufferLowWaterMark = 32768;
+        private int writeBufferHighWaterMark = 65536;
+        private Duration idleTimeout = Duration.ofSeconds(60);
     }
 }

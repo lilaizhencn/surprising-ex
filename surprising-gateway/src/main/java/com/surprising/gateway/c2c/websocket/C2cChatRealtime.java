@@ -104,7 +104,7 @@ public class C2cChatRealtime {
             if(!Objects.equals(connection.authenticatedUserId(),user.userId())) throw new IllegalArgumentException();
             return user.userId();
         } catch(RuntimeException failure) {
-            connection.close(org.springframework.web.socket.CloseStatus.POLICY_VIOLATION);
+            connection.close(com.surprising.websocket.provider.session.WsCloseStatus.POLICY_VIOLATION);
             throw C2cProblem.forbidden("登录状态已失效，请重新登录");
         }
     }

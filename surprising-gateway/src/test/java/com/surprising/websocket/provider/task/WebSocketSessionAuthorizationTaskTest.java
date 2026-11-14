@@ -7,8 +7,8 @@ import com.surprising.websocket.provider.service.SubscriptionRegistry;
 import com.surprising.websocket.provider.service.WebSocketAuthenticator;
 import com.surprising.websocket.provider.service.WebSocketSessionAuthorization;
 import com.surprising.websocket.provider.session.ClientConnection;
+import com.surprising.websocket.provider.session.WsCloseStatus;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.socket.CloseStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -91,7 +91,7 @@ class WebSocketSessionAuthorizationTaskTest {
             for (var client : clients) when(client.authorizationExpired(anyLong())).thenReturn(true);
             task.revalidateSessions();
             for (var client : clients) {
-                verify(client).close(argThat(status -> status.getCode() == CloseStatus.POLICY_VIOLATION.getCode()));
+                verify(client).close(argThat(status -> status.code() == WsCloseStatus.POLICY_VIOLATION.code()));
                 verify(client, never()).renewAuthorization(anyString(), any());
             }
             assertThat(executor.getQueue()).hasSize(1);

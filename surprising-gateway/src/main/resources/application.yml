@@ -196,6 +196,9 @@ surprising:
     security:
       allowed-origins:
         - ${SURPRISING_WS_ALLOWED_ORIGIN:*}
+    netty:
+      enabled: true
+      port: 8081
 
   account:
     aeron:
