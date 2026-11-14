@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.telegram.bot.service;
 import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Mac;
@@ -19,7 +20,16 @@ public class TelegramWebAppInitDataVerifier {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramWebAppInitDataVerifier.class);
     private static final Duration MAX_AUTH_AGE = Duration.ofHours(24);
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
+
+    public TelegramWebAppInitDataVerifier() {
+        this(new ObjectMapper());
+    }
+
+    @Autowired
+    public TelegramWebAppInitDataVerifier(ObjectMapper objectMapper) {
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+    }
 
     public record VerifiedUser(
             long telegramId,

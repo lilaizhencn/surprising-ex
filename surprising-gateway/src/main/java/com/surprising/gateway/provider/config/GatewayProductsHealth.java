@@ -4,8 +4,11 @@ import com.surprising.gateway.provider.product.GatewayProductServices;
 
 import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.account.provider.service.AccountAeronGateway;
+import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.*;
 import com.surprising.trading.order.service.MarkPriceReadinessHealthIndicator;
+import io.aeron.driver.MediaDriver;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.UUID;
 import org.springframework.boot.health.contributor.Health;
@@ -36,6 +39,14 @@ public class GatewayProductsHealth {
             com.surprising.instrument.provider.controller.InstrumentRequestHandler instruments,
             tools.jackson.databind.ObjectMapper mapper, jakarta.validation.Validator validator) {
         return com.surprising.gateway.provider.local.LocalBusinessApi.shared(instruments, mapper, validator);
+    }
+
+    @Bean(name = "productCommandMediaDriver", destroyMethod = "close")
+    public MediaDriver productCommandMediaDriver() {
+        String directory = Path.of(System.getProperty("java.io.tmpdir"),
+                "surprising-gateway-command-" + ProcessHandle.current().pid()
+                        + "-" + UUID.randomUUID()).toString();
+        return SurprisingAeronClient.newMediaDriver(directory);
     }
 
     @Bean("markPriceReadiness")

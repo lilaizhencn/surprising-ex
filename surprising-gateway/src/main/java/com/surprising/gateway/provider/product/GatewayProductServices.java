@@ -19,6 +19,7 @@ import java.util.*;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.*;
 import org.springframework.core.env.MapPropertySource;
@@ -43,11 +44,20 @@ public final class GatewayProductServices implements AutoCloseable {
             ConfigurableApplicationContext parent,
             GatewayProductsProperties configuration,
             GatewayProductSettings settings,
-            @Autowired(required = false) AeronClusterTopologyProvider topologyProvider) {
+            @Autowired(required = false) AeronClusterTopologyProvider topologyProvider,
+            @Autowired(required = false) @Qualifier("productCommandMediaDriver") io.aeron.driver.MediaDriver commandMediaDriver) {
         this.parent = parent;
         this.configuration = configuration;
         this.settings = settings;
         this.topologyProvider = topologyProvider;
+    }
+
+    public GatewayProductServices(
+            ConfigurableApplicationContext parent,
+            GatewayProductsProperties configuration,
+            GatewayProductSettings settings,
+            AeronClusterTopologyProvider topologyProvider) {
+        this(parent, configuration, settings, topologyProvider, null);
     }
 
     public GatewayProductServices(ConfigurableApplicationContext parent, GatewayProductsProperties configuration,
