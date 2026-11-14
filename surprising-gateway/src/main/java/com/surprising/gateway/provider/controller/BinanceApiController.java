@@ -1,18 +1,38 @@
 package com.surprising.gateway.provider.controller;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.service.AuthService;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.service.ComplianceService;
-import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
+import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.BalanceQueryResponse;
+import com.surprising.account.api.model.BalanceResponse;
+import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferResponse;
+import com.surprising.account.provider.controller.AccountRequestHandler;
 import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
-import com.surprising.gateway.provider.exception.ProductUnavailableException;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
-import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.controller.GatewayProxyController;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
+import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
+import com.surprising.instrument.provider.controller.InstrumentRequestHandler;
+import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.OrderBookLevel;
+import com.surprising.trading.api.model.OrderBookSnapshotResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
+import com.surprising.trading.api.model.OrderQueryResponse;
+import com.surprising.trading.api.model.OrderResponse;
+import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.matching.service.MatchingMarketDataService;
+import com.surprising.trading.order.controller.OrderRequestHandler;
 import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
@@ -23,8 +43,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -46,7 +67,10 @@ public class BinanceApiController {
 
     private final ApiKeyRequestBinding apiKeyRequests;
     private final GatewayProperties properties;
-    private final GatewayProxyController gatewayProxyService;
+    private final InstrumentRequestHandler instrumentRequests;
+    private final OrderRequestHandler orderRequests;
+    private final AccountRequestHandler accountRequests;
+    private final MatchingMarketDataService marketDataService;
     private final GatewayApiKeyService apiKeyService;
     private final SensitiveActionVerificationService verificationService;
     private final AuthService authService;
@@ -55,8 +79,12 @@ public class BinanceApiController {
     private final CustodyWithdrawalService withdrawalService;
     private final ObjectMapper objectMapper;
 
+    @Autowired
     public BinanceApiController(GatewayProperties properties,
-                                GatewayProxyController gatewayProxyService,
+                                InstrumentRequestHandler instrumentRequests,
+                                OrderRequestHandler orderRequests,
+                                AccountRequestHandler accountRequests,
+                                MatchingMarketDataService marketDataService,
                                 GatewayApiKeyService apiKeyService,
                                 SensitiveActionVerificationService verificationService,
                                 AuthService authService,
@@ -66,7 +94,10 @@ public class BinanceApiController {
                                 ObjectMapper objectMapper) {
         this.properties = properties;
         this.apiKeyRequests = new ApiKeyRequestBinding(properties);
-        this.gatewayProxyService = gatewayProxyService;
+        this.instrumentRequests = instrumentRequests;
+        this.orderRequests = orderRequests;
+        this.accountRequests = accountRequests;
+        this.marketDataService = marketDataService;
         this.apiKeyService = apiKeyService;
         this.verificationService = verificationService;
         this.authService = authService;
@@ -104,7 +135,8 @@ public class BinanceApiController {
                 return json(HttpStatus.OK, Map.of("serverTime", System.currentTimeMillis()));
             }
             if (path.endsWith("/exchangeInfo")) {
-                return proxy("instrument", "", request, body, null, null);
+                ProductLine product = productLine(request);
+                return json(HttpStatus.OK, instrumentRequests.list(null, null, product.name(), product.name(), false, false));
             }
             if (path.endsWith("/depth")) {
                 return depth(request);
@@ -125,9 +157,9 @@ public class BinanceApiController {
                 return withdrawHistory(request);
             }
             if (path.endsWith("/capital/withdraw/quote")) {
-                authenticate(request,"WITHDRAW",body);
-                var params = parameters(request,body);
-                return json(HttpStatus.OK,withdrawalService.quote(required(params,"coin"),required(params,"network"),required(params,"amount")));
+                authenticate(request, "WITHDRAW", body);
+                var params = parameters(request, body);
+                return json(HttpStatus.OK, withdrawalService.quote(required(params, "coin"), required(params, "network"), required(params, "amount")));
             }
             if (path.endsWith("/capital/withdraw/apply")) {
                 return withdraw(request, body);
@@ -141,11 +173,11 @@ public class BinanceApiController {
                 return json(HttpStatus.OK, Map.of("data", "Normal"));
             }
             if (path.endsWith("/openOrders")) {
-                long userId = authenticate(request, "READ");
+                long userId = authenticate(request, "READ", body);
                 return orders(request, userId);
             }
             if (path.endsWith("/allOrders")) {
-                long userId = authenticate(request, "READ");
+                long userId = authenticate(request, "READ", body);
                 return historyOrders(request, userId);
             }
             if (path.endsWith("/order")) {
@@ -154,19 +186,12 @@ public class BinanceApiController {
             if (path.endsWith("/ticker/bookTicker")) {
                 return bookTicker(request);
             }
-            return error(HttpStatus.NOT_FOUND, -1003, "unsupported Binance-compatible endpoint");
-        } catch (ProductUnavailableException unavailable) {
-            return error(HttpStatus.NOT_FOUND, -1000, unavailable.getMessage());
-        } catch (ResponseStatusException ex) {
-            return error(HttpStatus.valueOf(ex.getStatusCode().value()), -1000,
-                    ex.getReason() == null ? "request failed" : ex.getReason());
-        } catch (CustodyWithdrawalService.WithdrawalRejectedException ex) {
-            return error(HttpStatus.BAD_REQUEST, -2010, ex.getMessage());
-        } catch (com.surprising.gateway.provider.auth.service.ComplianceService.WithdrawalSecurityHoldException ex) {
-            return error(HttpStatus.LOCKED, -2010, ex.getMessage());
+            return error(HttpStatus.NOT_FOUND, -1003, "endpoint not implemented");
         } catch (IllegalArgumentException ex) {
-            return error(HttpStatus.BAD_REQUEST, -1100, ex.getMessage());
-        } catch (IllegalStateException ex) {
+            return error(HttpStatus.BAD_REQUEST, -1102, ex.getMessage());
+        } catch (ResponseStatusException ex) {
+            return error(HttpStatus.valueOf(ex.getStatusCode().value()), -1000, ex.getReason());
+        } catch (Exception ex) {
             return error(HttpStatus.SERVICE_UNAVAILABLE, -1001, ex.getMessage());
         }
     }
@@ -177,12 +202,6 @@ public class BinanceApiController {
         String type = required(params, "type").toUpperCase(Locale.ROOT);
         String asset = required(params, "asset");
         GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(asset);
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("userId", userId);
-        payload.put("sourceAccountType", transferAccount(type, true));
-        payload.put("targetAccountType", transferAccount(type, false));
-        payload.put("asset", asset.toUpperCase(Locale.ROOT));
-        payload.put("amountUnits", decimalUnits(required(params, "amount"), scale.getQuantityScale()));
         String idempotencyKey = first(params, "clientTranId", "clientOrderId");
         if (idempotencyKey == null) {
             idempotencyKey = request.getHeader("Idempotency-Key");
@@ -190,12 +209,17 @@ public class BinanceApiController {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new IllegalArgumentException("clientTranId or Idempotency-Key is required");
         }
-        payload.put("referenceId", idempotencyKey.trim());
-        payload.put("reason", "binance asset transfer");
-        ResponseEntity<byte[]> response = proxy("account", "/transfers", request, jsonBytes(payload), userId, null);
-        if (response.getStatusCode().isError()) return response;
-        Map<String, Object> result = readMap(response.getBody());
-        return json(HttpStatus.OK, Map.of("tranId", number(result.get("transferId"))));
+        ProductTransferRequest transferRequest = new ProductTransferRequest(
+                userId,
+                AccountType.valueOf(transferAccount(type, true)),
+                AccountType.valueOf(transferAccount(type, false)),
+                asset.toUpperCase(Locale.ROOT),
+                decimalUnits(required(params, "amount"), scale.getQuantityScale()),
+                idempotencyKey.trim(),
+                "binance asset transfer"
+        );
+        ProductTransferResponse result = accountRequests.transfer(transferRequest);
+        return json(HttpStatus.OK, Map.of("tranId", result.transferId()));
     }
 
     private ResponseEntity<byte[]> depositAddress(HttpServletRequest request) {
@@ -273,19 +297,19 @@ public class BinanceApiController {
             throw new IllegalArgumentException("withdrawOrderId or Idempotency-Key is required");
         }
         String amount = required(params, "amount");
-        String revision = required(params,"networkRevision");
-        var intent = new CustodyWithdrawalService.WithdrawalRequest(null,chain,asset,required(params,"address"),amount,null,Long.parseLong(revision));
-        var result = withdrawalService.replay(userId,idempotencyKey,intent);
+        String revision = required(params, "networkRevision");
+        var intent = new CustodyWithdrawalService.WithdrawalRequest(null, chain, asset, required(params, "address"), amount, null, Long.parseLong(revision));
+        var result = withdrawalService.replay(userId, idempotencyKey, intent);
         if (result == null) {
-            requireWithdrawalSecurity(request,userId,apiKeyRequest ? "API_WITHDRAWAL" : "WITHDRAWAL");
+            requireWithdrawalSecurity(request, userId, apiKeyRequest ? "API_WITHDRAWAL" : "WITHDRAWAL");
             requireKyc(userId);
             complianceService.requireWithdrawalEligibility(userId);
-            result = withdrawalService.submit(userId,idempotencyKey,intent);
+            result = withdrawalService.submit(userId, idempotencyKey, intent);
         }
         return json(HttpStatus.OK, Map.of("id", result.walletWithdrawalId() == null
                         ? result.withdrawalId().toString() : result.walletWithdrawalId(),
                 "withdrawalId", result.withdrawalId().toString(), "status", result.status(),
-                "msg", "success", "success", true, "amount",result.amount(),"platformFee",result.fee(),"receivedAmount",result.receivedAmount()));
+                "msg", "success", "success", true, "amount", result.amount(), "platformFee", result.fee(), "receivedAmount", result.receivedAmount()));
     }
 
     private ResponseEntity<byte[]> withdrawHistory(HttpServletRequest request) {
@@ -338,110 +362,177 @@ public class BinanceApiController {
         String instrumentId = properties.getBinanceApi().backendInstrumentId(symbol, productLine(request));
         if ("POST".equals(method)) {
             GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("userId", userId);
-            payload.put("clientOrderId", first(params, "newClientOrderId", "clientOrderId"));
-            payload.put("instrumentId", instrumentId);
-            payload.put("side", required(params, "side").toUpperCase(Locale.ROOT));
+            String clientOrderId = first(params, "newClientOrderId", "clientOrderId");
+            String side = required(params, "side").toUpperCase(Locale.ROOT);
             String type = required(params, "type").toUpperCase(Locale.ROOT);
-            payload.put("orderType", type);
-            payload.put("timeInForce", first(params, "timeInForce") == null
+            String tif = first(params, "timeInForce") == null
                     ? (type.equals("MARKET") ? "IOC" : "GTC")
-                    : String.valueOf(first(params, "timeInForce")).toUpperCase(Locale.ROOT));
-            payload.put("priceTicks", type.equals("MARKET") ? 0L
-                    : decimalUnits(required(params, "price"), scale.getPriceScale()));
-            payload.put("quantitySteps", decimalUnits(required(params, "quantity"), scale.getQuantityScale()));
-            payload.put("marginMode", "CROSS");
-            payload.put("positionSide", "NET");
-            payload.put("reduceOnly", booleanValue(params.get("reduceOnly")));
-            payload.put("postOnly", "GTX".equals(payload.get("timeInForce")));
-            return transformOrder(proxy("trading", "", request, jsonBytes(payload), userId, null), symbol, scale);
+                    : String.valueOf(first(params, "timeInForce")).toUpperCase(Locale.ROOT);
+            long priceTicks = type.equals("MARKET") ? 0L
+                    : decimalUnits(required(params, "price"), scale.getPriceScale());
+            long quantitySteps = decimalUnits(required(params, "quantity"), scale.getQuantityScale());
+            boolean reduceOnly = booleanValue(params.get("reduceOnly"));
+            boolean postOnly = "GTX".equals(tif);
+
+            PlaceOrderRequest placeRequest = new PlaceOrderRequest(
+                    userId,
+                    clientOrderId,
+                    instrumentId,
+                    OrderSide.valueOf(side),
+                    OrderType.valueOf(type),
+                    TimeInForce.valueOf(tif.equals("GTX") ? "GTC" : tif),
+                    priceTicks,
+                    quantitySteps,
+                    MarginMode.CROSS,
+                    PositionSide.NET,
+                    reduceOnly,
+                    postOnly
+            );
+            ResponseEntity<OrderCommandReceipt> receiptEntity;
+            try {
+                receiptEntity = orderRequests.place(placeRequest).toCompletableFuture().join();
+            } catch (Exception ex) {
+                Throwable cause = ex instanceof java.util.concurrent.CompletionException ? ex.getCause() : ex;
+                if (cause instanceof ResponseStatusException rse) {
+                    throw rse;
+                }
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, cause != null ? cause.getMessage() : ex.getMessage(), cause);
+            }
+            if (receiptEntity.getStatusCode().isError()) {
+                return ResponseEntity.status(receiptEntity.getStatusCode()).body(jsonBytes(receiptEntity.getBody()));
+            }
+            OrderCommandReceipt receipt = receiptEntity.getBody();
+            if (receipt != null && receipt.result() instanceof OrderResponse resp) {
+                return json(HttpStatus.OK, orderView(resp, symbol, scale));
+            }
+            long prospectiveOrderId = (receipt != null && !receipt.prospectiveOrderIds().isEmpty())
+                    ? receipt.prospectiveOrderIds().getFirst() : 0L;
+            Map<String, Object> fallback = new LinkedHashMap<>();
+            fallback.put("symbol", symbol);
+            fallback.put("orderId", prospectiveOrderId);
+            fallback.put("orderListId", -1);
+            fallback.put("clientOrderId", clientOrderId);
+            fallback.put("transactTime", System.currentTimeMillis());
+            fallback.put("price", decimalString(priceTicks, scale.getPriceScale()));
+            fallback.put("origQty", decimalString(quantitySteps, scale.getQuantityScale()));
+            fallback.put("executedQty", "0");
+            fallback.put("cummulativeQuoteQty", "0");
+            fallback.put("status", "NEW");
+            fallback.put("timeInForce", tif);
+            fallback.put("type", type);
+            fallback.put("side", side);
+            fallback.put("workingTime", System.currentTimeMillis());
+            fallback.put("selfTradePreventionMode", "NONE");
+            return json(HttpStatus.OK, fallback);
         }
         if ("DELETE".equals(method)) {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("userId", userId);
-            payload.put("orderId", longParameter(params, "orderId"));
-            return transformOrder(gatewayProxyService.proxyCompat("trading", "/cancel", null, HttpMethod.POST,
-                    request, jsonBytes(payload), userId), symbol,
-                    properties.getBinanceApi().scale(symbol));
+            Long orderId = longParameter(params, "orderId");
+            ResponseEntity<OrderCommandReceipt> receiptEntity;
+            try {
+                receiptEntity = orderRequests.cancel(new CancelOrderRequest(userId, orderId)).toCompletableFuture().join();
+            } catch (Exception ex) {
+                Throwable cause = ex instanceof java.util.concurrent.CompletionException ? ex.getCause() : ex;
+                if (cause instanceof ResponseStatusException rse) {
+                    throw rse;
+                }
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, cause != null ? cause.getMessage() : ex.getMessage(), cause);
+            }
+            if (receiptEntity.getStatusCode().isError()) {
+                return ResponseEntity.status(receiptEntity.getStatusCode()).body(jsonBytes(receiptEntity.getBody()));
+            }
+            GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
+            OrderCommandReceipt receipt = receiptEntity.getBody();
+            if (receipt != null && receipt.result() instanceof OrderResponse resp) {
+                return json(HttpStatus.OK, orderView(resp, symbol, scale));
+            }
+            Map<String, Object> fallback = new LinkedHashMap<>();
+            fallback.put("symbol", symbol);
+            fallback.put("orderId", orderId);
+            fallback.put("orderListId", -1);
+            fallback.put("clientOrderId", first(params, "origClientOrderId", "clientOrderId"));
+            fallback.put("transactTime", System.currentTimeMillis());
+            fallback.put("price", "0");
+            fallback.put("origQty", "0");
+            fallback.put("executedQty", "0");
+            fallback.put("cummulativeQuoteQty", "0");
+            fallback.put("status", "CANCELED");
+            fallback.put("timeInForce", "GTC");
+            fallback.put("type", "LIMIT");
+            fallback.put("side", "BUY");
+            fallback.put("workingTime", System.currentTimeMillis());
+            fallback.put("selfTradePreventionMode", "NONE");
+            return json(HttpStatus.OK, fallback);
         }
         String orderId = first(params, "orderId");
         String clientOrderId = first(params, "origClientOrderId", "clientOrderId");
+        GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
         if (orderId != null) {
-            return transformOrder(proxy("trading", "/" + orderId, request, null, userId, null), symbol,
-                    properties.getBinanceApi().scale(symbol));
+            OrderResponse orderResp = orderRequests.get(userId, Long.parseLong(orderId), null);
+            return json(HttpStatus.OK, orderView(orderResp, symbol, scale));
         }
         if (clientOrderId != null) {
-            String query = "userId=" + userId + "&clientOrderId=" + encode(clientOrderId);
-            return transformOrder(proxy("trading", "/by-client-order-id", request, null, userId, query), symbol,
-                    properties.getBinanceApi().scale(symbol));
+            OrderResponse orderResp = orderRequests.getByClientOrderId(userId, clientOrderId, null);
+            return json(HttpStatus.OK, orderView(orderResp, symbol, scale));
         }
         throw new IllegalArgumentException("orderId or origClientOrderId is required");
     }
 
     private static final List<String> COMPATIBLE_PREFIXES = List.of("/api/v3", "/fapi/v1", "/dapi/v1", "/eapi/v1");
     private static final java.util.Set<String> ORDER_METHODS = java.util.Set.of("GET", "POST", "DELETE");
-    private static final List<String> HISTORY_FILTER_PARAMS = List.of("orderId", "startTime", "endTime");
 
     private ResponseEntity<byte[]> orders(HttpServletRequest request, long userId) {
         String symbol = request.getParameter("symbol");
-        String query = "userId=" + userId + "&limit=" + capped(request.getParameter("limit"));
-        if (symbol != null && !symbol.isBlank()) query += "&instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)));
-        ResponseEntity<byte[]> response = proxy("trading", "/open", request, null, userId, query);
-        if (response.getStatusCode().isError()) return response;
-        Map<String, Object> payload = readMap(response.getBody());
-        return json(HttpStatus.OK, mapOrderRows(payload.get("orders"), symbol, productLine(request)));
+        String instrumentId = (symbol != null && !symbol.isBlank())
+                ? properties.getBinanceApi().backendInstrumentId(symbol, productLine(request))
+                : null;
+        int limit = capped(request.getParameter("limit"));
+        OrderQueryResponse openOrdersResp = orderRequests.openOrders(userId, instrumentId, limit, null, null);
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (openOrdersResp.orders() != null) {
+            for (OrderResponse ord : openOrdersResp.orders()) {
+                String rowSymbol = (symbol == null || symbol.isBlank())
+                        ? properties.getBinanceApi().externalSymbol(ord.instrumentId(), productLine(request))
+                        : symbol;
+                result.add(orderView(ord, rowSymbol, properties.getBinanceApi().scale(rowSymbol)));
+            }
+        }
+        return json(HttpStatus.OK, result);
     }
 
     private ResponseEntity<byte[]> historyOrders(HttpServletRequest request, long userId) {
         String symbol = request.getParameter("symbol");
-        String query = "userId=" + userId + "&limit=" + capped(request.getParameter("limit"));
-        if (symbol != null && !symbol.isBlank()) {
-            query += "&instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)));
+        String instrumentId = (symbol != null && !symbol.isBlank())
+                ? properties.getBinanceApi().backendInstrumentId(symbol, productLine(request))
+                : null;
+        int limit = capped(request.getParameter("limit"));
+        Long orderId = longParameter(request, "orderId");
+        Long startTime = longParameter(request, "startTime");
+        Long endTime = longParameter(request, "endTime");
+        OrderQueryResponse historyResp = orderRequests.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, null, null, null);
+        List<OrderResponse> list = new ArrayList<>(historyResp.orders() != null ? historyResp.orders() : List.of());
+        list.sort(java.util.Comparator.comparingLong(OrderResponse::orderId));
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (OrderResponse ord : list) {
+            String rowSymbol = (symbol == null || symbol.isBlank())
+                    ? properties.getBinanceApi().externalSymbol(ord.instrumentId(), productLine(request))
+                    : symbol;
+            result.add(orderView(ord, rowSymbol, properties.getBinanceApi().scale(rowSymbol)));
         }
-        for (String parameter : HISTORY_FILTER_PARAMS) {
-            String value = request.getParameter(parameter);
-            if (value != null && !value.isBlank()) query += "&" + parameter + "=" + encode(value);
-        }
-        ResponseEntity<byte[]> response = proxy("trading", "/history", request, null, userId, query);
-        if (response.getStatusCode().isError()) return response;
-        Map<String, Object> payload = readMap(response.getBody());
-        List<Map<String, Object>> result = mapOrderRows(payload.get("orders"), symbol, productLine(request));
-        result.sort((left, right) -> Long.compare(number(left.get("orderId")),
-                number(right.get("orderId"))));
         return json(HttpStatus.OK, result);
     }
 
-    private List<Map<String, Object>> mapOrderRows(Object rows, String symbol, com.surprising.product.api.ProductLine productLine) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        if (rows instanceof List<?> list) {
-            for (Object row : list) {
-                Map<String, Object> value = mapValue(row);
-                String rowSymbol = symbol == null || symbol.isBlank()
-                        ? properties.getBinanceApi().externalSymbol(stringValue(value.get("instrumentId")), productLine) : symbol;
-                result.add(orderView(value, rowSymbol, properties.getBinanceApi().scale(rowSymbol)));
-            }
-        }
-        return result;
-    }
-
     private ResponseEntity<byte[]> account(HttpServletRequest request, long userId) {
-        ResponseEntity<byte[]> response = proxy("account", "/balances", request, null, userId,
-                "userId=" + userId);
-        if (response.getStatusCode().isError()) return response;
+        BalanceQueryResponse balanceResp = accountRequests.balances(userId);
         boolean canWithdraw = properties.getCustodyWallet().isEnabled()
                 && isKycVerified(complianceService.kyc(userId));
-        Map<String, Object> payload = readMap(response.getBody());
         List<Map<String, Object>> balances = new ArrayList<>();
-        Object rows = payload.get("balances");
-        if (rows instanceof List<?> list) {
-            for (Object row : list) {
-                Map<String, Object> value = mapValue(row);
-                String asset = stringValue(value.get("asset"));
+        if (balanceResp.balances() != null) {
+            for (BalanceResponse b : balanceResp.balances()) {
+                String asset = b.asset();
                 GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(asset);
                 balances.add(Map.of("asset", asset,
-                        "free", decimalString(number(value.get("availableUnits")), scale.getQuantityScale()),
-                        "locked", decimalString(number(value.get("lockedUnits")), scale.getQuantityScale())));
+                        "free", decimalString(b.availableUnits(), scale.getQuantityScale()),
+                        "locked", decimalString(b.lockedUnits(), scale.getQuantityScale())));
             }
         }
         return json(HttpStatus.OK, Map.of("makerCommission", 0, "takerCommission", 0,
@@ -454,50 +545,39 @@ public class BinanceApiController {
     private ResponseEntity<byte[]> depth(HttpServletRequest request) {
         String symbol = requiredParameter(request, "symbol");
         int limit = capped(request.getParameter("limit"));
-        String query = "instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request))) + "&depth=" + limit;
-        ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query);
-        if (response.getStatusCode().isError()) return response;
-        Map<String, Object> payload = readMap(response.getBody());
+        String instrumentId = properties.getBinanceApi().backendInstrumentId(symbol, productLine(request));
+        OrderBookSnapshotResponse snapshot = marketDataService.orderBookSnapshot(instrumentId, limit);
         GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
         return json(HttpStatus.OK, Map.of(
-                "lastUpdateId", number(payload.get("sequence")),
-                "bids", levels(payload.get("bids"), scale),
-                "asks", levels(payload.get("asks"), scale)));
+                "lastUpdateId", snapshot.sequence(),
+                "bids", levels(snapshot.bids(), scale),
+                "asks", levels(snapshot.asks(), scale)));
     }
 
     private ResponseEntity<byte[]> bookTicker(HttpServletRequest request) {
         String symbol = requiredParameter(request, "symbol");
-        String query = "instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)))
-                + "&depth=5";
-        ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query);
-        if (response.getStatusCode().isError()) return response;
-        Map<String, Object> payload = readMap(response.getBody());
+        String instrumentId = properties.getBinanceApi().backendInstrumentId(symbol, productLine(request));
+        OrderBookSnapshotResponse snapshot = marketDataService.orderBookSnapshot(instrumentId, 5);
         GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
-        Map<String, Object> bid = firstLevel(payload.get("bids"));
-        Map<String, Object> ask = firstLevel(payload.get("asks"));
+        OrderBookLevel bid = snapshot.bids().isEmpty() ? null : snapshot.bids().getFirst();
+        OrderBookLevel ask = snapshot.asks().isEmpty() ? null : snapshot.asks().getFirst();
         return json(HttpStatus.OK, Map.of(
                 "symbol", symbol,
-                "bidPrice", decimalString(number(bid.get("priceTicks")), scale.getPriceScale()),
-                "bidQty", decimalString(number(bid.get("quantitySteps")), scale.getQuantityScale()),
-                "askPrice", decimalString(number(ask.get("priceTicks")), scale.getPriceScale()),
-                "askQty", decimalString(number(ask.get("quantitySteps")), scale.getQuantityScale())));
+                "bidPrice", decimalString(bid != null ? bid.priceTicks() : 0L, scale.getPriceScale()),
+                "bidQty", decimalString(bid != null ? bid.quantitySteps() : 0L, scale.getQuantityScale()),
+                "askPrice", decimalString(ask != null ? ask.priceTicks() : 0L, scale.getPriceScale()),
+                "askQty", decimalString(ask != null ? ask.quantitySteps() : 0L, scale.getQuantityScale())));
     }
 
-    private com.surprising.product.api.ProductLine productLine(HttpServletRequest request) {
+    private ProductLine productLine(HttpServletRequest request) {
         String explicit = request.getHeader("X-Product-Line");
         if (explicit == null || explicit.isBlank()) explicit = request.getParameter("productLine");
-        if (explicit != null && !explicit.isBlank()) return com.surprising.product.api.ProductLine.valueOf(explicit);
+        if (explicit != null && !explicit.isBlank()) return ProductLine.valueOf(explicit);
         String path = request.getRequestURI();
-        if (path.startsWith("/fapi/")) return com.surprising.product.api.ProductLine.LINEAR_PERPETUAL;
-        if (path.startsWith("/dapi/")) return com.surprising.product.api.ProductLine.INVERSE_PERPETUAL;
-        if (path.startsWith("/eapi/")) return com.surprising.product.api.ProductLine.OPTION;
-        return com.surprising.product.api.ProductLine.SPOT;
-    }
-
-    private ResponseEntity<byte[]> proxy(String service, String suffix, HttpServletRequest request,
-                                         byte[] body, Long userId, String query) {
-        return gatewayProxyService.proxyCompat(service, suffix, query, HttpMethod.valueOf(request.getMethod()),
-                request, body, userId);
+        if (path.startsWith("/fapi/")) return ProductLine.LINEAR_PERPETUAL;
+        if (path.startsWith("/dapi/")) return ProductLine.INVERSE_PERPETUAL;
+        if (path.startsWith("/eapi/")) return ProductLine.OPTION;
+        return ProductLine.SPOT;
     }
 
     private long authenticate(HttpServletRequest request, String permission) {
@@ -539,43 +619,35 @@ public class BinanceApiController {
         return result;
     }
 
-    private ResponseEntity<byte[]> transformOrder(ResponseEntity<byte[]> response,
-                                                  String symbol,
-                                                  GatewayProperties.SymbolScale scale) {
-        if (response.getStatusCode().isError()) return response;
-        return json(HttpStatus.OK, orderView(readMap(response.getBody()), symbol, scale));
-    }
-
-    private Map<String, Object> orderView(Map<String, Object> order, String requestedSymbol,
+    private Map<String, Object> orderView(OrderResponse order, String requestedSymbol,
                                           GatewayProperties.SymbolScale scale) {
-        String symbol = requestedSymbol == null ? stringValue(order.get("symbol")) : requestedSymbol;
-        String type = stringValue(order.get("orderType"));
+        String symbol = (requestedSymbol == null || requestedSymbol.isBlank())
+                ? properties.getBinanceApi().externalSymbol(order.instrumentId(), ProductLine.SPOT) : requestedSymbol;
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("symbol", symbol);
-        result.put("orderId", number(order.get("orderId")));
+        result.put("orderId", order.orderId());
         result.put("orderListId", -1);
-        result.put("clientOrderId", order.get("clientOrderId"));
-        result.put("transactTime", epochMillis(order.get("createdAt")));
-        result.put("price", decimalString(number(order.get("priceTicks")), scale.getPriceScale()));
-        result.put("origQty", decimalString(number(order.get("quantitySteps")), scale.getQuantityScale()));
-        result.put("executedQty", decimalString(number(order.get("executedQuantitySteps")), scale.getQuantityScale()));
+        result.put("clientOrderId", order.clientOrderId());
+        result.put("transactTime", order.createdAt() != null ? order.createdAt().toEpochMilli() : System.currentTimeMillis());
+        result.put("price", decimalString(order.priceTicks(), scale.getPriceScale()));
+        result.put("origQty", decimalString(order.quantitySteps(), scale.getQuantityScale()));
+        result.put("executedQty", decimalString(order.executedQuantitySteps(), scale.getQuantityScale()));
         result.put("cummulativeQuoteQty", "0");
-        result.put("status", status(stringValue(order.get("status"))));
-        result.put("timeInForce", stringValue(order.get("timeInForce")));
-        result.put("type", type);
-        result.put("side", stringValue(order.get("side")));
-        result.put("workingTime", epochMillis(order.get("createdAt")));
+        result.put("status", status(order.status() != null ? order.status().name() : "NEW"));
+        result.put("timeInForce", order.timeInForce() != null ? order.timeInForce().name() : "GTC");
+        result.put("type", order.orderType() != null ? order.orderType().name() : "LIMIT");
+        result.put("side", order.side() != null ? order.side().name() : "BUY");
+        result.put("workingTime", order.createdAt() != null ? order.createdAt().toEpochMilli() : System.currentTimeMillis());
         result.put("selfTradePreventionMode", "NONE");
         return result;
     }
 
-    private List<List<String>> levels(Object value, GatewayProperties.SymbolScale scale) {
-        if (!(value instanceof List<?> list)) return List.of();
+    private List<List<String>> levels(List<OrderBookLevel> levels, GatewayProperties.SymbolScale scale) {
+        if (levels == null) return List.of();
         List<List<String>> result = new ArrayList<>();
-        for (Object item : list) {
-            Map<String, Object> level = mapValue(item);
-            result.add(List.of(decimalString(number(level.get("priceTicks")), scale.getPriceScale()),
-                    decimalString(number(level.get("quantitySteps")), scale.getQuantityScale())));
+        for (OrderBookLevel level : levels) {
+            result.add(List.of(decimalString(level.priceTicks(), scale.getPriceScale()),
+                    decimalString(level.quantitySteps(), scale.getQuantityScale())));
         }
         return result;
     }
@@ -605,12 +677,6 @@ public class BinanceApiController {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> mapValue(Object value) {
-        if (!(value instanceof Map<?, ?> map)) throw new IllegalArgumentException("response item is invalid");
-        return (Map<String, Object>) map;
-    }
-
     private String required(Map<String, Object> params, String key) {
         String value = first(params, key);
         if (value == null || value.isBlank()) throw new IllegalArgumentException(key + " is required");
@@ -629,6 +695,16 @@ public class BinanceApiController {
             if (value != null && !String.valueOf(value).isBlank()) return String.valueOf(value);
         }
         return null;
+    }
+
+    private Long longParameter(HttpServletRequest request, String key) {
+        String val = request.getParameter(key);
+        if (val == null || val.isBlank()) return null;
+        try {
+            return Long.parseLong(val);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(key + " is invalid", ex);
+        }
     }
 
     private long longParameter(Map<String, Object> params, String key) {
@@ -650,34 +726,6 @@ public class BinanceApiController {
 
     private String decimalString(long units, int scale) {
         return BigDecimal.valueOf(units, scale).stripTrailingZeros().toPlainString();
-    }
-
-    private String decimalString(BigDecimal units, int scale) {
-        return units.movePointLeft(scale).stripTrailingZeros().toPlainString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> firstLevel(Object value) {
-        if (!(value instanceof List<?> list) || list.isEmpty()) return Map.of();
-        return mapValue(list.getFirst());
-    }
-
-    private long number(Object value) {
-        if (value == null) return 0L;
-        try {
-            return Long.parseLong(String.valueOf(value));
-        } catch (NumberFormatException ex) {
-            throw new IllegalArgumentException("numeric response field is invalid", ex);
-        }
-    }
-
-    private long epochMillis(Object value) {
-        if (value == null) return System.currentTimeMillis();
-        try {
-            return Instant.parse(String.valueOf(value)).toEpochMilli();
-        } catch (RuntimeException ex) {
-            return System.currentTimeMillis();
-        }
     }
 
     private String status(String value) {
@@ -705,9 +753,5 @@ public class BinanceApiController {
 
     private String stringValue(Object value) {
         return value == null ? "" : String.valueOf(value);
-    }
-
-    private String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

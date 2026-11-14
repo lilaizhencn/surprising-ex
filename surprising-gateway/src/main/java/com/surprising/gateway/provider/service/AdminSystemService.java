@@ -69,13 +69,20 @@ public class AdminSystemService {
         }
     }
 
+    private static final java.util.Set<String> LOCAL_SERVICES = java.util.Set.of(
+            "instrument", "instrument-admin", "trading", "trading-orders", "trading-leverage",
+            "trading-fees", "trading-market", "trading-trigger", "account", "account-public");
+
+    private static boolean isLocalService(String service) {
+        return service != null && LOCAL_SERVICES.contains(service.toLowerCase(java.util.Locale.ROOT));
+    }
+
     private List<RouteResponse> routeResponses(String routeType, Map<String, BackendRoute> routes) {
         List<RouteResponse> responses = new ArrayList<>();
         routes.forEach((service, route) -> responses.add(new RouteResponse(
                 routeType,
                 service,
-                com.surprising.gateway.provider.product.GatewayLocalDispatcher.isLocalService(service)
-                        ? "local:" : route.getBaseUrl(),
+                isLocalService(service) ? "local:" : route.getBaseUrl(),
                 route.getTargetPrefix(),
                 route.isPrivateRoute(),
                 route.hasBasicAuth())));
@@ -86,7 +93,7 @@ public class AdminSystemService {
                            String routeType,
                            String service,
                            BackendRoute route) {
-        String baseUrl = com.surprising.gateway.provider.product.GatewayLocalDispatcher.isLocalService(service)
+        String baseUrl = isLocalService(service)
                 ? "local:" : trimTrailingSlash(route.getBaseUrl());
         String key = baseUrl + "|" + route.hasBasicAuth();
         targets.putIfAbsent(key, new HealthTarget(routeType, service, route, baseUrl));

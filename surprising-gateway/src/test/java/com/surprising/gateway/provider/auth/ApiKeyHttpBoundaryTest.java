@@ -122,6 +122,6 @@ class ApiKeyHttpBoundaryTest {
     }
     private BinanceApiController controller(GatewayApiKeyService business) {
         properties.getBinanceApi().setEnabled(true);
-        return new BinanceApiController(properties,null,business,null,auth,null,null,null,new ObjectMapper());
+        return new BinanceApiController(properties, null, null, null, null, business, null, auth, null, null, null, new ObjectMapper());
     }
 }

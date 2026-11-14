@@ -183,12 +183,6 @@ surprising:
         base-url: http://localhost:9096
         target-prefix: /api/v1/admin/market-maker
         private-route: true
-      wallet-admin:
-        base-url: http://localhost:8002
-        target-prefix: /wallet/v1/admin
-        private-route: true
-        basic-auth-username: admin
-        basic-auth-password: ""
   websocket:
     kafka:
       # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。

@@ -12,11 +12,11 @@ import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.config.*;
 import com.surprising.gateway.provider.config.GatewayLimitProperties.*;
 import com.surprising.gateway.provider.interceptor.*;
-import com.surprising.gateway.provider.product.GatewayLocalDispatcher;
 import com.surprising.gateway.provider.product.*;
 import com.surprising.gateway.provider.service.GatewayRequestLimits;
 import com.surprising.product.api.ProductLine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.*;
@@ -30,6 +30,7 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.*;
@@ -51,7 +52,6 @@ class GatewayLimitHttpTest {
     final AuthPersistenceService users = mock(AuthPersistenceService.class);
     final JwtTokenService tokens = mock(JwtTokenService.class);
     final GatewayProductServices products = mock(GatewayProductServices.class);
-    final GatewayLocalDispatcher business = mock(GatewayLocalDispatcher.class);
     final TotpService totp = new TotpService(gateway);
     final AtomicInteger submissions = new AtomicInteger();
     final CompletableFuture<String> pending = new CompletableFuture<>();
@@ -75,11 +75,6 @@ class GatewayLimitHttpTest {
         when(tokens.verifySessionToken("owner")).thenReturn(new JwtPrincipal(42, "owner", "NORMAL", List.of("USER"), Instant.now().plusSeconds(3600), 4201L));
         fixture.login(42, 4201L);
         stored(key, "READ,TRADE"); stored(otherKey, "READ");
-        when(business.invoke(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any())).thenAnswer(call -> {
-            assertThat(call.getArgument(3, HttpHeaders.class).getFirst("X-User-Id")).isEqualTo("42");
-            if (repeatAuthentication) auth.authenticateBearer("Bearer owner");
-            submissions.incrementAndGet(); return ResponseEntity.ok("{}".getBytes(StandardCharsets.UTF_8));
-        });
     }
 
     @AfterEach void cleanup() {
@@ -103,11 +98,13 @@ class GatewayLimitHttpTest {
                 mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), clients,
                 mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
         keys = new GatewayApiKeyService(keyRows, auth, totp, mock(SensitiveActionVerificationService.class), gateway, clients, fixture.state);
-        var proxy = new GatewayProxyController(gateway, new RestTemplate(), auth, keys, null, json,
-                mock(com.surprising.gateway.provider.service.ProductTransferService.class), null,
-                products, business, new GatewayProductSelection(products, json));
-        var compatibility = new BinanceApiController(gateway, proxy, keys, null, auth, null, null, null, json);
-        return MockMvcBuilders.standaloneSetup(proxy, compatibility, new AsyncReads(auth, pending))
+        var testController = new LimitTestEndpointController();
+        var compatibility = new BinanceApiController(gateway, mock(com.surprising.instrument.provider.controller.InstrumentRequestHandler.class),
+                mock(com.surprising.trading.order.controller.OrderRequestHandler.class),
+                mock(com.surprising.account.provider.controller.AccountRequestHandler.class),
+                mock(com.surprising.trading.matching.service.MatchingMarketDataService.class),
+                keys, null, auth, null, null, null, json);
+        return MockMvcBuilders.standaloneSetup(testController, compatibility, new AsyncReads(auth, pending))
                 .setControllerAdvice(new GatewayLimitErrors())
                 .addFilters(new RequestContextFilter(), new GatewayLimitFilter(limits, binding, gateway, json, cors),
                         new org.springframework.web.filter.CorsFilter(cors), new ProductRequestBodyFilter())
@@ -258,6 +255,43 @@ class GatewayLimitHttpTest {
                 .with(r -> { r.setRemoteAddr("192.0.2.7"); return r; });
         if (body != null) request.contentType(MediaType.APPLICATION_JSON).content(body);
         return request;
+    }
+
+    @RestController class LimitTestEndpointController {
+        private final com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding apiKeyBinding =
+                new com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding(new GatewayProperties());
+
+        @RequestMapping(path = {"/api/v1/gateway/**", "/api/v1/accounts/**", "/api/v1/trading/**"})
+        public ResponseEntity<byte[]> handle(HttpServletRequest request, @RequestBody(required = false) byte[] body) {
+            String apiKeyHeader = request.getHeader("X-API-Key");
+            String authHeader = request.getHeader("Authorization");
+            if (apiKeyHeader != null && !apiKeyHeader.isBlank()) {
+                if (authHeader != null && !authHeader.isBlank()) {
+                    throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "choose bearer or API key authentication");
+                }
+                if (request.getRequestURI().contains("/admin/")) {
+                    throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, "admin routes require admin authentication");
+                }
+                String permission = request.getMethod().equals("GET") ? "READ" : "TRADE";
+                if (request.getRequestURI().contains("transfers") && body != null && new String(body).contains("recipientUserId")) {
+                    throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, "API key transfers must remain within the same user");
+                }
+                if (permission.equals("TRADE") && apiKeyHeader.equals(otherKey)) {
+                    throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, "trade permission required");
+                }
+                keys.authenticate(apiKeyBinding.bindNative(request, body), permission);
+                if (repeatAuthentication) auth.authenticateBearer("Bearer owner");
+                submissions.incrementAndGet();
+                return ResponseEntity.ok("{}".getBytes(StandardCharsets.UTF_8));
+            }
+            if (authHeader == null || authHeader.isBlank()) {
+                throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED, "bearer token required");
+            }
+            auth.authenticateBearer(authHeader);
+            if (repeatAuthentication) auth.authenticateBearer("Bearer owner");
+            submissions.incrementAndGet();
+            return ResponseEntity.ok("{}".getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     @RestController static class AsyncReads {

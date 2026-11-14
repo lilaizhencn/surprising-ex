@@ -104,7 +104,7 @@ public class GatewayProperties implements EnvironmentAware {
         requireNonBlank(failures, "custody-wallet.api-secret", wallet.getApiSecret());
         requireNonBlank(failures, "custody-wallet.webhook-secret", wallet.getWebhookSecret());
         BackendRoute walletAdmin = adminRoutes == null ? null : adminRoutes.get("wallet-admin");
-        if (walletAdmin == null || !walletAdmin.hasBasicAuth()) {
+        if (walletAdmin != null && !walletAdmin.hasBasicAuth()) {
             failures.add("admin-routes.wallet-admin.basic-auth must be configured");
         }
         Withdrawal configuredWithdrawal = withdrawal == null ? new Withdrawal() : withdrawal;
@@ -251,7 +251,6 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("trading-trigger", new BackendRoute("local:", "/api/v1/trading/trigger-orders", true));
         routes.put("account", new BackendRoute("local:", "/api/v1/accounts", true));
         routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/market-maker", true));
-        routes.put("wallet", new BackendRoute("http://localhost:8002", "/wallet/v1", true));
         return routes;
     }
 
@@ -268,16 +267,7 @@ public class GatewayProperties implements EnvironmentAware {
         routes.put("account", new BackendRoute("local:", "/api/v1/admin/accounts", true));
         routes.put("account-public", new BackendRoute("local:", "/api/v1/accounts", true));
         routes.put("market-maker", new BackendRoute("http://localhost:9096", "/api/v1/admin/market-maker", true));
-        routes.put("wallet", new BackendRoute("http://localhost:8002", "/wallet/v1", true));
-        routes.put("wallet-admin", walletAdminRoute());
         return routes;
-    }
-
-    private static BackendRoute walletAdminRoute() {
-        BackendRoute route = new BackendRoute("http://localhost:8002", "/wallet/v1/admin", true);
-        route.setBasicAuthUsername(System.getenv().getOrDefault("SW_WALLET_ADMIN_USERNAME", ""));
-        route.setBasicAuthPassword(System.getenv().getOrDefault("SW_WALLET_ADMIN_PASSWORD", ""));
-        return route;
     }
 
     @Getter

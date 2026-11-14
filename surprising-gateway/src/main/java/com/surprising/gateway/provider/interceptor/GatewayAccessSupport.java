@@ -23,7 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Shared authentication, permission, two-person approval, audit logging, and byte-scan helpers
- * used across {@code GatewayProxyController}, {@code GatewayDirectAccessFilter}, and {@code GatewayLocalDispatcher}.
+ * used across Gateway controllers and filters.
  */
 public final class GatewayAccessSupport {
 

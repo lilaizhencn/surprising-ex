@@ -33,7 +33,7 @@ class GatewayProductionSecurityConfigurationTest {
 
         assertThatCode(properties::validateProductionSecurityConfiguration)
                 .doesNotThrowAnyException();
-        assertThat(properties.getAdminRoutes().get("wallet-admin").hasBasicAuth()).isFalse();
+        assertThat(properties.getAdminRoutes().get("wallet-admin")).isNull();
     }
 
     @Test
@@ -69,8 +69,6 @@ class GatewayProductionSecurityConfigurationTest {
         wallet.setApiKey("wallet-key");
         wallet.setApiSecret("wallet-secret");
         wallet.setWebhookSecret("wallet-webhook-secret");
-        properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");
-        properties.getAdminRoutes().get("wallet-admin").setBasicAuthPassword("wallet-admin-secret");
 
         GatewayProperties.KycDocuments documents = properties.getKycDocuments();
         documents.setEnabled(true);
@@ -162,8 +160,6 @@ class GatewayProductionSecurityConfigurationTest {
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_SECRET", "wallet-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET", "wallet-webhook-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_ASSET_SCALES", "{\"USDT\":6}");
-        testEnvironment.put("SW_WALLET_ADMIN_USERNAME", "wallet-admin");
-        testEnvironment.put("SW_WALLET_ADMIN_PASSWORD", "wallet-admin-secret");
         testEnvironment.put("GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT", "10000");
         testEnvironment.put("GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT", "50000");
         testEnvironment.put("GATEWAY_PRODUCT_TRANSFER_VERIFICATION_THRESHOLD_USDT", "10000");
@@ -191,8 +187,6 @@ class GatewayProductionSecurityConfigurationTest {
         assertThat(properties.getCustodyWallet().isEnabled()).isTrue();
         assertThat(properties.getKycDocuments().isEnabled()).isTrue();
         assertThat(properties.getKycDocuments().getType()).isEqualTo("s3");
-        properties.getAdminRoutes().get("wallet-admin").setBasicAuthUsername("wallet-admin");
-        properties.getAdminRoutes().get("wallet-admin").setBasicAuthPassword("wallet-admin-secret");
         properties.setEnvironment(environment);
         assertThatCode(properties::validateProductionSecurityConfiguration)
                 .doesNotThrowAnyException();
