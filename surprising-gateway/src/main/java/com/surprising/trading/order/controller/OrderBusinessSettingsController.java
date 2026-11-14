@@ -13,10 +13,10 @@ import tools.jackson.databind.JsonNode;
 
 @RestController
 @RequestMapping("/api/v1/instruments/admin/order-settings")
-public class OrderBusinessSettingsMvcController {
+public class OrderBusinessSettingsController {
     private final OrderBusinessSettingsRequestHandler orderSettings;
 
-    public OrderBusinessSettingsMvcController(OrderBusinessSettingsRequestHandler orderSettings) {
+    public OrderBusinessSettingsController(OrderBusinessSettingsRequestHandler orderSettings) {
         this.orderSettings = orderSettings;
     }
 

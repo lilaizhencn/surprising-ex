@@ -16,10 +16,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-public class AccountMvcController {
+public class AccountController {
     private final AccountRequestHandler accountRequests;
 
-    public AccountMvcController(AccountRequestHandler accountRequests) {
+    public AccountController(AccountRequestHandler accountRequests) {
         this.accountRequests = accountRequests;
     }
 

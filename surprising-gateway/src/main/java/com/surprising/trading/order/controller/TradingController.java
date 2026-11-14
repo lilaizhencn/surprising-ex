@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-public class TradingMvcController {
+public class TradingController {
     private final OrderRequestHandler orderRequests;
     private final TriggerOrderRequestHandler triggerOrderRequests;
     private final LeverageRequestHandler leverageRequests;
@@ -41,7 +41,7 @@ public class TradingMvcController {
     private final MatchingMarketDataService marketDataService;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public TradingMvcController(OrderRequestHandler orderRequests,
+    public TradingController(OrderRequestHandler orderRequests,
                                 TriggerOrderRequestHandler triggerOrderRequests,
                                 LeverageRequestHandler leverageRequests,
                                 TradingFeeRequestHandler tradingFeeRequests,
@@ -53,11 +53,11 @@ public class TradingMvcController {
         this.marketDataService = marketDataService;
     }
 
-    public TradingMvcController(OrderRequestHandler orderRequests) {
+    public TradingController(OrderRequestHandler orderRequests) {
         this(orderRequests, null, null, null, null);
     }
 
-    public TradingMvcController(MatchingMarketDataService marketDataService) {
+    public TradingController(MatchingMarketDataService marketDataService) {
         this(null, null, null, null, marketDataService);
     }
 

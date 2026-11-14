@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-public class AdminTradingMvcController {
+public class AdminTradingController {
     private final AdminOrderRequestHandler adminOrderRequests;
     private final AdminTriggerOrderRequestHandler adminTriggerOrderRequests;
     private final AdminMaintenanceRequestHandler adminMaintenanceRequests;
@@ -31,7 +31,7 @@ public class AdminTradingMvcController {
     private final TradingFeeRequestHandler tradingFeeRequests;
     private final InstrumentCoreSyncService instrumentCoreSyncService;
 
-    public AdminTradingMvcController(AdminOrderRequestHandler adminOrderRequests,
+    public AdminTradingController(AdminOrderRequestHandler adminOrderRequests,
                                      AdminTriggerOrderRequestHandler adminTriggerOrderRequests,
                                      AdminMaintenanceRequestHandler adminMaintenanceRequests,
                                      LeverageRequestHandler leverageRequests,

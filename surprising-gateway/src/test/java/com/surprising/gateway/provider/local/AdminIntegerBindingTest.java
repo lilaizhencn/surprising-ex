@@ -10,7 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
-import com.surprising.account.provider.controller.AccountMvcController;
+import com.surprising.account.provider.controller.AccountController;
 import com.surprising.account.provider.controller.AccountRequestHandler;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
@@ -43,7 +43,7 @@ class AdminIntegerBindingTest {
         context.run(application -> {
             var json = application.getBean(tools.jackson.databind.json.JsonMapper.class);
             var handler = mock(AccountRequestHandler.class);
-            var mvc = MockMvcBuilders.standaloneSetup(new AccountMvcController(handler))
+            var mvc = MockMvcBuilders.standaloneSetup(new AccountController(handler))
                     .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
                     .build();
             String body = """
@@ -110,7 +110,7 @@ class AdminIntegerBindingTest {
             assertThatThrownBy(() -> json.readValue("{\"userId\":" + invalid + "}", AdminBatchCancelOrdersRequest.class))
                     .isInstanceOf(JacksonException.class);
             var handler = mock(AccountRequestHandler.class);
-            var mvc = MockMvcBuilders.standaloneSetup(new AccountMvcController(handler))
+            var mvc = MockMvcBuilders.standaloneSetup(new AccountController(handler))
                     .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
                     .build();
             mvc.perform(post("/api/v1/admin/accounts/balance-adjustments")

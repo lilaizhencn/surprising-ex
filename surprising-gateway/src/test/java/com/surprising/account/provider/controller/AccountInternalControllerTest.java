@@ -29,11 +29,11 @@ class AccountInternalControllerTest {
 
     private final BalanceAdjustmentRequest request = new BalanceAdjustmentRequest(42L, "USDT", 1_250_000L, "custody-wallet:event-1:deposit.confirmed", "custody wallet deposit");
 
-    private AccountMvcController controller;
+    private AccountController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new AccountMvcController(new com.surprising.account.provider.controller.AccountRequestHandler(accountService, history, commandGateway));
+        controller = new AccountController(new com.surprising.account.provider.controller.AccountRequestHandler(accountService, history, commandGateway));
     }
 
     @Test

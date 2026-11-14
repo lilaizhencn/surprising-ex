@@ -77,7 +77,7 @@ class InstrumentRequestHandlerBoundaryTest {
     }
 
     @Test void actualLocalDispatchMapsBadCursorAndNativeMissingInstrumentWithoutCreatingHttpRoutes() throws Exception {
-        var mvc = MockMvcBuilders.standaloneSetup(new InstrumentMvcController(controller)).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new InstrumentController(controller)).build();
         mvc.perform(get("/api/v1/instruments/admin/list")
                         .param("productLine", "SPOT")
                         .param("sort", "updatedAt.desc")

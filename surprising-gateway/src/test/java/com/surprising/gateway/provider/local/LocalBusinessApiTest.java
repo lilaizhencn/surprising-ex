@@ -3,15 +3,15 @@ package com.surprising.gateway.provider.local;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.controller.AccountMvcController;
+import com.surprising.account.provider.controller.AccountController;
 import com.surprising.gateway.provider.product.GatewayLocalDispatcher;
 import com.surprising.gateway.provider.product.GatewayProductServices;
-import com.surprising.instrument.provider.controller.InstrumentMvcController;
+import com.surprising.instrument.provider.controller.InstrumentController;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.controller.AdminTradingMvcController;
-import com.surprising.trading.order.controller.OrderBusinessSettingsMvcController;
-import com.surprising.trading.order.controller.TradingMvcController;
+import com.surprising.trading.order.controller.AdminTradingController;
+import com.surprising.trading.order.controller.OrderBusinessSettingsController;
+import com.surprising.trading.order.controller.TradingController;
 import jakarta.validation.Validation;
 import java.net.URI;
 import java.time.Duration;
@@ -298,17 +298,17 @@ class LocalBusinessApiTest {
 
     private GatewayLocalDispatcher dispatcher() {
         var context = new StaticApplicationContext();
-        context.registerBean(TradingMvcController.class, () -> new TradingMvcController(
+        context.registerBean(TradingController.class, () -> new TradingController(
                 orders, triggers, leverage, fees, market));
-        context.registerBean(AdminTradingMvcController.class, () -> new AdminTradingMvcController(
+        context.registerBean(AdminTradingController.class, () -> new AdminTradingController(
                 adminOrders,
                 mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler.class),
                 maintenance, leverage, fees,
                 mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class)));
-        context.registerBean(AccountMvcController.class, () -> new AccountMvcController(accounts));
-        context.registerBean(OrderBusinessSettingsMvcController.class, () -> new OrderBusinessSettingsMvcController(
+        context.registerBean(AccountController.class, () -> new AccountController(accounts));
+        context.registerBean(OrderBusinessSettingsController.class, () -> new OrderBusinessSettingsController(
                 mock(com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler.class)));
-        context.registerBean(InstrumentMvcController.class, () -> new InstrumentMvcController(instruments));
+        context.registerBean(InstrumentController.class, () -> new InstrumentController(instruments));
         context.refresh();
 
         var mapping = new RequestMappingHandlerMapping();
@@ -480,9 +480,9 @@ class LocalBusinessApiTest {
     }
 
     @Test
-    void localMvcControllersDependOnHandlersNotOtherRestControllers() {
-        for (Class<?> entry : java.util.List.of(TradingMvcController.class, AdminTradingMvcController.class,
-                AccountMvcController.class, InstrumentMvcController.class, OrderBusinessSettingsMvcController.class)) {
+    void localControllersDependOnHandlersNotOtherRestControllers() {
+        for (Class<?> entry : java.util.List.of(TradingController.class, AdminTradingController.class,
+                AccountController.class, InstrumentController.class, OrderBusinessSettingsController.class)) {
             for (var field : entry.getDeclaredFields()) {
                 assertThat(field.getType().isAnnotationPresent(
                         org.springframework.web.bind.annotation.RestController.class))
@@ -495,17 +495,17 @@ class LocalBusinessApiTest {
     void everyPublicBusinessEndpointHasAnExplicitMvcRoute() throws Exception {
         var expected = java.nio.file.Files.readAllLines(java.nio.file.Path.of("src/test/resources/local-business-route-paths.txt"));
         var context = new StaticApplicationContext();
-        context.registerBean(TradingMvcController.class, () -> new TradingMvcController(
+        context.registerBean(TradingController.class, () -> new TradingController(
                 orders, triggers, leverage, fees, market));
-        context.registerBean(AdminTradingMvcController.class, () -> new AdminTradingMvcController(
+        context.registerBean(AdminTradingController.class, () -> new AdminTradingController(
                 adminOrders,
                 mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler.class),
                 maintenance, leverage, fees,
                 mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class)));
-        context.registerBean(AccountMvcController.class, () -> new AccountMvcController(accounts));
-        context.registerBean(OrderBusinessSettingsMvcController.class, () -> new OrderBusinessSettingsMvcController(
+        context.registerBean(AccountController.class, () -> new AccountController(accounts));
+        context.registerBean(OrderBusinessSettingsController.class, () -> new OrderBusinessSettingsController(
                 mock(com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler.class)));
-        context.registerBean(InstrumentMvcController.class, () -> new InstrumentMvcController(instruments));
+        context.registerBean(InstrumentController.class, () -> new InstrumentController(instruments));
         context.refresh();
         var mapping = new RequestMappingHandlerMapping();
         mapping.setApplicationContext(context);

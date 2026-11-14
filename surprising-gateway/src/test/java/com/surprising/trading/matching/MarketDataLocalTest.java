@@ -3,7 +3,7 @@ package com.surprising.trading.matching;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.ValkeyMarketData;
-import com.surprising.trading.order.controller.TradingMvcController;
+import com.surprising.trading.order.controller.TradingController;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
 import java.util.List;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -25,7 +25,7 @@ class MarketDataLocalTest {
                 new CoreBookLevelView("1", CoreOrderSide.SELL, 101, 11, 5),
                 new CoreBookLevelView("1", CoreOrderSide.SELL, 102, 12, 6)));
         when(realtime.requireBook(product, "1")).thenReturn(new ValkeyMarketData.Book(view, 1234));
-        var controller = new TradingMvcController(new MatchingMarketDataService(realtime, product));
+        var controller = new TradingController(new MatchingMarketDataService(realtime, product));
         var book = controller.orderBook("1", 2);
         assertThat(book.instrumentId()).isEqualTo("1");
         assertThat(book.sequence()).isEqualTo(321);
@@ -53,7 +53,7 @@ class MarketDataLocalTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
     void invalidInputIsRejectedBeforeReadingRealtime(ProductLine product) {
         var realtime = mock(ValkeyMarketData.class);
-        var controller = new TradingMvcController(new MatchingMarketDataService(realtime, product));
+        var controller = new TradingController(new MatchingMarketDataService(realtime, product));
         assertThatThrownBy(() -> controller.orderBook("1", 101))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("400");
         assertThatThrownBy(() -> controller.orderBook("BTC-USDT", 20))
@@ -66,7 +66,7 @@ class MarketDataLocalTest {
         var realtime = mock(ValkeyMarketData.class);
         when(realtime.requireBook(product, "1")).thenThrow(
                 new com.surprising.realtime.api.exception.ReadViewUnavailableException("MARKET_BOOK_UNAVAILABLE"));
-        var controller = new TradingMvcController(new MatchingMarketDataService(realtime, product));
+        var controller = new TradingController(new MatchingMarketDataService(realtime, product));
         assertThatThrownBy(() -> controller.orderBook("1", 30))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("503");
         verifyNoMoreInteractions(ignoreStubs(realtime));

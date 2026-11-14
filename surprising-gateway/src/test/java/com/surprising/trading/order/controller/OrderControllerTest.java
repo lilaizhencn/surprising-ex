@@ -66,7 +66,7 @@ class OrderControllerTest {
         var algo=mock(AlgoOrderService.class);
         when(algo.get(7,99)).thenThrow(new java.util.NoSuchElementException("algo order is not present in the committed read view"));
         var requests=new OrderRequestHandler(mock(OrderService.class),algo,mock(CancelAllAfterService.class));
-        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new TradingMvcController(requests)).build();
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new TradingController(requests)).build();
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/trading/orders/algo/99").param("userId","7"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
     }

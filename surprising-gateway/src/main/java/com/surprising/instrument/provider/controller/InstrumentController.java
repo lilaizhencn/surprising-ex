@@ -16,10 +16,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1/instruments")
-public class InstrumentMvcController {
+public class InstrumentController {
     private final InstrumentRequestHandler instrumentRequests;
 
-    public InstrumentMvcController(InstrumentRequestHandler instrumentRequests) {
+    public InstrumentController(InstrumentRequestHandler instrumentRequests) {
         this.instrumentRequests = instrumentRequests;
     }
 

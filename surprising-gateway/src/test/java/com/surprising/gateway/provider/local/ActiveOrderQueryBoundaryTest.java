@@ -45,7 +45,7 @@ class ActiveOrderQueryBoundaryTest {
         var trigger=new TriggerOrderService(triggerProperties,triggerCore,views,null);
         var orders=new OrderRequestHandler(order,mock(AlgoOrderService.class),mock(CancelAllAfterService.class));
         var triggers=new TriggerOrderRequestHandler(trigger,order);
-        mvc=MockMvcBuilders.standaloneSetup(new TradingMvcController(orders,triggers,
+        mvc=MockMvcBuilders.standaloneSetup(new TradingController(orders,triggers,
                 mock(LeverageRequestHandler.class),mock(TradingFeeRequestHandler.class),
                 mock(com.surprising.trading.matching.service.MatchingMarketDataService.class)))
                 .setControllerAdvice(new BadRequestAdvice()).build();
