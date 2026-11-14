@@ -17,8 +17,11 @@ public final class ProductInternalHandlerMapping extends AbstractHandlerMapping 
         setOrder(-1);
     }
     public static boolean isProductEndpoint(String path) {
-        return path.startsWith("/api/v1/accounts/") || path.startsWith("/api/v1/trading/")
-                || path.equals("/api/v1/trading/orders") || path.startsWith("/internal/v1/accounts/")
+        return path.startsWith("/api/v1/accounts/") || path.startsWith("/api/v1/admin/accounts/")
+                || path.startsWith("/api/v1/trading/") || path.startsWith("/api/v1/admin/trading/")
+                || path.equals("/api/v1/trading/orders")
+                || path.equals("/api/v1/instruments/admin/order-settings")
+                || path.startsWith("/internal/v1/accounts/")
                 || path.startsWith("/internal/v1/trading/")
                 || path.startsWith("/api/v1/price/index") || path.startsWith("/api/v1/price/mark")
                 || path.startsWith("/api/v1/price/market-probe")

@@ -56,4 +56,17 @@ public class ProductBusinessConfiguration {
         return scheduler;
     }
 
+    @Bean
+    public org.springframework.beans.factory.SmartInitializingSingleton validateProductLineConsistency(
+            AccountProperties accountProperties,
+            com.surprising.trading.order.config.TradingOrderProperties tradingProperties) {
+        return () -> {
+            if (accountProperties.getProductLine() == null
+                    || accountProperties.getProductLine() != tradingProperties.getProductLine()) {
+                throw new IllegalStateException("account and trading must use the same product line: account="
+                        + accountProperties.getProductLine() + ", trading=" + tradingProperties.getProductLine());
+            }
+        };
+    }
+
 }

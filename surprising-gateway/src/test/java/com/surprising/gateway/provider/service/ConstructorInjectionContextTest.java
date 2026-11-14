@@ -12,7 +12,7 @@ import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.local.LocalBusinessApi;
+import com.surprising.gateway.provider.product.GatewayLocalDispatcher;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
@@ -56,14 +56,12 @@ class ConstructorInjectionContextTest {
             gatewayProperties.setRoutes(Map.of("trading-market", new GatewayProperties.BackendRoute(
                     "local:", "/api/v1/trading/market", false)));
             context.registerBean(GatewayProperties.class, () -> gatewayProperties);
-            var local = mock(LocalBusinessApi.class);
-            when(local.productLine()).thenReturn(product);
-            when(local.invoke(anyString(), any(), any(), any(), any(), any()))
+            var local = mock(GatewayLocalDispatcher.class);
+            when(local.invoke(anyString(), any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
                     .thenReturn(ResponseEntity.ok("local-view".getBytes(StandardCharsets.UTF_8)));
-            context.registerBean(LocalBusinessApi.class, () -> local);
+            context.registerBean(GatewayLocalDispatcher.class, () -> local);
             var products = mock(GatewayProductServices.class);
             when(products.enabled()).thenReturn(List.of(product));
-            when(products.local(product)).thenReturn(local);
             context.registerBean(GatewayProductServices.class, () -> products);
             context.registerBean(ObjectMapper.class, () -> new ObjectMapper());
             for (Class<?> type : List.of(AuthService.class, GatewayApiKeyService.class, AdminAuditRepository.class, AdminApprovalRepository.class,
@@ -94,7 +92,7 @@ class ConstructorInjectionContextTest {
             request.addHeader("X-Product-Line", product.name());
             assertThat(context.getBean(GatewayProxyController.class).proxy("trading-market", HttpMethod.GET, request, null).getBody())
                     .isEqualTo("local-view".getBytes(StandardCharsets.UTF_8));
-            verify(local).invoke(eq("trading-market"), any(), eq(HttpMethod.GET), any(), any(), any());
+            verify(local).invoke(eq("trading-market"), any(), eq(HttpMethod.GET), any(), any(), any(), any(), anyBoolean(), any());
             verifyNoInteractions(context.getBean(RestTemplate.class));
         }
     }

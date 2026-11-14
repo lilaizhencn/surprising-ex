@@ -30,7 +30,7 @@ public class ContentMediaCleanupService {
         transaction.setTimeout(130);
         transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
-    @Scheduled(fixedDelayString = "PT1H", initialDelayString = "PT10M", scheduler = "contentMediaCleanupScheduler")
+    @Scheduled(fixedDelayString = "PT1H", initialDelayString = "PT10M", scheduler = "taskScheduler")
     public void clean() {
         if (!properties.enabled()) return;
         Instant cutoff = Instant.now().minus(Duration.ofHours(24));

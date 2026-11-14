@@ -23,8 +23,9 @@ public class GatewayProductsHealth {
     @Bean("taskScheduler")
     org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler gatewayScheduler() {
         var scheduler = new org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(2);
+        scheduler.setPoolSize(4);
         scheduler.setThreadNamePrefix("gateway-shared-scheduled-");
+        scheduler.setRemoveOnCancelPolicy(true);
         scheduler.setAwaitTerminationSeconds(5);
         return scheduler;
     }
@@ -35,12 +36,6 @@ public class GatewayProductsHealth {
         scheduler.setThreadNamePrefix("gateway-product-activation-");
         scheduler.setAwaitTerminationSeconds(5);
         return scheduler;
-    }
-    @Bean
-    com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi(
-            com.surprising.instrument.provider.controller.InstrumentRequestHandler instruments,
-            tools.jackson.databind.ObjectMapper mapper, jakarta.validation.Validator validator) {
-        return com.surprising.gateway.provider.local.LocalBusinessApi.shared(instruments, mapper, validator);
     }
 
     @Bean(name = "productCommandMediaDriver", destroyMethod = "close")

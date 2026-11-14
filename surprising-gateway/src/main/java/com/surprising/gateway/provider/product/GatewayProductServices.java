@@ -5,7 +5,6 @@ import com.surprising.gateway.provider.exception.ProductUnavailableException;
 
 import com.surprising.gateway.provider.model.GatewayProductSetting;
 import com.surprising.gateway.provider.service.GatewayProductSettings;
-import com.surprising.gateway.provider.local.*;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -100,8 +99,7 @@ public final class GatewayProductServices implements AutoCloseable {
             child.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
                     "gateway-product-" + product, productProperties(product)));
             org.springframework.boot.context.properties.source.ConfigurationPropertySources.attach(child.getEnvironment());
-            child.register(com.surprising.gateway.config.ProductBusinessConfiguration.class, LocalBusinessApi.class,
-                    TradingLocalRoutes.class, AccountLocalRoutes.class, InstrumentLocalRoutes.class);
+            child.register(com.surprising.gateway.config.ProductBusinessConfiguration.class);
             if (product.isDerivative()) {
                 child.register(com.surprising.gateway.config.DerivativesBusinessConfiguration.class);
             }
@@ -197,8 +195,7 @@ public final class GatewayProductServices implements AutoCloseable {
         requireEnabled(product);
         return products.get(product).context().getBean(type);
     }
-    public LocalBusinessApi local(ProductLine product) { return service(product, LocalBusinessApi.class); }
-    RequestMappingHandlerMapping internalMapping(ProductLine product) {
+    public RequestMappingHandlerMapping internalMapping(ProductLine product) {
         requireEnabled(product);
         return products.get(product).mapping();
     }
@@ -223,7 +220,8 @@ public final class GatewayProductServices implements AutoCloseable {
             values.put(prefix + ".hostnames", joinedHosts);
             values.put(prefix + ".egress-hostname", core.getEgressHostname());
             values.put(prefix + ".response-timeout", core.getResponseTimeout().toMillis() + "ms");
-            values.put(prefix + ".client-connections", core.getClientConnections());
+            values.put(prefix + ".client-connections",
+                    "surprising.trading.trigger.aeron".equals(prefix) ? 1 : core.getClientConnections());
         }
         values.put("surprising.price.mark.aeron.hostnames", joinedHosts);
         values.put("surprising.price.mark.aeron.egress-hostname", core.getEgressHostname());

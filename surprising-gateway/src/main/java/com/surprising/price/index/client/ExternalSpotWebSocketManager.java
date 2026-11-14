@@ -23,16 +23,20 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -46,8 +50,9 @@ public class ExternalSpotWebSocketManager {
     private final IndexInstrumentConfigService indexInstrumentConfigService;
     private final ExternalSpotPriceClient externalSpotPriceClient;
     private final LatestSourceQuoteStore latestSourceQuoteStore;
-    private final HttpClient httpClient;
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private final TaskScheduler taskScheduler;
+    private volatile HttpClient httpClient;
+    private volatile ScheduledFuture<?> healthCheckFuture;
     private final Map<String, WsSession> sessions = new ConcurrentHashMap<>();
     private volatile boolean running;
 
@@ -55,14 +60,20 @@ public class ExternalSpotWebSocketManager {
                                         IndexInstrumentConfigService indexInstrumentConfigService,
                                         ExternalSpotPriceClient externalSpotPriceClient,
                                         LatestSourceQuoteStore latestSourceQuoteStore) {
+        this(properties, indexInstrumentConfigService, externalSpotPriceClient, latestSourceQuoteStore, null);
+    }
+
+    @Autowired
+    public ExternalSpotWebSocketManager(IndexPriceProperties properties,
+                                        IndexInstrumentConfigService indexInstrumentConfigService,
+                                        ExternalSpotPriceClient externalSpotPriceClient,
+                                        LatestSourceQuoteStore latestSourceQuoteStore,
+                                        @Qualifier("taskScheduler") TaskScheduler taskScheduler) {
         this.properties = properties;
         this.indexInstrumentConfigService = indexInstrumentConfigService;
         this.externalSpotPriceClient = externalSpotPriceClient;
         this.latestSourceQuoteStore = latestSourceQuoteStore;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(properties.getHttp().getConnectTimeout())
-                .proxy(properties.getHttp().proxySelector())
-                .build();
+        this.taskScheduler = taskScheduler;
     }
 
     @Order(Ordered.LOWEST_PRECEDENCE)
@@ -74,14 +85,23 @@ public class ExternalSpotWebSocketManager {
             log.info("No external spot WebSocket sources configured");
         } else {
             refreshConnections(grouped);
+            ensureHealthCheckScheduled();
         }
+    }
 
+    private void ensureHealthCheckScheduled() {
+        if (healthCheckFuture != null || taskScheduler == null) return;
         long intervalMs = Math.max(1000L, properties.getWebSocket().getHealthCheckInterval().toMillis());
-        scheduler.scheduleAtFixedRate(this::checkIdleSessions, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+        healthCheckFuture = taskScheduler.scheduleAtFixedRate(this::checkIdleSessions, Duration.ofMillis(intervalMs));
     }
 
     public void refreshConnections() {
-        if (running) refreshConnections(properties.getWebSocket().isEnabled() ? groupedSources() : Map.of());
+        if (!running) return;
+        Map<String, List<TrackedSource>> grouped = properties.getWebSocket().isEnabled() ? groupedSources() : Map.of();
+        refreshConnections(grouped);
+        if (!grouped.isEmpty()) {
+            ensureHealthCheckScheduled();
+        }
     }
 
     public List<WebSocketHealth> health() {
@@ -100,14 +120,31 @@ public class ExternalSpotWebSocketManager {
     @PreDestroy
     public void stop() {
         running = false;
+        ScheduledFuture<?> future = healthCheckFuture;
+        healthCheckFuture = null;
+        if (future != null) future.cancel(false);
         sessions.values().forEach(session -> {
             session.listener = null;
             WebSocket webSocket = session.webSocket.getAndSet(null);
             if (webSocket != null) webSocket.abort();
         });
         sessions.clear();
-        scheduler.shutdownNow();
-        httpClient.shutdownNow();
+        HttpClient client = httpClient;
+        if (client != null) client.shutdownNow();
+    }
+
+    private HttpClient httpClient() {
+        HttpClient client = httpClient;
+        if (client != null) return client;
+        synchronized (this) {
+            if (httpClient == null) {
+                httpClient = HttpClient.newBuilder()
+                        .connectTimeout(properties.getHttp().getConnectTimeout())
+                        .proxy(properties.getHttp().proxySelector())
+                        .build();
+            }
+            return httpClient;
+        }
     }
 
     private Map<String, List<TrackedSource>> groupedSources() {
@@ -160,7 +197,7 @@ public class ExternalSpotWebSocketManager {
                     || !session.connecting.compareAndSet(false, true)) return;
             SourceWebSocketListener listener = new SourceWebSocketListener(session);
             session.listener = listener;
-            httpClient.newWebSocketBuilder()
+            httpClient().newWebSocketBuilder()
                     .connectTimeout(properties.getHttp().getConnectTimeout())
                     .buildAsync(URI.create(session.url), listener)
                     .whenComplete((webSocket, ex) -> {
@@ -204,10 +241,12 @@ public class ExternalSpotWebSocketManager {
             long delayMs = reconnectDelayMillis(attempt);
             log.warn("Scheduling external spot WebSocket reconnect url={} attempt={} delayMs={} reason={}",
                     session.url, attempt, delayMs, reason);
-            scheduler.schedule(() -> {
-                session.reconnectScheduled.set(false);
-                connect(session);
-            }, delayMs, TimeUnit.MILLISECONDS);
+            if (taskScheduler != null) {
+                taskScheduler.schedule(() -> {
+                    session.reconnectScheduled.set(false);
+                    connect(session);
+                }, Instant.now().plusMillis(delayMs));
+            }
         }
     }
 

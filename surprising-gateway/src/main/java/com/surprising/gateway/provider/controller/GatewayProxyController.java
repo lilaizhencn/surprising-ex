@@ -60,7 +60,7 @@ public class GatewayProxyController {
             "X-Forwarded-For");
 
     private final com.surprising.gateway.provider.product.GatewayProductServices products;
-    private final com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi;
+    private final com.surprising.gateway.provider.product.GatewayLocalDispatcher localDispatcher;
     private final com.surprising.gateway.provider.product.GatewayProductSelection productSelection;
 
     private final GatewayProperties properties;
@@ -83,10 +83,10 @@ public class GatewayProxyController {
                                ProductTransferService productTransferCoordinator,
                                ProductTransferSecurityService productTransferSecurityService,
                                com.surprising.gateway.provider.product.GatewayProductServices products,
-                               com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi,
+                               com.surprising.gateway.provider.product.GatewayLocalDispatcher localDispatcher,
                                com.surprising.gateway.provider.product.GatewayProductSelection productSelection) {
         this.products = java.util.Objects.requireNonNull(products, "products");
-        this.sharedBusinessApi = java.util.Objects.requireNonNull(sharedBusinessApi, "sharedBusinessApi");
+        this.localDispatcher = java.util.Objects.requireNonNull(localDispatcher, "localDispatcher");
         this.productSelection = java.util.Objects.requireNonNull(productSelection, "productSelection");
         this.properties = properties;
         this.restTemplate = restTemplate;
@@ -272,15 +272,15 @@ public class GatewayProxyController {
                                             GatewayProperties.BackendRoute route) {
         if ("local".equalsIgnoreCase(target.getScheme())) {
             HttpHeaders trustedHeaders = headers(request, identity, route);
-            ProductLine product = productSelection.resolve(request, body, !isSharedLocalService(service, request));
+            boolean shared = isSharedLocalService(service, request);
+            ProductLine product = productSelection.resolve(request, body, !shared);
             if (product != null) trustedHeaders.set("X-Product-Line", product.name());
             else trustedHeaders.remove("X-Product-Line");
-            if (!com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
+            if (!com.surprising.gateway.provider.product.GatewayLocalDispatcher.isLocalService(service)) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown local gateway service: " + service);
             }
-            var local = isSharedLocalService(service, request) ? sharedBusinessApi : products.local(product);
-            return local.invoke(service, target, method, trustedHeaders, body,
-                    properties.getHttpClient().getReadTimeout());
+            return localDispatcher.invoke(service, target, method, trustedHeaders, body,
+                    properties.getHttpClient().getReadTimeout(), product, shared, request);
         }
         try {
             return restTemplate.exchange(target, method, new HttpEntity<>(body, headers(request, identity, route)),
@@ -402,7 +402,7 @@ public class GatewayProxyController {
     private GatewayProperties.BackendRoute resolveRoute(String service, boolean admin,
                                                          HttpServletRequest request, byte[] body) {
         GatewayProperties.BackendRoute configured = route(service, admin);
-        if (com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)) {
+        if (com.surprising.gateway.provider.product.GatewayLocalDispatcher.isLocalService(service)) {
             productSelection.resolve(request, body, !isSharedLocalService(service, request));
             return configured;
         }

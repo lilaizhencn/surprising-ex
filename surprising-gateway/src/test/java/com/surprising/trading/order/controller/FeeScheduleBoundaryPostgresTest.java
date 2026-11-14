@@ -3,8 +3,10 @@ package com.surprising.trading.order.controller;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.local.LocalBusinessApi;
-import com.surprising.gateway.provider.local.TradingLocalRoutes;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.cache.FeeScheduleSnapshotCache;
 import com.surprising.trading.api.model.*;
@@ -44,9 +46,8 @@ class FeeScheduleBoundaryPostgresTest {
     private FeeScheduleEventPublisher publisher;
     private FeePolicyCoreImporter importer;
     private TradingFeeService service;
-    private LocalBusinessApi api;
+    private MockMvc mvc;
     private ProductLine product;
-    private jakarta.validation.ValidatorFactory validation;
 
     @BeforeEach void setup() throws Exception {
         String url = System.getenv("INSTRUMENT_TEST_JDBC_URL");
@@ -80,14 +81,21 @@ class FeeScheduleBoundaryPostgresTest {
         var properties = new TradingOrderProperties(); properties.getKafka().setProductLine(line);
         service = new TradingFeeService(repository, null, null, publisher, new FeeScheduleSnapshotCache(), properties, importer);
         var controller = new TradingFeeRequestHandler(service);
-        var routes = new TradingLocalRoutes(null, null, null, null, controller, null, null, null, null);
-        if (validation != null) validation.close();
-        validation = Validation.buildDefaultValidatorFactory();
-        api = new LocalBusinessApi(routes, null, null, json, validation.getValidator(),
-                null, properties);
+        var adminTrading = new AdminTradingMvcController(null, null, null, null, controller, null);
+        mvc = MockMvcBuilders.standaloneSetup(adminTrading)
+                .setControllerAdvice(new BadRequestAdvice())
+                .build();
     }
 
-    @AfterEach void cleanup() { if (validation != null) validation.close(); if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }
+    @RestControllerAdvice
+    static class BadRequestAdvice {
+        @ExceptionHandler(IllegalArgumentException.class)
+        ResponseEntity<String> badRequest(IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(ex.getMessage());
+        }
+    }
+
+    @AfterEach void cleanup() { if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }
 
     static Stream<Arguments> pages() {
         return Arrays.stream(ProductLine.values()).flatMap(line -> Stream.of("updatedAt", "createdAt", "effectiveTime")
@@ -210,9 +218,19 @@ class FeeScheduleBoundaryPostgresTest {
 
     private ResponseEntity<byte[]> query(String suffix) { return invoke("?userId=7&instrumentId=%201%20&status=ACTIVE" + suffix, HttpMethod.GET, null); }
     private ResponseEntity<byte[]> invoke(String suffix, HttpMethod method, Object body) {
-        var headers = new HttpHeaders(); headers.set("X-Admin-User-Id", "9"); headers.set("X-Product-Line", product.name());
-        return api.invoke("trading-fees", URI.create("http://local/api/v1/admin/trading/fees/schedules" + suffix), method,
-                headers, body == null ? null : json.writeValueAsBytes(body), Duration.ofSeconds(3));
+        try {
+            var builder = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(
+                            method, URI.create("http://local/api/v1/admin/trading/fees/schedules" + suffix))
+                    .header("X-Admin-User-Id", "9")
+                    .header("X-Product-Line", product.name());
+            if (body != null) {
+                builder.contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body));
+            }
+            var res = mvc.perform(builder).andReturn().getResponse();
+            return ResponseEntity.status(res.getStatus()).body(res.getContentAsByteArray());
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
+        }
     }
     private static long first(ProductLine product) { return FIRST + product.ordinal() * 10L; }
     private static FeeScheduleResponse fact(long id, ProductLine product, long user, String symbol, FeeScheduleStatus status) {

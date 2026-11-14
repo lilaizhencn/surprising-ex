@@ -3,16 +3,30 @@ package com.surprising.gateway.provider.local;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.account.provider.controller.AccountMvcController;
+import com.surprising.gateway.provider.product.GatewayLocalDispatcher;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.instrument.provider.controller.InstrumentMvcController;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.order.controller.AdminTradingMvcController;
+import com.surprising.trading.order.controller.OrderBusinessSettingsMvcController;
+import com.surprising.trading.order.controller.TradingMvcController;
 import jakarta.validation.Validation;
 import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.support.StaticApplicationContext;
+import org.springframework.format.support.DefaultFormattingConversionService;
 import org.springframework.http.*;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
+import org.springframework.web.bind.support.ConfigurableWebBindingInitializer;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
@@ -282,12 +296,48 @@ class LocalBusinessApiTest {
         tradingProperties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
     }
 
-    private LocalBusinessApi api() {
-        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler.class), leverage, fees, orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), accountProperties, tradingProperties);
+    private GatewayLocalDispatcher dispatcher() {
+        var context = new StaticApplicationContext();
+        context.registerBean(TradingMvcController.class, () -> new TradingMvcController(
+                orders, triggers, leverage, fees, market));
+        context.registerBean(AdminTradingMvcController.class, () -> new AdminTradingMvcController(
+                adminOrders,
+                mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler.class),
+                maintenance, leverage, fees,
+                mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class)));
+        context.registerBean(AccountMvcController.class, () -> new AccountMvcController(accounts));
+        context.registerBean(OrderBusinessSettingsMvcController.class, () -> new OrderBusinessSettingsMvcController(
+                mock(com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler.class)));
+        context.registerBean(InstrumentMvcController.class, () -> new InstrumentMvcController(instruments));
+        context.refresh();
+
+        var mapping = new RequestMappingHandlerMapping();
+        mapping.setApplicationContext(context);
+        mapping.afterPropertiesSet();
+
+        var binding = new ConfigurableWebBindingInitializer();
+        binding.setConversionService(new DefaultFormattingConversionService());
+        var validator = new LocalValidatorFactoryBean();
+        validator.afterPropertiesSet();
+        binding.setValidator(validator);
+
+        var adapter = new RequestMappingHandlerAdapter();
+        adapter.setApplicationContext(context);
+        adapter.setWebBindingInitializer(binding);
+        adapter.setMessageConverters(java.util.List.of(new JacksonJsonHttpMessageConverter(mapper)));
+        adapter.afterPropertiesSet();
+
+        var products = mock(GatewayProductServices.class);
+        when(products.internalMapping(any())).thenReturn(mapping);
+        return new GatewayLocalDispatcher(products, mapping, adapter, mapper);
     }
 
     private ResponseEntity<byte[]> invoke(String service, String path, HttpMethod method, HttpHeaders headers, String body) {
-        return api().invoke(service, URI.create("local:" + path), method, headers, body == null ? null : body.getBytes(java.nio.charset.StandardCharsets.UTF_8), Duration.ofMillis(20));
+        boolean shared = java.util.Set.of("instrument", "instrument-admin").contains(service.toLowerCase(java.util.Locale.ROOT))
+                && !path.contains("/order-settings");
+        return dispatcher().invoke(service, URI.create("local:" + path), method, headers,
+                body == null ? null : body.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                Duration.ofMillis(20), ProductLine.LINEAR_PERPETUAL, shared, new MockHttpServletRequest());
     }
 
     private HttpHeaders userHeaders() {
@@ -299,7 +349,7 @@ class LocalBusinessApiTest {
 
     @Test
     void websocketAdminIsNoLongerLocalBusinessService() {
-        assertThat(LocalBusinessApi.isLocalService("websocket-admin")).isFalse();
+        assertThat(GatewayLocalDispatcher.isLocalService("websocket-admin")).isFalse();
     }
 
     @Test
@@ -319,7 +369,7 @@ class LocalBusinessApiTest {
 
     @Test
     void publicBookUsesLocalControllerAndDefaultDepthWithoutUserIdentity() {
-        assertThat(LocalBusinessApi.isLocalService("trading-market")).isTrue();
+        assertThat(GatewayLocalDispatcher.isLocalService("trading-market")).isTrue();
         var response = invoke("trading-market", "/api/v1/trading/market/orderbook?instrumentId=1", HttpMethod.GET, new HttpHeaders(), null);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(market).orderBookSnapshot("1", 30);
@@ -413,7 +463,10 @@ class LocalBusinessApiTest {
     void mergedDomainsMustUseTheSameProductLine() {
         accountProperties.getKafka().setProductLine(ProductLine.OPTION);
         tradingProperties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        assertThatThrownBy(() -> api().validateConfiguration()).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> new com.surprising.gateway.config.ProductBusinessConfiguration()
+                .validateProductLineConsistency(accountProperties, tradingProperties)
+                .afterSingletonsInstantiated())
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -427,30 +480,38 @@ class LocalBusinessApiTest {
     }
 
     @Test
-    void localDispatchCannotDependOnHttpControllers() {
-        for (Class<?> entry : java.util.List.of(LocalBusinessApi.class, TradingLocalRoutes.class,
-                AccountLocalRoutes.class, InstrumentLocalRoutes.class)) {
+    void localMvcControllersDependOnHandlersNotOtherRestControllers() {
+        for (Class<?> entry : java.util.List.of(TradingMvcController.class, AdminTradingMvcController.class,
+                AccountMvcController.class, InstrumentMvcController.class, OrderBusinessSettingsMvcController.class)) {
             for (var field : entry.getDeclaredFields()) {
                 assertThat(field.getType().isAnnotationPresent(
                         org.springframework.web.bind.annotation.RestController.class))
-                        .as("%s.%s must depend on a service", entry.getSimpleName(), field.getName()).isFalse();
+                        .as("%s.%s must depend on a handler/service", entry.getSimpleName(), field.getName()).isFalse();
             }
         }
     }
 
     @Test
-    void everyPublicBusinessEndpointHasAnExplicitLocalRoute() throws Exception {
-        // Original mappings plus the user order-protection query.
+    void everyPublicBusinessEndpointHasAnExplicitMvcRoute() throws Exception {
         var expected = java.nio.file.Files.readAllLines(java.nio.file.Path.of("src/test/resources/local-business-route-paths.txt"));
+        var context = new StaticApplicationContext();
+        context.registerBean(TradingMvcController.class, () -> new TradingMvcController(
+                orders, triggers, leverage, fees, market));
+        context.registerBean(AdminTradingMvcController.class, () -> new AdminTradingMvcController(
+                adminOrders,
+                mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler.class),
+                maintenance, leverage, fees,
+                mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class)));
+        context.registerBean(AccountMvcController.class, () -> new AccountMvcController(accounts));
+        context.registerBean(OrderBusinessSettingsMvcController.class, () -> new OrderBusinessSettingsMvcController(
+                mock(com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler.class)));
+        context.registerBean(InstrumentMvcController.class, () -> new InstrumentMvcController(instruments));
+        context.refresh();
+        var mapping = new RequestMappingHandlerMapping();
+        mapping.setApplicationContext(context);
+        mapping.afterPropertiesSet();
         var actual = new java.util.HashSet<String>();
-        for (Class<?> routes : java.util.List.of(TradingLocalRoutes.class, AccountLocalRoutes.class, InstrumentLocalRoutes.class, LocalBusinessApi.class)) {
-            for (var field : routes.getDeclaredFields()) {
-                if (field.getType() == org.springframework.web.util.pattern.PathPattern.class) {
-                    field.setAccessible(true);
-                    actual.add(((org.springframework.web.util.pattern.PathPattern) field.get(null)).getPatternString());
-                }
-            }
-        }
+        mapping.getHandlerMethods().keySet().forEach(info -> actual.addAll(info.getPatternValues()));
         assertThat(actual).containsExactlyInAnyOrderElementsOf(expected);
     }
 

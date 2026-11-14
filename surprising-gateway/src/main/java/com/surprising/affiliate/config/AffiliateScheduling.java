@@ -5,7 +5,6 @@ import com.surprising.affiliate.service.*;
 import com.surprising.product.api.ProductLine;
 import org.springframework.context.annotation.*;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /** Two fixed tasks: bounded accounting and independent money I/O. No task per member or fee. */
 @Configuration(proxyBeanMethods = false)
@@ -28,17 +27,8 @@ public class AffiliateScheduling {
     this.settlement = settlement;
   }
 
-  @Bean("affiliateScheduler")
-  ThreadPoolTaskScheduler scheduler() {
-    var scheduler = new ThreadPoolTaskScheduler();
-    scheduler.setPoolSize(2);
-    scheduler.setThreadNamePrefix("gateway-affiliate-");
-    scheduler.setAwaitTerminationSeconds(5);
-    return scheduler;
-  }
-
   @Scheduled(
-    scheduler = "affiliateScheduler",
+    scheduler = "taskScheduler",
     initialDelay = 15000,
     fixedDelay = 250
   )
@@ -82,7 +72,7 @@ public class AffiliateScheduling {
   }
 
   @Scheduled(
-    scheduler = "affiliateScheduler",
+    scheduler = "taskScheduler",
     initialDelay = 15000,
     fixedDelay = 1000
   )

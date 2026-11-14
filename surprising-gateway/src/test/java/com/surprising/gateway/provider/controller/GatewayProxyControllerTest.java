@@ -545,8 +545,7 @@ class GatewayProxyControllerTest {
                 : new tools.jackson.databind.ObjectMapper();
         var transfers = dependencies.length > 4 ? (ProductTransferService) dependencies[4] : null;
         var security = dependencies.length > 5 ? (ProductTransferSecurityService) dependencies[5] : null;
-        var local = mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
-        when(local.productLine()).thenReturn(ProductLine.LINEAR_PERPETUAL);
+        var local = mock(com.surprising.gateway.provider.product.GatewayLocalDispatcher.class);
         org.mockito.Mockito.doAnswer(invocation -> {
             if (!(rest instanceof CapturingRestTemplate captured)) {
                 throw new AssertionError("local invocation must have an explicit test response");
@@ -557,10 +556,11 @@ class GatewayProxyControllerTest {
             return ResponseEntity.ok(captured.responseBody);
         }).when(local).invoke(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.any());
         var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(java.util.List.of(ProductLine.LINEAR_PERPETUAL));
-        when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
         var selectorProducts = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(selectorProducts.enabled()).thenReturn(properties.getRoutes().values().stream().anyMatch(GatewayProperties.BackendRoute::hasProductRoutes)
                 ? java.util.List.of(ProductLine.values()) : java.util.List.of(ProductLine.LINEAR_PERPETUAL));

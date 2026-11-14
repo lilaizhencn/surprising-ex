@@ -12,7 +12,7 @@ import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.config.*;
 import com.surprising.gateway.provider.config.GatewayLimitProperties.*;
 import com.surprising.gateway.provider.interceptor.*;
-import com.surprising.gateway.provider.local.LocalBusinessApi;
+import com.surprising.gateway.provider.product.GatewayLocalDispatcher;
 import com.surprising.gateway.provider.product.*;
 import com.surprising.gateway.provider.service.GatewayRequestLimits;
 import com.surprising.product.api.ProductLine;
@@ -51,7 +51,7 @@ class GatewayLimitHttpTest {
     final AuthPersistenceService users = mock(AuthPersistenceService.class);
     final JwtTokenService tokens = mock(JwtTokenService.class);
     final GatewayProductServices products = mock(GatewayProductServices.class);
-    final LocalBusinessApi business = mock(LocalBusinessApi.class);
+    final GatewayLocalDispatcher business = mock(GatewayLocalDispatcher.class);
     final TotpService totp = new TotpService(gateway);
     final AtomicInteger submissions = new AtomicInteger();
     final CompletableFuture<String> pending = new CompletableFuture<>();
@@ -71,12 +71,11 @@ class GatewayLimitHttpTest {
         gateway.getRoutes().put("account", new GatewayProperties.BackendRoute("local:", "/api/v1/accounts", true));
         gateway.getRoutes().put("trading", new GatewayProperties.BackendRoute("local:", "/api/v1/trading/orders", true));
         when(products.enabled()).thenReturn(List.of(ProductLine.values()));
-        when(products.local(any())).thenReturn(business);
         when(users.user(42)).thenReturn(Optional.of(new AuthenticatedUser(42, "owner", null, "NORMAL", List.of("USER"), Instant.now())));
         when(tokens.verifySessionToken("owner")).thenReturn(new JwtPrincipal(42, "owner", "NORMAL", List.of("USER"), Instant.now().plusSeconds(3600), 4201L));
         fixture.login(42, 4201L);
         stored(key, "READ,TRADE"); stored(otherKey, "READ");
-        when(business.invoke(any(), any(), any(), any(), any(), any())).thenAnswer(call -> {
+        when(business.invoke(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any())).thenAnswer(call -> {
             assertThat(call.getArgument(3, HttpHeaders.class).getFirst("X-User-Id")).isEqualTo("42");
             if (repeatAuthentication) auth.authenticateBearer("Bearer owner");
             submissions.incrementAndGet(); return ResponseEntity.ok("{}".getBytes(StandardCharsets.UTF_8));

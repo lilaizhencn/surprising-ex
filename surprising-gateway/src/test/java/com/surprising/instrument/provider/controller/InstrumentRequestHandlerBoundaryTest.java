@@ -3,7 +3,9 @@ package com.surprising.instrument.provider.controller;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import com.surprising.gateway.provider.local.LocalBusinessApi;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.instrument.provider.exception.InstrumentOperationException;
 import com.surprising.instrument.provider.model.InstrumentPageQuery;
@@ -74,19 +76,20 @@ class InstrumentRequestHandlerBoundaryTest {
         verifyNoInteractions(service);
     }
 
-    @Test void actualLocalDispatchMapsBadCursorAndNativeMissingInstrumentWithoutCreatingHttpRoutes() {
-        try (var validation = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
-            var api = LocalBusinessApi.shared(controller, JsonMapper.builder().findAndAddModules().build(), validation.getValidator());
-            var headers = new HttpHeaders(); headers.set("X-Admin-User-Id", "1");
-            var response = api.invoke("instrument-admin", URI.create("http://local/api/v1/instruments/admin/list?productLine=SPOT&sort=updatedAt.desc&cursor=broken"),
-                    HttpMethod.GET, headers, null, Duration.ofSeconds(1));
-            assertThat(response.getStatusCode().value()).isEqualTo(400);
-            verifyNoInteractions(service);
-            when(service.publicLatest(1, ProductLine.SPOT)).thenThrow(new InstrumentOperationException(InstrumentOperationException.Reason.NOT_FOUND, "instrument is not listed"));
-            response = api.invoke("instrument", URI.create("http://local/api/v1/instruments/latest?productLine=SPOT&instrumentId=1"),
-                    HttpMethod.GET, new HttpHeaders(), null, Duration.ofSeconds(1));
-            assertThat(response.getStatusCode().value()).isEqualTo(404);
-        }
+    @Test void actualLocalDispatchMapsBadCursorAndNativeMissingInstrumentWithoutCreatingHttpRoutes() throws Exception {
+        var mvc = MockMvcBuilders.standaloneSetup(new InstrumentMvcController(controller)).build();
+        mvc.perform(get("/api/v1/instruments/admin/list")
+                        .param("productLine", "SPOT")
+                        .param("sort", "updatedAt.desc")
+                        .param("cursor", "broken")
+                        .header("X-Admin-User-Id", "1"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+        when(service.publicLatest(1, ProductLine.SPOT)).thenThrow(new InstrumentOperationException(InstrumentOperationException.Reason.NOT_FOUND, "instrument is not listed"));
+        mvc.perform(get("/api/v1/instruments/latest")
+                        .param("productLine", "SPOT")
+                        .param("instrumentId", "1"))
+                .andExpect(status().isNotFound());
         assertThat(InstrumentRequestHandler.class.getAnnotation(org.springframework.web.bind.annotation.RestController.class)).isNull();
     }
 

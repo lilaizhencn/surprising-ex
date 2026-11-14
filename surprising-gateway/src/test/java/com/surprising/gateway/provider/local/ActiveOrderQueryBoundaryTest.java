@@ -19,6 +19,11 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.*;
 import org.springframework.http.*;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -30,10 +35,8 @@ class ActiveOrderQueryBoundaryTest {
     final OrderAeronGateway core=mock(OrderAeronGateway.class);
     final TriggerOrderAeronGateway triggerCore=mock(TriggerOrderAeronGateway.class);
     final JsonMapper json=JsonMapper.builder().findAndAddModules().build();
-    final jakarta.validation.ValidatorFactory validators=Validation.buildDefaultValidatorFactory();
-    LocalBusinessApi api;
+    MockMvc mvc;
     ProductLine line;
-    @AfterEach void close() {validators.close();}
     void setup(ProductLine product) {
         line=product;var properties=new TradingOrderProperties();properties.getKafka().setProductLine(line);
         var account=new AccountProperties();account.getKafka().setProductLine(line);
@@ -42,12 +45,24 @@ class ActiveOrderQueryBoundaryTest {
         var trigger=new TriggerOrderService(triggerProperties,triggerCore,views,null);
         var orders=new OrderRequestHandler(order,mock(AlgoOrderService.class),mock(CancelAllAfterService.class));
         var triggers=new TriggerOrderRequestHandler(trigger,order);
-        var routes=new TradingLocalRoutes(mock(com.surprising.trading.maintenance.controller.AdminMaintenanceRequestHandler.class),triggers,mock(AdminTriggerOrderRequestHandler.class),mock(LeverageRequestHandler.class),mock(TradingFeeRequestHandler.class),orders,mock(AdminOrderRequestHandler.class),mock(InstrumentCoreSyncService.class),mock(com.surprising.trading.matching.service.MatchingMarketDataService.class));
-        api=new LocalBusinessApi(routes,new AccountLocalRoutes(mock(com.surprising.account.provider.controller.AccountRequestHandler.class)),new InstrumentLocalRoutes(mock(com.surprising.instrument.provider.controller.InstrumentRequestHandler.class),mock(OrderBusinessSettingsRequestHandler.class)),json,validators.getValidator(),account,properties);
+        mvc=MockMvcBuilders.standaloneSetup(new TradingMvcController(orders,triggers,
+                mock(LeverageRequestHandler.class),mock(TradingFeeRequestHandler.class),
+                mock(com.surprising.trading.matching.service.MatchingMarketDataService.class)))
+                .setControllerAdvice(new BadRequestAdvice()).build();
+    }
+    @RestControllerAdvice
+    static class BadRequestAdvice {
+        @ExceptionHandler(IllegalArgumentException.class)
+        ResponseEntity<String> badRequest(IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(ex.getMessage());
+        }
     }
     ResponseEntity<byte[]> get(String domain,String query) {
-        var headers=new HttpHeaders();headers.set("X-User-Id","42");headers.set("X-Product-Line",line.name());
-        return api.invoke(domain.equals("order")?"trading-orders":"trading-trigger",URI.create("local:/api/v1/trading/"+(domain.equals("order")?"orders":"trigger-orders")+"/open?"+query),HttpMethod.GET,headers,null,Duration.ofSeconds(2));
+        try {
+            var res=mvc.perform(MockMvcRequestBuilders.get(URI.create("http://local/api/v1/trading/"+(domain.equals("order")?"orders":"trigger-orders")+"/open?"+query))
+                    .header("X-User-Id","42").header("X-Product-Line",line.name())).andReturn().getResponse();
+            return ResponseEntity.status(res.getStatus()).body(res.getContentAsByteArray());
+        } catch(Exception ex) { throw new RuntimeException(ex); }
     }
     CoreOrderStateView order(long id,String instrument) {
         return new CoreOrderStateView(id,line,42,instrument,CoreOrderSide.BUY,100,1,0,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"client-"+id,new UUID(0,id),1,2,1000,1000,1,"OPEN",1);

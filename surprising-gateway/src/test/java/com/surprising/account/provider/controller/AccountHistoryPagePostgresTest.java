@@ -9,8 +9,7 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.repository.*;
 import com.surprising.account.provider.service.*;
-import com.surprising.gateway.provider.local.AccountLocalRoutes;
-import com.surprising.gateway.provider.local.LocalApiRequest;
+import com.surprising.account.provider.controller.AccountMvcController;
 import com.surprising.product.api.ProductLine;
 import java.net.URI;
 import java.nio.file.Files;
@@ -73,14 +72,15 @@ class AccountHistoryPagePostgresTest {
             assertThat(next.path(rows).get(0).path("userId").asLong()).isEqualTo(42L);
             assertThat(next.path("hasMore").asBoolean()).isFalse();
         }
-        var headers=new HttpHeaders();headers.set("X-Admin-User-Id","7");
-        var routes=new AccountLocalRoutes(requests);
+        var accountMvc = MockMvcBuilders.standaloneSetup(new AccountMvcController(requests)).build();
         String path="/api/v1/admin/accounts/adjustments?adminUserId=7&userId=42&accountType="+line.accountTypeCode()
                 +"&asset=usdt&adjustmentKind=product&limit=1";
-        JsonNode firstAdjustment=json.valueToTree(routes.invoke(new LocalApiRequest(URI.create(path),HttpMethod.GET,headers,null,json,null)));
+        JsonNode firstAdjustment=json.readTree(accountMvc.perform(get(path).header("X-Admin-User-Id","7"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray());
         assertThat(firstAdjustment.path("adjustments").get(0).path("adjustmentId").asLong()).isEqualTo(first+2);
-        String cursor=java.net.URLEncoder.encode(firstAdjustment.path("nextCursor").asString(),java.nio.charset.StandardCharsets.UTF_8);
-        JsonNode next=json.valueToTree(routes.invoke(new LocalApiRequest(URI.create(path+"&cursor="+cursor),HttpMethod.GET,headers,null,json,null)));
+        String cursor=firstAdjustment.path("nextCursor").asString();
+        JsonNode next=json.readTree(accountMvc.perform(get(path).param("cursor",cursor).header("X-Admin-User-Id","7"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray());
         assertThat(next.path("adjustments").get(0).path("adjustmentId").asLong()).isEqualTo(first);
         assertThat(next.path("hasMore").asBoolean()).isFalse();
         assertThat(jdbc.queryForObject("SELECT sum(amount_units) FROM account_product_transfers",Long.class)).isEqualTo(400L);

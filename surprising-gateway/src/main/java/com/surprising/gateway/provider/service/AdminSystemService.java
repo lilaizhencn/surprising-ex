@@ -74,7 +74,7 @@ public class AdminSystemService {
         routes.forEach((service, route) -> responses.add(new RouteResponse(
                 routeType,
                 service,
-                com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)
+                com.surprising.gateway.provider.product.GatewayLocalDispatcher.isLocalService(service)
                         ? "local:" : route.getBaseUrl(),
                 route.getTargetPrefix(),
                 route.isPrivateRoute(),
@@ -86,7 +86,7 @@ public class AdminSystemService {
                            String routeType,
                            String service,
                            BackendRoute route) {
-        String baseUrl = com.surprising.gateway.provider.local.LocalBusinessApi.isLocalService(service)
+        String baseUrl = com.surprising.gateway.provider.product.GatewayLocalDispatcher.isLocalService(service)
                 ? "local:" : trimTrailingSlash(route.getBaseUrl());
         String key = baseUrl + "|" + route.hasBasicAuth();
         targets.putIfAbsent(key, new HealthTarget(routeType, service, route, baseUrl));

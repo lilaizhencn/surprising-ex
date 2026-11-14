@@ -166,6 +166,48 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
         if (uri.startsWith("/api/v1/admin/websocket")) {
             return new DirectRoute("websocket-admin", true, true, true);
         }
+        if (uri.startsWith("/api/v1/accounts/admin/") || uri.startsWith("/api/v1/admin/accounts/")) {
+            return new DirectRoute("account", true, true, false);
+        }
+        if (uri.startsWith("/api/v1/accounts/")) {
+            return new DirectRoute("account", true, false, false);
+        }
+        if (uri.startsWith("/api/v1/trading/market/")) {
+            return new DirectRoute("trading-market", false, false, false);
+        }
+        if (uri.startsWith("/api/v1/admin/trading/trigger-orders")) {
+            return new DirectRoute("trading-trigger", true, true, false);
+        }
+        if (uri.startsWith("/api/v1/admin/trading/fees")) {
+            return new DirectRoute("trading-fees", true, true, false);
+        }
+        if (uri.startsWith("/api/v1/admin/trading/leverage")) {
+            return new DirectRoute("trading-leverage", true, true, false);
+        }
+        if (uri.startsWith("/api/v1/admin/trading/")) {
+            return new DirectRoute("trading", true, true, false);
+        }
+        if (uri.startsWith("/api/v1/trading/trigger-orders")) {
+            return new DirectRoute("trading-trigger", true, false, false);
+        }
+        if (uri.startsWith("/api/v1/trading/fees")) {
+            return new DirectRoute("trading-fees", true, false, false);
+        }
+        if (uri.startsWith("/api/v1/trading/leverage")) {
+            return new DirectRoute("trading-leverage", true, false, false);
+        }
+        if (uri.startsWith("/api/v1/trading/")) {
+            return new DirectRoute("trading", true, false, false);
+        }
+        if (uri.equals("/api/v1/instruments/admin/order-settings")) {
+            return new DirectRoute("instrument-admin", true, true, false);
+        }
+        if (uri.startsWith("/api/v1/instruments/admin/")) {
+            return new DirectRoute("instrument-admin", true, true, true);
+        }
+        if (uri.startsWith("/api/v1/instruments/")) {
+            return new DirectRoute("instrument", false, false, true);
+        }
         return null;
     }
 
@@ -179,11 +221,16 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
             if (authorization != null && !authorization.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "choose bearer or API key authentication");
             }
-            if (!isReadMethod(request.getMethod())) {
+            String requiredScope;
+            if (isReadMethod(request.getMethod())) {
+                requiredScope = "READ";
+            } else if (supportsTradeApiKey(route.service())) {
+                requiredScope = "TRADE";
+            } else {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "API key writes are not supported for this endpoint");
             }
             try {
-                long user = apiKeys.authenticate(apiKeyRequests.bindNative(request, body), "READ");
+                long user = apiKeys.authenticate(apiKeyRequests.bindNative(request, body), requiredScope);
                 return new Identity(Long.toString(user), null, List.of(), false);
             } catch (ApiKeyAccessBlockedException blocked) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, blocked.getMessage(), blocked);
@@ -306,6 +353,13 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
 
     private static boolean isReadMethod(String method) {
         return HttpMethod.GET.matches(method) || HttpMethod.HEAD.matches(method) || HttpMethod.OPTIONS.matches(method);
+    }
+
+    private static boolean supportsTradeApiKey(String service) {
+        return switch (service) {
+            case "trading", "trading-orders", "trading-trigger", "trading-leverage", "account" -> true;
+            default -> false;
+        };
     }
 
     private static String bodySha256(byte[] body) {

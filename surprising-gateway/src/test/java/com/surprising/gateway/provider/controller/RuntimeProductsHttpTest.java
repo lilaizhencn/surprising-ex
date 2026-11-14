@@ -10,7 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.local.LocalBusinessApi;
+import com.surprising.gateway.provider.product.GatewayLocalDispatcher;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
@@ -24,7 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 class RuntimeProductsHttpTest {
     private final GatewayProductServices products = mock(GatewayProductServices.class);
     private final AuthService auth = mock(AuthService.class);
-    private final LocalBusinessApi local = mock(LocalBusinessApi.class);
+    private final GatewayLocalDispatcher local = mock(GatewayLocalDispatcher.class);
     private final GatewayProductSelection selection = mock(GatewayProductSelection.class);
     private final ObjectMapper json = new ObjectMapper();
     private final MockMvc mvc;
@@ -35,7 +35,6 @@ class RuntimeProductsHttpTest {
         properties.getAdminRoutes().put("account", new GatewayProperties.BackendRoute("local:", "/api/v1/admin/accounts", true));
         when(products.enabled()).thenReturn(List.of(ProductLine.SPOT));
         when(products.disabled()).thenReturn(List.of(ProductLine.OPTION));
-        when(products.local(ProductLine.SPOT)).thenReturn(local);
         when(selection.resolve(any(), any(), anyBoolean())).thenReturn(ProductLine.SPOT);
         when(auth.authenticateBearer(null)).thenThrow(new IllegalArgumentException("bearer token required"));
         var controller = new GatewayProxyController(properties, new RestTemplate(), auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class), null,
@@ -80,6 +79,6 @@ class RuntimeProductsHttpTest {
                 .andExpect(status().isUnauthorized());
         mvc.perform(get("/api/v1/admin/gateway/account/balances").header("X-Product-Line", "SPOT"))
                 .andExpect(status().isUnauthorized());
-        verify(local, never()).invoke(any(), any(), any(), any(), any(), any());
+        verify(local, never()).invoke(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
     }
 }

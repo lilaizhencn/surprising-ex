@@ -41,11 +41,9 @@ class ProductTransferGatewaySurfaceTest {
         when(accountClient.completeTransfer(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(ProductTransferOperationRequest.class)))
                 .thenReturn(ProductAccountAdjustment.applied("ok"));
-        var local = mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
-        when(local.productLine()).thenReturn(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
+        var local = mock(com.surprising.gateway.provider.product.GatewayLocalDispatcher.class);
         var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(java.util.List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
-        when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
         GatewayProxyController proxy = new GatewayProxyController(properties(), new RestTemplate(), userAuthService(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class),
                 null, new ObjectMapper(), new ProductTransferService(accountClient), null,
                 products, local, new com.surprising.gateway.provider.product.GatewayProductSelection(products, new ObjectMapper()));
@@ -74,7 +72,7 @@ class ProductTransferGatewaySurfaceTest {
         org.mockito.Mockito.doThrow(new com.surprising.gateway.provider.exception.ProductTransferSecurityException(reason,"security failure"))
                 .when(security).requireIfNeeded(org.mockito.ArgumentMatchers.eq(42L),org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
-        var local=mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
+        var local=mock(com.surprising.gateway.provider.product.GatewayLocalDispatcher.class);
         var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
         var proxy=new GatewayProxyController(properties(),new RestTemplate(),userAuthService(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class),null,new ObjectMapper(),
@@ -183,7 +181,7 @@ class ProductTransferGatewaySurfaceTest {
 
     private GatewayProxyController controller(ProductTransferService coordinator,ProductTransferSecurityService security,AuthService auth) {
         var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
-        var local=mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
+        var local=mock(com.surprising.gateway.provider.product.GatewayLocalDispatcher.class);
         var json=new ObjectMapper();
         return new GatewayProxyController(properties(),new RestTemplate(),auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class),null,json,coordinator,security,
                 products,local,new com.surprising.gateway.provider.product.GatewayProductSelection(products,json));

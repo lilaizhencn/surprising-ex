@@ -2,25 +2,31 @@ package com.surprising.gateway.provider.local;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
+import com.surprising.account.provider.controller.AccountMvcController;
+import com.surprising.account.provider.controller.AccountRequestHandler;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.trading.api.model.LeverageSettingRequest;
-import jakarta.validation.Validation;
-import java.net.URI;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -35,32 +41,35 @@ class AdminIntegerBindingTest {
     @ValueSource(strings = {"9007199254740993", "9223372036854775807", "-9223372036854775808"})
     void accountAmountStringsAreExactThroughTheActualLocalRequestBinder(String units) {
         context.run(application -> {
-            var json = application.getBean(ObjectMapper.class);
-            var headers = new HttpHeaders();
-            headers.set("X-Admin-User-Id", "123");
+            var json = application.getBean(tools.jackson.databind.json.JsonMapper.class);
+            var handler = mock(AccountRequestHandler.class);
+            var mvc = MockMvcBuilders.standaloneSetup(new AccountMvcController(handler))
+                    .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
+                    .build();
             String body = """
                     {"userId":"9007199254740993","asset":"USDT","amountUnits":"%s",
                      "referenceId":"admin-integer-boundary","reason":"test"}
                     """.formatted(units);
-            try (var validators = Validation.buildDefaultValidatorFactory()) {
-                var request = new LocalApiRequest(URI.create("/api/v1/admin/accounts/balance-adjustments"),
-                        HttpMethod.POST, headers, body.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        json, validators.getValidator());
-                var adjustment = request.body(BalanceAdjustmentRequest.class, true, true);
-                assertThat(adjustment.userId()).isEqualTo(LARGE_ID);
-                assertThat(adjustment.amountUnits()).isEqualTo(Long.parseLong(units));
-                var product = json.readValue(body.replace("\"asset\"", "\"accountType\":\"USDT_PERPETUAL\",\"asset\""),
-                        ProductBalanceAdjustmentRequest.class);
-                assertThat(product.userId()).isEqualTo(LARGE_ID);
-                assertThat(product.amountUnits()).isEqualTo(Long.parseLong(units));
-            }
+            mvc.perform(post("/api/v1/admin/accounts/balance-adjustments")
+                            .header("X-Admin-User-Id", "123")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isOk());
+            var captor = ArgumentCaptor.forClass(BalanceAdjustmentRequest.class);
+            verify(handler).adminAdjustBalance(eq("123"), eq(null), captor.capture());
+            assertThat(captor.getValue().userId()).isEqualTo(LARGE_ID);
+            assertThat(captor.getValue().amountUnits()).isEqualTo(Long.parseLong(units));
+            var product = json.readValue(body.replace("\"asset\"", "\"accountType\":\"USDT_PERPETUAL\",\"asset\""),
+                    ProductBalanceAdjustmentRequest.class);
+            assertThat(product.userId()).isEqualTo(LARGE_ID);
+            assertThat(product.amountUnits()).isEqualTo(Long.parseLong(units));
         });
     }
 
     @Test
     void orderLeverageFeeAndInstrumentDtosPreserveStringIntegers() {
         context.run(application -> {
-            var json = application.getBean(ObjectMapper.class);
+            var json = application.getBean(tools.jackson.databind.json.JsonMapper.class);
             var cancel = json.readValue("{\"userId\":\"9007199254740993\",\"instrumentId\":\"604\",\"limit\":100}",
                     AdminBatchCancelOrdersRequest.class);
             assertThat(cancel.userId()).isEqualTo(LARGE_ID);
@@ -93,21 +102,22 @@ class AdminIntegerBindingTest {
             "-9223372036854775809", "\"-9223372036854775809\""})
     void fractionalOrOverflowingIntegerFieldsAreRejected(String invalid) {
         context.run(application -> {
-            var json = application.getBean(ObjectMapper.class);
+            var json = application.getBean(tools.jackson.databind.json.JsonMapper.class);
             String body = "{\"userId\":\"9007199254740993\",\"asset\":\"USDT\",\"amountUnits\":" + invalid
                     + ",\"referenceId\":\"admin-rejected-integer\"}";
             assertThatThrownBy(() -> json.readValue(body, BalanceAdjustmentRequest.class))
                     .isInstanceOf(JacksonException.class);
             assertThatThrownBy(() -> json.readValue("{\"userId\":" + invalid + "}", AdminBatchCancelOrdersRequest.class))
                     .isInstanceOf(JacksonException.class);
-            try (var validators = Validation.buildDefaultValidatorFactory()) {
-                var request = new LocalApiRequest(URI.create("/api/v1/admin/accounts/balance-adjustments"),
-                        HttpMethod.POST, new HttpHeaders(), body.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        json, validators.getValidator());
-                assertThatThrownBy(() -> request.body(BalanceAdjustmentRequest.class, true, true))
-                        .isInstanceOfSatisfying(ResponseStatusException.class,
-                                rejected -> assertThat(rejected.getStatusCode().value()).isEqualTo(400));
-            }
+            var handler = mock(AccountRequestHandler.class);
+            var mvc = MockMvcBuilders.standaloneSetup(new AccountMvcController(handler))
+                    .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
+                    .build();
+            mvc.perform(post("/api/v1/admin/accounts/balance-adjustments")
+                            .header("X-Admin-User-Id", "123")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest());
         });
     }
 }
