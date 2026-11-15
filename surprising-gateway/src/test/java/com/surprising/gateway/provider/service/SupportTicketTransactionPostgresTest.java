@@ -59,17 +59,17 @@ class SupportTicketTransactionPostgresTest {
                     admin_user_id BIGINT, note_type TEXT, visibility TEXT,
                     body TEXT CHECK (body <> 'FAIL'), created_at TIMESTAMPTZ)
                 """);
-        var auth = mock(AuthService.class);
+        var adminAuth = mock(com.surprising.gateway.provider.auth.service.AdminAuthService.class);
         Instant now = Instant.now();
-        when(auth.requireAdminPermission("Bearer admin", "admin.support.write"))
+        when(adminAuth.requireAdminPermission("Bearer admin", "admin.support.write"))
                 .thenReturn(new AuthModels.JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), now.plusSeconds(60)));
-        when(auth.adminUser("Bearer admin", 42))
+        when(adminAuth.adminUser("Bearer admin", 42))
                 .thenReturn(new AuthModels.AuthenticatedUser(42, "user", "user@example.test", "NORMAL", List.of("USER"), now));
         context = new AnnotationConfigApplicationContext();
         context.register(Transactions.class);
         context.registerBean(PlatformTransactionManager.class, () -> new DataSourceTransactionManager(dataSource));
         context.registerBean(SupportTicketService.class, () -> new SupportTicketService(
-                new SupportTicketRepository(jdbc), new SupportTicketNoteRepository(jdbc), auth, mock(ComplianceService.class)));
+                new SupportTicketRepository(jdbc), new SupportTicketNoteRepository(jdbc), adminAuth, mock(ComplianceService.class)));
         context.refresh();
         service = context.getBean(SupportTicketService.class);
     }

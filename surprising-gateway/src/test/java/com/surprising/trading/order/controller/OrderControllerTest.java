@@ -133,7 +133,7 @@ class OrderControllerTest {
     void oversizedProjectionResponseIsTypedAndCarriesContinuationCursor() {
         OrderQueryService orderService = mock(OrderQueryService.class);
         String continuation = "eyJvcmRlciI6MTIzfQ";
-        when(orderService.openOrders(1001L, "1", TradingController.activePage(10, null), null)).thenThrow(new ProjectionReadResult.ResponseTooLargeException(12L, 0L, continuation));
+        when(orderService.openOrders(1001L, "1", TradingControllerSupport.activePage(10, null), null)).thenThrow(new ProjectionReadResult.ResponseTooLargeException(12L, 0L, continuation));
         TradingController controller = new TradingController(null, orderService, mock(CancelAllAfterService.class));
         assertThatThrownBy(() -> controller.openOrders(1001L, null, null, "1", 10, null, null)).isInstanceOf(ResponseStatusException.class).satisfies(throwable -> {
             ResponseStatusException response = (ResponseStatusException) throwable;

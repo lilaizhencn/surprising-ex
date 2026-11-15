@@ -67,13 +67,14 @@ class SupportBoundaryPostgresTest {
                 FIRST + 1000, FIRST + 1000, Timestamp.from(TIME));
         tickets = spy(new SupportTicketRepository(jdbc)); notes = spy(new SupportTicketNoteRepository(jdbc));
         auth = mock(AuthService.class);
+        var adminAuth = mock(com.surprising.gateway.provider.auth.service.AdminAuthService.class);
         for (long id : List.of(8L, 9L)) {
-            when(auth.requireAdminPermission(eq("Bearer " + id), anyString())).thenReturn(new JwtPrincipal(id, "support", "NORMAL", List.of("SUPPORT"), Instant.now().plusSeconds(3600)));
-            when(auth.adminUser("Bearer " + id, 7)).thenReturn(new AuthenticatedUser(7, "user", null, "NORMAL", List.of("USER"), TIME));
+            when(adminAuth.requireAdminPermission(eq("Bearer " + id), anyString())).thenReturn(new JwtPrincipal(id, "support", "NORMAL", List.of("SUPPORT"), Instant.now().plusSeconds(3600)));
+            when(adminAuth.adminUser("Bearer " + id, 7)).thenReturn(new AuthenticatedUser(7, "user", null, "NORMAL", List.of("USER"), TIME));
         }
         context = new AnnotationConfigApplicationContext(); context.register(Transactions.class);
         context.registerBean(DataSourceTransactionManager.class, () -> new DataSourceTransactionManager(source));
-        context.registerBean(SupportTicketService.class, () -> new SupportTicketService(tickets, notes, auth, mock(ComplianceService.class)));
+        context.registerBean(SupportTicketService.class, () -> new SupportTicketService(tickets, notes, adminAuth, mock(ComplianceService.class)));
         context.refresh();
         mvc = MockMvcBuilders.standaloneSetup(new AdminSupportController(context.getBean(SupportTicketService.class))).build();
     }

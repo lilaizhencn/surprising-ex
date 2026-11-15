@@ -1,9 +1,12 @@
 package com.surprising.trading.order.controller;
 
+import static com.surprising.trading.order.controller.TradingControllerSupport.activeInstrument;
+import static com.surprising.trading.order.controller.TradingControllerSupport.activePage;
+import static com.surprising.trading.order.controller.TradingControllerSupport.commandResponse;
+import static com.surprising.trading.order.controller.TradingControllerSupport.mapAsyncFailure;
+
 import com.surprising.gateway.provider.product.GatewayUserContext;
-import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.utils.InstrumentIds;
-import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.BatchAmendOrdersRequest;
 import com.surprising.trading.api.model.BatchCancelOrdersRequest;
@@ -14,12 +17,7 @@ import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.CancellationPlanResponse;
 import com.surprising.trading.api.model.ClosePositionRequest;
-import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
-import com.surprising.trading.api.model.LeverageSettingRequest;
-import com.surprising.trading.api.model.LeverageSettingResponse;
-import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBatchResponse;
-import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderPriceProtectionResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
@@ -28,22 +26,14 @@ import com.surprising.trading.api.model.OrderSubmissionResponse;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TradeFillQueryResponse;
-import com.surprising.trading.matching.service.MatchingMarketDataService;
-import com.surprising.trading.order.exception.OrderCommandRejectedException;
-import com.surprising.trading.order.model.ActiveOrderPageQuery;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.CancelAllAfterService;
-import com.surprising.trading.order.service.LeverageService;
 import com.surprising.trading.order.service.OrderQueryService;
 import com.surprising.trading.order.service.OrderService;
-import com.surprising.trading.order.service.TradingFeeService;
-import com.surprising.trading.order.utils.ActiveOrderCursors;
 import com.surprising.trading.order.utils.TradeReadCursors;
 import jakarta.validation.Valid;
 import java.util.Locale;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
@@ -64,33 +54,14 @@ public class TradingController {
     private final OrderService orderService;
     private final OrderQueryService orderQueryService;
     private final CancelAllAfterService cancelAllAfterService;
-    private final LeverageService leverageService;
-    private final TradingFeeService tradingFeeService;
-    private final MatchingMarketDataService marketDataService;
 
     @Autowired
     public TradingController(OrderService orderService,
                              OrderQueryService orderQueryService,
-                             CancelAllAfterService cancelAllAfterService,
-                             LeverageService leverageService,
-                             TradingFeeService tradingFeeService,
-                             MatchingMarketDataService marketDataService) {
+                             CancelAllAfterService cancelAllAfterService) {
         this.orderService = orderService;
         this.orderQueryService = orderQueryService;
         this.cancelAllAfterService = cancelAllAfterService;
-        this.leverageService = leverageService;
-        this.tradingFeeService = tradingFeeService;
-        this.marketDataService = marketDataService;
-    }
-
-    public TradingController(OrderService orderService,
-                             OrderQueryService orderQueryService,
-                             CancelAllAfterService cancelAllAfterService) {
-        this(orderService, orderQueryService, cancelAllAfterService, null, null, null);
-    }
-
-    public TradingController(MatchingMarketDataService marketDataService) {
-        this(null, null, null, null, null, marketDataService);
     }
 
     @GetMapping("/api/v1/trading/orders/trades")
@@ -208,32 +179,6 @@ public class TradingController {
         return orderQueryService.priceProtection();
     }
 
-    @GetMapping("/api/v1/trading/market/orderbook")
-    public OrderBookSnapshotResponse orderBook(
-            @RequestParam("instrumentId") String instrumentId,
-            @RequestParam(value = "depth", defaultValue = "30") int depth) {
-        try {
-            return marketDataService.orderBookSnapshot(instrumentId, depth);
-        } catch (ReadViewUnavailableException unavailable) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, unavailable.getMessage(), unavailable);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/api/v1/trading/fees/effective")
-    public EffectiveTradingFeeResponse effectiveFee(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestParam("instrumentId") String instrumentId,
-            @RequestParam(value = "instrumentChangeId", defaultValue = "0") long instrumentChangeId,
-            @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
-            @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return effectiveFee(tradingFeeService, userId, instrumentId, instrumentChangeId, headerProductLine, queryProductLine);
-    }
-
     @GetMapping("/api/v1/trading/orders/by-client-order-id")
     public OrderResponse getByClientOrderId(
             @RequestParam(value = "userId", required = false) Long queryUserId,
@@ -278,7 +223,7 @@ public class TradingController {
     @PostMapping("/api/v1/trading/orders/batch-cancel")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request) {
         try {
-            return mapAsyncFailure(orderService.cancelBatchCommandAsync(request).thenApply(TradingController::commandResponse), HttpStatus.NOT_FOUND);
+            return mapAsyncFailure(orderService.cancelBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.NOT_FOUND);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -287,7 +232,7 @@ public class TradingController {
     @PostMapping("/api/v1/trading/orders/batch-amend")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request) {
         try {
-            return mapAsyncFailure(orderService.amendBatchCommandAsync(request).thenApply(TradingController::commandResponse), HttpStatus.CONFLICT);
+            return mapAsyncFailure(orderService.amendBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -300,27 +245,6 @@ public class TradingController {
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
-    }
-
-    @PostMapping("/api/v1/trading/leverage/settings")
-    public LeverageSettingResponse setLeverage(
-            @RequestBody LeverageSettingRequest request,
-            @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
-            @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        return setLeverage(leverageService, request, headerProductLine, queryProductLine);
-    }
-
-    @GetMapping("/api/v1/trading/leverage/settings")
-    public LeverageSettingResponse getLeverage(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestParam("instrumentId") String instrumentId,
-            @RequestParam(value = "marginMode", required = false) MarginMode marginMode,
-            @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
-            @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return getLeverage(leverageService, userId, instrumentId, marginMode, headerProductLine, queryProductLine);
     }
 
     @GetMapping("/api/v1/trading/orders/history")
@@ -351,7 +275,7 @@ public class TradingController {
     @PostMapping("/api/v1/trading/orders/cancel")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> cancel(@RequestBody CancelOrderRequest request) {
         try {
-            return mapAsyncFailure(orderService.cancelCommandAsync(request).thenApply(TradingController::commandResponse), HttpStatus.NOT_FOUND);
+            return mapAsyncFailure(orderService.cancelCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.NOT_FOUND);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -362,7 +286,7 @@ public class TradingController {
     @PostMapping("/api/v1/trading/orders/batch")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request) {
         try {
-            return mapAsyncFailure(orderService.placeBatchCommandAsync(request).thenApply(TradingController::commandResponse), HttpStatus.CONFLICT);
+            return mapAsyncFailure(orderService.placeBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -373,7 +297,7 @@ public class TradingController {
     @PostMapping("/api/v1/trading/orders/amend")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> amend(@Valid @RequestBody AmendOrderRequest request) {
         try {
-            return mapAsyncFailure(orderService.amendCommandAsync(request).thenApply(TradingController::commandResponse), HttpStatus.CONFLICT);
+            return mapAsyncFailure(orderService.amendCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -415,7 +339,7 @@ public class TradingController {
     @PostMapping("/api/v1/trading/orders")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> place(@Valid @RequestBody PlaceOrderRequest request) {
         try {
-            return mapAsyncFailure(orderService.placeCommandAsync(request).thenApply(TradingController::commandResponse), HttpStatus.CONFLICT);
+            return mapAsyncFailure(orderService.placeCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -458,122 +382,5 @@ public class TradingController {
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
-    }
-
-    static EffectiveTradingFeeResponse effectiveFee(TradingFeeService service, long userId, String instrumentId,
-                                                      long instrumentChangeId, String headerProductLine, String queryProductLine) {
-        try {
-            String normalized = normalizeOptionalSymbol(instrumentId);
-            if (normalized == null) throw new IllegalArgumentException("instrumentId is required");
-            return service.effectiveFee(userId, normalized, instrumentChangeId, productLine(queryProductLine, headerProductLine));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
-    static LeverageSettingResponse setLeverage(LeverageService service, LeverageSettingRequest request,
-                                               String headerProductLine, String queryProductLine) {
-        try {
-            ProductLine line = productLine(queryProductLine, headerProductLine);
-            LeverageSettingRequest bound = request == null || request.productLine() != null || line == null
-                    ? request
-                    : new LeverageSettingRequest(request.userId(), line, request.instrumentId(),
-                            request.marginMode(), request.leveragePpm(), request.reason(), request.repriceCrossMargin());
-            return service.set(bound);
-        } catch (OrderCommandRejectedException rejected) {
-            throw conflict(rejected);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
-    static LeverageSettingResponse getLeverage(LeverageService service, long userId, String instrumentId,
-                                               MarginMode marginMode, String headerProductLine, String queryProductLine) {
-        try {
-            return service.get(userId, instrumentId, marginMode, productLine(queryProductLine, headerProductLine));
-        } catch (OrderCommandRejectedException rejected) {
-            throw conflict(rejected);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
-    static ProductLine productLine(String queryValue, String headerValue) {
-        String value = queryValue == null || queryValue.isBlank() ? headerValue : queryValue;
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        return ProductLine.requireExternalCode(value);
-    }
-
-    static String normalizeOptionalSymbol(String instrumentId) {
-        if (instrumentId == null || instrumentId.isBlank()) {
-            return null;
-        }
-        String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
-        if (!InstrumentIds.valid(normalized)) {
-            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
-        }
-        return normalized;
-    }
-
-    public static ActiveOrderPageQuery activePage(int limit, String cursor) {
-        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
-        return new ActiveOrderPageQuery(limit, ActiveOrderCursors.decode(cursor));
-    }
-
-    static String activeInstrument(String instrumentId) {
-        if (instrumentId == null || instrumentId.isBlank()) return null;
-        String value = instrumentId.trim().toUpperCase(Locale.ROOT);
-        if (!InstrumentIds.valid(value)) {
-            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
-        }
-        return value;
-    }
-
-    private static ResponseStatusException conflict(OrderCommandRejectedException rejected) {
-        var response = new ResponseStatusException(HttpStatus.CONFLICT, rejected.getMessage(), rejected);
-        response.getBody().setProperty("code", rejected.code().name());
-        return response;
-    }
-
-    static <T> CompletionStage<T> mapAsyncFailure(CompletionStage<T> stage, HttpStatus illegalStateStatus) {
-        CompletableFuture<T> mapped = new CompletableFuture<>();
-        stage.whenComplete((value, failure) -> {
-            if (failure == null) {
-                mapped.complete(value);
-                return;
-            }
-            Throwable cause = failure;
-            while (cause instanceof CompletionException && cause.getCause() != null) {
-                cause = cause.getCause();
-            }
-            if (cause instanceof IllegalArgumentException) {
-                mapped.completeExceptionally(new ResponseStatusException(HttpStatus.BAD_REQUEST, cause.getMessage(), cause));
-            } else if (cause instanceof IllegalStateException) {
-                mapped.completeExceptionally(new ResponseStatusException(illegalStateStatus, cause.getMessage(), cause));
-            } else {
-                mapped.completeExceptionally(cause);
-            }
-        });
-        return mapped;
-    }
-
-    private static ResponseEntity<OrderCommandReceipt> commandResponse(OrderCommandReceipt receipt) {
-        HttpStatus status = switch (receipt.code()) {
-            case "IDEMPOTENCY_CONFLICT" -> HttpStatus.CONFLICT;
-            case "CLIENT_BACKPRESSURED" -> HttpStatus.TOO_MANY_REQUESTS;
-            case "MATCHING_PENDING", "RESULT_UNKNOWN" -> HttpStatus.ACCEPTED;
-            case "RESULT_UNKNOWN_OUTSIDE_RETENTION" -> HttpStatus.GONE;
-            case "NOT_CONNECTED", "ADMIN_ACTION", "CLOSED", "MAX_POSITION_EXCEEDED", "UNKNOWN" -> HttpStatus.SERVICE_UNAVAILABLE;
-            default -> HttpStatus.OK;
-        };
-        return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(receipt);
     }
 }

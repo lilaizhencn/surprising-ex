@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.controller;
 
-import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.AdminAuthService;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminMfaEnrollmentResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminMfaStatusResponse;
@@ -19,16 +19,16 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/v1/admin/security")
 public class AdminSecurityController {
 
-    private final AuthService authService;
+    private final AdminAuthService adminAuthService;
 
-    public AdminSecurityController(AuthService authService) {
-        this.authService = authService;
+    public AdminSecurityController(AdminAuthService adminAuthService) {
+        this.adminAuthService = adminAuthService;
     }
 
     @GetMapping("/mfa")
     public AdminMfaStatusResponse mfaStatus(@RequestHeader("Authorization") String authorization) {
         try {
-            return authService.adminMfaStatus(authorization);
+            return adminAuthService.adminMfaStatus(authorization);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

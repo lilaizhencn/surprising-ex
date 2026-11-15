@@ -173,7 +173,7 @@ public class OrderQueryService {
 
     public List<OrderResponse> openOrdersFromCore(long userId, String instrumentId, long beforeOrderId, int limit) {
         return requireAeron().openOrders(userId, instrumentId, beforeOrderId, limit).stream()
-                .map(OrderService::toOrder)
+                .map(OrderCoreMapper::toOrder)
                 .toList();
     }
 
@@ -183,7 +183,7 @@ public class OrderQueryService {
         }
         ProductLine productLine = properties.getProductLine();
         return requireAeron().lifecycleOpenOrders(instrumentId, limit).stream()
-                .map(view -> OrderService.requireLocalOrder(view, productLine))
+                .map(view -> OrderCoreMapper.requireLocalOrder(view, productLine))
                 .toList();
     }
 
@@ -199,7 +199,7 @@ public class OrderQueryService {
         var order = requireRealtimeQueries().order(currentProductLine(), userId, orderId, minExportSequence);
         OrderResponse current = order == null
                 ? terminalOrder(requireProjection().byOrder(currentProductLine(), userId, orderId, minExportSequence))
-                : OrderService.toOrder(order);
+                : OrderCoreMapper.toOrder(order);
         if (current == null) throw new IllegalStateException("order not found: " + orderId);
         return current;
     }
@@ -214,7 +214,7 @@ public class OrderQueryService {
         }
         String normalized = normalizeClientOrderId(clientOrderId);
         OrderResponse current = requireRealtimeQueries().require(currentProductLine(), userId, minExportSequence).openOrders().stream()
-                .filter(v -> normalized.equals(v.clientOrderId())).map(OrderService::toOrder).findFirst().orElse(null);
+                .filter(v -> normalized.equals(v.clientOrderId())).map(OrderCoreMapper::toOrder).findFirst().orElse(null);
         if (current == null) current = terminalOrder(requireProjection().byClientOrderId(
                 currentProductLine(), userId, normalized, minExportSequence));
         if (current == null) throw new IllegalStateException("order not found: " + normalized);
@@ -229,7 +229,7 @@ public class OrderQueryService {
                 .filter(v -> instrumentId == null || instrumentId.equals(v.instrumentId()))
                 .filter(v -> beforeOrderId == 0 || v.orderId() < beforeOrderId)
                 .sorted(Comparator.comparingLong(CoreOrderStateView::orderId).reversed())
-                .limit(limit + 1).map(OrderService::toOrder).toList();
+                .limit(limit + 1).map(OrderCoreMapper::toOrder).toList();
         boolean hasMore = orders.size() > limit;
         if (hasMore) orders = new ArrayList<>(orders.subList(0, limit));
         String nextCursor = hasMore && !orders.isEmpty()

@@ -18,7 +18,7 @@ class AdminMaintenanceRequestHandlerTest {
     void rejectsMissingIdentityAndCrossProductRequestsBeforeDoingBusiness() {
         var service = mock(MaintenanceService.class);
         when(service.productLine()).thenReturn(ProductLine.LINEAR_PERPETUAL);
-        var requests = new AdminTradingController(null, null, service, null, null, null);
+        var requests = new com.surprising.trading.order.controller.AdminTradingMaintenanceController(service);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> requests.maintenanceList(null, null, ProductLine.LINEAR_PERPETUAL, 0))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> requests.maintenanceList("1", "SPOT", ProductLine.SPOT, 0))
@@ -35,7 +35,7 @@ class AdminMaintenanceRequestHandlerTest {
         when(service.create(eq("1"), any())).thenAnswer(i -> new MaintenanceTask("9007199254740999", ProductLine.LINEAR_PERPETUAL, i.getArgument(1), "1", "RUNNING", "GATE", 0, 0, 0, null, "2026-09-06", "2026-09-06"));
         var mapper = new tools.jackson.databind.ObjectMapper();
         var request = mapper.readValue("{\"requestId\":\"98515364-34c9-46a9-bf6f-bbb48f330ea3\",\"instrumentId\":\"1\",\"userId\":\"9007199254740997\",\"mode\":\"LIMIT\",\"priceTicks\":\"9007199254740993\",\"reason\":\"upgrade\"}", MaintenanceRequest.class);
-        var result = mapper.readTree(mapper.writeValueAsString(new AdminTradingController(null, null, service, null, null, null)
+        var result = mapper.readTree(mapper.writeValueAsString(new com.surprising.trading.order.controller.AdminTradingMaintenanceController(service)
                 .maintenanceCreate("1", ProductLine.LINEAR_PERPETUAL.name(), ProductLine.LINEAR_PERPETUAL, request)));
         org.assertj.core.api.Assertions.assertThat(result.get("id").asText()).isEqualTo("9007199254740999");
         org.assertj.core.api.Assertions.assertThat(result.get("request").get("priceTicks").asText()).isEqualTo("9007199254740993");
@@ -46,7 +46,7 @@ class AdminMaintenanceRequestHandlerTest {
     void malformedProtocolValuesNeverReachTheBusinessService() {
         var service = mock(MaintenanceService.class);
         when(service.productLine()).thenReturn(ProductLine.LINEAR_PERPETUAL);
-        var controller = new AdminTradingController(null, null, service, null, null, null);
+        var controller = new com.surprising.trading.order.controller.AdminTradingMaintenanceController(service);
         for (String value : new String[] {"-1", "01", "1.0", "9223372036854775808"}) {
             var request = new MaintenanceRequest(java.util.UUID.randomUUID(), "1", value,
                     MaintenanceCommand.Mode.CANCEL, "0", "maintenance");
@@ -67,7 +67,7 @@ class AdminMaintenanceRequestHandlerTest {
     void bindsOptionalZerosAndTrimsReasonIntoNativeCommand() {
         var service = mock(MaintenanceService.class);
         when(service.productLine()).thenReturn(ProductLine.LINEAR_PERPETUAL);
-        var controller = new AdminTradingController(null, null, service, null, null, null);
+        var controller = new com.surprising.trading.order.controller.AdminTradingMaintenanceController(service);
         var id = java.util.UUID.randomUUID();
         controller.maintenanceCreate("1", ProductLine.LINEAR_PERPETUAL.name(), ProductLine.LINEAR_PERPETUAL,
                 new MaintenanceRequest(id, "1", "", MaintenanceCommand.Mode.CANCEL, null, "  maintenance  "));

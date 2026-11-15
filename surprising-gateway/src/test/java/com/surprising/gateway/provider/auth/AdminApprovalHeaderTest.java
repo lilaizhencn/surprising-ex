@@ -30,6 +30,7 @@ class AdminApprovalHeaderTest {
     private static final byte[] BODY = "{\"status\":\"FROZEN\"}".getBytes(StandardCharsets.UTF_8);
     private final GatewayProperties properties = new GatewayProperties();
     private final AuthService auth = mock(AuthService.class);
+    private final AdminAuthService adminAuth = mock(AdminAuthService.class);
     private final AdminApprovalRepository rows = mock(AdminApprovalRepository.class);
     private MockMvc mvc;
 
@@ -37,16 +38,16 @@ class AdminApprovalHeaderTest {
         properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(true);
         properties.getSecurity().setAdminApprovalHeader("X-QA-Approval");
         when(auth.authenticateAdminBearer("admin")).thenReturn(new JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600)));
-        when(auth.updateUserStatus("admin", 7L, "FROZEN")).thenReturn(new AuthenticatedUser(7, "user", null, "FROZEN", List.of("USER"), Instant.now()));
+        when(adminAuth.updateUserStatus("admin", 7L, "FROZEN")).thenReturn(new AuthenticatedUser(7, "user", null, "FROZEN", List.of("USER"), Instant.now()));
         var service = new AdminApprovalService(auth, mock(AdminAuditRepository.class), rows, properties);
-        mvc = MockMvcBuilders.standaloneSetup(new AdminAuthController(auth, service, new ObjectMapper())).build();
+        mvc = MockMvcBuilders.standaloneSetup(new AdminAuthController(adminAuth, service, new ObjectMapper())).build();
     }
 
     @ParameterizedTest @NullAndEmptySource @ValueSource(strings = {" ", "bad-header", "9223372036854775808", "-7"})
     void disabledPolicyIgnoresMalformedOrMissingOptionalHeader(String header) throws Exception {
         properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(false);
         perform(header, 200);
-        verify(auth).updateUserStatus("admin", 7L, "FROZEN");
+        verify(adminAuth).updateUserStatus("admin", 7L, "FROZEN");
         verifyNoInteractions(rows);
     }
 
@@ -54,7 +55,7 @@ class AdminApprovalHeaderTest {
     void requiredPolicyRejectsUnusableHeaderBeforeRepository(String header) throws Exception {
         perform(header, 428);
         verifyNoInteractions(rows);
-        verify(auth, never()).updateUserStatus(anyString(), anyLong(), anyString());
+        verify(adminAuth, never()).updateUserStatus(anyString(), anyLong(), anyString());
     }
 
     @ParameterizedTest @ValueSource(longs = {9007199254740993L, Long.MAX_VALUE})

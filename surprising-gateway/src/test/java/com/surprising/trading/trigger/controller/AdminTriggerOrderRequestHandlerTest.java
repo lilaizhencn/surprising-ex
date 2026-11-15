@@ -14,7 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 class AdminTriggerOrderRequestHandlerTest {
     @Test void bindsExactCoordinatesAndNormalizedFiltersBeforeBusinessRead() {
         var service=mock(TriggerOrderService.class);
-        var requests=new AdminTradingController(null,service,null,null,null,null);
+        var requests=new AdminTradingController(null,service);
         var cursor=new TriggerReadCursor(9007199254740993L,Long.MAX_VALUE);
         var scope=TriggerReadCursors.scope(ProductLine.OPTION,7L,"74",CoreTriggerOrderStatus.CANCELED,Long.MAX_VALUE,true);
         requests.triggerOrders("1",null,"OPTION",7L," 74 "," canceled ",Long.MAX_VALUE,10,
@@ -24,7 +24,7 @@ class AdminTriggerOrderRequestHandlerTest {
 
     @Test void invalidQueryNeverReachesBusinessRead() {
         var service=mock(TriggerOrderService.class);
-        var requests=new AdminTradingController(null,service,null,null,null,null);
+        var requests=new AdminTradingController(null,service);
         for (int limit:new int[]{0,1001})
             badRequest(()->requests.triggerOrders("1",null,"OPTION",null,null,null,null,limit,null,null));
         badRequest(()->requests.triggerOrders("1",null,"OPTION",0L,null,null,null,10,null,null));

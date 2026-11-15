@@ -27,6 +27,6 @@ public class TradingFeeInternalController {
                 || request.getHeader("X-Forwarded-For") != null || request.getHeader("Forwarded") != null
                 || request.getHeader("X-Real-IP") != null)
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "host-local maker endpoint");
-        return TradingController.effectiveFee(tradingFeeService, userId, instrumentId, instrumentChangeId, productLine, productLine);
+        return TradingControllerSupport.effectiveFee(tradingFeeService, userId, instrumentId, instrumentChangeId, productLine, productLine);
     }
 }

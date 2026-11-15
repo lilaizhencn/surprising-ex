@@ -14,9 +14,16 @@ import com.surprising.trading.api.client.MarketDataRpcApi;
 import com.surprising.trading.api.client.OrderRpcApi;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
 import com.surprising.trading.order.controller.AdminTradingController;
+import com.surprising.trading.order.controller.AdminTradingFeeController;
+import com.surprising.trading.order.controller.AdminTradingLeverageController;
+import com.surprising.trading.order.controller.AdminTradingMaintenanceController;
+import com.surprising.trading.order.controller.AdminTradingSyncController;
 import com.surprising.trading.order.controller.OrderBusinessSettingsController;
 import com.surprising.trading.order.controller.TradingAlgoController;
 import com.surprising.trading.order.controller.TradingController;
+import com.surprising.trading.order.controller.TradingFeeRateController;
+import com.surprising.trading.order.controller.TradingLeverageController;
+import com.surprising.trading.order.controller.TradingMarketController;
 import com.surprising.trading.order.controller.TradingTriggerController;
 import com.surprising.trading.order.service.AlgoOrderService;
 import com.surprising.trading.order.service.CancelAllAfterService;
@@ -43,7 +50,7 @@ class InternalBusinessContractTest {
     void independentMakerFeignContractsStillHaveInternalHttpEndpoints() {
         Map.of(AccountRpcApi.class, java.util.List.of(AccountController.class),
                 OrderRpcApi.class, java.util.List.of(TradingController.class, TradingAlgoController.class),
-                MarketDataRpcApi.class, java.util.List.of(TradingController.class)).forEach((api, controllers) -> {
+                MarketDataRpcApi.class, java.util.List.of(TradingMarketController.class)).forEach((api, controllers) -> {
                     String prefix = api.getAnnotation(FeignClient.class).path();
                     var actual = new java.util.LinkedHashSet<String>();
                     for (Class<?> controller : controllers) {
@@ -82,8 +89,10 @@ class InternalBusinessContractTest {
 
     @Test
     void localControllersDependOnHandlersNotOtherRestControllers() {
-        for (Class<?> entry : java.util.List.of(TradingController.class, TradingTriggerController.class,
-                TradingAlgoController.class, AdminTradingController.class,
+        for (Class<?> entry : java.util.List.of(TradingController.class, TradingMarketController.class,
+                TradingFeeRateController.class, TradingLeverageController.class, TradingTriggerController.class,
+                TradingAlgoController.class, AdminTradingController.class, AdminTradingMaintenanceController.class,
+                AdminTradingFeeController.class, AdminTradingLeverageController.class, AdminTradingSyncController.class,
                 AccountController.class, InstrumentController.class, OrderBusinessSettingsController.class)) {
             for (var field : entry.getDeclaredFields()) {
                 assertThat(field.getType().isAnnotationPresent(
@@ -100,10 +109,13 @@ class InternalBusinessContractTest {
         context.registerBean(TradingController.class, () -> new TradingController(
                 mock(OrderService.class),
                 mock(OrderQueryService.class),
-                mock(CancelAllAfterService.class),
-                mock(LeverageService.class),
-                mock(TradingFeeService.class),
+                mock(CancelAllAfterService.class)));
+        context.registerBean(TradingMarketController.class, () -> new TradingMarketController(
                 mock(MatchingMarketDataService.class)));
+        context.registerBean(TradingFeeRateController.class, () -> new TradingFeeRateController(
+                mock(TradingFeeService.class)));
+        context.registerBean(TradingLeverageController.class, () -> new TradingLeverageController(
+                mock(LeverageService.class)));
         context.registerBean(TradingTriggerController.class, () -> new TradingTriggerController(
                 mock(OrderQueryService.class),
                 mock(TriggerOrderService.class)));
@@ -112,10 +124,14 @@ class InternalBusinessContractTest {
         context.registerBean(AdminTradingController.class, () -> new AdminTradingController(
                 mock(OrderService.class),
                 mock(OrderQueryService.class),
-                mock(TriggerOrderService.class),
-                mock(MaintenanceService.class),
-                mock(LeverageService.class),
-                mock(TradingFeeService.class),
+                mock(TriggerOrderService.class)));
+        context.registerBean(AdminTradingMaintenanceController.class, () -> new AdminTradingMaintenanceController(
+                mock(MaintenanceService.class)));
+        context.registerBean(AdminTradingFeeController.class, () -> new AdminTradingFeeController(
+                mock(TradingFeeService.class)));
+        context.registerBean(AdminTradingLeverageController.class, () -> new AdminTradingLeverageController(
+                mock(LeverageService.class)));
+        context.registerBean(AdminTradingSyncController.class, () -> new AdminTradingSyncController(
                 mock(InstrumentCoreSyncService.class)));
         context.registerBean(AccountController.class, () -> new AccountController(
                 mock(AccountService.class),

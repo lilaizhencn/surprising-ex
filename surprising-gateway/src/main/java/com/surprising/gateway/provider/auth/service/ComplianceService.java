@@ -51,6 +51,7 @@ public class ComplianceService {
     private final ComplianceRiskTagRepository riskTagRepository;
     private final ComplianceAmlCaseRepository amlCaseRepository;
     private final AuthService authService;
+    private final AdminAuthService adminAuthService;
     private final AdminApprovalService approvalService;
     private final KycDocumentService kycDocumentService;
     private final AdminAuditRepository adminAuditRepository;
@@ -71,12 +72,33 @@ public class ComplianceService {
                              AuthPersistenceService authPersistence,
                              SecurityNotificationService notifications,
                              KycProviderRegistry kycProviders, CountryRepository countries) {
+        this(userProjectionRepository, kycRepository, providerEvents, riskTagRepository, amlCaseRepository,
+                authService, new AdminAuthService(authService.properties(), authPersistence, authService),
+                approvalService, kycDocumentService, adminAuditRepository, authPersistence, notifications,
+                kycProviders, countries);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ComplianceService(ComplianceUserProjectionRepository userProjectionRepository,
+                             ComplianceKycRepository kycRepository,
+                             KycProviderEventRepository providerEvents,
+                             ComplianceRiskTagRepository riskTagRepository,
+                             ComplianceAmlCaseRepository amlCaseRepository,
+                             AuthService authService,
+                             AdminAuthService adminAuthService,
+                             AdminApprovalService approvalService,
+                             KycDocumentService kycDocumentService,
+                             AdminAuditRepository adminAuditRepository,
+                             AuthPersistenceService authPersistence,
+                             SecurityNotificationService notifications,
+                             KycProviderRegistry kycProviders, CountryRepository countries) {
         this.userProjectionRepository = userProjectionRepository;
         this.kycRepository = kycRepository;
         this.providerEvents = providerEvents;
         this.riskTagRepository = riskTagRepository;
         this.amlCaseRepository = amlCaseRepository;
         this.authService = authService;
+        this.adminAuthService = adminAuthService;
         this.approvalService = approvalService;
         this.kycDocumentService = kycDocumentService;
         this.adminAuditRepository = adminAuditRepository;
@@ -102,7 +124,7 @@ public class ComplianceService {
 
     public AdminComplianceUserDetail adminUser(String authorization, long userId) {
         authService.requireAdminPermission(authorization, "admin.compliance.read");
-        AuthenticatedUser user = authService.adminUser(authorization, userId);
+        AuthenticatedUser user = adminAuthService.adminUser(authorization, userId);
         return new AdminComplianceUserDetail(
                 user,
                 kyc(userId),
@@ -136,7 +158,7 @@ public class ComplianceService {
                                      AdminRequestMetadata metadata,
                                      byte[] body) {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
-        authService.adminUser(authorization, userId);
+        adminAuthService.adminUser(authorization, userId);
         return upsertKyc(userId, principal.userId(), request, Instant.now());
     }
 
@@ -181,7 +203,7 @@ public class ComplianceService {
 
     public List<KycDocument> adminKycDocuments(String authorization, long userId) {
         authService.requireAdminPermission(authorization, "admin.compliance.read");
-        authService.adminUser(authorization, userId);
+        adminAuthService.adminUser(authorization, userId);
         return kycDocumentService.findForUser(userId);
     }
 
@@ -355,7 +377,7 @@ public class ComplianceService {
                                       AdminRequestMetadata metadata,
                                       byte[] body) {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
-        authService.adminUser(authorization, userId);
+        adminAuthService.adminUser(authorization, userId);
         return createRiskTag(userId, principal.userId(), request, Instant.now());
     }
 
@@ -375,7 +397,7 @@ public class ComplianceService {
                                       AdminRequestMetadata metadata,
                                       byte[] body) {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
-        authService.adminUser(authorization, userId);
+        adminAuthService.adminUser(authorization, userId);
         return createAmlCase(userId, principal.userId(), request, Instant.now());
     }
 

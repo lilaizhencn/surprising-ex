@@ -74,19 +74,20 @@ class ComplianceWritePostgresTest {
         cases = spy(new ComplianceAmlCaseRepository(jdbc)); approvalRows = new AdminApprovalRepository(jdbc);
         profiles.submit(42, new KycSubmissionRequest("INDIVIDUAL", "STANDARD", "SG", "PASSPORT", "SUMSUB", "session-42", null, "PENDING", List.of()), "[]", Instant.now());
         var auth = mock(AuthService.class);
+        var adminAuth = mock(com.surprising.gateway.provider.auth.service.AdminAuthService.class);
         var writer = new JwtPrincipal(7, "writer", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600));
         var reviewer = new JwtPrincipal(8, "reviewer", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600));
         when(auth.authenticateAdminBearer("Bearer writer")).thenReturn(writer);
         when(auth.authenticateAdminBearer("Bearer reviewer")).thenReturn(reviewer);
         when(auth.requireAdminPermission("Bearer writer", "admin.compliance.write")).thenReturn(writer);
-        when(auth.adminUser("Bearer writer", 42)).thenReturn(new AuthenticatedUser(42, "user", null, "NORMAL", List.of("USER"), Instant.now()));
+        when(adminAuth.adminUser("Bearer writer", 42)).thenReturn(new AuthenticatedUser(42, "user", null, "NORMAL", List.of("USER"), Instant.now()));
         var properties = new GatewayProperties(); properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(true);
         providers = mock(KycProviderRegistry.class); when(providers.simulationEnabled()).thenReturn(true);when(providers.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));
         context = new AnnotationConfigApplicationContext(); context.register(Transactions.class);
         context.registerBean(DataSourceTransactionManager.class, () -> new DataSourceTransactionManager(source));
         context.registerBean(AdminApprovalService.class, () -> new AdminApprovalService(auth, mock(AdminAuditRepository.class), approvalRows, properties));
         context.registerBean(ComplianceService.class, () -> new ComplianceService(mock(), profiles, new KycProviderEventRepository(jdbc), tags, cases,
-                auth, context.getBean(AdminApprovalService.class), mock(KycDocumentService.class), mock(AdminAuditRepository.class),
+                auth, adminAuth, context.getBean(AdminApprovalService.class), mock(KycDocumentService.class), mock(AdminAuditRepository.class),
                 mock(AuthPersistenceService.class), mock(SecurityNotificationService.class), providers, mock(CountryRepository.class)));
         context.refresh(); approvals = context.getBean(AdminApprovalService.class); service = context.getBean(ComplianceService.class);
         mvc = MockMvcBuilders.standaloneSetup(new AdminComplianceController(service, json)).build();

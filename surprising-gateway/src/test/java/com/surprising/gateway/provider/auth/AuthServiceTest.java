@@ -146,7 +146,8 @@ class AuthServiceTest {
         when(repository.refreshSessionsPage(42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(session),null,false,"createdAt.desc",100));
 
-        var response = service.adminRefreshSessions("Bearer admin-token", 42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC));
+        var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
+        var response = adminService.adminRefreshSessions("Bearer admin-token", 42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC));
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.sessions()).containsExactly(session);
@@ -164,7 +165,8 @@ class AuthServiceTest {
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(session), "next", true,
                         "createdAt.asc", 25));
 
-        var response = service.adminRefreshSessions("Bearer admin-token", 42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
+        var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
+        var response = adminService.adminRefreshSessions("Bearer admin-token", 42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
 
         assertThat(response.sessions()).containsExactly(session);
         assertThat(response.nextCursor()).isEqualTo("next");
@@ -185,7 +187,8 @@ class AuthServiceTest {
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(user), "next", true,
                         "createdAt.asc", 50));
 
-        var response = service.adminUsers("Bearer admin-token", new UserQueryFilter("user",null,"NORMAL"), new AuthPageQuery(50,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
+        var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
+        var response = adminService.adminUsers("Bearer admin-token", new UserQueryFilter("user",null,"NORMAL"), new AuthPageQuery(50,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
 
         assertThat(response.users()).containsExactly(user);
         assertThat(response.nextCursor()).isEqualTo("next");
@@ -205,7 +208,8 @@ class AuthServiceTest {
                 42L, "user", null, "NORMAL", List.of("USER"), now)));
         when(repository.revokeUserRefreshSessions(eq(42L), any())).thenReturn(3);
 
-        var response = service.revokeUserRefreshSessions("Bearer admin-token", 42L);
+        var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
+        var response = adminService.revokeUserRefreshSessions("Bearer admin-token", 42L);
 
         assertThat(response.revoked()).isEqualTo(3);
         assertThat(response.revokedAt()).isNotNull();
@@ -220,7 +224,8 @@ class AuthServiceTest {
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         when(repository.revokeRefreshSessionForAdmin(eq(88L), any())).thenReturn(1);
 
-        var response = service.revokeRefreshSession("Bearer admin-token", 88L);
+        var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
+        var response = adminService.revokeRefreshSession("Bearer admin-token", 88L);
 
         assertThat(response.revoked()).isEqualTo(1);
         verify(repository).revokeRefreshSessionForAdmin(eq(88L), any());

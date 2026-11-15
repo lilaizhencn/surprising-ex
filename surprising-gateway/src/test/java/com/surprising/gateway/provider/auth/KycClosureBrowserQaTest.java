@@ -92,8 +92,9 @@ class KycClosureBrowserQaTest {
             when(auth.authenticateBearer(anyString())).thenAnswer(call->{if(!"Bearer kyc-qa-user".equals(call.getArgument(0)))throw new IllegalArgumentException("invalid QA identity");return principal;});
             var administrator=new JwtPrincipal(7,"qa-admin","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(7200));
             when(auth.requireAdminPermission(anyString(),anyString())).thenAnswer(call->{if(!"Bearer kyc-qa-admin".equals(call.getArgument(0)))throw new IllegalArgumentException("invalid QA administrator");return administrator;});
+            var adminAuth=mock(com.surprising.gateway.provider.auth.service.AdminAuthService.class);
             var account=new AuthenticatedUser(42,"kycqa",null,"NORMAL",List.of("USER"),Instant.now());
-            when(auth.adminUser("Bearer kyc-qa-admin",42)).thenReturn(account);
+            when(adminAuth.adminUser("Bearer kyc-qa-admin",42)).thenReturn(account);
             var approvals=mock(AdminApprovalService.class);
             when(approvals.approvalHeaderName()).thenReturn("X-Admin-Approval-Id");
             when(approvals.requireWrite(anyString(),anyString(),anyString(),any(),any())).thenAnswer(call->{auth.requireAdminPermission(call.getArgument(0),"admin.compliance.write");return administrator;});
@@ -105,7 +106,7 @@ class KycClosureBrowserQaTest {
                     mock(GatewayRequestLimits.class),mock(UploadContentScanner.class));
             var providers=new KycProviderRegistry(List.of(new ManualReviewKycProvider()),properties);
             target=new ComplianceService(new ComplianceUserProjectionRepository(jdbc),profiles,new KycProviderEventRepository(jdbc),
-                    new ComplianceRiskTagRepository(jdbc),new ComplianceAmlCaseRepository(jdbc),auth,approvals,
+                    new ComplianceRiskTagRepository(jdbc),new ComplianceAmlCaseRepository(jdbc),auth,adminAuth,approvals,
                     documents,mock(),mock(),mock(),providers,countries);
             Path runtime=Files.createTempDirectory(output,"tomcat-");
             tomcat.setBaseDir(runtime.toString());tomcat.setPort(19086);tomcat.getConnector().setProperty("address","127.0.0.1");

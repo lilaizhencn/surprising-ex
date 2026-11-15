@@ -78,7 +78,7 @@ class TriggerOrderProjectionPostgresTest {
         var properties=new com.surprising.trading.trigger.config.TriggerProperties();
         properties.setProductLine(product);
         var service=new TriggerOrderService(properties,null,null,repository);
-        return new com.surprising.trading.order.controller.AdminTradingController(null,service,null,null,null,null)
+        return new com.surprising.trading.order.controller.AdminTradingController(null,service)
                 .triggerOrders("1",null,product.name(),user,instrument,status==null?null:status.name(),trigger,limit,cursor,sort);
     }
 

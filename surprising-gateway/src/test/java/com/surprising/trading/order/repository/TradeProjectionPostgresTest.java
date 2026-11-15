@@ -135,7 +135,7 @@ class TradeProjectionPostgresTest {
     }
     private com.surprising.trading.api.model.AdminTradeQueryResponse search(ProductLine line,Long user,String instrument,
             Long order,int limit,String cursor,String sort) {
-        return new com.surprising.trading.order.controller.AdminTradingController(null, queryService(line), null,null,null,null,null)
+        return new com.surprising.trading.order.controller.AdminTradingController(null, queryService(line), null)
                 .trades("1",null,line.name(),user,instrument,order,limit,cursor,sort);
     }
 

@@ -270,433 +270,54 @@ public class GatewayProperties implements EnvironmentAware {
         return routes;
     }
 
-    @Getter
-    public static class Security {
-        @Setter
-        private List<String> corsAllowedOrigins = List.of("http://localhost:5173", "http://127.0.0.1:5173",
-                "http://localhost:5174", "http://127.0.0.1:5174", "http://localhost:4173", "http://127.0.0.1:4173",
-                "https://ex.tokdou.com");
-        @Setter
-        private String userIdHeader = "X-User-Id";
-        @Setter
-        private boolean requireIdentityForPrivateRoutes = true;
-        private List<String> adminRoles = List.of("SUPPORT", "ADMIN", "SUPER_ADMIN");
-        private List<String> adminIpAllowlist = List.of();
-        private List<String> trustedProxyIpAllowlist = List.of();
-        @Setter
-        private boolean requireApprovalForHighRiskAdminWrites = true;
-        private String adminApprovalHeader = "X-Admin-Approval-Id";
-        private Duration adminApprovalTtl = Duration.ofMinutes(30);
-        @Setter
-        private boolean requireAdminMfa = false;
-        @Setter
-        private boolean phoneRegistrationEnabled = false;
-        @Setter
-        private boolean requireEmailVerification = true;
-        private String resendApiKey = "";
-        private String resendFrom = "";
-        private String resendBaseUrl = "https://api.resend.com";
-        private String verificationCodePepper = "local-dev-verification-pepper-change-me";
-        @Setter
-        private boolean simulatedVerificationCodesEnabled = false;
-        private Duration verificationCodeTtl = Duration.ofMinutes(10);
-        private String mfaSecretEncryptionKey = "";
-        @Setter
-        private String issuer = "surprising-ex-gateway";
-        @Setter
-        private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
-        /** 管理员登录会话的滑动有效期：最后一次请求之后保留多久，且不超过主认证后的该时长。 */
-        @Setter
-        private Duration adminSessionTtl = Duration.ofHours(8);
-        /** 登录令牌（JWT）自身的最长寿命；会话是否有效由 Valkey 决定，令牌到期只是兜底。 */
-        @Setter
-        private Duration sessionTokenMaxLifetime = Duration.ofDays(365);
-        /** 浏览器会话 Cookie 的 Domain，例如 .tokdou.com；留空表示只对当前主机生效（本地开发）。 */
-        @Setter
-        private String browserCookieDomain = "";
-        @Setter
-        private boolean browserCookieSecure = true;
-        @Setter
-        private List<String> adminBrowserAllowedOrigins = List.of("https://ex-api.tokdou.com");
-        /** 普通用户登录会话的滑动有效期：最后一次请求之后保留多久。 */
-        @Setter
-        private Duration sessionTtl = Duration.ofDays(7);
-        /** 同一会话在 Valkey 里续期的最小间隔，避免每个请求都写 Valkey。 */
-        @Setter
-        private Duration sessionRenewInterval = Duration.ofMinutes(10);
-        /** 网关进程内缓存登录态的时间；其它网关的变更最晚这么久后生效（失效广播丢失时）。 */
-        @Setter
-        private Duration authLocalCacheTtl = Duration.ofSeconds(4);
-        /** Valkey 不可用时，进程内已有的登录态还能继续使用多久。 */
-        @Setter
-        private Duration authLocalStaleTtl = Duration.ofSeconds(60);
-        /** 网关启动时，把 Postgres 里仍有效的会话、用户和 API Key 补进 Valkey 中缺失的部分。 */
-        @Setter
-        private boolean authStateRebuildOnStart = true;
-
-        public void setAdminRoles(List<String> adminRoles) {
-            this.adminRoles = adminRoles == null || adminRoles.isEmpty()
-                    ? List.of("SUPPORT", "ADMIN", "SUPER_ADMIN")
-                    : List.copyOf(adminRoles);
-        }
-
-        public void setAdminIpAllowlist(List<String> adminIpAllowlist) {
-            this.adminIpAllowlist = adminIpAllowlist == null ? List.of() : List.copyOf(adminIpAllowlist);
-        }
-
-        public void setTrustedProxyIpAllowlist(List<String> trustedProxyIpAllowlist) {
-            this.trustedProxyIpAllowlist = trustedProxyIpAllowlist == null
-                    ? List.of() : List.copyOf(trustedProxyIpAllowlist);
-        }
-
-        public void setAdminApprovalHeader(String adminApprovalHeader) {
-            this.adminApprovalHeader = adminApprovalHeader == null || adminApprovalHeader.isBlank()
-                    ? "X-Admin-Approval-Id"
-                    : adminApprovalHeader;
-        }
-
-        public void setAdminApprovalTtl(Duration adminApprovalTtl) {
-            this.adminApprovalTtl = adminApprovalTtl == null || adminApprovalTtl.isZero() || adminApprovalTtl.isNegative()
-                    ? Duration.ofMinutes(30)
-                    : adminApprovalTtl;
-        }
-
-        public void setResendApiKey(String resendApiKey) {
-            this.resendApiKey = resendApiKey == null ? "" : resendApiKey;
-        }
-
-        public void setResendFrom(String resendFrom) {
-            this.resendFrom = resendFrom == null ? "" : resendFrom;
-        }
-
-        public void setResendBaseUrl(String resendBaseUrl) {
-            this.resendBaseUrl = resendBaseUrl == null || resendBaseUrl.isBlank()
-                    ? "https://api.resend.com" : resendBaseUrl.replaceAll("/$", "");
-        }
-
-        public void setVerificationCodePepper(String verificationCodePepper) {
-            this.verificationCodePepper = verificationCodePepper == null ? "" : verificationCodePepper;
-        }
-
-        public void setVerificationCodeTtl(Duration verificationCodeTtl) {
-            this.verificationCodeTtl = verificationCodeTtl == null || verificationCodeTtl.isNegative()
-                    || verificationCodeTtl.isZero() ? Duration.ofMinutes(10) : verificationCodeTtl;
-        }
-
-        public void setMfaSecretEncryptionKey(String mfaSecretEncryptionKey) {
-            this.mfaSecretEncryptionKey = mfaSecretEncryptionKey == null ? "" : mfaSecretEncryptionKey;
-        }
-
+    public static class Security extends GatewaySecurityProperties {
     }
 
-    @Getter
-    public static class CustodyWallet {
-        @Setter
-        private boolean enabled = false;
-        @Setter
-        private String baseUrl = "http://localhost:8002";
-        @Setter
-        private String apiKey = "";
-        @Setter
-        private String apiSecret = "";
-        @Setter
-        private String webhookSecret = "";
-        private Duration requestTimeout = Duration.ofSeconds(10);
-
-        public void setRequestTimeout(Duration requestTimeout) {
-            this.requestTimeout = requestTimeout == null || requestTimeout.isNegative()
-                    || requestTimeout.isZero() ? Duration.ofSeconds(10) : requestTimeout;
-        }
+    public static class CustodyWallet extends GatewayCustodyProperties.CustodyWallet {
     }
 
-    @Getter
-    public static class Withdrawal {
-        @Setter
-        private java.math.BigDecimal singleApprovalThresholdUsdt = new java.math.BigDecimal("10000");
-        @Setter
-        private java.math.BigDecimal dailyLimitUsdt = new java.math.BigDecimal("50000");
-        private Duration valuationMaxAge = Duration.ofSeconds(30);
-        private Duration failureReconciliationDelay = Duration.ofSeconds(30);
-
-        public void setValuationMaxAge(Duration value) {
-            this.valuationMaxAge = value == null || value.isZero() || value.isNegative()
-                    ? Duration.ofSeconds(30) : value;
-        }
-
-        public void setFailureReconciliationDelay(Duration value) {
-            this.failureReconciliationDelay = value == null || value.isZero() || value.isNegative()
-                    ? Duration.ofSeconds(30) : value;
-        }
+    public static class Withdrawal extends GatewayCustodyProperties.Withdrawal {
     }
 
-    @Getter
-    public static class ProductTransfer {
-        private Duration reconciliationDelay = Duration.ofSeconds(5);
-        private int reconciliationBatchSize = 100;
-        private java.math.BigDecimal verificationThresholdUsdt = new java.math.BigDecimal("10000");
-
-        public void setReconciliationDelay(Duration value) {
-            reconciliationDelay = value == null || value.isZero() || value.isNegative()
-                    ? Duration.ofSeconds(5) : value;
-        }
-
-        public void setReconciliationBatchSize(int value) {
-            reconciliationBatchSize = value <= 0 ? 100 : Math.min(value, 1000);
-        }
-
-        public void setVerificationThresholdUsdt(java.math.BigDecimal value) {
-            verificationThresholdUsdt = value == null || value.signum() < 0
-                    ? new java.math.BigDecimal("10000") : value;
-        }
+    public static class ProductTransfer extends GatewayCustodyProperties.ProductTransfer {
     }
 
-    @Getter
-    public static class BinanceApi {
-        @Setter
-        private boolean enabled = true;
-        private Map<String, String> symbolAliases = Map.of();
-        private Map<String, SymbolScale> symbolScales = Map.of();
-
-        public void setSymbolAliases(Map<String, String> symbolAliases) {
-            this.symbolAliases = symbolAliases == null ? Map.of() : Map.copyOf(symbolAliases);
-        }
-
-        public void setSymbolScales(Map<String, SymbolScale> symbolScales) {
-            this.symbolScales = symbolScales == null ? Map.of() : Map.copyOf(symbolScales);
-        }
-
-        public String backendInstrumentId(String symbol, com.surprising.product.api.ProductLine line) {
-            String key = line.name() + ":" + symbol.trim().toUpperCase(java.util.Locale.ROOT);
-            String id = symbolAliases.get(key);
-            if (!com.surprising.product.api.utils.InstrumentIds.valid(id)) {
-                throw new IllegalArgumentException("permanent instrument ID alias is not configured: " + key);
-            }
-            return id;
-        }
-
-        public String externalSymbol(String instrumentId, com.surprising.product.api.ProductLine line) {
-            String prefix = line.name() + ":";
-            return symbolAliases.entrySet().stream()
-                    .filter(entry -> entry.getKey().startsWith(prefix) && entry.getValue().equals(instrumentId))
-                    .map(entry -> entry.getKey().substring(prefix.length()))
-                    .findFirst().orElseThrow(() -> new IllegalArgumentException("external symbol alias is not configured"));
-        }
-
-        public SymbolScale scale(String symbol) {
-            String normalized = symbol == null ? "" : symbol.trim().toUpperCase(java.util.Locale.ROOT);
-            return symbolScales.entrySet().stream()
-                    .filter(entry -> entry.getKey().equalsIgnoreCase(normalized))
-                    .map(Map.Entry::getValue)
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalArgumentException("symbol scale is not configured: " + symbol));
-        }
+    public static class BinanceApi extends GatewayOpenApiProperties.BinanceApi {
     }
 
-    @Getter
-    public static class KycDocuments {
-        @Setter
-        private boolean enabled;
-        private String type = "s3";
-        private String endpoint = "";
-        private String bucket = "";
-        private String region = "us-east-1";
-        private String accessKey = "";
-        private String secretKey = "";
-        private String rootPath = "/tmp/surprising-kyc-documents";
-        private String prefix = "kyc";
-        private long maxFileSizeBytes = 15L * 1024L * 1024L;
-
-        public void setType(String type) {
-            this.type = type == null || type.isBlank() ? "s3" : type.trim().toLowerCase(java.util.Locale.ROOT);
-        }
-
-        public void setEndpoint(String endpoint) {
-            this.endpoint = endpoint == null ? "" : endpoint.trim().replaceAll("/$", "");
-        }
-
-        public void setBucket(String bucket) {
-            this.bucket = bucket == null ? "" : bucket.trim();
-        }
-
-        public void setRegion(String region) {
-            this.region = region == null || region.isBlank() ? "us-east-1" : region.trim();
-        }
-
-        public void setAccessKey(String accessKey) {
-            this.accessKey = accessKey == null ? "" : accessKey.trim();
-        }
-
-        public void setSecretKey(String secretKey) {
-            this.secretKey = secretKey == null ? "" : secretKey;
-        }
-
-        public void setRootPath(String rootPath) {
-            this.rootPath = rootPath == null || rootPath.isBlank() ? "/tmp/surprising-kyc-documents" : rootPath;
-        }
-
-        public void setPrefix(String prefix) {
-            this.prefix = prefix == null || prefix.isBlank() ? "kyc" : prefix.trim().replaceAll("^/+|/+$", "");
-        }
-
-        public void setMaxFileSizeBytes(long maxFileSizeBytes) {
-            this.maxFileSizeBytes = maxFileSizeBytes <= 0 ? 15L * 1024L * 1024L : maxFileSizeBytes;
-        }
+    public static class KycDocuments extends GatewayKycProperties.KycDocuments {
     }
 
-    @Getter
-    public static class Kyc {
-        private String provider = "SUMSUB";
-        private java.time.Duration validity = java.time.Duration.ofDays(365);
-        public void setValidity(java.time.Duration value) {
-            if (value == null || value.isNegative() || value.isZero() || value.compareTo(java.time.Duration.ofDays(3650)) > 0) {
-                throw new IllegalArgumentException("KYC validity must be positive and at most ten years");
-            }
-            validity = value;
-        }
-        @Setter private boolean simulationEnabled = true;
-        private Sumsub sumsub = new Sumsub();
-        private Veriff veriff = new Veriff();
-        public void setProvider(String provider) {
-            this.provider = provider == null || provider.isBlank() ? "SUMSUB" : provider.trim().toUpperCase(java.util.Locale.ROOT);
-        }
-        public void setSumsub(Sumsub value) { sumsub = value == null ? new Sumsub() : value; }
-        public void setVeriff(Veriff value) { veriff = value == null ? new Veriff() : value; }
+    public static class Kyc extends GatewayKycProperties.Kyc {
     }
 
-    @Getter
-    public static class Sumsub {
-        @Setter private String appToken = "";
-        @Setter private String secretKey = "";
-        @Setter private String webhookSecret = "";
-        private java.util.Map<String, String> levelNames = new java.util.LinkedHashMap<>(
-                java.util.Map.of("INDIVIDUAL_BASIC", "basic-kyc-level"));
-        public void setLevelNames(java.util.Map<String, String> values) {
-            levelNames = new java.util.LinkedHashMap<>();
-            if (values != null) values.forEach((key, value) -> {
-                String name=key.trim().toUpperCase(java.util.Locale.ROOT).replace('-', '_');
-                if(!name.matches("(INDIVIDUAL|BUSINESS)_(BASIC|STANDARD|ENHANCED)")) throw new IllegalArgumentException("unsupported Sumsub verification option");
-                String flow=value == null ? "" : value.trim();
-                if(!flow.isEmpty() && levelNames.containsValue(flow)) throw new IllegalArgumentException("each KYC option requires a distinct Sumsub flow");
-                levelNames.put(name,flow);
-            });
-        }
-        public String levelName(String applicantType, String kycLevel) {
-            String value = levelNames.get(applicantType + "_" + kycLevel);
-            if (value == null || value.isBlank()) throw new IllegalArgumentException("the requested KYC verification flow is not configured");
-            return value;
-        }
-        private String baseUrl = "https://api.sumsub.com";
-        public void setBaseUrl(String value) { baseUrl = value == null || value.isBlank() ? "https://api.sumsub.com" : value.trim().replaceAll("/$", ""); }
+    public static class Sumsub extends GatewayKycProperties.Sumsub {
     }
 
-    @Getter
-    public static class Veriff {
-        private String kycLevel = "BASIC";
-        public void setKycLevel(String value) {
-            String normalized=value == null ? "" : value.trim().toUpperCase(java.util.Locale.ROOT);
-            if(!java.util.List.of("BASIC","STANDARD","ENHANCED").contains(normalized)) throw new IllegalArgumentException("unsupported Veriff verification level");
-            kycLevel=normalized;
-        }
-        @Setter private String apiKey = "";
-        @Setter private String sharedSecret = "";
-        private String baseUrl = "https://stationapi.veriff.com";
-        @Setter private String callbackUrl = "";
-        public void setBaseUrl(String value) { baseUrl = value == null || value.isBlank() ? "https://stationapi.veriff.com" : value.trim().replaceAll("/$", ""); }
+    public static class Veriff extends GatewayKycProperties.Veriff {
     }
 
-    @Getter
-    @Setter
-    public static class SymbolScale {
-        private int priceScale;
-        private int quantityScale;
-
+    public static class SymbolScale extends GatewayOpenApiProperties.SymbolScale {
     }
 
-    @Getter
-    @Setter
-    public static class HttpClient {
-        private Duration connectTimeout = Duration.ofSeconds(1);
-        private Duration readTimeout = Duration.ofSeconds(5);
-
+    public static class HttpClient extends GatewayRoutingProperties.HttpClient {
     }
 
-    @Getter
-    public static class BackendRoute {
-        @Setter
-        private String baseUrl;
-        @Setter
-        private String targetPrefix;
-        @Setter
-        private boolean privateRoute;
-        @Setter
-        private String basicAuthUsername;
-        @Setter
-        private String basicAuthPassword;
-        private Map<ProductLine, ProductRoute> productRoutes = new LinkedHashMap<>();
-
+    public static class BackendRoute extends GatewayRoutingProperties.BackendRoute {
         public BackendRoute() {
         }
 
         public BackendRoute(String baseUrl, String targetPrefix, boolean privateRoute) {
-            this.baseUrl = baseUrl;
-            this.targetPrefix = targetPrefix;
-            this.privateRoute = privateRoute;
-        }
-
-        public boolean hasBasicAuth() {
-            return basicAuthUsername != null && !basicAuthUsername.isBlank()
-                    && basicAuthPassword != null && !basicAuthPassword.isBlank();
-        }
-
-        public void setProductRoutes(Map<ProductLine, ProductRoute> productRoutes) {
-            this.productRoutes = productRoutes == null ? Map.of() : Map.copyOf(productRoutes);
-        }
-
-        public boolean hasProductRoutes() {
-            return productRoutes != null && !productRoutes.isEmpty();
-        }
-
-        public BackendRoute resolve(ProductLine productLine) {
-            if (productLine == null || !hasProductRoutes()) {
-                return this;
-            }
-            ProductRoute productRoute = productRoutes.get(productLine);
-            if (productRoute == null) {
-                return null;
-            }
-            BackendRoute resolved = new BackendRoute(
-                    productRoute.getBaseUrl() == null || productRoute.getBaseUrl().isBlank()
-                            ? baseUrl
-                            : productRoute.getBaseUrl(),
-                    productRoute.getTargetPrefix() == null || productRoute.getTargetPrefix().isBlank()
-                            ? targetPrefix
-                            : productRoute.getTargetPrefix(),
-                    privateRoute);
-            resolved.setBasicAuthUsername(productRoute.getBasicAuthUsername() == null
-                    ? basicAuthUsername
-                    : productRoute.getBasicAuthUsername());
-            resolved.setBasicAuthPassword(productRoute.getBasicAuthPassword() == null
-                    ? basicAuthPassword
-                    : productRoute.getBasicAuthPassword());
-            return resolved;
+            super(baseUrl, targetPrefix, privateRoute);
         }
     }
 
-    @Getter
-    @Setter
-    public static class ProductRoute {
-        private String baseUrl;
-        private String targetPrefix;
-        private String basicAuthUsername;
-        private String basicAuthPassword;
-
+    public static class ProductRoute extends GatewayRoutingProperties.ProductRoute {
         public ProductRoute() {
         }
 
         public ProductRoute(String baseUrl, String targetPrefix) {
-            this.baseUrl = baseUrl;
-            this.targetPrefix = targetPrefix;
+            super(baseUrl, targetPrefix);
         }
-
     }
 }

@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import static com.surprising.trading.order.service.OrderCoreMapper.*;
+
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
@@ -97,6 +99,7 @@ public class OrderService {
     private final MatchingMarketDataService bboOrderBook;
     private final BracketOrderDispatcher bracketOrderDispatcher;
     private final OrderQueryService queries;
+    private final OrderAdminService adminOps;
 
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderAeronGateway aeron, AeronOrderProjectionRepository aeronOrderProjection,
@@ -127,6 +130,7 @@ public class OrderService {
         this.bboOrderBook = bboOrderBook;
         this.bracketOrderDispatcher = bracketOrderDispatcher;
         this.queries = queries;
+        this.adminOps = new OrderAdminService(this, queries);
     }
 
     public ObjectNode tradingMetrics(int window, int limit, ProductLine requestedProduct) {
@@ -745,112 +749,44 @@ public class OrderService {
     }
 
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason) {
-        return adminCancelOrder(orderId, reason, null);
+        return adminOps.adminCancelOrder(orderId, reason);
     }
 
     public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
-        requireOrderId(orderId);
-        ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-        requireCurrentProductLine(resolved);
-        OrderResponse selected = queries.findOrderForAdminCancel(resolved, orderId);
-        requireAeron();
-        OrderResponse canceled = cancelById(selected.userId(), selected.orderId());
-        boolean requested = cancelSucceeded(canceled.status());
-        return new AdminCancelOrderResult(canceled.orderId(), canceled.userId(), canceled.instrumentId(),
-                canceled.status(), requested, requested ? "cancel requested" : "order is already "
-                + canceled.status().name(), canceled);
+        return adminOps.adminCancelOrder(orderId, reason, productLine);
     }
 
     public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request) {
-        return adminCancelOrders(request, null);
+        return adminOps.adminCancelOrders(request);
     }
 
     public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request, ProductLine productLine) {
-        Long userId = request == null ? null : request.userId();
-        if (userId != null && userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        String instrumentId = request == null || request.instrumentId() == null || request.instrumentId().isBlank()
-                ? null
-                : normalizeInstrumentId(request.instrumentId());
-        int limit = request == null || request.limit() == null ? 100 : request.limit();
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
-        }
-        adminCancelReason(request == null ? null : request.reason());
-        ProductLine resolved = productLine == null ? currentProductLine() : productLine;
-        requireCurrentProductLine(resolved);
-        List<OrderResponse> selected = activeOpenOrders(resolved, userId, instrumentId, limit);
-        requireAeron();
-        List<CancelOrderRequest> requests = selected.stream()
-                .map(order -> new CancelOrderRequest(order.userId(), order.orderId()))
-                .toList();
-        List<OrderBatchItemResponse> canceled = cancelOrderChunks(requests);
-        List<AdminCancelOrderResult> results = canceled.stream()
-                .map(item -> {
-                    OrderResponse selectedOrder = selected.get(item.index());
-                    OrderResponse order = item.order() == null ? selectedOrder : item.order();
-                    boolean requested = item.success() && cancelSucceeded(order.status());
-                    String message = requested ? "cancel completed"
-                            : item.success() ? "order is already " + order.status().name() : item.message();
-                    return new AdminCancelOrderResult(order.orderId(), order.userId(), order.instrumentId(),
-                            order.status(), requested, message, order);
-                })
-                .toList();
-        int canceledCount = (int) results.stream().filter(AdminCancelOrderResult::cancelRequested).count();
-        return new AdminCancelOrdersResponse(selected.size(), canceledCount, selected.size() - canceledCount, results);
+        return adminOps.adminCancelOrders(request, productLine);
     }
 
     public AdminCancelOrdersPreviewResponse adminCancelPreview(Long userId, String instrumentId, int limit) {
-        return adminCancelPreview(userId, instrumentId, limit, null);
+        return adminOps.adminCancelPreview(userId, instrumentId, limit);
     }
 
     public AdminCancelOrdersPreviewResponse adminCancelPreview(
             Long userId, String instrumentId, int limit, ProductLine productLine) {
-        if (userId != null && userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
-        }
-        String normalizedInstrumentId = instrumentId == null || instrumentId.isBlank() ? null : normalizeInstrumentId(instrumentId);
-        ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
-        List<OrderResponse> orders = activeOpenOrders(resolvedProductLine, userId, normalizedInstrumentId, limit);
-        long quantity = orders.stream().mapToLong(OrderResponse::remainingQuantitySteps).sum();
-        int buys = (int) orders.stream().filter(order -> order.side() == OrderSide.BUY).count();
-        return new AdminCancelOrdersPreviewResponse(userId, normalizedInstrumentId, orders.size(), orders.size(),
-                quantity, buys, orders.size() - buys, orders);
+        return adminOps.adminCancelPreview(userId, instrumentId, limit, productLine);
     }
 
     public AdminCancelOrdersResponse adminCancelByInstrument(AdminCancelByInstrumentRequest request) {
-        return adminCancelByInstrument(request, null);
+        return adminOps.adminCancelByInstrument(request);
     }
 
     public AdminCancelOrdersResponse adminCancelByInstrument(AdminCancelByInstrumentRequest request, ProductLine productLine) {
-        if (request == null) {
-            throw new IllegalArgumentException("request is required");
-        }
-        String instrumentId = normalizeInstrumentId(request.instrumentId());
-        return adminCancelOrders(new AdminBatchCancelOrdersRequest(null, instrumentId, request.limit(), request.reason()),
-                productLine);
+        return adminOps.adminCancelByInstrument(request, productLine);
     }
 
-    /**
-     * 到期生命周期只发起撤单，最终状态仍由撮合结果驱动。
-     */
     public int requestLifecycleCancellation(String instrumentId, int limit) {
-        String normalizedInstrumentId = normalizeInstrumentId(instrumentId);
-        List<OrderResponse> selected = lifecycleOpenOrders(normalizedInstrumentId, limit);
-        List<CancelOrderRequest> requests = selected.stream()
-                .map(order -> new CancelOrderRequest(order.userId(), order.orderId()))
-                .toList();
-        return (int) cancelOrderChunks(requests).stream()
-                .filter(item -> item.success() && item.order() != null && cancelSucceeded(item.order().status()))
-                .count();
+        return adminOps.requestLifecycleCancellation(instrumentId, limit);
     }
 
     public boolean hasLifecycleActiveOrders(String instrumentId) {
-        return !lifecycleOpenOrders(normalizeInstrumentId(instrumentId), 1).isEmpty();
+        return adminOps.hasLifecycleActiveOrders(instrumentId);
     }
 
     private PlaceOrderCommand buildPlaceCommand(long orderId, PlaceOrderRequest request) {
@@ -904,146 +840,8 @@ public class OrderService {
         return OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=" + productLine.name();
     }
 
-    static OrderResponse toOrder(CoreOrderStateView view) {
-        return view == null ? null : requireOrder(view, "order query returned no order");
-    }
-
-    private static OrderResponse requireOrder(CoreOrderStateView view, String message) {
-        if (view == null) throw new IllegalStateException(message);
-        return new OrderResponse(view.orderId(), view.userId(), emptyToNullStatic(view.clientOrderId()), view.instrumentId(),
-                OrderSide.valueOf(view.side().name()), OrderType.valueOf(view.orderType().name()),
-                TimeInForce.valueOf(view.timeInForce().name()), view.priceTicks(), view.quantitySteps(),
-                view.executedQuantitySteps(), view.remainingQuantitySteps(), MarginMode.valueOf(view.marginMode().name()),
-                PositionSide.valueOf(view.positionSide().name()), view.makerFeeRatePpm(), view.takerFeeRatePpm(),
-                view.reduceOnly(), view.postOnly(), status(view), null,
-                Instant.ofEpochMilli(view.createdAtEpochMillis()), Instant.ofEpochMilli(view.updatedAtEpochMillis()),
-                view.cumulativeFeeUnits(), view.getExecutedValueTicks(), view.getAveragePriceTicks());
-    }
-
-    static OrderResponse requireLocalOrder(CoreOrderStateView view, ProductLine productLine) {
-        if (view == null) {
-            throw new IllegalStateException("lifecycle order query returned a missing order");
-        }
-        if (view.productLine() != productLine) {
-            throw new IllegalStateException("lifecycle order product line does not match local core");
-        }
-        return requireOrder(view, "lifecycle order missing");
-    }
-
-    private static CoreOrderStateView commandOrder(CoreResponse response, long orderId) {
-        CoreCommandResultView result = requireCommandResult(response);
-        return result.orders().stream().filter(value -> value.orderId() == orderId).findFirst()
-                .orElseThrow(() -> new IllegalStateException("command response is missing order: " + orderId));
-    }
-
-    private static CoreCommandResultView requireCommandResult(CoreResponse response) {
-        if (response != null && response.status() == ResponseStatus.REJECTED) {
-            throw new OrderCommandRejectedException(response.resultCode());
-        }
-        byte[] data = response == null ? null : response.data();
-        if (data == null || data.length == 0) {
-            throw new IllegalStateException("command response is missing result payload");
-        }
-        return CoreCommandResultCodec.decode(data);
-    }
-
-    private static CoreResponse terminalResponse(CommandExecution execution) {
-        if (execution.outcome() instanceof CoreCommandOutcome.Terminal terminal) {
-            return terminal.response();
-        }
-        if (execution.outcome() instanceof CoreCommandOutcome.ResultUnknown unknown) {
-            throw new com.surprising.aeron.client.ResultUnknownException(unknown.originalCommandId(),
-                    "Aeron command result is unknown");
-        }
-        throw new CoreCommandOutcome.NotAcceptedException(
-                (CoreCommandOutcome.NotAccepted) execution.outcome());
-    }
-
-    private OrderCommandResult decodeResult(CommandKind kind, List<Long> prospectiveIds, byte[] data) {
-        if (data == null || data.length == 0) {
-            return null;
-        }
-        return switch (kind) {
-            case PLACE, CANCEL -> {
-                CoreCommandResultView result = CoreCommandResultCodec.decode(data);
-                CoreOrderStateView order = result.orders().stream()
-                        .filter(value -> value.orderId() == prospectiveIds.getFirst())
-                        .findFirst().orElse(null);
-                yield order == null && !result.orders().isEmpty() ? optionalOrder(result.orders().getFirst())
-                        : optionalOrder(order);
-            }
-            case REPLACE, AMEND -> {
-                CoreCommandResultView result = CoreCommandResultCodec.decode(data);
-                CoreOrderStateView original = result.orders().stream()
-                        .filter(value -> value.orderId() == prospectiveIds.getFirst()).findFirst().orElse(null);
-                CoreOrderStateView replacement = result.orders().stream()
-                        .filter(value -> value.orderId() == prospectiveIds.getLast()).findFirst().orElse(null);
-                yield new AmendOrderResponse(optionalOrder(original),
-                        optionalOrder(replacement), true, "order amended");
-            }
-            case PLACE_BATCH, CANCEL_BATCH -> {
-                CoreOrderBatchResult batch = TradingOrderBatchCodec.decodeResult(data);
-                List<OrderBatchItemResponse> items = batch.items().stream()
-                        .map(item -> new OrderBatchItemResponse(item.index(), item.status() == ResponseStatus.APPLIED,
-                                item.resultCode().name(), optionalOrder(item.order())))
-                        .toList();
-                int completed = (int) items.stream().filter(OrderBatchItemResponse::success).count();
-                yield new OrderBatchResponse(items.size(), completed, items.size() - completed, items);
-            }
-            case AMEND_BATCH -> {
-                CoreOrderBatchResult batch = TradingOrderBatchCodec.decodeResult(data);
-                List<AmendOrderBatchItemResponse> items = batch.items().stream()
-                        .map(item -> new AmendOrderBatchItemResponse(item.index(),
-                                item.status() == ResponseStatus.APPLIED, item.resultCode().name(),
-                                item.order() == null ? null : new AmendOrderResponse(
-                                        null, optionalOrder(item.order()), true, item.resultCode().name())))
-                        .toList();
-                int completed = (int) items.stream().filter(AmendOrderBatchItemResponse::success).count();
-                yield new AmendOrderBatchResponse(items.size(), completed, items.size() - completed, items);
-            }
-        };
-    }
-
-    private static OrderResponse optionalOrder(CoreOrderStateView view) {
-        return view == null ? null : requireOrder(view, "order result is missing");
-    }
-
     static UUID batchCommandId(ProductLine productLine, long userId, String kind, String batchKey) {
         return StableOrderIdentity.commandId(productLine, userId, "batch:" + kind + ':' + batchKey);
-    }
-
-    private static void requireBatchKey(String batchKey) {
-        requireClientKey(batchKey, "batchKey");
-    }
-
-    private static void requireBatchListSize(List<?> requests, int maximum, String field) {
-        if (requests == null || requests.isEmpty() || requests.size() > maximum) {
-            throw new IllegalArgumentException(field + " size must be in [1, " + maximum + "]");
-        }
-    }
-
-    private static long requireSingleUser(List<?> requests) {
-        long userId = userId(requests.getFirst());
-        if (userId <= 0L || requests.stream().anyMatch(request -> userId(request) != userId)) {
-            throw new IllegalArgumentException("batch orders must belong to one positive user");
-        }
-        return userId;
-    }
-
-    private static long userId(Object request) {
-        return switch (request) {
-            case PlaceOrderRequest value -> value.userId();
-            case AmendOrderRequest value -> value.userId();
-            case CancelOrderRequest value -> value.userId();
-            default -> throw new IllegalArgumentException("unsupported order batch request");
-        };
-    }
-
-    private static OrderStatus status(CoreOrderStateView view) {
-        if ("OPEN".equals(view.status())) {
-            return view.executedQuantitySteps() == 0 ? OrderStatus.ACCEPTED : OrderStatus.PARTIALLY_FILLED;
-        }
-        return OrderStatus.valueOf(view.status());
     }
 
     private ProductLine configuredProductLine() {
@@ -1057,45 +855,16 @@ public class OrderService {
         return productLine;
     }
 
-    private static String requireClientKey(String key, String name) {
-        if (key == null || key.isBlank()) {
-            throw new IllegalArgumentException(name + " is required");
-        }
-        return key;
-    }
-
-    private static String emptyToNullStatic(String value) { return value == null || value.isEmpty() ? null : value; }
-    private static CoreOrderSide side(OrderSide value) { return CoreOrderSide.valueOf(value.name()); }
-    private static CoreMarginMode marginMode(MarginMode value) { return CoreMarginMode.valueOf(value.name()); }
-    private static CorePositionSide positionSide(PositionSide value) { return CorePositionSide.valueOf(value.name()); }
-    private static CoreOrderType orderType(OrderType value) { return CoreOrderType.valueOf(value.name()); }
-    private static CoreTimeInForce timeInForce(TimeInForce value) { return CoreTimeInForce.valueOf(value.name()); }
-
-    private OrderAeronGateway requireAeron() {
+    OrderAeronGateway requireAeron() {
         if (aeron == null) throw new IllegalStateException("Aeron order gateway is required");
         return aeron;
     }
 
-    private ProductLine requireCurrentProductLine(ProductLine productLine) {
+    ProductLine requireCurrentProductLine(ProductLine productLine) {
         if (productLine != currentProductLine()) {
             throw new IllegalArgumentException("product line does not match this order core");
         }
         return productLine;
-    }
-
-    private String adminCancelReason(String reason) {
-        if (reason == null || reason.isBlank()) {
-            return "admin cancel";
-        }
-        String normalized = reason.trim();
-        if (normalized.length() > 500) {
-            normalized = normalized.substring(0, 500);
-        }
-        return "admin cancel: " + normalized;
-    }
-
-    private static boolean cancelSucceeded(OrderStatus status) {
-        return status == OrderStatus.CANCEL_REQUESTED || status == OrderStatus.CANCELED;
     }
 
     private TestOrderResponse testRejected(ValidationResult validation, String stage) {
@@ -1114,7 +883,7 @@ public class OrderService {
         return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
     }
 
-    private List<OrderBatchItemResponse> cancelOrderChunks(List<CancelOrderRequest> requests) {
+    List<OrderBatchItemResponse> cancelOrderChunks(List<CancelOrderRequest> requests) {
         if (requests.isEmpty()) {
             return List.of();
         }
@@ -1278,7 +1047,7 @@ public class OrderService {
                 request.clientRequestId());
     }
 
-    private String normalizeInstrumentId(String instrumentId) {
+    static String normalizeInstrumentId(String instrumentId) {
         if (instrumentId == null || instrumentId.isBlank()) {
             throw new IllegalArgumentException("instrumentId is required");
         }
@@ -1300,7 +1069,7 @@ public class OrderService {
         return normalized;
     }
 
-    private void requireOrderId(long orderId) {
+    static void requireOrderId(long orderId) {
         if (orderId <= 0) {
             throw new IllegalArgumentException("orderId must be positive");
         }

@@ -44,7 +44,7 @@ public class TradingTriggerController {
     @PostMapping("/api/v1/trading/trigger-orders")
     public CompletionStage<TriggerOrderResponse> placeTrigger(@RequestBody PlaceTriggerOrderRequest request) {
         try {
-            return TradingController.mapAsyncFailure(triggerOrderService.placeAsync(request), HttpStatus.CONFLICT);
+            return TradingControllerSupport.mapAsyncFailure(triggerOrderService.placeAsync(request), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -55,7 +55,7 @@ public class TradingTriggerController {
     @PostMapping("/api/v1/trading/trigger-orders/batch")
     public CompletionStage<TriggerOrderBatchResponse> placeTriggerBatch(@RequestBody BatchPlaceTriggerOrderRequest request) {
         try {
-            return TradingController.mapAsyncFailure(triggerOrderService.placeBatchAsync(request), HttpStatus.CONFLICT);
+            return TradingControllerSupport.mapAsyncFailure(triggerOrderService.placeBatchAsync(request), HttpStatus.CONFLICT);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -66,7 +66,7 @@ public class TradingTriggerController {
     @PostMapping("/api/v1/trading/trigger-orders/cancel")
     public CompletionStage<TriggerOrderResponse> cancelTrigger(@RequestBody CancelTriggerOrderRequest request) {
         try {
-            return TradingController.mapAsyncFailure(triggerOrderService.cancelAsync(request), HttpStatus.NOT_FOUND);
+            return TradingControllerSupport.mapAsyncFailure(triggerOrderService.cancelAsync(request), HttpStatus.NOT_FOUND);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -103,7 +103,7 @@ public class TradingTriggerController {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-            return triggerOrderService.openOrders(userId, TradingController.activeInstrument(instrumentId), activeTriggerPage(limit, cursor));
+            return triggerOrderService.openOrders(userId, TradingControllerSupport.activeInstrument(instrumentId), activeTriggerPage(limit, cursor));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

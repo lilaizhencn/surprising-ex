@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth.controller;
 import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
 import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AdminAuthService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
@@ -40,16 +41,24 @@ import tools.jackson.databind.ObjectMapper;
 @RequestMapping("/api/v1/admin")
 public class AdminAuthController {
 
-    private final AuthService authService;
+    private final AdminAuthService adminAuthService;
     private final AdminApprovalService adminApprovalService;
     private final ObjectMapper objectMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AdminAuthController(AdminAuthService adminAuthService,
+                               AdminApprovalService adminApprovalService,
+                               ObjectMapper objectMapper) {
+        this.adminAuthService = adminAuthService;
+        this.adminApprovalService = adminApprovalService;
+        this.objectMapper = objectMapper;
+    }
 
     public AdminAuthController(AuthService authService,
                                AdminApprovalService adminApprovalService,
                                ObjectMapper objectMapper) {
-        this.authService = authService;
-        this.adminApprovalService = adminApprovalService;
-        this.objectMapper = objectMapper;
+        this(new AdminAuthService(authService.properties(), authService.persistence(), authService),
+                adminApprovalService, objectMapper);
     }
 
     @GetMapping("/users")
@@ -60,7 +69,7 @@ public class AdminAuthController {
                                         @RequestParam(value = "cursor", required = false) String cursor,
                                         @RequestParam(value = "sort", required = false) String sort) {
         try {
-            return authService.adminUsers(authorization, AuthPageRequestBinding.userFilter(query, status),
+            return adminAuthService.adminUsers(authorization, AuthPageRequestBinding.userFilter(query, status),
                     AuthPageRequestBinding.created(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -73,7 +82,7 @@ public class AdminAuthController {
     public AuthenticatedUser user(@RequestHeader("Authorization") String authorization,
                                   @PathVariable("userId") long userId) {
         try {
-            return authService.adminUser(authorization, userId);
+            return adminAuthService.adminUser(authorization, userId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -91,7 +100,7 @@ public class AdminAuthController {
             @RequestParam(value = "sort", required = false) String sort) {
         try {
             AuthPageRequestBinding.sessionUser(userId);
-            return authService.adminRefreshSessions(authorization, userId, active,
+            return adminAuthService.adminRefreshSessions(authorization, userId, active,
                     AuthPageRequestBinding.created(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -109,9 +118,9 @@ public class AdminAuthController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         try {
-            authService.adminUser(authorization, userId);
+            adminAuthService.adminUser(authorization, userId);
             AuthPageRequestBinding.sessionUser(userId);
-            return authService.adminRefreshSessions(authorization, userId, active,
+            return adminAuthService.adminRefreshSessions(authorization, userId, active,
                     AuthPageRequestBinding.created(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -127,7 +136,7 @@ public class AdminAuthController {
                                                     HttpServletRequest httpRequest) {
         try {
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return authService.revokeRefreshSession(authorization, sessionId);
+            return adminAuthService.revokeRefreshSession(authorization, sessionId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -142,7 +151,7 @@ public class AdminAuthController {
                                                          HttpServletRequest httpRequest) {
         try {
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return authService.revokeUserRefreshSessions(authorization, userId);
+            return adminAuthService.revokeUserRefreshSessions(authorization, userId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -158,7 +167,7 @@ public class AdminAuthController {
         try {
             AdminUserStatusRequest request = readBody(body, AdminUserStatusRequest.class);
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return authService.updateUserStatus(authorization, userId, request.status());
+            return adminAuthService.updateUserStatus(authorization, userId, request.status());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -175,7 +184,7 @@ public class AdminAuthController {
             AdminUserRolesRequest request = readBody(body, AdminUserRolesRequest.class);
             var roles = AuthRequestBinding.roles(request.roles());
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return authService.replaceUserRoles(authorization, userId, roles);
+            return adminAuthService.replaceUserRoles(authorization, userId, roles);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -191,7 +200,7 @@ public class AdminAuthController {
                                            @RequestParam(value = "cursor", required = false) String cursor,
                                            @RequestParam(value = "sort", required = false) String sort) {
         try {
-            return authService.loginLogs(authorization, userId, AuditLogRequestBinding.result(result),
+            return adminAuthService.loginLogs(authorization, userId, AuditLogRequestBinding.result(result),
                     AuditLogRequestBinding.page(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -225,7 +234,7 @@ public class AdminAuthController {
     @GetMapping("/roles")
     public AdminRoleQueryResponse roles(@RequestHeader("Authorization") String authorization) {
         try {
-            return authService.adminRoles(authorization);
+            return adminAuthService.adminRoles(authorization);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -236,7 +245,7 @@ public class AdminAuthController {
     @GetMapping("/permissions")
     public AdminPermissionQueryResponse permissions(@RequestHeader("Authorization") String authorization) {
         try {
-            return authService.adminPermissions(authorization);
+            return adminAuthService.adminPermissions(authorization);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -248,7 +257,7 @@ public class AdminAuthController {
     public AdminRolePermissionsResponse rolePermissions(@RequestHeader("Authorization") String authorization,
                                                         @PathVariable("roleCode") String roleCode) {
         try {
-            return authService.adminRolePermissions(authorization, com.surprising.gateway.provider.auth.utils.AuthCodeFormats.role(roleCode));
+            return adminAuthService.adminRolePermissions(authorization, com.surprising.gateway.provider.auth.utils.AuthCodeFormats.role(roleCode));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -265,7 +274,7 @@ public class AdminAuthController {
             AdminRolePermissionsRequest request = AuthRequestBinding.permissions(readBody(body, AdminRolePermissionsRequest.class));
             String normalizedRole = com.surprising.gateway.provider.auth.utils.AuthCodeFormats.role(roleCode);
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return authService.replaceRolePermissions(authorization, normalizedRole, request);
+            return adminAuthService.replaceRolePermissions(authorization, normalizedRole, request);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

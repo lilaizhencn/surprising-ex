@@ -31,17 +31,27 @@ public class SupportTicketService {
 
     private final SupportTicketRepository ticketRepository;
     private final SupportTicketNoteRepository noteRepository;
-    private final AuthService authService;
+    private final AdminAuthService adminAuthService;
     private final ComplianceService complianceService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SupportTicketService(SupportTicketRepository ticketRepository,
+                                SupportTicketNoteRepository noteRepository,
+                                AdminAuthService adminAuthService,
+                                ComplianceService complianceService) {
+        this.ticketRepository = ticketRepository;
+        this.noteRepository = noteRepository;
+        this.adminAuthService = adminAuthService;
+        this.complianceService = complianceService;
+    }
 
     public SupportTicketService(SupportTicketRepository ticketRepository,
                                 SupportTicketNoteRepository noteRepository,
                                 AuthService authService,
                                 ComplianceService complianceService) {
-        this.ticketRepository = ticketRepository;
-        this.noteRepository = noteRepository;
-        this.authService = authService;
-        this.complianceService = complianceService;
+        this(ticketRepository, noteRepository,
+                new AdminAuthService(authService.properties(), authService.persistence(), authService),
+                complianceService);
     }
 
     public SupportOverview adminOverview(String authorization, long userId) {
@@ -129,7 +139,7 @@ public class SupportTicketService {
 
     private AuthModels.JwtPrincipal supportPrincipal(String authorization, String permission) {
         try {
-            return authService.requireAdminPermission(authorization, permission);
+            return adminAuthService.requireAdminPermission(authorization, permission);
         } catch (IllegalArgumentException ex) {
             throw new SupportUnauthorizedException(ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -139,7 +149,7 @@ public class SupportTicketService {
 
     private AuthModels.AuthenticatedUser adminUser(String authorization, long userId) {
         try {
-            return authService.adminUser(authorization, userId);
+            return adminAuthService.adminUser(authorization, userId);
         } catch (IllegalArgumentException ex) {
             throw new SupportTicketNotFoundException(ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
