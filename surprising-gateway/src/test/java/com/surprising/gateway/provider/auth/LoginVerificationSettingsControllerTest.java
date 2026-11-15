@@ -43,7 +43,9 @@ class LoginVerificationSettingsControllerTest {
                 1, null, null, null, null, "NORMAL", Instant.now())));
         var service = new LoginVerificationService(challenges, mock(com.surprising.gateway.provider.auth.repository.LoginFactorRepository.class), mock(GatewayUserRepository.class), mock(GatewayUserMfaRepository.class), users, properties, new TotpService(properties),
                 mock(EmailMessageSender.class), mock(ObjectProvider.class), mock(PasswordHasher.class));
-        mvc = MockMvcBuilders.standaloneSetup(new LoginVerificationSettingsController(auth, service)).build();
+        mvc = MockMvcBuilders.standaloneSetup(new LoginVerificationSettingsController(auth, service))
+                .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler())
+                .build();
     }
 
     @Test

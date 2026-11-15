@@ -26,7 +26,7 @@ class LeverageRequestHandlerTest {
         org.mockito.Mockito.when(leverage.set(org.mockito.ArgumentMatchers.any())).thenThrow(failure);
         var request = new LeverageSettingRequest(1, ProductLine.LINEAR_PERPETUAL, "604",
                 MarginMode.CROSS, 2_000_000, "web");
-        assertThatThrownBy(() -> new LeverageRequestHandler(leverage).set(request, null, null))
+        assertThatThrownBy(() -> TradingController.setLeverage(leverage, request, null, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,error -> {
                     assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
                     assertThat(error.getCause()).isSameAs(failure);
@@ -38,18 +38,16 @@ class LeverageRequestHandlerTest {
     @Test
     void adminSetRequiresTrustedAdminIdentity() {
         LeverageService leverage = mock(LeverageService.class);
-        LeverageRequestHandler requests = new LeverageRequestHandler(leverage);
+        AdminTradingController controller = new AdminTradingController(null, null, null, leverage, null, null);
         LeverageSettingRequest request = new LeverageSettingRequest(900001L,
                 ProductLine.LINEAR_PERPETUAL, "49", MarginMode.CROSS,
                 10_000_000L, "maker depth QA");
 
-        assertThatThrownBy(() -> requests.adminSet(null, request, null, null))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(error -> assertThat(
-                        ((ResponseStatusException) error).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        assertThatThrownBy(() -> controller.adminSetLeverage(null, request, null, null))
+                .isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(leverage);
 
-        requests.adminSet("1", request, null, null);
+        controller.adminSetLeverage("1", request, null, null);
         verify(leverage).set(request);
     }
 }

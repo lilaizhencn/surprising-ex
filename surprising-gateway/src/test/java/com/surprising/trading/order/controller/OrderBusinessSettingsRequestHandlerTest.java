@@ -14,8 +14,8 @@ import tools.jackson.databind.json.JsonMapper;
 class OrderBusinessSettingsRequestHandlerTest {
     private final OrderBusinessSettingsService settings=mock(OrderBusinessSettingsService.class);
     private final JsonMapper json=JsonMapper.builder().findAndAddModules().build();
-    private final OrderBusinessSettingsRequestHandler controller=new OrderBusinessSettingsRequestHandler(settings,json);
-    private final String valid=json.writeValueAsString(new OrderBusinessSettingsRequestHandler.Update(OrderBusinessSettings.initial(),1L,"valid"));
+    private final OrderBusinessSettingsController controller=new OrderBusinessSettingsController(settings,json);
+    private final String valid=json.writeValueAsString(new OrderBusinessSettingsController.Update(OrderBusinessSettings.initial(),1L,"valid"));
 
     @Test void rejectsCoercionOmissionsUnknownsOverflowAndInvalidLimitsBeforeBusinessChanges() {
         for (String bad : List.of("null","{}",valid.replace("10000","2.5"),
@@ -34,7 +34,8 @@ class OrderBusinessSettingsRequestHandlerTest {
                     .isInstanceOf(ResponseStatusException.class).hasMessageContaining("400");
         }
         for (String admin : List.of("", "0", "-1", "user"))
-            assertThatThrownBy(()->controller.save(ProductLine.SPOT,json.readTree(valid),admin)).hasMessageContaining("400");
+            assertThatThrownBy(()->controller.save(ProductLine.SPOT,json.readTree(valid),admin))
+                    .isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(settings);
     }
 

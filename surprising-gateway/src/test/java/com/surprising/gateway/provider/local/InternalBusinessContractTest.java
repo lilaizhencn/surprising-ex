@@ -5,24 +5,26 @@ import static org.mockito.Mockito.mock;
 
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.provider.controller.AccountController;
-import com.surprising.account.provider.controller.AccountRequestHandler;
+import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.account.provider.service.AccountQueryService;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.instrument.provider.controller.InstrumentController;
-import com.surprising.instrument.provider.controller.InstrumentRequestHandler;
+import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.trading.api.client.MarketDataRpcApi;
 import com.surprising.trading.api.client.OrderRpcApi;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
 import com.surprising.trading.order.controller.AdminTradingController;
 import com.surprising.trading.order.controller.OrderBusinessSettingsController;
-import com.surprising.trading.order.controller.OrderRequestHandler;
 import com.surprising.trading.order.controller.TradingController;
-import com.surprising.trading.order.controller.TradingFeeRequestHandler;
-import com.surprising.trading.order.controller.LeverageRequestHandler;
-import com.surprising.trading.order.controller.AdminOrderRequestHandler;
-import com.surprising.trading.trigger.controller.TriggerOrderRequestHandler;
-import com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler;
-import com.surprising.trading.maintenance.controller.AdminMaintenanceRequestHandler;
+import com.surprising.trading.order.service.AlgoOrderService;
+import com.surprising.trading.order.service.CancelAllAfterService;
 import com.surprising.trading.order.service.InstrumentCoreSyncService;
-import com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler;
+import com.surprising.trading.order.service.LeverageService;
+import com.surprising.trading.order.service.OrderBusinessSettingsService;
+import com.surprising.trading.order.service.OrderService;
+import com.surprising.trading.order.service.TradingFeeService;
+import com.surprising.trading.trigger.service.TriggerOrderService;
+import com.surprising.trading.maintenance.service.MaintenanceService;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -88,24 +90,28 @@ class InternalBusinessContractTest {
         var expected = java.nio.file.Files.readAllLines(java.nio.file.Path.of("src/test/resources/local-business-route-paths.txt"));
         var context = new StaticApplicationContext();
         context.registerBean(TradingController.class, () -> new TradingController(
-                mock(OrderRequestHandler.class),
-                mock(TriggerOrderRequestHandler.class),
-                mock(LeverageRequestHandler.class),
-                mock(TradingFeeRequestHandler.class),
+                mock(OrderService.class),
+                mock(AlgoOrderService.class),
+                mock(CancelAllAfterService.class),
+                mock(TriggerOrderService.class),
+                mock(LeverageService.class),
+                mock(TradingFeeService.class),
                 mock(MatchingMarketDataService.class)));
         context.registerBean(AdminTradingController.class, () -> new AdminTradingController(
-                mock(AdminOrderRequestHandler.class),
-                mock(AdminTriggerOrderRequestHandler.class),
-                mock(AdminMaintenanceRequestHandler.class),
-                mock(LeverageRequestHandler.class),
-                mock(TradingFeeRequestHandler.class),
+                mock(OrderService.class),
+                mock(TriggerOrderService.class),
+                mock(MaintenanceService.class),
+                mock(LeverageService.class),
+                mock(TradingFeeService.class),
                 mock(InstrumentCoreSyncService.class)));
         context.registerBean(AccountController.class, () -> new AccountController(
-                mock(AccountRequestHandler.class)));
+                mock(AccountService.class),
+                mock(AccountQueryService.class),
+                mock(AccountCommandGateway.class)));
         context.registerBean(OrderBusinessSettingsController.class, () -> new OrderBusinessSettingsController(
-                mock(OrderBusinessSettingsRequestHandler.class)));
+                mock(OrderBusinessSettingsService.class), mock(tools.jackson.databind.ObjectMapper.class)));
         context.registerBean(InstrumentController.class, () -> new InstrumentController(
-                mock(InstrumentRequestHandler.class)));
+                mock(InstrumentService.class), mock(tools.jackson.databind.ObjectMapper.class)));
         context.refresh();
         var mapping = new RequestMappingHandlerMapping();
         mapping.setApplicationContext(context);

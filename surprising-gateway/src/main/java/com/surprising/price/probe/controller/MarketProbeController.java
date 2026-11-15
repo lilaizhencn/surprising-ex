@@ -2,12 +2,14 @@ package com.surprising.price.probe.controller;
 
 import com.surprising.price.probe.service.MarketProbeService;
 
+import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Profile({"local", "dev", "test"})
 @RequestMapping("/api/v1/price/market-probe")
 public class MarketProbeController {
 

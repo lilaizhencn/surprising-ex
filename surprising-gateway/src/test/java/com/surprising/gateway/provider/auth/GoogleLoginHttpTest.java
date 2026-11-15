@@ -81,7 +81,8 @@ class GoogleLoginHttpTest {
     @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
     @EnableWebMvc
     @Import({GatewaySecurityConfiguration.class, GatewayCorsConfig.class, AdminIpWhitelistFilter.class, AdminPermissionFilter.class,
-            GoogleLoginController.class, AuthClientMetadataBinding.class, BrowserSessionController.class, BrowserSessionResponse.class})
+            GoogleLoginController.class, AuthClientMetadataBinding.class, BrowserSessionController.class, BrowserSessionResponse.class,
+            com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler.class})
     static class Config {
         @Bean GatewayProperties properties() { var p = new GatewayProperties(); p.getSecurity().setBrowserCookieSecure(false); return p; }
         @Bean GoogleLoginProperties googleProperties() { var p = new GoogleLoginProperties(); p.setWebClientId("web.apps.googleusercontent.com"); return p; }

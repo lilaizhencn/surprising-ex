@@ -1,9 +1,0 @@
-{
-  "baselineErrors": 93,
-  "currentErrors": 90,
-  "introducedInChangedKycFiles": 0,
-  "remainingCategories": [
-    "lint/correctness/useExhaustiveDependencies",
-    "lint/suspicious/noArrayIndexKey"
-  ]
-}

@@ -59,7 +59,7 @@ class AccountHistoryPagePostgresTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void actualHistoryEntrancesKeepUserAccountFiltersAndOddLongCursorsForEachProduct(ProductLine line) throws Exception {
-        seed(line);var requests=requests(line);var mvc=MockMvcBuilders.standaloneSetup(new AccountController(requests)).build();
+        seed(line);var controller=controller(line);var mvc=MockMvcBuilders.standaloneSetup(controller).build();
         for(String path:List.of("ledger","product-ledger","transfers"))for(String sort:List.of("createdAt.asc","createdAt.desc")) {
             String rows=path.equals("transfers")?"transfers":"entries";
             var firstPage=read(mvc,path,line,sort,null);
@@ -72,7 +72,7 @@ class AccountHistoryPagePostgresTest {
             assertThat(next.path(rows).get(0).path("userId").asLong()).isEqualTo(42L);
             assertThat(next.path("hasMore").asBoolean()).isFalse();
         }
-        var accountMvc = MockMvcBuilders.standaloneSetup(new AccountController(requests)).build();
+        var accountMvc = MockMvcBuilders.standaloneSetup(controller).build();
         String path="/api/v1/admin/accounts/adjustments?adminUserId=7&userId=42&accountType="+line.accountTypeCode()
                 +"&asset=usdt&adjustmentKind=product&limit=1";
         JsonNode firstAdjustment=json.readTree(accountMvc.perform(get(path).header("X-Admin-User-Id","7"))
@@ -89,7 +89,7 @@ class AccountHistoryPagePostgresTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void productMismatchAndFundingNeverReachProductHistoryRepository(ProductLine line) throws Exception {
-        var mvc=MockMvcBuilders.standaloneSetup(new AccountController(requests(line))).build();
+        var mvc=MockMvcBuilders.standaloneSetup(controller(line)).build();
         var wrong=line==ProductLine.SPOT?AccountType.OPTION:AccountType.SPOT;
         for(AccountType type:List.of(wrong,AccountType.FUNDING)) {
             mvc.perform(get("/api/v1/accounts/product-ledger").header("X-User-Id","42").param("accountType",type.name()))
@@ -100,7 +100,7 @@ class AccountHistoryPagePostgresTest {
 
     @ParameterizedTest @ValueSource(strings={"low-limit","high-limit","sort","asset","reference","cursor","time","user"})
     void malformedHistoryQueryFailsBeforeAnyRepository(String invalid) throws Exception {
-        var mvc=MockMvcBuilders.standaloneSetup(new AccountController(requests(ProductLine.SPOT))).build();
+        var mvc=MockMvcBuilders.standaloneSetup(controller(ProductLine.SPOT)).build();
         var request=get("/api/v1/accounts/ledger").header("X-User-Id",invalid.equals("user")?"-1":"42");
         switch(invalid) {
             case "low-limit" -> request.param("limit","0");
@@ -117,9 +117,9 @@ class AccountHistoryPagePostgresTest {
         verifyNoInteractions(basic,product,transfers,adjustments,live,commands);
     }
 
-    private AccountRequestHandler requests(ProductLine line) {
+    private AccountController controller(ProductLine line) {
         var properties=new AccountProperties();properties.getKafka().setProductLine(line);
-        return new AccountRequestHandler(live,new AccountQueryService(basic,product,transfers,adjustments,properties),commands);
+        return new AccountController(live,new AccountQueryService(basic,product,transfers,adjustments,properties),commands);
     }
     private JsonNode read(MockMvc mvc,String path,ProductLine line,String sort,String cursor) throws Exception {
         var request=get("/api/v1/accounts/"+path).header("X-User-Id","42").param("userId","99")

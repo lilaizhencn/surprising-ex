@@ -1,74 +1,102 @@
 package com.surprising.account.provider.controller;
 
+import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.AdminBalanceAdjustmentQueryResponse;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
+import com.surprising.account.api.model.BalanceQueryResponse;
+import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
+import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
+import com.surprising.account.api.model.PositionMarginResponse;
+import com.surprising.account.api.model.PositionModeResponse;
 import com.surprising.account.api.model.PositionModeUpdateRequest;
+import com.surprising.account.api.model.PositionQueryResponse;
+import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
+import com.surprising.account.api.model.ProductBalanceQueryResponse;
+import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductLedgerQueryResponse;
+import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferResponse;
+import com.surprising.account.provider.exception.AccountCommandTimeoutException;
+import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.account.provider.service.AccountQueryService;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.product.api.ProductLine;
 import jakarta.validation.Valid;
+import java.util.function.Supplier;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 public class AccountController {
-    private final AccountRequestHandler accountRequests;
+    private final AccountService accountService;
+    private final AccountQueryService history;
+    private final AccountCommandGateway commandGateway;
 
-    public AccountController(AccountRequestHandler accountRequests) {
-        this.accountRequests = accountRequests;
+    public AccountController(AccountService accountService,
+                             AccountQueryService history,
+                             AccountCommandGateway commandGateway) {
+        this.accountService = accountService;
+        this.history = history;
+        this.commandGateway = commandGateway;
     }
 
     @PostMapping("/api/v1/accounts/admin/product-balance-adjustments")
-    public Object adjustProductBalance(
+    public ProductBalanceResponse adjustProductBalance(
             @Valid @RequestBody ProductBalanceAdjustmentRequest request) {
-        return accountRequests.adjustProductBalance(request);
+        return executeCommand(() -> commandGateway.adjustProductBalance(AccountInputBinding.productAdjustment(request), null, null));
     }
 
     @PostMapping("/api/v1/admin/accounts/product-balance-adjustments")
-    public Object adminAdjustProductBalance(
+    public ProductBalanceResponse adminAdjustProductBalance(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestHeader(value = "X-Admin-Username", required = false) String adminUsername,
             @Valid @RequestBody ProductBalanceAdjustmentRequest request) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.adminAdjustProductBalance(adminUserId, adminUsername, request);
+        return executeCommand(() -> commandGateway.adjustProductBalance(AccountInputBinding.productAdjustment(request), adminUserId, adminUsername));
     }
 
     @PostMapping("/api/v1/accounts/position-margin-adjustments")
-    public Object adjustPositionMargin(@RequestBody PositionMarginAdjustmentRequest request) {
-        return accountRequests.adjustPositionMargin(request);
+    public PositionMarginAdjustmentResponse adjustPositionMargin(@RequestBody PositionMarginAdjustmentRequest request) {
+        return executeCommand(() -> commandGateway.adjustPositionMargin(AccountInputBinding.positionMargin(request)));
     }
 
     @PostMapping("/api/v1/accounts/admin/balance-adjustments")
-    public Object adjustBalance(
+    public BalanceResponse adjustBalance(
             @Valid @RequestBody BalanceAdjustmentRequest request) {
-        return accountRequests.adjustBalance(request);
+        return executeCommand(() -> commandGateway.adjustBalance(AccountInputBinding.adjustment(request), null, null));
     }
 
     @PostMapping("/api/v1/admin/accounts/balance-adjustments")
-    public Object adminAdjustBalance(
+    public BalanceResponse adminAdjustBalance(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestHeader(value = "X-Admin-Username", required = false) String adminUsername,
             @RequestBody BalanceAdjustmentRequest request) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.adminAdjustBalance(adminUserId, adminUsername, request);
+        return executeCommand(() -> commandGateway.adjustBalance(AccountInputBinding.adjustment(request), adminUserId, adminUsername));
     }
 
     @GetMapping("/api/v1/admin/accounts/product-balances")
-    public Object adminProductBalances(
+    public ProductBalanceQueryResponse adminProductBalances(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("userId") long userId,
             @RequestParam(value = "accountType", required = false) AccountType accountType) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.adminProductBalances(adminUserId, userId, accountType);
+        return executeQuery(() -> accountService.productBalances(userId, accountType));
     }
 
     @GetMapping("/api/v1/admin/accounts/product-ledger")
-    public Object productLedger(
+    public ProductLedgerQueryResponse productLedger(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "userId", required = false) Long userId,
             @RequestParam(value = "accountType", required = false) AccountType accountType,
@@ -78,11 +106,17 @@ public class AccountController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.productLedger(adminUserId, userId, accountType, asset, referenceType, limit, cursor, sort);
+        return executeQuery(() -> {
+            AccountHistoryRequestBinding.userId(userId);
+            return history.productLedger(userId, accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceType(referenceType),
+                    AccountHistoryRequestBinding.page(limit, cursor, sort));
+        });
     }
 
     @GetMapping("/api/v1/admin/accounts/adjustments")
-    public Object adminBalanceAdjustments(
+    public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "adminUserId", required = false) Long filterAdminUserId,
             @RequestParam(value = "userId", required = false) Long userId,
@@ -94,53 +128,61 @@ public class AccountController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.adminBalanceAdjustments(adminUserId, filterAdminUserId, userId, adjustmentKind,
-                accountType, asset, referenceId, limit, cursor, sort);
+        return executeQuery(() -> {
+            AccountHistoryRequestBinding.userId(userId);
+            AccountHistoryRequestBinding.userId(filterAdminUserId);
+            return history.adminBalanceAdjustments(filterAdminUserId, userId,
+                    AccountHistoryRequestBinding.optionalAdjustmentKind(adjustmentKind), accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceId(referenceId),
+                    AccountHistoryRequestBinding.page(limit, cursor, sort));
+        });
     }
 
     @GetMapping("/api/v1/accounts/product-balances")
-    public Object productBalances(
+    public ProductBalanceQueryResponse productBalances(
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "accountType", required = false) AccountType accountType) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return accountRequests.productBalances(userId, accountType);
+        return executeQuery(() -> accountService.productBalances(userId, accountType));
     }
 
     @GetMapping("/api/v1/accounts/product-balance")
-    public Object productBalance(
+    public ProductBalanceResponse productBalance(
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("accountType") AccountType accountType,
             @RequestParam("asset") String asset) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return accountRequests.productBalance(userId, accountType, asset);
+        return executeQuery(() -> accountService.productBalance(userId, accountType, AccountInputBinding.asset(asset)));
     }
 
     @GetMapping("/api/v1/accounts/position-margin")
-    public Object positionMargin(
+    public PositionMarginResponse positionMargin(
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("instrumentId") String instrumentId,
             @RequestParam(value = "marginMode", required = false) String marginMode) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return accountRequests.positionMargin(userId, instrumentId, marginMode);
+        return executeQuery(() -> accountService.positionMargin(userId,
+                AccountInputBinding.instrument(instrumentId), AccountInputBinding.marginMode(marginMode)));
     }
 
     @GetMapping("/api/v1/admin/accounts/positions")
-    public Object adminPositions(
+    public PositionQueryResponse adminPositions(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("userId") long userId,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.adminPositions(adminUserId, userId, positionSide);
+        return executeQuery(() -> accountService.positions(userId, AccountInputBinding.optionalPositionSide(positionSide)));
     }
 
     @GetMapping("/api/v1/admin/accounts/transfers")
-    public Object productTransfers(
+    public ProductTransferRecordQueryResponse productTransfers(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "userId", required = false) Long userId,
             @RequestParam(value = "accountType", required = false) AccountType accountType,
@@ -149,30 +191,36 @@ public class AccountController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.productTransfers(adminUserId, userId, accountType, asset, limit, cursor, sort);
+        return executeQuery(() -> {
+            AccountHistoryRequestBinding.userId(userId);
+            return history.productTransfers(userId, accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.page(limit, cursor, sort));
+        });
     }
 
     @GetMapping("/api/v1/admin/accounts/balances")
-    public Object adminBalances(
+    public BalanceQueryResponse adminBalances(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("userId") long userId) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.adminBalances(adminUserId, userId);
+        return accountService.balances(userId);
     }
 
     @GetMapping("/api/v1/admin/accounts/position")
-    public Object adminPosition(
+    public PositionResponse adminPosition(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("userId") long userId,
             @RequestParam("instrumentId") String instrumentId,
             @RequestParam(value = "marginMode", required = false) String marginMode,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.adminPosition(adminUserId, userId, instrumentId, marginMode, positionSide);
+        return executeQuery(() -> accountService.position(userId, AccountInputBinding.instrument(instrumentId),
+                AccountInputBinding.marginMode(marginMode), AccountInputBinding.positionSide(positionSide)));
     }
 
     @GetMapping("/api/v1/accounts/product-ledger")
-    public Object userProductLedger(
+    public ProductLedgerQueryResponse userProductLedger(
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestParam("accountType") AccountType accountType,
             @RequestParam(value = "asset", required = false) String asset,
@@ -181,30 +229,37 @@ public class AccountController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         long userId = GatewayUserContext.requireHeaderUserId(headerUserId);
-        return accountRequests.userProductLedger(userId, accountType, asset, referenceType, limit, cursor, sort);
+        return executeQuery(() -> {
+            AccountHistoryRequestBinding.userId(userId);
+            return history.productLedger(userId, accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceType(referenceType),
+                    AccountHistoryRequestBinding.page(limit, cursor, sort));
+        });
     }
 
     @GetMapping("/api/v1/accounts/position-mode")
-    public Object positionMode(
+    public PositionModeResponse positionMode(
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return accountRequests.positionMode(userId, headerProductLine, queryProductLine);
+        return executeQuery(() -> accountService.positionMode(productLine(queryProductLine, headerProductLine), userId));
     }
 
     @PostMapping("/api/v1/accounts/position-mode")
-    public Object updatePositionMode(
+    public PositionModeResponse updatePositionMode(
             @RequestBody PositionModeUpdateRequest request,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        return accountRequests.updatePositionMode(request, headerProductLine, queryProductLine);
+        return executeCommand(() -> commandGateway.updatePositionMode(
+                AccountInputBinding.positionMode(withProductLine(request, productLine(queryProductLine, headerProductLine)))));
     }
 
     @GetMapping("/api/v1/admin/accounts/ledger")
-    public Object accountLedger(
+    public AccountLedgerQueryResponse accountLedger(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "userId", required = false) Long userId,
             @RequestParam(value = "asset", required = false) String asset,
@@ -213,26 +268,32 @@ public class AccountController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return accountRequests.accountLedger(adminUserId, userId, asset, referenceType, limit, cursor, sort);
+        return executeQuery(() -> {
+            AccountHistoryRequestBinding.userId(userId);
+            return history.accountLedger(userId,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceType(referenceType),
+                    AccountHistoryRequestBinding.page(limit, cursor, sort));
+        });
     }
 
     @PostMapping("/api/v1/accounts/transfers")
-    public Object transfer(@RequestBody ProductTransferRequest request) {
-        return accountRequests.transfer(request);
+    public ProductTransferResponse transfer(@RequestBody ProductTransferRequest request) {
+        return executeCommand(() -> commandGateway.transfer(request));
     }
 
     @GetMapping("/api/v1/accounts/positions")
-    public Object positions(
+    public PositionQueryResponse positions(
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return accountRequests.positions(userId, positionSide);
+        return executeQuery(() -> accountService.positions(userId, AccountInputBinding.optionalPositionSide(positionSide)));
     }
 
     @GetMapping("/api/v1/accounts/transfers")
-    public Object userProductTransfers(
+    public ProductTransferRecordQueryResponse userProductTransfers(
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestParam("accountType") AccountType accountType,
             @RequestParam(value = "asset", required = false) String asset,
@@ -240,20 +301,25 @@ public class AccountController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         long userId = GatewayUserContext.requireHeaderUserId(headerUserId);
-        return accountRequests.userProductTransfers(userId, accountType, asset, limit, cursor, sort);
+        return executeQuery(() -> {
+            AccountHistoryRequestBinding.userId(userId);
+            return history.productTransfers(userId, accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.page(limit, cursor, sort));
+        });
     }
 
     @GetMapping("/api/v1/accounts/balances")
-    public Object balances(
+    public BalanceQueryResponse balances(
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return accountRequests.balances(userId);
+        return accountService.balances(userId);
     }
 
     @GetMapping("/api/v1/accounts/position")
-    public Object position(
+    public PositionResponse position(
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
@@ -261,21 +327,22 @@ public class AccountController {
             @RequestParam(value = "marginMode", required = false) String marginMode,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return accountRequests.position(userId, instrumentId, marginMode, positionSide);
+        return executeQuery(() -> accountService.position(userId, AccountInputBinding.instrument(instrumentId),
+                AccountInputBinding.marginMode(marginMode), AccountInputBinding.positionSide(positionSide)));
     }
 
     @GetMapping("/api/v1/accounts/balance")
-    public Object balance(
+    public BalanceResponse balance(
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("asset") String asset) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        return accountRequests.balance(userId, asset);
+        return executeQuery(() -> accountService.balance(userId, AccountInputBinding.asset(asset)));
     }
 
     @GetMapping("/api/v1/accounts/ledger")
-    public Object userAccountLedger(
+    public AccountLedgerQueryResponse userAccountLedger(
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestParam(value = "asset", required = false) String asset,
             @RequestParam(value = "referenceType", required = false) String referenceType,
@@ -283,6 +350,47 @@ public class AccountController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         long userId = GatewayUserContext.requireHeaderUserId(headerUserId);
-        return accountRequests.userAccountLedger(userId, asset, referenceType, limit, cursor, sort);
+        return executeQuery(() -> {
+            AccountHistoryRequestBinding.userId(userId);
+            return history.accountLedger(userId,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceType(referenceType),
+                    AccountHistoryRequestBinding.page(limit, cursor, sort));
+        });
+    }
+
+    private static <T> T executeCommand(Supplier<T> action) {
+        try {
+            return action.get();
+        } catch (AccountCommandTimeoutException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
+    }
+
+    private static <T> T executeQuery(Supplier<T> action) {
+        try {
+            return action.get();
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    private static PositionModeUpdateRequest withProductLine(PositionModeUpdateRequest request, ProductLine productLine) {
+        if (request == null || request.productLine() != null || productLine == null) {
+            return request;
+        }
+        return new PositionModeUpdateRequest(request.userId(), productLine, request.positionMode(), request.referenceId());
+    }
+
+    private static ProductLine productLine(String queryValue, String headerValue) {
+        String value = queryValue == null || queryValue.isBlank() ? headerValue : queryValue;
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return ProductLine.requireExternalCode(value);
     }
 }

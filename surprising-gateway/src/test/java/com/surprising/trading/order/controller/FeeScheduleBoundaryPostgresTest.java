@@ -80,8 +80,7 @@ class FeeScheduleBoundaryPostgresTest {
         importer = mock(FeePolicyCoreImporter.class);
         var properties = new TradingOrderProperties(); properties.getKafka().setProductLine(line);
         service = new TradingFeeService(repository, null, null, publisher, new FeeScheduleSnapshotCache(), properties, importer);
-        var controller = new TradingFeeRequestHandler(service);
-        var adminTrading = new AdminTradingController(null, null, null, null, controller, null);
+        var adminTrading = new AdminTradingController(null, null, null, null, service, null);
         mvc = MockMvcBuilders.standaloneSetup(adminTrading)
                 .setControllerAdvice(new BadRequestAdvice())
                 .build();

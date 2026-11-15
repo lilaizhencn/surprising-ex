@@ -5,17 +5,18 @@ import static org.assertj.core.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
-import com.surprising.trading.order.controller.TradingFeeRequestHandler;
+import com.surprising.product.api.ProductLine;
+import com.surprising.trading.order.service.TradingFeeService;
 
 class TradingFeeInternalControllerTest {
     @Test void hostLocalLookupKeepsAccountProductAndVersion() {
-        var fees = mock(TradingFeeRequestHandler.class);
+        var fees = mock(TradingFeeService.class);
         var request = new MockHttpServletRequest(); request.setRemoteAddr("127.0.0.1");
         new TradingFeeInternalController(fees).effective(2, "604", 1203, "LINEAR_PERPETUAL", request);
-        verify(fees).effective(2, "604", 1203, "LINEAR_PERPETUAL", "LINEAR_PERPETUAL");
+        verify(fees).effectiveFee(2, "604", 1203, ProductLine.LINEAR_PERPETUAL);
     }
     @Test void refusesExternalAndProxyRequests() {
-        var fees = mock(TradingFeeRequestHandler.class);
+        var fees = mock(TradingFeeService.class);
         var controller = new TradingFeeInternalController(fees);
         for (String header : new String[]{"X-Forwarded-For", "Forwarded", "X-Real-IP"}) {
             var request = new MockHttpServletRequest(); request.setRemoteAddr("127.0.0.1");

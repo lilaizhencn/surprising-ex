@@ -13,7 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 class AdminOrderRequestHandlerTest {
     @Test void tradeHistoryRequiresAnAdminAndPreservesTheSelectedProductAndExactOrderId() {
         var service = mock(OrderService.class);
-        var requests = new AdminOrderRequestHandler(service);
+        var requests = new AdminTradingController(service, null, null, null, null, null);
         assertThatThrownBy(() -> requests.trades(null,"OPTION",null,7L,"604",Long.MAX_VALUE,10,null,null))
                 .isInstanceOf(ResponseStatusException.class);
         org.mockito.Mockito.verifyNoInteractions(service);
@@ -31,7 +31,7 @@ class AdminOrderRequestHandlerTest {
         OrderService orderService = mock(OrderService.class);
         String continuation = "eyJvcmRlciI6MTIzfQ";
         when(orderService.adminOrders(null, null, null, null, 100, null, null, null)).thenThrow(new ProjectionReadResult.ResponseTooLargeException(12L, 0L, continuation));
-        com.surprising.trading.order.controller.AdminOrderRequestHandler requests = new com.surprising.trading.order.controller.AdminOrderRequestHandler(orderService);
+        AdminTradingController requests = new AdminTradingController(orderService, null, null, null, null, null);
         assertThatThrownBy(() -> requests.orders("admin-1", null, null, null, null, null, null, 100, null, null)).isInstanceOf(ResponseStatusException.class).satisfies(throwable -> {
             ResponseStatusException response = (ResponseStatusException) throwable;
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
@@ -40,7 +40,7 @@ class AdminOrderRequestHandlerTest {
     }
     @org.junit.jupiter.api.Test void invalidStatisticsWindowAndLimitNeverReachBusinessService() {
         var orders=org.mockito.Mockito.mock(com.surprising.trading.order.service.OrderService.class);
-        var requests=new AdminOrderRequestHandler(orders);
+        var requests=new AdminTradingController(orders, null, null, null, null, null);
         for(int[] values:new int[][]{{120,20},{60,0},{60,101}}) {
             org.assertj.core.api.Assertions.assertThatThrownBy(()->requests.metrics("1",null,"SPOT",values[0],values[1]))
                     .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,

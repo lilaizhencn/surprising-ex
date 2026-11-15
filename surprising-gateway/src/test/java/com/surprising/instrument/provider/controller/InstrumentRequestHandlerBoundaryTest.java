@@ -23,7 +23,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class InstrumentRequestHandlerBoundaryTest {
     private final InstrumentService service = mock(InstrumentService.class);
-    private final InstrumentRequestHandler controller = new InstrumentRequestHandler(service, JsonMapper.builder().findAndAddModules().build());
+    private final InstrumentController controller = new InstrumentController(service, JsonMapper.builder().findAndAddModules().build());
 
     @Test void nativeVersionConflictRemains409AndInternalStateFailuresAreNotMisreportedAs404() {
         var request = mock(InstrumentUpsertRequest.class);
@@ -40,7 +40,7 @@ class InstrumentRequestHandlerBoundaryTest {
         when(request.supportedTimeInForce()).thenReturn(java.util.List.of("GTC"));
         when(service.edit(request, "1", "edit", 2)).thenThrow(new InstrumentOperationException(
                 InstrumentOperationException.Reason.CONFLICT, "合约配置已更新，请重新加载后检查修改；本次修改未保存"));
-        assertThatThrownBy(() -> controller.edit(request, "1", "edit", 2)).isInstanceOfSatisfying(ResponseStatusException.class,
+        assertThatThrownBy(() -> controller.upsert(request, "1", "edit", 2)).isInstanceOfSatisfying(ResponseStatusException.class,
                 e -> assertThat(e.getStatusCode().value()).isEqualTo(409));
         when(service.publicLatest(1, ProductLine.SPOT)).thenThrow(new IllegalStateException("instrument product current mismatch"));
         assertThatThrownBy(() -> controller.latest(1, null, "SPOT"))
@@ -49,35 +49,35 @@ class InstrumentRequestHandlerBoundaryTest {
 
     @ParameterizedTest @ValueSource(strings = {"status.desc", "updatedAt.desc;drop table instruments", "symbol.DESC"})
     void unsupportedSortNeverReachesBusinessService(String sort) {
-        assertBadRequest(() -> controller.adminList(null, null, 10, null, sort, null, "SPOT"));
+        assertBadRequest(() -> controller.adminList("1", null, null, 10, null, sort, null, "SPOT"));
         verifyNoInteractions(service);
     }
 
     @ParameterizedTest @ValueSource(strings = {"broken", "a|", "not-a-time|BTC-USDT"})
     void malformedCursorNeverReachesBusinessService(String raw) {
         String cursor = Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        assertBadRequest(() -> controller.adminList(null, null, 10, cursor, "updatedAt.desc", null, "SPOT"));
+        assertBadRequest(() -> controller.adminList("1", null, null, 10, cursor, "updatedAt.desc", null, "SPOT"));
         verifyNoInteractions(service);
     }
 
     @Test void cursorTimeAndSymbolAreBoundBeforeNativeQueryAndLimitClampingIsPreserved() {
         var time = Instant.parse("2026-01-01T00:00:00.123456Z");
         String cursor = Base64.getUrlEncoder().withoutPadding().encodeToString((time + "|BTC-USDT").getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        controller.adminList(null, null, 1001, cursor, "updatedAt.asc", null, "SPOT");
+        controller.adminList("1", null, null, 1001, cursor, "updatedAt.asc", null, "SPOT");
         verify(service).list(ProductLine.SPOT, null, null, new InstrumentPageQuery(1000,
                 InstrumentPageQuery.Sort.UPDATED_AT_ASC, new InstrumentPageQuery.Cursor("BTC-USDT", time)));
-        controller.adminList(null, null, 0, null, null, null, "SPOT");
+        controller.adminList("1", null, null, 0, null, null, null, "SPOT");
         verify(service).list(ProductLine.SPOT, null, null, new InstrumentPageQuery(1, InstrumentPageQuery.Sort.SYMBOL_ASC, null));
     }
 
     @Test void invalidAdministratorOrReasonCannotStartBusinessEdit() {
-        assertBadRequest(() -> controller.edit(null, "", "edit", 1));
-        assertBadRequest(() -> controller.editStatus(1, null, null, "SPOT", "1", "x".repeat(1001), 1));
+        assertBadRequest(() -> controller.upsert(null, "1", "", 1));
+        assertBadRequest(() -> controller.updateStatus(1, null, null, "SPOT", "1", "x".repeat(1001), 1));
         verifyNoInteractions(service);
     }
 
     @Test void actualLocalDispatchMapsBadCursorAndNativeMissingInstrumentWithoutCreatingHttpRoutes() throws Exception {
-        var mvc = MockMvcBuilders.standaloneSetup(new InstrumentController(controller)).build();
+        var mvc = MockMvcBuilders.standaloneSetup(controller).build();
         mvc.perform(get("/api/v1/instruments/admin/list")
                         .param("productLine", "SPOT")
                         .param("sort", "updatedAt.desc")
@@ -90,7 +90,6 @@ class InstrumentRequestHandlerBoundaryTest {
                         .param("productLine", "SPOT")
                         .param("instrumentId", "1"))
                 .andExpect(status().isNotFound());
-        assertThat(InstrumentRequestHandler.class.getAnnotation(org.springframework.web.bind.annotation.RestController.class)).isNull();
     }
 
     private static void assertBadRequest(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {

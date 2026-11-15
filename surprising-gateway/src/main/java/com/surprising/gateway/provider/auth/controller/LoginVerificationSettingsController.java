@@ -83,10 +83,4 @@ public class LoginVerificationSettingsController {
         verification.confirmBinding(principal.userId(), method, request, Instant.now(),
                 auth.primaryAuthenticatedAt(principal));
     }
-
-    @ExceptionHandler(LoginVerificationService.VerificationFailure.class)
-    public ResponseEntity<Map<String, String>> failure(
-            LoginVerificationService.VerificationFailure e) {
-        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
-    }
 }

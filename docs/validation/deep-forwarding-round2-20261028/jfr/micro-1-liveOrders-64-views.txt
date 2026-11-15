@@ -1,5 +1,0 @@
-Views cover the entire recording, including setup/audit; JSON above applies the measurement window.
-
-VIEW allocation-by-site
-
-No events found for 'Allocation by Site'.

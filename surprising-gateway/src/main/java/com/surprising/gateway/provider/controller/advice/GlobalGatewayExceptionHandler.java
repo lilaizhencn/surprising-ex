@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.controller.advice;
 
 import com.surprising.gateway.provider.announcement.exception.AnnouncementProblem;
+import com.surprising.gateway.provider.auth.client.GoogleIdentityClient;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
 import com.surprising.gateway.provider.exception.ProductUnavailableException;
 import com.surprising.gateway.provider.legal.exception.LegalProblem;
 import com.surprising.realtime.api.exception.ReadViewUnavailableException;
@@ -10,6 +12,7 @@ import java.io.IOException;
 import java.util.Map;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -57,5 +60,19 @@ public class GlobalGatewayExceptionHandler {
     public ResponseEntity<Map<String, String>> legalProblem(LegalProblem problem) {
         return ResponseEntity.status(problem.kind().status())
                 .body(Map.of("code", "LEGAL_" + problem.kind().name(), "message", problem.getMessage()));
+    }
+
+    @ExceptionHandler(LoginVerificationService.VerificationFailure.class)
+    public ResponseEntity<Map<String, String>> verificationFailure(LoginVerificationService.VerificationFailure failure) {
+        String msg = failure.getMessage() == null ? "" : failure.getMessage();
+        int status = msg.contains("RATE_LIMITED") ? 429
+                : msg.contains("UNAVAILABLE") || msg.contains("DELIVERY_FAILED") ? 503 : 400;
+        return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(Map.of("message", msg));
+    }
+
+    @ExceptionHandler(GoogleIdentityClient.Unavailable.class)
+    public ResponseEntity<Map<String, String>> googleUnavailable() {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).cacheControl(CacheControl.noStore())
+                .body(Map.of("message", "Google sign-in is temporarily unavailable"));
     }
 }

@@ -70,14 +70,6 @@ public class TelegramLoginController {
         return result == null ? noStore().body(new Pending(true)) : noStore().body(result);
     }
 
-    @ExceptionHandler(LoginVerificationService.VerificationFailure.class)
-    public ResponseEntity<?> verification(LoginVerificationService.VerificationFailure error) {
-        int status = error.getMessage().contains("RATE_LIMITED") ? 429
-                : error.getMessage().contains("UNAVAILABLE") || error.getMessage().contains("DELIVERY_FAILED") ? 503 : 400;
-        return ResponseEntity.status(status).cacheControl(CacheControl.noStore())
-                .body(java.util.Map.of("message", error.getMessage()));
-    }
-
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> invalid(IllegalArgumentException error) {
         return ResponseEntity.badRequest().cacheControl(CacheControl.noStore())

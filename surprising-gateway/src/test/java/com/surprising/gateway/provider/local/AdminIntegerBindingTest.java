@@ -11,7 +11,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.provider.controller.AccountController;
-import com.surprising.account.provider.controller.AccountRequestHandler;
+import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.account.provider.service.AccountQueryService;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
@@ -42,8 +44,9 @@ class AdminIntegerBindingTest {
     void accountAmountStringsAreExactThroughTheActualLocalRequestBinder(String units) {
         context.run(application -> {
             var json = application.getBean(tools.jackson.databind.json.JsonMapper.class);
-            var handler = mock(AccountRequestHandler.class);
-            var mvc = MockMvcBuilders.standaloneSetup(new AccountController(handler))
+            var gateway = mock(AccountCommandGateway.class);
+            var mvc = MockMvcBuilders.standaloneSetup(new AccountController(
+                            mock(AccountService.class), mock(AccountQueryService.class), gateway))
                     .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
                     .build();
             String body = """
@@ -56,7 +59,7 @@ class AdminIntegerBindingTest {
                             .content(body))
                     .andExpect(status().isOk());
             var captor = ArgumentCaptor.forClass(BalanceAdjustmentRequest.class);
-            verify(handler).adminAdjustBalance(eq("123"), eq(null), captor.capture());
+            verify(gateway).adjustBalance(captor.capture(), eq("123"), eq(null));
             assertThat(captor.getValue().userId()).isEqualTo(LARGE_ID);
             assertThat(captor.getValue().amountUnits()).isEqualTo(Long.parseLong(units));
             var product = json.readValue(body.replace("\"asset\"", "\"accountType\":\"USDT_PERPETUAL\",\"asset\""),
@@ -109,8 +112,8 @@ class AdminIntegerBindingTest {
                     .isInstanceOf(JacksonException.class);
             assertThatThrownBy(() -> json.readValue("{\"userId\":" + invalid + "}", AdminBatchCancelOrdersRequest.class))
                     .isInstanceOf(JacksonException.class);
-            var handler = mock(AccountRequestHandler.class);
-            var mvc = MockMvcBuilders.standaloneSetup(new AccountController(handler))
+            var mvc = MockMvcBuilders.standaloneSetup(new AccountController(
+                            mock(AccountService.class), mock(AccountQueryService.class), mock(AccountCommandGateway.class)))
                     .setMessageConverters(new JacksonJsonHttpMessageConverter(json))
                     .build();
             mvc.perform(post("/api/v1/admin/accounts/balance-adjustments")

@@ -1,20 +1,23 @@
 package com.surprising.trading.order.controller;
 
-import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
-import com.surprising.trading.order.controller.TradingFeeRequestHandler;
+import com.surprising.trading.order.service.TradingFeeService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /** Host-local fee lookup for the maker, using the same selection as order submission. */
 @RestController
 public class TradingFeeInternalController {
-    private final TradingFeeRequestHandler fees;
-    public TradingFeeInternalController(TradingFeeRequestHandler fees) { this.fees = fees; }
+    private final TradingFeeService tradingFeeService;
+
+    public TradingFeeInternalController(TradingFeeService tradingFeeService) {
+        this.tradingFeeService = tradingFeeService;
+    }
 
     @GetMapping(TradingApiPaths.INTERNAL_FEE_BASE_PATH + "/effective")
     public EffectiveTradingFeeResponse effective(@RequestParam long userId, @RequestParam String instrumentId,
@@ -24,6 +27,6 @@ public class TradingFeeInternalController {
                 || request.getHeader("X-Forwarded-For") != null || request.getHeader("Forwarded") != null
                 || request.getHeader("X-Real-IP") != null)
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "host-local maker endpoint");
-        return fees.effective(userId, instrumentId, instrumentChangeId, productLine, productLine);
+        return TradingController.effectiveFee(tradingFeeService, userId, instrumentId, instrumentChangeId, productLine, productLine);
     }
 }

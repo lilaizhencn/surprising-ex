@@ -38,16 +38,8 @@ public class GoogleLoginController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(
                 login.login(request.credential(), request.nonce(), request.platform(), request.inviteCode(), clients.bind(http)));
     }
-    @ExceptionHandler(LoginVerificationService.VerificationFailure.class)
-    public ResponseEntity<?> verification(LoginVerificationService.VerificationFailure failure) {
-        int status = failure.getMessage().contains("RATE_LIMITED") ? 429
-                : failure.getMessage().contains("UNAVAILABLE") || failure.getMessage().contains("DELIVERY_FAILED") ? 503 : 400;
-        return error(status, failure.getMessage());
-    }
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> invalid(IllegalArgumentException failure) { return error(400, failure.getMessage()); }
-    @ExceptionHandler(com.surprising.gateway.provider.auth.client.GoogleIdentityClient.Unavailable.class)
-    public ResponseEntity<?> googleUnavailable() { return error(503, "Google sign-in is temporarily unavailable"); }
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<?> unavailable(IllegalStateException failure) {
         return error(properties.enabled() ? 403 : 503, properties.enabled() ? "Google login is not permitted" : "Google login is not configured");
