@@ -1,7 +1,5 @@
 package com.surprising.gateway.config;
 
-import com.surprising.websocket.provider.consumer.KafkaFanoutConsumer;
-
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.websocket.provider.config.WebSocketProperties;
@@ -32,9 +30,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @EnableConfigurationProperties({
         AccountProperties.class, TriggerProperties.class,
         com.surprising.candlestick.provider.config.CandlestickProperties.class})
-@Import({com.surprising.realtime.api.ValkeyUserQueries.class,
-        com.surprising.websocket.provider.config.WebSocketKafkaConfiguration.class,
-        com.surprising.websocket.provider.consumer.KafkaFanoutConsumer.class})
+@Import(com.surprising.realtime.api.ValkeyUserQueries.class)
 @EnableKafka @EnableScheduling @EnableTransactionManagement
 public class ProductBusinessConfiguration {
     // 公共 WebSocket 的配置位于父容器；每条产品线的 Kafka 订阅必须另行绑定。
