@@ -386,7 +386,7 @@ Local integrated environment:
 ./scripts/local-perpetual.sh down
 ```
 
-See [local perpetual deployment](deployment/local-perpetual/README.md) and [single-node test deployment](deployment/test-single-node/README.md) for prerequisites and data-directory rules. Existing databases require migrations, not repeated initialization. Production credentials belong outside version control. Public content uses the dedicated R2 bucket and external credential file described in [the legal/content deployment guide](deployment/legal/README.md).
+See [local perpetual deployment](deployment/local-perpetual/README.md) and [single-node test deployment](deployment/test-single-node/README.md) for prerequisites and data-directory rules. Existing databases require migrations, not repeated initialization. Production credentials belong outside version control. Public content uses the dedicated R2 bucket and external credential file.
 
 ## Verification and performance evidence
 

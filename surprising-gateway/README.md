@@ -58,7 +58,7 @@ Affiliate processing consumes committed fee facts. Identifiable team-relation er
 
 Public media uses the dedicated `surprising-ex-public` R2 bucket, CDN `https://ex-cdn.tokdou.com`, and prefix `public/exchange/content/`. Private C2C/KYC attachments retain private access controls. Validate file type, signature, size, and references. Persist draft references transactionally; bounded cleanup removes only unreferenced expired uploads.
 
-Real R2 credentials are an explicit external-configuration exception: `~/.config/surprising-ex/content-r2.env`, mode 0600. Inject `GATEWAY_CONTENT_R2_ACCESS_KEY_ID` and `GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY` at runtime. Keep secrets out of committed YAML, examples, logs, and command arguments. See [deployment](../deployment/legal/README.md), [empty credential example](../deployment/content-r2.env.example), and [CORS policy](../deployment/content-r2.cors.json).
+Real R2 credentials are an explicit external-configuration exception: `~/.config/surprising-ex/content-r2.env`, mode 0600. Inject `GATEWAY_CONTENT_R2_ACCESS_KEY_ID` and `GATEWAY_CONTENT_R2_SECRET_ACCESS_KEY` at runtime. Keep secrets out of committed YAML, examples, logs, and command arguments. See [empty credential example](../deployment/content-r2.env.example) and [CORS policy](../deployment/content-r2.cors.json).
 
 Legal revisions are immutable after publication. Registration/login confirm the actual current revision and reading language. New revisions require renewed acceptance; privacy acknowledgement does not grant unrelated optional permissions. Required unpublished documents return unavailable; published-but-unaccepted revisions require consent. Administrative approval requirements and user legal consent are different conditions.
 
