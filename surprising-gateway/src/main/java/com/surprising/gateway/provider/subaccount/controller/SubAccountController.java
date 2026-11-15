@@ -1,7 +1,6 @@
 package com.surprising.gateway.provider.subaccount.controller;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.gateway.provider.subaccount.model.SubAccountModels.*;
 import com.surprising.gateway.provider.subaccount.service.SubAccountService;
 import jakarta.validation.Valid;
@@ -15,19 +14,16 @@ import org.springframework.web.server.ResponseStatusException;
 public class SubAccountController {
 
     private final SubAccountService subAccountService;
-    private final AuthService authService;
 
-    public SubAccountController(SubAccountService subAccountService, AuthService authService) {
+    public SubAccountController(SubAccountService subAccountService) {
         this.subAccountService = subAccountService;
-        this.authService = authService;
     }
 
     @PostMapping("/create")
-    public SubAccountRecord create(@RequestHeader("Authorization") String authorization,
+    public SubAccountRecord create(@CurrentUser long userId,
                                    @Valid @RequestBody CreateSubAccountRequest request) {
-        JwtPrincipal principal = principal(authorization);
         try {
-            return subAccountService.createSubAccount(principal.userId(), request);
+            return subAccountService.createSubAccount(userId, request);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -36,31 +32,19 @@ public class SubAccountController {
     }
 
     @GetMapping("/list")
-    public List<SubAccountRecord> list(@RequestHeader("Authorization") String authorization) {
-        JwtPrincipal principal = principal(authorization);
-        return subAccountService.listSubAccounts(principal.userId());
+    public List<SubAccountRecord> list(@CurrentUser long userId) {
+        return subAccountService.listSubAccounts(userId);
     }
 
     @PostMapping("/transfer")
-    public SubAccountTransferResponse transfer(@RequestHeader("Authorization") String authorization,
+    public SubAccountTransferResponse transfer(@CurrentUser long userId,
                                                @Valid @RequestBody SubAccountTransferRequest request) {
-        JwtPrincipal principal = principal(authorization);
         try {
-            return subAccountService.transfer(principal.userId(), request);
+            return subAccountService.transfer(userId, request);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        }
-    }
-
-    private JwtPrincipal principal(String authorization) {
-        try {
-            return authService.authenticateBearer(authorization);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
         }
     }
 }

@@ -4,6 +4,7 @@ import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.MfaRecoveryRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.MfaRecoveryService;
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -32,11 +33,11 @@ public class MfaRecoveryController {
 
     @PostMapping("/api/v1/security/mfa/recovery/challenge")
     public MfaRecoveryService.RecoveryChallenge issue(
-            @RequestHeader("Authorization") String bearer,
+            @CurrentUser long userId,
             @Valid @RequestBody RecoveryChallengeRequest request,
             HttpServletRequest servletRequest) {
         try {
-            return recovery.issue(auth.authenticateBearer(bearer).userId(), request.currentPassword(),
+            return recovery.issue(userId, request.currentPassword(),
                     servletRequest.getRemoteAddr(), Instant.now());
         } catch (IllegalArgumentException ex) { throw badRequest(ex); }
         catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex); }
@@ -44,10 +45,10 @@ public class MfaRecoveryController {
 
     @PostMapping("/api/v1/security/mfa/recovery")
     public MfaRecoveryRepository.RecoveryRequest submit(
-            @RequestHeader("Authorization") String bearer,
+            @CurrentUser long userId,
             @Valid @RequestBody RecoverySubmitRequest request) {
         try {
-            return recovery.submit(auth.authenticateBearer(bearer).userId(),
+            return recovery.submit(userId,
                     new MfaRecoveryService.RecoverySubmission(request.challengeId(), request.currentPassword(),
                             request.code(), request.reason()), Instant.now());
         } catch (IllegalArgumentException ex) { throw badRequest(ex); }
@@ -55,8 +56,8 @@ public class MfaRecoveryController {
     }
 
     @GetMapping("/api/v1/security/mfa/recovery")
-    public MfaRecoveryRepository.RecoveryRequest status(@RequestHeader("Authorization") String bearer) {
-        return recovery.status(auth.authenticateBearer(bearer).userId());
+    public MfaRecoveryRepository.RecoveryRequest status(@CurrentUser long userId) {
+        return recovery.status(userId);
     }
 
     @GetMapping("/api/v1/admin/compliance/mfa-recovery")

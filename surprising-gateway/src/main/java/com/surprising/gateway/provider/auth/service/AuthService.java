@@ -34,7 +34,7 @@ import com.surprising.gateway.provider.auth.state.UserState;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -60,7 +60,6 @@ public class AuthService {
     private final com.surprising.gateway.provider.legal.service.LegalConsentService legal;
     private final AuthState authState;
     private final AuthStateSync authStateSync;
-    private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(GatewayProperties properties,
                        AuthPersistenceService repository,
@@ -220,6 +219,12 @@ public class AuthService {
      * Valkey 里没有会话/用户就是登录无效（401）。
      */
     public JwtPrincipal verifyBearer(String authorizationHeader) {
+        var existing = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (existing != null && existing.isAuthenticated()
+                && existing.getPrincipal() instanceof JwtPrincipal verifiedPrincipal
+                && authorizationHeader != null && authorizationHeader.equals(existing.getCredentials())) {
+            return verifiedPrincipal;
+        }
         JwtPrincipal cached = currentClient.cachedBearer(authorizationHeader);
         if (cached != null) return cached;
         String token = bearerToken(authorizationHeader);
@@ -393,7 +398,7 @@ public class AuthService {
     /** 会话行的 token_hash 列必须有值且唯一；登录令牌不落库，这里存一个随机值的摘要。 */
     private String randomSessionHash() {
         byte[] bytes = new byte[32];
-        secureRandom.nextBytes(bytes);
+        AuthCodeFormats.SECURE_RANDOM.nextBytes(bytes);
         try {
             return Base64.getUrlEncoder().withoutPadding()
                     .encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes));

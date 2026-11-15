@@ -78,11 +78,83 @@ public class AuthStateSync {
         return Optional.of(loaded);
     }
 
-    /** 角色权限变更：拥有该角色的用户全部重新写入。 */
+    /** 角色权限变更：拥有该角色的用户批量读取后写入 Valkey，避免按用户 N+1 查询。 */
     public void roleChanged(long roleId) {
-        for (Long userId : jdbc.queryForList("SELECT user_id FROM gateway_user_roles WHERE role_id = ?",
-                Long.class, roleId)) {
-            reloadUser(userId);
+        List<Long> userIds = jdbc.queryForList("SELECT user_id FROM gateway_user_roles WHERE role_id = ?",
+                Long.class, roleId);
+        if (userIds.isEmpty()) {
+            return;
+        }
+        reloadUsers(userIds);
+    }
+
+    private void reloadUsers(List<Long> userIds) {
+        String placeholders = String.join(",", java.util.Collections.nCopies(userIds.size(), "?"));
+        Object[] args = userIds.toArray();
+
+        var users = new java.util.LinkedHashMap<Long, Object[]>();
+        jdbc.query("""
+                SELECT user_id, username, email, display_name, created_at, status
+                  FROM gateway_users WHERE user_id IN (%s)
+                """.formatted(placeholders), rs -> {
+            users.put(rs.getLong(1), new Object[]{
+                    rs.getString(2), rs.getString(3), rs.getString(4),
+                    rs.getTimestamp(5).toInstant(), rs.getString(6)
+            });
+        }, args);
+
+        var rolesByUser = new java.util.HashMap<Long, List<String>>();
+        jdbc.query("""
+                SELECT ur.user_id, r.role_code
+                  FROM gateway_user_roles ur JOIN gateway_roles r ON r.role_id = ur.role_id
+                 WHERE ur.user_id IN (%s) ORDER BY ur.user_id, r.role_code
+                """.formatted(placeholders), rs -> {
+            rolesByUser.computeIfAbsent(rs.getLong(1), ignored -> new ArrayList<>()).add(rs.getString(2));
+        }, args);
+
+        var permsByUser = new java.util.HashMap<Long, List<String>>();
+        jdbc.query("""
+                SELECT DISTINCT ur.user_id, p.permission_code
+                  FROM gateway_user_roles ur
+                  JOIN gateway_role_permissions rp ON rp.role_id = ur.role_id
+                  JOIN gateway_permissions p ON p.permission_id = rp.permission_id
+                 WHERE ur.user_id IN (%s) ORDER BY ur.user_id, p.permission_code
+                """.formatted(placeholders), rs -> {
+            permsByUser.computeIfAbsent(rs.getLong(1), ignored -> new ArrayList<>()).add(rs.getString(2));
+        }, args);
+
+        var blockedIpsByUser = new java.util.HashMap<Long, Set<String>>();
+        var blockedDevicesByUser = new java.util.HashMap<Long, Set<String>>();
+        jdbc.query("""
+                SELECT user_id, block_type, block_value FROM gateway_user_access_blocks
+                 WHERE user_id IN (%s) AND revoked_at IS NULL
+                """.formatted(placeholders), rs -> {
+            long uid = rs.getLong(1);
+            String type = rs.getString(2);
+            if ("IP".equals(type)) blockedIpsByUser.computeIfAbsent(uid, ignored -> new LinkedHashSet<>()).add(rs.getString(3));
+            else if ("DEVICE".equals(type)) blockedDevicesByUser.computeIfAbsent(uid, ignored -> new LinkedHashSet<>()).add(rs.getString(3));
+        }, args);
+
+        var activeApiKeyUsers = new java.util.HashSet<Long>();
+        jdbc.query("""
+                SELECT DISTINCT user_id FROM gateway_api_keys WHERE user_id IN (%s) AND status = 'ACTIVE'
+                """.formatted(placeholders), rs -> {
+            activeApiKeyUsers.add(rs.getLong(1));
+        }, args);
+
+        for (Long userId : userIds) {
+            Object[] user = users.get(userId);
+            if (user == null) {
+                state.deleteUser(userId);
+                continue;
+            }
+            List<String> roles = rolesByUser.getOrDefault(userId, List.of("USER"));
+            List<String> perms = permsByUser.getOrDefault(userId, List.of());
+            Set<String> blockedIps = blockedIpsByUser.getOrDefault(userId, Set.of());
+            Set<String> blockedDevices = blockedDevicesByUser.getOrDefault(userId, Set.of());
+            state.putUser(new UserState(userId, (String) user[0], (String) user[1], (String) user[2],
+                    (Instant) user[3], (String) user[4], roles, perms, blockedIps, blockedDevices,
+                    activeApiKeyUsers.contains(userId)));
         }
     }
 

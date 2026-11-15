@@ -102,6 +102,7 @@ public class WebSocketProperties {
     @Setter
     public static class Fanout {
         private Duration candlePartialCoalesceWindow = Duration.ofMillis(250);
+        private Duration depthCoalesceWindow = Duration.ofMillis(50);
         private Duration markPriceMaxAge = Duration.ofSeconds(3);
         private Duration markPriceAllowedFutureSkew = Duration.ofSeconds(1);
 

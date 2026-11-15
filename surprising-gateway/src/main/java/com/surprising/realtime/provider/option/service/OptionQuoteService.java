@@ -88,7 +88,7 @@ public final class OptionQuoteService {
                 || mark.sameExpiryForwardPrice().compareTo(reference.sameExpiryForwardPrice()) != 0)
             throw unavailable();
         Long scale = instruments.scale(ProductLine.OPTION, instrument.quoteAsset()).orElse(null);
-        if (scale == null || scale <= 0 || !Long.toString(scale).matches("10*")
+        if (scale == null || !isPowerOfTen(scale)
                 || instrument.strikePriceUnits() == null || instrument.strikePriceUnits() <= 0
                 || instrument.settleAssetId() != instrument.quoteAssetId()
                 || instrument.optionExerciseStyle() != OptionExerciseStyle.EUROPEAN
@@ -136,6 +136,15 @@ public final class OptionQuoteService {
     private static boolean fresh(Instant time, Instant now) { return time != null && !time.isAfter(now) && time.isAfter(now.minus(MAX_AGE)); }
     private static boolean usable(PriceStatus status) { return status != null && status != PriceStatus.STALE && status != PriceStatus.INSUFFICIENT_SOURCES; }
     private static boolean positive(BigDecimal value) { return value != null && value.signum() > 0; }
+    private static boolean isPowerOfTen(long scale) {
+        if (scale <= 0) return false;
+        long value = scale;
+        while (value > 1) {
+            if (value % 10 != 0) return false;
+            value /= 10;
+        }
+        return true;
+    }
     private static OptionQuoteException unavailable() { return OptionQuoteException.unavailable(); }
 
 }

@@ -8,7 +8,7 @@ import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepos
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
@@ -25,7 +25,6 @@ public class PasswordResetService {
     private final GatewayAuthChallengeRepository challenges;
     private final EmailMessageSender sender;
     private final PasswordHasher passwordHasher;
-    private final SecureRandom secureRandom = new SecureRandom();
 
     public PasswordResetService(GatewayProperties properties,
                                 AuthPersistenceService persistence,
@@ -46,7 +45,7 @@ public class PasswordResetService {
         if (credential.isPresent() && credential.get().email() != null) {
             String email = credential.get().email().toLowerCase(Locale.ROOT);
             boolean simulated = properties.getSecurity().isSimulatedVerificationCodesEnabled();
-            String code = simulated ? "123456" : String.format("%06d", secureRandom.nextInt(1_000_000));
+            String code = AuthCodeFormats.sixDigitCode(simulated);
             Instant expiresAt = now.plus(properties.getSecurity().getVerificationCodeTtl());
             challenges.create(credential.get().userId(), PURPOSE, "EMAIL", email,
                     digest(code, PURPOSE, email), expiresAt, requestIp, now);

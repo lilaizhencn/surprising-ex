@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -39,7 +39,6 @@ public class LoginVerificationService {
     private final EmailMessageSender email;
     private final ObjectProvider<SmsMessageSender> sms;
     private final PasswordHasher passwordHasher;
-    private final SecureRandom random = new SecureRandom();
 
     public LoginVerificationService(
             LoginChallengeRepository challenges,
@@ -386,7 +385,7 @@ public class LoginVerificationService {
             boolean targetEnabled,
             Instant now) {
         byte[] bytes = new byte[32];
-        random.nextBytes(bytes);
+        AuthCodeFormats.SECURE_RANDOM.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes),
                 hash = digest(token);
         boolean simulatedCodes = properties.getSecurity().isSimulatedVerificationCodesEnabled();
@@ -478,7 +477,7 @@ public class LoginVerificationService {
     }
 
     private String code() {
-        return String.format(Locale.ROOT, "%06d", random.nextInt(1_000_000));
+        return AuthCodeFormats.sixDigitCode(false);
     }
 
     private String codeHash(String code, String tokenHash, String method) {

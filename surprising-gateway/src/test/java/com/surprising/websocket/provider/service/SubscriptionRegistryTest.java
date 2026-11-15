@@ -250,6 +250,26 @@ class SubscriptionRegistryTest {
         assertThat(messages.getAllValues().get(1)).contains("\"previousSequence\":\"2\"");
     }
 
+    @Test
+    void depthSubscriptionSkipsPushWhenOnlyLevelsBeyondSubscribedDepthChange() {
+        var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        var client = connection("depth-2");
+        var topic = new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, ProductLine.SPOT, 2);
+        registry.add(client);
+        registry.subscribe(client, topic);
+        var book1 = new com.surprising.aeron.protocol.CoreOrderBookView(1, java.util.List.of(
+                new com.surprising.aeron.protocol.CoreBookLevelView("1", com.surprising.aeron.protocol.CoreOrderSide.BUY, 100, 2, 1),
+                new com.surprising.aeron.protocol.CoreBookLevelView("1", com.surprising.aeron.protocol.CoreOrderSide.BUY, 99, 3, 1),
+                new com.surprising.aeron.protocol.CoreBookLevelView("1", com.surprising.aeron.protocol.CoreOrderSide.BUY, 98, 4, 1)));
+        var book2 = new com.surprising.aeron.protocol.CoreOrderBookView(2, java.util.List.of(
+                new com.surprising.aeron.protocol.CoreBookLevelView("1", com.surprising.aeron.protocol.CoreOrderSide.BUY, 100, 2, 1),
+                new com.surprising.aeron.protocol.CoreBookLevelView("1", com.surprising.aeron.protocol.CoreOrderSide.BUY, 99, 3, 1),
+                new com.surprising.aeron.protocol.CoreBookLevelView("1", com.surprising.aeron.protocol.CoreOrderSide.BUY, 98, 99, 5)));
+        registry.publishDepth(new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, ProductLine.SPOT), book1, "v1", "book", Instant.now());
+        registry.publishDepth(new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, ProductLine.SPOT), book2, "v2", "book", Instant.now());
+        verify(client, org.mockito.Mockito.times(1)).send(any(String.class));
+    }
+
     private ClientConnection connection(String id) {
         return connection(id, null);
     }

@@ -9,7 +9,7 @@ import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowReposito
 import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
 import org.springframework.stereotype.Service;
@@ -25,7 +25,6 @@ public class TelegramLoginService {
     private final AuthService auth;
     private final com.surprising.gateway.provider.telegram.bot.service.TelegramWebAppInitDataVerifier webAppVerifier;
     private final com.surprising.gateway.provider.telegram.bot.config.TelegramBotProperties botProperties;
-    private final SecureRandom random = new SecureRandom();
 
     public TelegramLoginService(TelegramLoginFlowRepository flows, TelegramIdentityRepository identities, GatewayUserRepository userRows, TelegramOidcClient oidc,
                                 AuthPersistenceService users, AuthService auth) {
@@ -114,7 +113,7 @@ public class TelegramLoginService {
 
     private String random() {
         byte[] value = new byte[32];
-        random.nextBytes(value);
+        AuthCodeFormats.SECURE_RANDOM.nextBytes(value);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
     }
 

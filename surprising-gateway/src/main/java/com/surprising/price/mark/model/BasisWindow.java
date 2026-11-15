@@ -21,9 +21,10 @@ public class BasisWindow {
         if (samples.isEmpty()) {
             return BigDecimal.ZERO;
         }
-        BigDecimal total = samples.stream()
-                .map(BasisSample::basis)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal total = BigDecimal.ZERO;
+        for (BasisSample sample : samples) {
+            total = total.add(sample.basis());
+        }
         return total.divide(BigDecimal.valueOf(samples.size()), scale, RoundingMode.HALF_UP);
     }
 

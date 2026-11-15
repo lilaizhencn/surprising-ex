@@ -5,7 +5,7 @@ import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
@@ -33,7 +33,6 @@ public class TotpService {
     private static final int GCM_TAG_BITS = 128;
 
     private final GatewayProperties properties;
-    private final SecureRandom secureRandom = new SecureRandom();
 
     public TotpService(GatewayProperties properties) {
         this.properties = properties;
@@ -41,7 +40,7 @@ public class TotpService {
 
     public String newSecret() {
         byte[] bytes = new byte[SECRET_BYTES];
-        secureRandom.nextBytes(bytes);
+        AuthCodeFormats.SECURE_RANDOM.nextBytes(bytes);
         return base32Encode(bytes);
     }
 
@@ -88,7 +87,7 @@ public class TotpService {
     public String encryptSecret(String secret) {
         try {
             byte[] nonce = new byte[GCM_NONCE_BYTES];
-            secureRandom.nextBytes(nonce);
+            AuthCodeFormats.SECURE_RANDOM.nextBytes(nonce);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, encryptionKey(), new GCMParameterSpec(GCM_TAG_BITS, nonce));
             byte[] encrypted = cipher.doFinal(secret.getBytes(StandardCharsets.UTF_8));

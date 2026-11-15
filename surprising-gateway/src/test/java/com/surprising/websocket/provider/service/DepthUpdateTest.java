@@ -49,4 +49,26 @@ class DepthUpdateTest {
         assertThat(unchanged.bids()).isEmpty();
         assertThat(unchanged.asks()).isEmpty();
     }
+
+    @Test
+    void changesBeyondSubscribedDepthAreIgnored() {
+        var before = new CoreOrderBookView(10, List.of(
+                new CoreBookLevelView("1", BUY, 100, 2, 1),
+                new CoreBookLevelView("1", BUY, 99, 5, 1),
+                new CoreBookLevelView("1", BUY, 98, 4, 1),
+                new CoreBookLevelView("1", SELL, 101, 3, 1),
+                new CoreBookLevelView("1", SELL, 102, 6, 1),
+                new CoreBookLevelView("1", SELL, 103, 7, 1)));
+        var after = new CoreOrderBookView(11, List.of(
+                new CoreBookLevelView("1", BUY, 100, 2, 1),
+                new CoreBookLevelView("1", BUY, 99, 5, 1),
+                new CoreBookLevelView("1", BUY, 98, 99, 3),
+                new CoreBookLevelView("1", SELL, 101, 3, 1),
+                new CoreBookLevelView("1", SELL, 102, 6, 1),
+                new CoreBookLevelView("1", SELL, 103, 88, 2)));
+        var delta = DepthUpdate.between(before, after, 2);
+        assertThat(delta.depth()).isEqualTo(2);
+        assertThat(delta.bids()).isEmpty();
+        assertThat(delta.asks()).isEmpty();
+    }
 }

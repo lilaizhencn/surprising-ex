@@ -16,22 +16,37 @@ public final class ApiSignatureFormats {
         if (queryString == null || queryString.isBlank()) {
             return "";
         }
-        return java.util.Arrays.stream(queryString.split("&"))
-                .filter(item -> {
-                    int separator = item.indexOf('=');
-                    String key = separator < 0 ? item : item.substring(0, separator);
-                    return !"signature".equals(key);
-                })
-                .reduce((left, right) -> left + "&" + right)
-                .orElse("");
+        StringBuilder sb = new StringBuilder(queryString.length());
+        int start = 0;
+        int len = queryString.length();
+        while (start <= len) {
+            int amp = queryString.indexOf('&', start);
+            int end = amp < 0 ? len : amp;
+            int separator = queryString.indexOf('=', start);
+            int keyEnd = (separator >= start && separator < end) ? separator : end;
+            if (!(keyEnd - start == "signature".length() && queryString.regionMatches(start, "signature", 0, 9))) {
+                if (!sb.isEmpty()) sb.append('&');
+                sb.append(queryString, start, end);
+            }
+            if (amp < 0) break;
+            start = amp + 1;
+        }
+        return sb.toString();
     }
 
-    public static String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap, byte[] body) {
+    private static final ThreadLocal<java.security.MessageDigest> SHA256 = ThreadLocal.withInitial(() -> {
         try {
-            String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(body == null ? new byte[0] : body));
-            return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + canonicalParameters(parameterMap) + "\n" + hash;
-        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+            return java.security.MessageDigest.getInstance("SHA-256");
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    });
+
+    public static String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap, byte[] body) {
+        java.security.MessageDigest digest = SHA256.get();
+        digest.reset();
+        String hash = java.util.HexFormat.of().formatHex(digest.digest(body == null ? new byte[0] : body));
+        return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + canonicalParameters(parameterMap) + "\n" + hash;
     }
 
     public static String canonicalParameters(java.util.Map<String, String[]> parameterMap) {

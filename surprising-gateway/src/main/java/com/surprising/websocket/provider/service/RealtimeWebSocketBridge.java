@@ -5,6 +5,7 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.*;
 import com.surprising.websocket.api.model.*;
+import com.surprising.websocket.provider.config.WebSocketProperties;
 import jakarta.annotation.PreDestroy;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
@@ -30,6 +31,17 @@ public final class RealtimeWebSocketBridge
     private final Object heartbeatLock = new Object();
     private final AeronRealtimeReceiver receiver;
     private final ObjectMapper mapper;
+    private record BookKey(ProductLine productLine, String instrumentId) {}
+    private record LastTicker(long bidPrice, long bidQty, long askPrice, long askQty) {}
+    private record PendingDepth(SubscriptionTopic topic, CoreOrderBookView book,
+                                String version, String entityId, Instant eventTime) {}
+
+    private final long depthCoalesceWindowNanos;
+    private final Map<BookKey, LastTicker> lastTickers = new ConcurrentHashMap<>();
+    private final Map<BookKey, PendingDepth> pendingDepths = new ConcurrentHashMap<>();
+    private final Map<BookKey, Long> lastDepthFlushNanos = new ConcurrentHashMap<>();
+    private final java.util.concurrent.ScheduledExecutorService depthFlusher;
+    private final java.util.concurrent.atomic.AtomicBoolean depthFlushScheduled = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile SnapshotAssembler snapshots = new SnapshotAssembler();
     private volatile boolean closed;
     private long nextHeartbeatNanos;
@@ -43,8 +55,28 @@ public final class RealtimeWebSocketBridge
             StringRedisTemplate redis,
             Environment env,
             ObjectMapper mapper) {
+        this(registry, redis, env, mapper, new WebSocketProperties());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public RealtimeWebSocketBridge(
+            SubscriptionRegistry registry,
+            StringRedisTemplate redis,
+            Environment env,
+            ObjectMapper mapper,
+            WebSocketProperties properties) {
         this.registry = registry;
         this.mapper = mapper;
+        Duration coalesce = properties == null ? Duration.ofMillis(50) : properties.getFanout().getDepthCoalesceWindow();
+        this.depthCoalesceWindowNanos = coalesce == null || coalesce.isNegative() || coalesce.isZero()
+                ? 0L : coalesce.toNanos();
+        this.depthFlusher = depthCoalesceWindowNanos > 0
+                ? java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "ws-depth-coalesce");
+                    t.setDaemon(true);
+                    return t;
+                })
+                : null;
         directory = new ValkeyRouteDirectory(redis);
         views = new ValkeyReadViewStore(redis);
         refresh = new ValkeySnapshotRequests(redis);
@@ -61,6 +93,7 @@ public final class RealtimeWebSocketBridge
             heartbeat();
             registry.routeLifecycle(this);
         } catch (RuntimeException | Error failure) {
+            if (depthFlusher != null) depthFlusher.shutdownNow();
             try { receiver.close(); } catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
             try { directory.removeNode(node); } catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
             throw failure;
@@ -142,6 +175,9 @@ public final class RealtimeWebSocketBridge
             synchronized (heartbeatLock) {
                 snapshots = new SnapshotAssembler();
                 memberships.clear();
+                pendingDepths.clear();
+                lastDepthFlushNanos.clear();
+                lastTickers.clear();
                 directory.removeNode(node);
                 continuityLost.set(false);
                 receiver.resumeAfterRecovery(recoveryVersion);
@@ -236,6 +272,46 @@ public final class RealtimeWebSocketBridge
                     default -> null;
                 };
         if (channel == null) return;
+        String instrumentId = f.instrumentId().isBlank() ? SubscriptionTopic.WILDCARD : f.instrumentId();
+        var topic =
+                new SubscriptionTopic(
+                        channel,
+                        instrumentId,
+                        channel == WsChannel.CANDLES ? f.entityId() : null,
+                        f.userId() > 0 ? f.userId() : null,
+                        f.productLine());
+        if (f.kind() == RealtimeFrame.Kind.BOOK) {
+            boolean hasDepth = registry.hasDepthSubscribers(f.productLine(), instrumentId);
+            var tickerTopic = new SubscriptionTopic(
+                    WsChannel.BOOK_TICKER, instrumentId, null, null, f.productLine());
+            boolean hasTicker = registry.hasSubscribers(tickerTopic);
+            if (!hasDepth && !hasTicker) return;
+            CoreOrderBookView book = CoreStateQueryCodec.decodeOrderBookView(f.payload());
+            String version = RealtimeVersion.of(f.sequence(), f.ordinal());
+            Instant eventTime = Instant.ofEpochMilli(f.timestamp());
+            BookKey key = new BookKey(f.productLine(), instrumentId);
+            if (hasDepth) {
+                publishOrCoalesceDepth(key, topic, book, version, f.entityId(), eventTime);
+            }
+            if (hasTicker) {
+                publishTickerIfChanged(key, tickerTopic, book, version, f.entityId(), eventTime);
+            }
+            return;
+        }
+        if (f.kind() == RealtimeFrame.Kind.RISK) {
+            var accountRiskTopic = new SubscriptionTopic(
+                    WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, null, f.userId(), f.productLine());
+            boolean hasPositionRisk = registry.hasSubscribers(topic);
+            boolean hasAccountRisk = registry.hasSubscribers(accountRiskTopic);
+            if (!hasPositionRisk && !hasAccountRisk) return;
+            Object value = UserReadView.PositionRisk.decode(f);
+            var event = new VersionedEvent(RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), value);
+            Instant eventTime = Instant.ofEpochMilli(f.timestamp());
+            if (hasPositionRisk) registry.publish(topic, event, eventTime);
+            if (hasAccountRisk) registry.publish(accountRiskTopic, event, eventTime);
+            return;
+        }
+        if (!registry.hasSubscribers(topic)) return;
         Object value =
                 switch (f.kind()) {
                     case EXECUTION -> {
@@ -254,8 +330,6 @@ public final class RealtimeWebSocketBridge
                                 "maker",
                                 b.get() == 1);
                     }
-                    case RISK -> UserReadView.PositionRisk.decode(f);
-                    case BOOK -> CoreStateQueryCodec.decodeOrderBookView(f.payload());
                     case ORDER -> CoreStateQueryCodec.decodeOrderState(f.payload());
                     case TRIGGER -> CoreTriggerOrderCodec.decodeList(f.payload());
                     case USER, BALANCE, METADATA, RESERVATION, LEVERAGE, POSITION ->
@@ -264,54 +338,74 @@ public final class RealtimeWebSocketBridge
                     default -> new tools.jackson.databind.util.RawValue(
                             new String(f.payload(), java.nio.charset.StandardCharsets.UTF_8));
                 };
-        String instrumentId = f.instrumentId().isBlank() ? SubscriptionTopic.WILDCARD : f.instrumentId();
-        var topic =
-                new SubscriptionTopic(
-                        channel,
-                        instrumentId,
-                        channel == WsChannel.CANDLES ? f.entityId() : null,
-                        f.userId() > 0 ? f.userId() : null,
-                        f.productLine());
-        if (f.kind() == RealtimeFrame.Kind.BOOK) {
-            registry.publishDepth(topic, (CoreOrderBookView) value,
-                    RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(),
-                    Instant.ofEpochMilli(f.timestamp()));
-        } else registry.publish(
+        registry.publish(
                 topic,
                 new VersionedEvent(
                         RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), value),
                 Instant.ofEpochMilli(f.timestamp()));
-        if (f.kind() == RealtimeFrame.Kind.RISK) {
-            registry.publish(
-                    new SubscriptionTopic(
-                            WsChannel.ACCOUNT_RISK,
-                            SubscriptionTopic.WILDCARD,
-                            null,
-                            f.userId(),
-                            f.productLine()),
-                    new VersionedEvent(
-                            RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), value),
-                    Instant.ofEpochMilli(f.timestamp()));
+    }
+
+    private void publishOrCoalesceDepth(BookKey key, SubscriptionTopic topic, CoreOrderBookView book,
+            String version, String entityId, Instant eventTime) {
+        if (depthCoalesceWindowNanos <= 0 || depthFlusher == null) {
+            registry.publishDepth(topic, book, version, entityId, eventTime);
+            return;
         }
-        if (f.kind() == RealtimeFrame.Kind.BOOK) {
-            var book = (CoreOrderBookView) value;
-            CoreBookLevelView bid = null;
-            CoreBookLevelView ask = null;
-            for (CoreBookLevelView level : book.levels()) {
-                if (level.side() == CoreOrderSide.BUY) {
-                    if (bid == null || level.priceTicks() > bid.priceTicks()) bid = level;
-                } else if (level.side() == CoreOrderSide.SELL) {
-                    if (ask == null || level.priceTicks() < ask.priceTicks()) ask = level;
-                }
+        long nowNanos = System.nanoTime();
+        Long lastFlush = lastDepthFlushNanos.get(key);
+        if (lastFlush == null || nowNanos - lastFlush >= depthCoalesceWindowNanos) {
+            pendingDepths.remove(key);
+            lastDepthFlushNanos.put(key, nowNanos);
+            registry.publishDepth(topic, book, version, entityId, eventTime);
+            return;
+        }
+        pendingDepths.put(key, new PendingDepth(topic, book, version, entityId, eventTime));
+        if (depthFlushScheduled.compareAndSet(false, true)) {
+            depthFlusher.schedule(this::flushPendingDepths, depthCoalesceWindowNanos,
+                    java.util.concurrent.TimeUnit.NANOSECONDS);
+        }
+    }
+
+    private void flushPendingDepths() {
+        depthFlushScheduled.set(false);
+        if (closed || continuityLost.get() || pendingDepths.isEmpty()) {
+            return;
+        }
+        long nowNanos = System.nanoTime();
+        for (var entry : pendingDepths.entrySet()) {
+            BookKey key = entry.getKey();
+            PendingDepth pending = pendingDepths.remove(key);
+            if (pending == null) continue;
+            lastDepthFlushNanos.put(key, nowNanos);
+            try {
+                registry.publishDepth(pending.topic(), pending.book(),
+                        pending.version(), pending.entityId(), pending.eventTime());
+            } catch (RuntimeException failure) {
+                LOG.warn("Coalesced depth publish failed key={} error={}", key, failure.getMessage());
             }
-            var ticker = new BookTicker(bid, ask);
-            registry.publish(
-                    new SubscriptionTopic(
-                            WsChannel.BOOK_TICKER, instrumentId, null, null, f.productLine()),
-                    new VersionedEvent(
-                            RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), ticker),
-                    Instant.ofEpochMilli(f.timestamp()));
         }
+    }
+
+    private void publishTickerIfChanged(BookKey key, SubscriptionTopic tickerTopic, CoreOrderBookView book,
+            String version, String entityId, Instant eventTime) {
+        CoreBookLevelView bid = null;
+        CoreBookLevelView ask = null;
+        for (CoreBookLevelView level : book.levels()) {
+            if (level.side() == CoreOrderSide.BUY) {
+                if (bid == null || level.priceTicks() > bid.priceTicks()) bid = level;
+            } else if (level.side() == CoreOrderSide.SELL) {
+                if (ask == null || level.priceTicks() < ask.priceTicks()) ask = level;
+            }
+        }
+        LastTicker current = new LastTicker(
+                bid == null ? 0L : bid.priceTicks(),
+                bid == null ? 0L : bid.quantitySteps(),
+                ask == null ? 0L : ask.priceTicks(),
+                ask == null ? 0L : ask.quantitySteps());
+        if (current.equals(lastTickers.put(key, current))) {
+            return;
+        }
+        registry.publish(tickerTopic, new VersionedEvent(version, entityId, new BookTicker(bid, ask)), eventTime);
     }
 
     /** Public REST history uses this same entity ID; matcher sequence is a separate domain. */
@@ -367,7 +461,11 @@ public final class RealtimeWebSocketBridge
             closed = true;
             registry.routeLifecycle(null);
             memberships.clear();
+            pendingDepths.clear();
+            lastDepthFlushNanos.clear();
+            lastTickers.clear();
         }
+        if (depthFlusher != null) depthFlusher.shutdownNow();
         try { receiver.close(); }
         finally {
             try { directory.removeNode(node); }

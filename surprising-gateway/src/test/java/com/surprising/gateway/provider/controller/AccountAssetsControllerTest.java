@@ -28,6 +28,7 @@ class AccountAssetsControllerTest {
     private final GatewayProductSelection selection = new GatewayProductSelection(products, new ObjectMapper());
     private final MockMvc mvc = MockMvcBuilders.standaloneSetup(
             new AccountAssetsController(auth, selection, products))
+            .setCustomArgumentResolvers(new com.surprising.gateway.provider.config.CurrentUserArgumentResolver(auth))
             .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler()).build();
 
     AccountAssetsControllerTest() {

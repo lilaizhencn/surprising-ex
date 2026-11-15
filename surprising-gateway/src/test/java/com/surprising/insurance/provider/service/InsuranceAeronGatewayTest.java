@@ -17,7 +17,7 @@ class InsuranceAeronGatewayTest {
     @EnumSource(value = ProductLine.class, names = "SPOT", mode = EnumSource.Mode.EXCLUDE)
     void usesSharedClientForCommandsAndSystemFunds(ProductLine product) {
         var properties = new InsuranceProperties();
-        properties.getKafka().setProductLine(product);
+        properties.setProductLine(product);
         var client = mock(DerivativesAeronClient.class);
         var gateway = new InsuranceAeronGateway(properties, client);
         var id = UUID.randomUUID();

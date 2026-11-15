@@ -10,6 +10,6 @@ public class OrderBusinessSettingsTask {
     private final OrderBusinessSettingsService settings;
     public OrderBusinessSettingsTask(OrderBusinessSettingsService settings) { this.settings = settings; }
 
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelayString = "${surprising.order.settings-refresh-ms:5000}")
     public void reload() { settings.reload(); }
 }

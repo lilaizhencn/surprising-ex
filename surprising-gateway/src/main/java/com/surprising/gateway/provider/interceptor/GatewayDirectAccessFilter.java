@@ -33,6 +33,8 @@ import org.springframework.web.server.ResponseStatusException;
  */
 public class GatewayDirectAccessFilter extends OncePerRequestFilter {
 
+    private static final String MATCHED_ROUTE_ATTR = GatewayDirectAccessFilter.class.getName() + ".route";
+
     private record DirectRoute(String service, boolean privateRoute, boolean admin, boolean shared) {}
 
     private final GatewayProperties properties;
@@ -57,13 +59,20 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return matchRoute(request.getRequestURI()) == null;
+        DirectRoute route = matchRoute(request.getRequestURI());
+        if (route == null) {
+            return true;
+        }
+        request.setAttribute(MATCHED_ROUTE_ATTR, route);
+        return false;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        DirectRoute route = matchRoute(request.getRequestURI());
+        DirectRoute route = request.getAttribute(MATCHED_ROUTE_ATTR) instanceof DirectRoute cached
+                ? cached
+                : matchRoute(request.getRequestURI());
         if (route == null) {
             filterChain.doFilter(request, response);
             return;
@@ -240,21 +249,21 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     }
 
     private HttpServletRequest wrapHeaders(HttpServletRequest request, ProductLine product, GatewayIdentity identity) {
-        Map<String, String> injected = new LinkedHashMap<>();
-        String userIdHeader = properties.getSecurity().getUserIdHeader();
+        Map<String, String> injected = new java.util.HashMap<>(8);
+        String userIdHeader = properties.getSecurity().getUserIdHeader().toLowerCase(Locale.ROOT);
         injected.put(userIdHeader, null);
-        injected.put("X-User-Id", null);
-        injected.put("X-Admin-User-Id", null);
-        injected.put("X-Admin-Username", null);
-        injected.put("X-Admin-Roles", null);
+        injected.put("x-user-id", null);
+        injected.put("x-admin-user-id", null);
+        injected.put("x-admin-username", null);
+        injected.put("x-admin-roles", null);
         if (product != null) {
-            injected.put("X-Product-Line", product.name());
+            injected.put("x-product-line", product.name());
         }
         if (identity != null) {
             if (identity.admin()) {
-                injected.put("X-Admin-User-Id", identity.userId());
-                if (identity.username() != null) injected.put("X-Admin-Username", identity.username());
-                injected.put("X-Admin-Roles", String.join(",", identity.roles()));
+                injected.put("x-admin-user-id", identity.userId());
+                if (identity.username() != null) injected.put("x-admin-username", identity.username());
+                injected.put("x-admin-roles", String.join(",", identity.roles()));
             } else {
                 injected.put(userIdHeader, identity.userId());
             }
@@ -277,10 +286,9 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     private static final class InjectedHeadersRequestWrapper extends HttpServletRequestWrapper {
         private final Map<String, String> overrides;
 
-        InjectedHeadersRequestWrapper(HttpServletRequest request, Map<String, String> overrides) {
+        InjectedHeadersRequestWrapper(HttpServletRequest request, Map<String, String> lowercaseOverrides) {
             super(request);
-            this.overrides = new LinkedHashMap<>();
-            overrides.forEach((k, v) -> this.overrides.put(k.toLowerCase(Locale.ROOT), v));
+            this.overrides = lowercaseOverrides;
         }
 
         @Override

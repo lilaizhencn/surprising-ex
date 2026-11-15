@@ -1,8 +1,8 @@
 package com.surprising.gateway.provider.controller;
 
 import com.surprising.gateway.provider.service.PortfolioIncomeService;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -11,18 +11,14 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/portfolio")
 public class PortfolioIncomeController {
-    private final AuthService auth;
     private final PortfolioIncomeService income;
-    public PortfolioIncomeController(AuthService auth, PortfolioIncomeService income) { this.auth = auth; this.income = income; }
+    public PortfolioIncomeController(PortfolioIncomeService income) { this.income = income; }
+    public PortfolioIncomeController(AuthService auth, PortfolioIncomeService income) { this(income); }
 
     @GetMapping("/income")
-    public ResponseEntity<PortfolioIncomeService.Summary> income(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        JwtPrincipal principal;
-        try { principal = auth.authenticateBearer(authorization); }
-        catch (IllegalArgumentException unauthenticated) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "sign in is required"); }
-        catch (IllegalStateException forbidden) { throw new ResponseStatusException(HttpStatus.FORBIDDEN, "account is not available"); }
+    public ResponseEntity<PortfolioIncomeService.Summary> income(@CurrentUser long userId) {
         try {
-            return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(income.income(principal.userId()));
+            return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(income.income(userId));
         } catch (DataAccessException unavailable) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "portfolio income is temporarily unavailable", unavailable);
         }

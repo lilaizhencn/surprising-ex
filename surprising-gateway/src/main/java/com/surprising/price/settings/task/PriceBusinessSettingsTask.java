@@ -8,6 +8,6 @@ import org.springframework.stereotype.Component;
 public class PriceBusinessSettingsTask {
     private final PriceBusinessSettingsService settings;
     public PriceBusinessSettingsTask(PriceBusinessSettingsService settings) { this.settings = settings; }
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelayString = "${surprising.price.settings-refresh-ms:5000}")
     public void reload() { settings.reload(); }
 }

@@ -27,24 +27,23 @@ public final class AccountHistoryRequestBinding {
         return asset == null || asset.isBlank() ? null : normalizeAsset(asset);
     }
 
+    private static final java.util.regex.Pattern REF_PATTERN = java.util.regex.Pattern.compile("[A-Z0-9_:-]{2,80}");
+
     public static String optionalReferenceType(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9_:-]{2,80}")) {
-            throw new IllegalArgumentException("invalid referenceType: " + value);
-        }
-        return normalized;
+        return optionalIdentifier(value, "referenceType");
     }
 
     public static String optionalAdjustmentKind(String value) {
+        return optionalIdentifier(value, "adjustmentKind");
+    }
+
+    private static String optionalIdentifier(String value, String fieldName) {
         if (value == null || value.isBlank()) {
             return null;
         }
         String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9_:-]{2,80}")) {
-            throw new IllegalArgumentException("invalid adjustmentKind: " + value);
+        if (!REF_PATTERN.matcher(normalized).matches()) {
+            throw new IllegalArgumentException("invalid " + fieldName + ": " + value);
         }
         return normalized;
     }
@@ -61,13 +60,6 @@ public final class AccountHistoryRequestBinding {
     }
 
     private static String normalizeAsset(String asset) {
-        if (asset == null || asset.isBlank()) {
-            throw new IllegalArgumentException("asset is required");
-        }
-        String value = asset.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!value.matches("[A-Z0-9]{2,20}")) {
-            throw new IllegalArgumentException("invalid asset: " + asset);
-        }
-        return value;
+        return AccountInputBinding.asset(asset);
     }
 }

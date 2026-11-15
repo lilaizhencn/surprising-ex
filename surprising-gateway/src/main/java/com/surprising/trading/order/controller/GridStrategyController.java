@@ -1,7 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.trading.order.model.GridStrategyModels.CreateGridStrategyRequest;
 import com.surprising.trading.order.model.GridStrategyModels.GridStrategyRecord;
 import com.surprising.trading.order.service.GridStrategyService;
@@ -16,49 +15,34 @@ import org.springframework.web.server.ResponseStatusException;
 public class GridStrategyController {
 
     private final GridStrategyService gridStrategyService;
-    private final AuthService authService;
 
-    public GridStrategyController(GridStrategyService gridStrategyService, AuthService authService) {
+    public GridStrategyController(GridStrategyService gridStrategyService) {
         this.gridStrategyService = gridStrategyService;
-        this.authService = authService;
     }
 
     @PostMapping("/create")
-    public GridStrategyRecord create(@RequestHeader("Authorization") String authorization,
+    public GridStrategyRecord create(@CurrentUser long userId,
                                      @Valid @RequestBody CreateGridStrategyRequest request,
                                      @RequestParam(defaultValue = "0") long currentPriceTicks) {
-        JwtPrincipal principal = principal(authorization);
         try {
-            return gridStrategyService.createAndStartGrid(principal.userId(), request, currentPriceTicks);
+            return gridStrategyService.createAndStartGrid(userId, request, currentPriceTicks);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
 
     @GetMapping("/list")
-    public List<GridStrategyRecord> list(@RequestHeader("Authorization") String authorization) {
-        JwtPrincipal principal = principal(authorization);
-        return gridStrategyService.listStrategies(principal.userId());
+    public List<GridStrategyRecord> list(@CurrentUser long userId) {
+        return gridStrategyService.listStrategies(userId);
     }
 
     @PostMapping("/{strategyId}/stop")
-    public GridStrategyRecord stop(@RequestHeader("Authorization") String authorization,
+    public GridStrategyRecord stop(@CurrentUser long userId,
                                    @PathVariable long strategyId) {
-        JwtPrincipal principal = principal(authorization);
         try {
-            return gridStrategyService.stopGrid(principal.userId(), strategyId);
+            return gridStrategyService.stopGrid(userId, strategyId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
-    private JwtPrincipal principal(String authorization) {
-        try {
-            return authService.authenticateBearer(authorization);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
         }
     }
 }

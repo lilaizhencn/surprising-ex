@@ -182,7 +182,7 @@ public class AdlService {
     }
 
     private String accountType() {
-        return properties.getKafka().getAccountType();
+        return properties.getAccountType();
     }
 
     public record AdlCycle(boolean enabled, int resolutions, int executed) {

@@ -10,7 +10,7 @@ import com.surprising.gateway.provider.auth.model.ApiKeyModels.CreatedApiKey;
 import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -31,7 +31,6 @@ public class GatewayApiKeyService {
     private final ClientIpResolver clientIpResolver;
     private final com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient;
     private final com.surprising.gateway.provider.auth.state.AuthState authState;
-    private final SecureRandom random = new SecureRandom();
 
     public GatewayApiKeyService(GatewayApiKeyRepository repository,
                                 AuthService authService,
@@ -123,9 +122,17 @@ public class GatewayApiKeyService {
         return record;
     }
 
+    private static final ThreadLocal<Mac> HMAC_SHA256 = ThreadLocal.withInitial(() -> {
+        try {
+            return Mac.getInstance("HmacSHA256");
+        } catch (Exception ex) {
+            throw new IllegalStateException("HmacSHA256 unavailable", ex);
+        }
+    });
+
     public String sign(String secret, String canonicalQuery) {
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
+            Mac mac = HMAC_SHA256.get();
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return java.util.HexFormat.of().formatHex(mac.doFinal(canonicalQuery.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception ex) {
@@ -187,7 +194,7 @@ public class GatewayApiKeyService {
 
     private String randomToken(int bytes) {
         byte[] value = new byte[bytes];
-        random.nextBytes(value);
+        AuthCodeFormats.SECURE_RANDOM.nextBytes(value);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
     }
 

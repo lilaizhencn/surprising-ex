@@ -5,10 +5,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 其他设备与异地登录安全检测与提醒服务
@@ -17,15 +19,28 @@ import org.springframework.stereotype.Service;
 public class DeviceLoginAlertService {
 
     private static final Logger log = LoggerFactory.getLogger(DeviceLoginAlertService.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+            .withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter DAY_KEY_FMT = DateTimeFormatter.ofPattern("yyyyMMdd")
             .withZone(ZoneId.systemDefault());
 
     private final GatewayLoginLogRepository loginLogRepository;
     private final PushDispatcher pushDispatcher;
+    private final ObjectMapper objectMapper;
 
     public DeviceLoginAlertService(GatewayLoginLogRepository loginLogRepository, PushDispatcher pushDispatcher) {
+        this(loginLogRepository, pushDispatcher, JSON);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DeviceLoginAlertService(
+            GatewayLoginLogRepository loginLogRepository,
+            PushDispatcher pushDispatcher,
+            ObjectMapper objectMapper) {
         this.loginLogRepository = loginLogRepository;
         this.pushDispatcher = pushDispatcher;
+        this.objectMapper = objectMapper == null ? JSON : objectMapper;
     }
 
     /**
@@ -54,10 +69,10 @@ public class DeviceLoginAlertService {
                 String body = String.format("您的账号于 %s 从新网络环境 (%s - %s) 登录。如非本人操作，请立即前往安全中心检查活跃会话并修改密码。",
                         timeStr, ipAddress.trim(), deviceHint);
                 String route = "/security";
-                String routeParams = String.format("{\"section\":\"devices\",\"ip\":\"%s\"}", ipAddress.trim());
+                String routeParams = objectMapper.writeValueAsString(Map.of("section", "devices", "ip", ipAddress.trim()));
 
                 // 幂等防重：同一天同一 IP 只发一次
-                String dayKey = DateTimeFormatter.ofPattern("yyyyMMdd").withZone(ZoneId.systemDefault()).format(Instant.now());
+                String dayKey = DAY_KEY_FMT.format(Instant.now());
                 String idempotencyKey = String.format("LOGIN_ALERT:%d:%s:%s", userId, ipAddress.trim(), dayKey);
 
                 log.info("Triggering new device login alert for userId={}, ip={}", userId, ipAddress);

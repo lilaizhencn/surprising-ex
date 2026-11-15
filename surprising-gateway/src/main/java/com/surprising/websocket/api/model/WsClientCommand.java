@@ -10,7 +10,8 @@ public record WsClientCommand(
         @Size(max = 16) String period,
         Long userId,
         @Size(max = 32) String productLine,
-        @Size(max = 4096) String token) {
+        @Size(max = 4096) String token,
+        Integer depth) {
 
     public WsClientCommand(String op,
                            String id,
@@ -18,7 +19,7 @@ public record WsClientCommand(
                            String instrumentId,
                            String period,
                            Long userId) {
-        this(op, id, channel, instrumentId, period, userId, null, null);
+        this(op, id, channel, instrumentId, period, userId, null, null, null);
     }
 
     public WsClientCommand(String op,
@@ -28,6 +29,17 @@ public record WsClientCommand(
                            String period,
                            Long userId,
                            String productLine) {
-        this(op, id, channel, instrumentId, period, userId, productLine, null);
+        this(op, id, channel, instrumentId, period, userId, productLine, null, null);
+    }
+
+    public WsClientCommand(String op,
+                           String id,
+                           String channel,
+                           String instrumentId,
+                           String period,
+                           Long userId,
+                           String productLine,
+                           String token) {
+        this(op, id, channel, instrumentId, period, userId, productLine, token, null);
     }
 }

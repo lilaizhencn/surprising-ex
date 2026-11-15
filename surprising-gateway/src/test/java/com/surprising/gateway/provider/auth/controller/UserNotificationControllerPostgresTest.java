@@ -60,7 +60,9 @@ class UserNotificationControllerPostgresTest {
         var auth=mock(AuthService.class);
         when(auth.authenticateBearer("Bearer user")).thenReturn(new JwtPrincipal(42,"user","NORMAL",List.of("USER"),Instant.now().plusSeconds(60)));
         when(auth.authenticateBearer("Bearer bad")).thenThrow(new IllegalArgumentException("bad bearer"));
-        mvc=MockMvcBuilders.standaloneSetup(new UserNotificationController(auth,context.getBean(UserNotificationService.class))).build();
+        mvc=MockMvcBuilders.standaloneSetup(new UserNotificationController(auth,context.getBean(UserNotificationService.class)))
+                .setCustomArgumentResolvers(new com.surprising.gateway.provider.config.CurrentUserArgumentResolver(auth))
+                .build();
     }
 
     @AfterEach void clean() {

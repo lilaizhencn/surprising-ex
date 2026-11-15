@@ -8,12 +8,14 @@ import com.surprising.account.api.model.*;
 public final class AccountInputBinding {
     private AccountInputBinding() { }
 
+    private static final java.util.regex.Pattern ASSET_PATTERN = java.util.regex.Pattern.compile("[A-Z0-9]{2,20}");
+
     public static String asset(String asset) {
         if (asset == null || asset.isBlank()) {
             throw new IllegalArgumentException("asset is required");
         }
         String value = asset.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!value.matches("[A-Z0-9]{2,20}")) {
+        if (!ASSET_PATTERN.matcher(value).matches()) {
             throw new IllegalArgumentException("invalid asset: " + asset);
         }
         return value;

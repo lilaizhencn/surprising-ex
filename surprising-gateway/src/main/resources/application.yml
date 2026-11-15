@@ -21,6 +21,7 @@ spring:
   jackson:
     deserialization:
       accept-float-as-int: false
+      use-big-decimal-for-floats: true
   application:
     name: surprising-gateway
   servlet:

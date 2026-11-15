@@ -6,7 +6,7 @@ import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepos
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
@@ -26,7 +26,6 @@ public class SensitiveActionVerificationService {
     private final GatewayAuthChallengeRepository challengeRepository;
     private final EmailMessageSender sender;
     private final TotpService totpService;
-    private final SecureRandom secureRandom = new SecureRandom();
 
     public SensitiveActionVerificationService(GatewayProperties properties,
                                               AuthPersistenceService persistence,
@@ -51,7 +50,7 @@ public class SensitiveActionVerificationService {
         var user = persistence.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
         String destination = normalizeEmail(user.email());
         boolean simulated = properties.getSecurity().isSimulatedVerificationCodesEnabled();
-        String code = simulated ? "123456" : String.format("%06d", secureRandom.nextInt(1_000_000));
+        String code = AuthCodeFormats.sixDigitCode(simulated);
         Instant expiresAt = now.plus(properties.getSecurity().getVerificationCodeTtl());
         var challenge = challengeRepository.create(userId, PURPOSE, "EMAIL", destination,
                 digest(code, normalizedScene, destination), expiresAt, requestIp, now);

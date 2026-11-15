@@ -7,6 +7,7 @@ import com.surprising.gateway.provider.interceptor.*;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import jakarta.servlet.DispatcherType;
 import java.util.List;
+import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -25,6 +26,8 @@ import org.springframework.web.cors.CorsConfigurationSource;
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
 public class GatewaySecurityConfiguration {
+    private static final Set<String> LOOPBACK_ADDRS = Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1");
+    private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
     @Bean
     public WebSecurityCustomizer gatewayFirewall() {
         var firewall = new StrictHttpFirewall() {
@@ -73,7 +76,7 @@ public class GatewaySecurityConfiguration {
                         .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
                         .requestMatchers("/actuator/**", "/internal/**", "/api/v1/accounts/**", "/api/v1/trading/**")
                             .access((authentication, context) -> new org.springframework.security.authorization.AuthorizationDecision(
-                                    List.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(context.getRequest().getRemoteAddr())))
+                                    LOOPBACK_ADDRS.contains(context.getRequest().getRemoteAddr())))
                         .requestMatchers("/api/v1/admin/**").hasAnyRole(properties.getSecurity().getAdminRoles().toArray(String[]::new))
                         .requestMatchers(HttpMethod.HEAD,"/api/v1/content/media/{mediaId}").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/csrf", "/api/v1/auth/google/config", "/api/v1/auth/telegram/config", "/api/v1/auth/telegram/callback",
@@ -105,7 +108,7 @@ public class GatewaySecurityConfiguration {
      * 用 Authorization 头或 API Key 认证的请求（App、脚本、做市商）不受影响。
      */
     static boolean requiresCsrf(jakarta.servlet.http.HttpServletRequest request) {
-        if (List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod())) return false;
+        if (SAFE_METHODS.contains(request.getMethod())) return false;
         if (request.getHeader("Authorization") != null || request.getHeader("X-API-Key") != null
                 || request.getHeader("X-MBX-APIKEY") != null) return false;
         if (com.surprising.gateway.provider.auth.controller.BrowserSessionCookies.client(request) == null) return false;

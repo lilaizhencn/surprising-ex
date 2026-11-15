@@ -39,6 +39,7 @@ class ProductUnavailableHttpBoundaryTest {
                 new JwtPrincipal(42,"user","NORMAL",List.of(),Instant.now().plusSeconds(60)));
         var mvc=MockMvcBuilders.standaloneSetup(new AccountAssetsController(auth,
                 new GatewayProductSelection(products,new ObjectMapper()),products))
+                .setCustomArgumentResolvers(new com.surprising.gateway.provider.config.CurrentUserArgumentResolver(auth))
                 .setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
         for(String path:List.of("balances","product-balances")) {
             mvc.perform(get("/api/v1/gateway/account/"+path).header("Authorization","Bearer own")

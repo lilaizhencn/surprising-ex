@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.interceptor;
 
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -7,8 +8,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -17,6 +20,11 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
 
     private static final String ADMIN_PREFIX = "/api/v1/admin/";
     private static final String ADMIN_GATEWAY_PREFIX = "/api/v1/admin/gateway/";
+    private static final Pattern C2C_PAY_ACCOUNT = Pattern.compile("/c2c/payment-accounts/[^/]+");
+    private static final Pattern C2C_ORDER_PAYMENT = Pattern.compile("/c2c/orders/[^/]+/payment");
+    private static final Pattern C2C_ORDER_CHAT = Pattern.compile("/c2c/orders/[^/]+/chat(?:/.*)?");
+    private static final Pattern C2C_APPEAL_DECISION = Pattern.compile("/c2c/appeals/[^/]+/decision");
+    private static final Pattern C2C_AD_CLOSE = Pattern.compile("/c2c/ads/[^/]+/close");
 
     private final AuthService authService;
 
@@ -37,7 +45,13 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
             GatewaySecurityErrors.write(response, 403, "ACCESS_DENIED"); return;
         }
         try {
-            authService.requireAdminPermission(request.getHeader(HttpHeaders.AUTHORIZATION), permission);
+            var authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.isAuthenticated()
+                    && authentication.getPrincipal() instanceof JwtPrincipal principal) {
+                authService.requireAdminPermission(principal.userId(), principal.roles(), permission);
+            } else {
+                authService.requireAdminPermission(request.getHeader(HttpHeaders.AUTHORIZATION), permission);
+            }
         } catch (IllegalArgumentException ex) {
             GatewaySecurityErrors.write(response, 401, "UNAUTHENTICATED"); return;
         } catch (IllegalStateException ex) {
@@ -61,13 +75,13 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         boolean read = HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method);
         String path = uri.substring("/api/v1/admin".length()).toLowerCase(Locale.ROOT);
         if (path.equals("/c2c") || path.startsWith("/c2c/")) {
-            if (read && (path.matches("/c2c/payment-accounts/[^/]+")
-                    || path.matches("/c2c/orders/[^/]+/payment")
-                    || path.matches("/c2c/orders/[^/]+/chat(?:/.*)?"))) {
+            if (read && (C2C_PAY_ACCOUNT.matcher(path).matches()
+                    || C2C_ORDER_PAYMENT.matcher(path).matches()
+                    || C2C_ORDER_CHAT.matcher(path).matches())) {
                 return "admin.c2c.sensitive.read";
             }
-            if (!read && (path.matches("/c2c/appeals/[^/]+/decision")
-                    || path.matches("/c2c/ads/[^/]+/close"))) {
+            if (!read && (C2C_APPEAL_DECISION.matcher(path).matches()
+                    || C2C_AD_CLOSE.matcher(path).matches())) {
                 return "admin.c2c.resolve";
             }
             return "admin.c2c." + (read ? "read" : "write");

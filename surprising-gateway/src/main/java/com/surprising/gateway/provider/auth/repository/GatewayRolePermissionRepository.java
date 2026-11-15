@@ -70,12 +70,17 @@ public class GatewayRolePermissionRepository {
 
     public void replace(long roleId, Collection<Long> permissionIds, Instant now) {
         jdbcTemplate.update("DELETE FROM gateway_role_permissions WHERE role_id = ?", roleId);
-        for (Long permissionId : permissionIds) {
-            jdbcTemplate.update("""
+        if (!permissionIds.isEmpty()) {
+            Timestamp createdAt = Timestamp.from(now);
+            List<Object[]> batch = new java.util.ArrayList<>(permissionIds.size());
+            for (Long permissionId : permissionIds) {
+                batch.add(new Object[]{roleId, permissionId, createdAt});
+            }
+            jdbcTemplate.batchUpdate("""
                     INSERT INTO gateway_role_permissions (role_id, permission_id, created_at)
                     VALUES (?, ?, ?)
                     ON CONFLICT (role_id, permission_id) DO NOTHING
-                    """, roleId, permissionId, Timestamp.from(now));
+                    """, batch);
         }
         if (authState != null) authState.roleChanged(roleId);
     }

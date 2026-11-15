@@ -1,9 +1,11 @@
 package com.surprising.gateway.provider.auth.controller;
 
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 
 import jakarta.validation.Valid;
 
@@ -12,7 +14,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
 /** 登录因素的绑定入口；必须验证已有全部因素及新联系方式，成功后才启用。 */
 @RestController
@@ -28,15 +29,13 @@ public class LoginVerificationSettingsController {
     }
 
     @GetMapping
-    public List<LoginVerificationModels.Setting> methods(
-            @RequestHeader("Authorization") String bearer) {
-        return verification.settings(auth.authenticateBearer(bearer).userId());
+    public List<LoginVerificationModels.Setting> methods(@CurrentUser long userId) {
+        return verification.settings(userId);
     }
 
     @GetMapping("/authentication")
     public ResponseEntity<LoginVerificationModels.PrimaryAuthentication> authentication(
-            @RequestHeader("Authorization") String bearer) {
-        var principal = auth.authenticateBearer(bearer);
+            @CurrentUser JwtPrincipal principal) {
         return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(verification.primaryAuthentication(principal.userId(), Instant.now(),
                         auth.primaryAuthenticatedAt(principal)));
@@ -44,10 +43,9 @@ public class LoginVerificationSettingsController {
 
     @PostMapping("/{method}/verify-password")
     public void verifyPassword(
-            @RequestHeader("Authorization") String bearer,
+            @CurrentUser JwtPrincipal principal,
             @PathVariable String method,
             @Valid @RequestBody PasswordVerificationRequest request) {
-        var principal = auth.authenticateBearer(bearer);
         verification.verifySettingPassword(principal.userId(), method, request.currentPassword(),
                 Instant.now(), auth.primaryAuthenticatedAt(principal));
     }
@@ -57,29 +55,27 @@ public class LoginVerificationSettingsController {
 
     @PostMapping("/{method}/bind")
     public LoginVerificationModels.BindingResponse begin(
-            @RequestHeader("Authorization") String bearer,
+            @CurrentUser JwtPrincipal principal,
             @PathVariable String method,
             @Valid @RequestBody LoginVerificationModels.SettingRequest request) {
-        var principal = auth.authenticateBearer(bearer);
         return verification.beginBinding(principal.userId(), method, request, Instant.now(),
                 auth.primaryAuthenticatedAt(principal));
     }
 
     @PostMapping("/{method}/resend")
     public LoginVerificationModels.ChallengeResponse resend(
-            @RequestHeader("Authorization") String bearer,
+            @CurrentUser long userId,
             @PathVariable String method,
             @Valid @RequestBody LoginVerificationModels.ResendRequest request) {
         return verification.resendBindingCode(
-                auth.authenticateBearer(bearer).userId(), method, request, Instant.now());
+                userId, method, request, Instant.now());
     }
 
     @PostMapping("/{method}/confirm")
     public void confirm(
-            @RequestHeader("Authorization") String bearer,
+            @CurrentUser JwtPrincipal principal,
             @PathVariable String method,
             @Valid @RequestBody LoginVerificationModels.SettingConfirmation request) {
-        var principal = auth.authenticateBearer(bearer);
         verification.confirmBinding(principal.userId(), method, request, Instant.now(),
                 auth.primaryAuthenticatedAt(principal));
     }

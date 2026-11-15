@@ -1,7 +1,7 @@
 package com.surprising.websocket.provider.controller;
 
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.websocket.provider.service.RealtimeWebSocketBridge;
-import com.surprising.gateway.provider.auth.service.AuthService;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.UserReadView;
@@ -14,25 +14,16 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/realtime")
 public final class RealtimeStateController {
     private final RealtimeWebSocketBridge bridge;
-    private final AuthService auth;
 
-    public RealtimeStateController(RealtimeWebSocketBridge bridge, AuthService auth) {
+    public RealtimeStateController(RealtimeWebSocketBridge bridge) {
         this.bridge = bridge;
-        this.auth = auth;
     }
 
     @GetMapping("/{productLine}/state")
     public UserReadView state(
             @PathVariable ProductLine productLine,
-            @RequestHeader("Authorization") String authorization) {
-        if (!authorization.startsWith("Bearer "))
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.UNAUTHORIZED);
-        long user;
-        try {
-            user = auth.authenticateBearer(authorization).userId();
-            if (user <= 0) throw new IllegalArgumentException();
-        } catch (IllegalArgumentException failure) {
+            @CurrentUser long user) {
+        if (user <= 0) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.UNAUTHORIZED);
         }

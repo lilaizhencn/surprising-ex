@@ -70,8 +70,8 @@ class LifecycleHistoryBoundaryPostgresTest {
     @AfterEach void cleanup() { if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }
 
     private void configure(ProductLine line) {
-        var ap = new AdlProperties(); ap.getKafka().setProductLine(line);
-        var ip = new InsuranceProperties(); ip.getKafka().setProductLine(line);
+        var ap = new AdlProperties(); ap.setProductLine(line);
+        var ip = new InsuranceProperties(); ip.setProductLine(line);
         adlCore = mock(AdlAeronGateway.class); insuranceCore = mock(InsuranceAeronGateway.class);
         var adl = new AdlService(ap, adlCore, new AdlEventRepository(jdbc));
         var insurance = new InsuranceService(ip, new InsuranceFundLedgerRepository(jdbc), new InsuranceCoverageRepository(jdbc), insuranceCore);

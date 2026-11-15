@@ -20,9 +20,13 @@ public class JwtTokenService {
 
     private static final Base64.Encoder URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final Base64.Decoder URL_DECODER = Base64.getUrlDecoder();
+    private static final String JWT_HEADER_B64 = URL_ENCODER.encodeToString(
+            "{\"alg\":\"HS256\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8));
 
     private final GatewayProperties properties;
     private final ObjectMapper objectMapper;
+    private volatile String cachedSecret;
+    private volatile SecretKeySpec cachedSecretKey;
 
     public JwtTokenService(GatewayProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
@@ -32,7 +36,6 @@ public class JwtTokenService {
     /** 登录令牌：带用户ID、会话ID、用户名和角色，签名后不查库即可得到用户ID；是否仍有效由 Valkey 会话决定。 */
     public String createSessionToken(long userId, String username, List<String> roles, long sessionId, Instant now) {
         Instant expiresAt = now.plus(properties.getSecurity().getSessionTokenMaxLifetime());
-        Map<String, Object> header = Map.of("alg", "HS256", "typ", "JWT");
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put("iss", properties.getSecurity().getIssuer());
         claims.put("sub", Long.toString(userId));
@@ -43,7 +46,7 @@ public class JwtTokenService {
         claims.put("exp", expiresAt.getEpochSecond());
         claims.put("jti", UUID.randomUUID().toString());
         claims.put("sid", sessionId);
-        String unsigned = base64Json(header) + "." + base64Json(claims);
+        String unsigned = JWT_HEADER_B64 + "." + base64Json(claims);
         return unsigned + "." + sign(unsigned);
     }
 
@@ -71,32 +74,54 @@ public class JwtTokenService {
         if (token == null || token.isBlank()) {
             throw new IllegalArgumentException("missing access token");
         }
-        String[] parts = token.split("\\.");
-        if (parts.length != 3) {
+        int firstDot = token.indexOf('.');
+        int secondDot = firstDot < 0 ? -1 : token.indexOf('.', firstDot + 1);
+        if (firstDot <= 0 || secondDot <= firstDot + 1 || secondDot == token.length() - 1
+                || token.indexOf('.', secondDot + 1) >= 0) {
             throw new IllegalArgumentException("invalid access token");
         }
-        String unsigned = parts[0] + "." + parts[1];
+        String unsigned = token.substring(0, secondDot);
         byte[] expected = sign(unsigned).getBytes(StandardCharsets.UTF_8);
-        byte[] actual = parts[2].getBytes(StandardCharsets.UTF_8);
+        byte[] actual = token.substring(secondDot + 1).getBytes(StandardCharsets.UTF_8);
         if (!MessageDigest.isEqual(expected, actual)) {
             throw new IllegalArgumentException("invalid access token signature");
         }
-        return objectMapper.readValue(new String(URL_DECODER.decode(parts[1]), StandardCharsets.UTF_8), Map.class);
+        String payloadPart = token.substring(firstDot + 1, secondDot);
+        return objectMapper.readValue(URL_DECODER.decode(payloadPart), Map.class);
     }
 
     private String base64Json(Object value) {
         return URL_ENCODER.encodeToString(objectMapper.writeValueAsBytes(value));
     }
 
+    private static final ThreadLocal<Mac> HMAC_SHA256 = ThreadLocal.withInitial(() -> {
+        try {
+            return Mac.getInstance("HmacSHA256");
+        } catch (Exception ex) {
+            throw new IllegalStateException("HmacSHA256 unavailable", ex);
+        }
+    });
+
     private String sign(String unsigned) {
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(properties.getSecurity().getJwtSecret().getBytes(StandardCharsets.UTF_8),
-                    "HmacSHA256"));
+            Mac mac = HMAC_SHA256.get();
+            mac.init(secretKeySpec());
             return URL_ENCODER.encodeToString(mac.doFinal(unsigned.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception ex) {
             throw new IllegalStateException("failed to sign access token", ex);
         }
+    }
+
+    private SecretKeySpec secretKeySpec() {
+        String secret = properties.getSecurity().getJwtSecret();
+        SecretKeySpec spec = cachedSecretKey;
+        if (spec != null && secret.equals(cachedSecret)) {
+            return spec;
+        }
+        SecretKeySpec created = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+        cachedSecret = secret;
+        cachedSecretKey = created;
+        return created;
     }
 
     private static String asString(Object value) {

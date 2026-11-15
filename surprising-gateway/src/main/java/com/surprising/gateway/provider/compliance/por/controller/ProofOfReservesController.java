@@ -1,9 +1,8 @@
 package com.surprising.gateway.provider.compliance.por.controller;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.compliance.por.model.PorModels.*;
 import com.surprising.gateway.provider.compliance.por.service.ProofOfReservesService;
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 import jakarta.validation.Valid;
 import java.util.NoSuchElementException;
 import org.springframework.http.HttpStatus;
@@ -15,11 +14,9 @@ import org.springframework.web.server.ResponseStatusException;
 public class ProofOfReservesController {
 
     private final ProofOfReservesService porService;
-    private final AuthService authService;
 
-    public ProofOfReservesController(ProofOfReservesService porService, AuthService authService) {
+    public ProofOfReservesController(ProofOfReservesService porService) {
         this.porService = porService;
-        this.authService = authService;
     }
 
     @GetMapping("/latest")
@@ -28,10 +25,9 @@ public class ProofOfReservesController {
     }
 
     @GetMapping("/my-proof")
-    public UserPorProofResponse myProof(@RequestHeader("Authorization") String authorization) {
-        JwtPrincipal principal = principal(authorization);
+    public UserPorProofResponse myProof(@CurrentUser long userId) {
         try {
-            return porService.getUserProof(principal.userId());
+            return porService.getUserProof(userId);
         } catch (NoSuchElementException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
@@ -40,15 +36,5 @@ public class ProofOfReservesController {
     @PostMapping("/verify")
     public VerifyPorProofResponse verify(@Valid @RequestBody VerifyPorProofRequest request) {
         return porService.verifyProof(request);
-    }
-
-    private JwtPrincipal principal(String authorization) {
-        try {
-            return authService.authenticateBearer(authorization);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
     }
 }

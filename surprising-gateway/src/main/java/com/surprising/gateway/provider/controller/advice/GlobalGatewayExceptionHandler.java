@@ -68,6 +68,11 @@ public class GlobalGatewayExceptionHandler {
                         "retryAfterSeconds", failure.retryAfterSeconds()));
     }
 
+    @ExceptionHandler(com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException.class)
+    public ProblemDetail apiKeyBlocked(com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException failure) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, failure.getMessage());
+    }
+
     @ExceptionHandler(OrderCommandRejectedException.class)
     public ProblemDetail orderRejected(OrderCommandRejectedException failure) {
         ProblemDetail body = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, failure.getMessage());

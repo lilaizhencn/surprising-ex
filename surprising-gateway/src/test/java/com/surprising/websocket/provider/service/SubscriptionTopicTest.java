@@ -73,6 +73,17 @@ class SubscriptionTopicTest {
     }
 
     @Test
+    void depthSubscriptionSupportsCustomTierAndRejectsOutOfRange() {
+        SubscriptionTopic topic = SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-depth", "depth", "1", null, null, "SPOT", null, 20),
+                null);
+        assertThat(topic.effectiveDepth()).isEqualTo(20);
+        assertThatThrownBy(() -> SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-bad-depth", "depth", "1", null, null, "SPOT", null, 51),
+                null)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void privateTriggerOrdersChannelUsesAuthenticatedUser() {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(
                 new WsClientCommand("subscribe", "req-trigger", "triggerOrders", "1", null, null),

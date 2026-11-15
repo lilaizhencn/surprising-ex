@@ -1,28 +1,22 @@
 package com.surprising.gateway.provider.notification.controller;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.gateway.provider.notification.model.NotificationPreference;
 import com.surprising.gateway.provider.notification.service.NotificationPreferenceService;
 import java.math.BigDecimal;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/v1/user/notification-preferences")
 public class NotificationPreferenceController {
 
-    private final AuthService authService;
     private final NotificationPreferenceService preferenceService;
 
-    public NotificationPreferenceController(AuthService authService, NotificationPreferenceService preferenceService) {
-        this.authService = authService;
+    public NotificationPreferenceController(NotificationPreferenceService preferenceService) {
         this.preferenceService = preferenceService;
     }
 
@@ -43,16 +37,14 @@ public class NotificationPreferenceController {
     ) {}
 
     @GetMapping
-    public NotificationPreference getMyPreferences(@RequestHeader("Authorization") String authorization) {
-        long userId = principal(authorization).userId();
+    public NotificationPreference getMyPreferences(@CurrentUser long userId) {
         return preferenceService.getPreference(userId);
     }
 
     @PutMapping
     public NotificationPreference updateMyPreferences(
-            @RequestHeader("Authorization") String authorization,
+            @CurrentUser long userId,
             @RequestBody UpdatePreferenceRequest req) {
-        long userId = principal(authorization).userId();
         NotificationPreference current = preferenceService.getPreference(userId);
 
         NotificationPreference updated = new NotificationPreference(
@@ -74,15 +66,5 @@ public class NotificationPreferenceController {
         );
 
         return preferenceService.updatePreference(updated);
-    }
-
-    private JwtPrincipal principal(String authorization) {
-        try {
-            return authService.authenticateBearer(authorization);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
     }
 }

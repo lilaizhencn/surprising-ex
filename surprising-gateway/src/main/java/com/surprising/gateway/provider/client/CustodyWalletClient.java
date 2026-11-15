@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -35,7 +35,6 @@ public class CustodyWalletClient {
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
-    private final SecureRandom random = new SecureRandom();
 
     public CustodyWalletClient(GatewayProperties properties,
                                @Qualifier("custodyWalletRestTemplate")
@@ -255,7 +254,7 @@ public class CustodyWalletClient {
 
     private String nonce() {
         byte[] bytes = new byte[18];
-        random.nextBytes(bytes);
+        AuthCodeFormats.SECURE_RANDOM.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 

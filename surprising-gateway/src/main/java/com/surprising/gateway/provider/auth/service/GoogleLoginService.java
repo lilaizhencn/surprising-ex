@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginResult;
 import com.surprising.gateway.provider.auth.repository.GoogleLoginRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
 import org.springframework.stereotype.Service;
@@ -19,7 +19,6 @@ public class GoogleLoginService {
     private final AuthPersistenceService users;
     private final AuthService auth;
     private final com.surprising.affiliate.service.AffiliateService affiliates;
-    private final SecureRandom random = new SecureRandom();
 
     public GoogleLoginService(GoogleLoginRepository identities, GoogleIdentityClient google,
                               GatewayUserRepository userRows, AuthPersistenceService users, AuthService auth, com.surprising.affiliate.service.AffiliateService affiliates) {
@@ -35,7 +34,7 @@ public class GoogleLoginService {
     public Challenge challenge(String device) {
         requireDevice(device);
         byte[] bytes = new byte[32];
-        random.nextBytes(bytes);
+        AuthCodeFormats.SECURE_RANDOM.nextBytes(bytes);
         String nonce = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         Instant expires = Instant.now().plusSeconds(300);
         identities.createChallenge(hash(nonce), device, expires);

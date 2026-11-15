@@ -142,7 +142,7 @@ import java.util.UUID;
     }
 
     private String accountType() {
-        return normalizeAccountType(properties.getKafka().getAccountType());
+        return normalizeAccountType(properties.getAccountType());
     }
 
     private void requireProviderAccountType(String eventAccountType) {

@@ -1,11 +1,14 @@
 package com.surprising.websocket.provider.service;
 
 import com.surprising.gateway.provider.auth.service.AuthService;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 /** HTTP 与 WebSocket 共用交易登录检查，包括会话撤销、账户状态与有效期。 */
 @Service
 public class WebSocketAuthenticator {
+    private static final Pattern API_KEY_PATTERN = Pattern.compile("sx_[A-Za-z0-9_-]{20,80}");
+    private static final Pattern HEX_64_PATTERN = Pattern.compile("[a-fA-F0-9]{64}");
     private final AuthService auth;
     private final com.surprising.gateway.provider.auth.service.GatewayApiKeyService keys;
     public WebSocketAuthenticator(AuthService auth, com.surprising.gateway.provider.auth.service.GatewayApiKeyService keys) {
@@ -20,8 +23,8 @@ public class WebSocketAuthenticator {
     }
 
     public long authenticateApiKey(String apiKey, String ip, long timestamp, String signature, String challenge) {
-        if (apiKey == null || !apiKey.matches("sx_[A-Za-z0-9_-]{20,80}")
-                || signature == null || !signature.matches("[a-fA-F0-9]{64}") || ip == null || ip.isBlank())
+        if (apiKey == null || !API_KEY_PATTERN.matcher(apiKey).matches()
+                || signature == null || !HEX_64_PATTERN.matcher(signature).matches() || ip == null || ip.isBlank())
             throw new IllegalArgumentException("invalid websocket API key proof");
         return keys.authenticate(new com.surprising.gateway.provider.auth.model.ApiKeyAuthenticationRequest(
                 apiKey, ip, timestamp, 5000, signature,

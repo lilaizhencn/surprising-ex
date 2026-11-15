@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.controller;
 import com.surprising.account.api.model.*;
 import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
@@ -18,29 +19,32 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/gateway/account")
 public class AccountAssetsController {
-    private final AuthService auth;
     private final GatewayProductSelection selection;
     private final GatewayProductServices products;
 
-    public AccountAssetsController(AuthService auth, GatewayProductSelection selection, GatewayProductServices products) {
-        this.auth = auth;
+    @org.springframework.beans.factory.annotation.Autowired
+    public AccountAssetsController(GatewayProductSelection selection, GatewayProductServices products) {
         this.selection = selection;
         this.products = products;
     }
 
+    public AccountAssetsController(AuthService auth, GatewayProductSelection selection, GatewayProductServices products) {
+        this(selection, products);
+    }
+
     @GetMapping("/balances")
-    public ResponseEntity<BalanceQueryResponse> balances(@RequestHeader(value = "Authorization", required = false) String authorization,
+    public ResponseEntity<BalanceQueryResponse> balances(@CurrentUser long owner,
                                          @RequestParam long userId, HttpServletRequest request) {
-        ProductLine product = product(authorization, userId, request);
+        ProductLine product = product(owner, userId, request);
         var balance = products.disabled().contains(product) ? new BalanceQueryResponse(0, List.of())
                 : products.service(product, AccountService.class).balances(userId);
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(balance);
     }
 
     @GetMapping("/product-balances")
-    public ResponseEntity<ProductBalanceQueryResponse> productBalances(@RequestHeader(value = "Authorization", required = false) String authorization,
+    public ResponseEntity<ProductBalanceQueryResponse> productBalances(@CurrentUser long owner,
             @RequestParam long userId, @RequestParam AccountType accountType, HttpServletRequest request) {
-        ProductLine product = product(authorization, userId, request);
+        ProductLine product = product(owner, userId, request);
         if (accountType.productLine().orElse(null) != product)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "account type does not match product");
         var balance = products.disabled().contains(product) ? new ProductBalanceQueryResponse(0, List.of())
@@ -48,13 +52,7 @@ public class AccountAssetsController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(balance);
     }
 
-    private ProductLine product(String authorization, long userId, HttpServletRequest request) {
-        if (authorization == null || authorization.isBlank())
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "bearer token required");
-        final long owner;
-        try { owner = auth.authenticateBearer(authorization).userId(); }
-        catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage()); }
-        catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage()); }
+    private ProductLine product(long owner, long userId, HttpServletRequest request) {
         if (userId <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId must be positive");
         if (owner != userId) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "userId does not match authenticated user");
         ProductLine product = selection.resolve(request, null, false);

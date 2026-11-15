@@ -27,6 +27,7 @@ class AffiliateHttpTest {
     mvc = MockMvcBuilders.standaloneSetup(
       new AffiliateController(auth, service, mock(AffiliateQueryService.class))
     )
+      .setCustomArgumentResolvers(new com.surprising.gateway.provider.config.CurrentUserArgumentResolver(auth))
       .setControllerAdvice(new AffiliateErrors())
       .build();
   }

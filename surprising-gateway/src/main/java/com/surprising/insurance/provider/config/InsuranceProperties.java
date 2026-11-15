@@ -8,33 +8,16 @@ import com.surprising.product.api.ProductLine;
 @Getter
 public class InsuranceProperties {
 
-    private Kafka kafka = new Kafka();
+    private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     @Setter
     private volatile Coverage coverage = new Coverage();
 
-    public ProductLine getProductLine() {
-        return kafka.getProductLine();
-    }
-
     public void setProductLine(ProductLine productLine) {
-        kafka.setProductLine(productLine);
+        this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
     }
 
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka == null ? new Kafka() : kafka;
-    }
-
-    @Getter
-    public static class Kafka {
-        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-
-        public void setProductLine(ProductLine productLine) {
-            this.productLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
-        }
-
-        public String getAccountType() {
-            return productLine.accountTypeCode();
-        }
+    public String getAccountType() {
+        return productLine.accountTypeCode();
     }
 
     @Getter

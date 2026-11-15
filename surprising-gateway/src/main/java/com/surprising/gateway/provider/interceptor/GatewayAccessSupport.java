@@ -16,9 +16,11 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -26,6 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
  * used across Gateway controllers and filters.
  */
 public final class GatewayAccessSupport {
+    private static final Pattern ADMIN_SERVICE_PATTERN = Pattern.compile("[a-z0-9][a-z0-9_-]{0,63}");
 
     public record GatewayIdentity(String userId, String username, String status, List<String> roles, boolean admin) {
         public static GatewayIdentity user(String userId) {
@@ -57,7 +60,7 @@ public final class GatewayAccessSupport {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "user auth service is not configured");
         }
         try {
-            JwtPrincipal principal = authService.authenticateBearer(authorization);
+            JwtPrincipal principal = resolveBearerPrincipal(authService, authorization);
             return new GatewayIdentity(Long.toString(principal.userId()), principal.username(),
                     principal.status(), principal.roles(), false);
         } catch (IllegalArgumentException ex) {
@@ -72,12 +75,11 @@ public final class GatewayAccessSupport {
             GatewayProperties properties,
             HttpServletRequest request,
             String missingAuthMessage) {
-        String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (authService == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, missingAuthMessage);
         }
         try {
-            JwtPrincipal principal = authService.authenticateBearer(authorization);
+            JwtPrincipal principal = resolveBearerPrincipal(authService, request.getHeader(HttpHeaders.AUTHORIZATION));
             if (principal.roles().stream().noneMatch(properties.getSecurity().getAdminRoles()::contains)) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin role required");
             }
@@ -92,6 +94,15 @@ public final class GatewayAccessSupport {
         }
     }
 
+    private static JwtPrincipal resolveBearerPrincipal(AuthService authService, String authorization) {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof JwtPrincipal principal
+                && (authorization == null || authorization.equals(auth.getCredentials()))) {
+            return principal;
+        }
+        return authService.authenticateBearer(authorization);
+    }
+
     public static void enforceAdminPermission(
             AuthService authService,
             String service,
@@ -101,7 +112,7 @@ public final class GatewayAccessSupport {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin identity required");
         }
         String normalizedService = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
-        if (!normalizedService.matches("[a-z0-9][a-z0-9_-]{0,63}")) {
+        if (!ADMIN_SERVICE_PATTERN.matcher(normalizedService).matches()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid admin gateway service");
         }
         String permission = "admin.gateway." + normalizedService + "." + (readMethod ? "read" : "write");

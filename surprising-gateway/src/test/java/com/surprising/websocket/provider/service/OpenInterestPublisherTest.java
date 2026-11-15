@@ -47,6 +47,17 @@ class OpenInterestPublisherTest {
         verify(registry).publish(eth, Map.of("instrumentId", eth.instrumentId(), "status", "READY", "openInterestSteps", "0", "sequence", "7"), now);
         verify(registry, never()).publish(eq(other), any(), any());
     }
+    @Test void skipsRepublishWhenRevisionAndValueUnchanged() {
+        var btc = topic("49", product);
+        when(registry.topics(WsChannel.OPEN_INTEREST)).thenReturn(List.of(btc));
+        Instant now = Instant.now();
+        when(snapshots.snapshot(product)).thenReturn(new OpenInterestSnapshotResponse(product, 7, now,
+                List.of(new OpenInterestShardSnapshot(product, btc.instrumentId(), 0, 5, 5, 7, now))));
+        OpenInterestPublisher instance = publisher();
+        instance.publish();
+        instance.publish();
+        verify(registry, times(1)).publish(eq(btc), any(), eq(now));
+    }
     @Test void failureInOneProductDoesNotHideTheOtherProduct() {
         var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         var inverse = mock(AccountOpenInterestSnapshotService.class);

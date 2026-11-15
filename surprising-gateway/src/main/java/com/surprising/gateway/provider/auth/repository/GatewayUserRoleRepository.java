@@ -67,8 +67,17 @@ public class GatewayUserRoleRepository {
 
     public void replace(long userId, Collection<Long> roleIds, Instant now) {
         jdbcTemplate.update("DELETE FROM gateway_user_roles WHERE user_id = ?", userId);
-        for (Long roleId : roleIds) {
-            add(userId, roleId, now);
+        if (!roleIds.isEmpty()) {
+            Timestamp createdAt = Timestamp.from(now);
+            List<Object[]> batch = new java.util.ArrayList<>(roleIds.size());
+            for (Long roleId : roleIds) {
+                batch.add(new Object[]{userId, roleId, createdAt});
+            }
+            jdbcTemplate.batchUpdate("""
+                    INSERT INTO gateway_user_roles (user_id, role_id, created_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (user_id, role_id) DO NOTHING
+                    """, batch);
         }
         if (authState != null) authState.reloadUser(userId);
     }

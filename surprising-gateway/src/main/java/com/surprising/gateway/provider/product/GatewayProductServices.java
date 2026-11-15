@@ -206,7 +206,7 @@ public final class GatewayProductServices implements AutoCloseable {
         for (String prefix : List.of("surprising.account.kafka", "surprising.trading.order.kafka",
                 "surprising.trading.trigger", "surprising.price.consumer", "surprising.websocket.kafka",
                 "surprising.price.index.kafka", "surprising.price.mark.kafka", "surprising.candlestick.kafka",
-                "surprising.risk", "surprising.insurance.kafka", "surprising.funding.kafka"))
+                "surprising.risk", "surprising.insurance", "surprising.funding.kafka"))
             values.put(prefix + ".product-line", product.name());
         List<String> hosts = (topologyProvider != null)
                 ? topologyProvider.lookupHostnames(product)

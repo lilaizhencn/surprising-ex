@@ -23,8 +23,8 @@ public class LifecycleInfrastructureConfiguration {
     @Bean
     public InsuranceProperties insuranceProperties(Environment environment, RiskProperties risk) {
         var properties = new InsuranceProperties();
-        properties.getKafka().setProductLine(risk.getProductLine());
-        Binder.get(environment).bind("surprising.insurance.kafka", Bindable.ofInstance(properties.getKafka()));
+        properties.setProductLine(risk.getProductLine());
+        Binder.get(environment).bind("surprising.insurance", Bindable.ofInstance(properties));
         if (properties.getProductLine() != risk.getProductLine())
             throw new IllegalStateException("insurance and lifecycle must use the same product line");
         return properties;
@@ -33,7 +33,7 @@ public class LifecycleInfrastructureConfiguration {
     @Bean
     public AdlProperties adlProperties(RiskProperties risk) {
         var properties = new AdlProperties();
-        properties.getKafka().setProductLine(risk.getProductLine());
+        properties.setProductLine(risk.getProductLine());
         return properties;
     }
 }

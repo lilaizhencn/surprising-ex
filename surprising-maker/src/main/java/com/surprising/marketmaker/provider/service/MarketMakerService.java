@@ -1818,17 +1818,23 @@ public class MarketMakerService {
     }
 
     private static final class PriceState {
+        private final java.util.concurrent.locks.ReentrantLock lock = new java.util.concurrent.locks.ReentrantLock();
         private long lastPriceTicks;
         private volatile long volatilityTicks;
 
-        private synchronized long observe(long priceTicks) {
-            if (lastPriceTicks > 0) {
-                long delta = priceTicks >= lastPriceTicks
-                        ? priceTicks - lastPriceTicks : lastPriceTicks - priceTicks;
-                volatilityTicks += (delta - volatilityTicks) / 4L;
+        private long observe(long priceTicks) {
+            lock.lock();
+            try {
+                if (lastPriceTicks > 0) {
+                    long delta = priceTicks >= lastPriceTicks
+                            ? priceTicks - lastPriceTicks : lastPriceTicks - priceTicks;
+                    volatilityTicks += (delta - volatilityTicks) / 4L;
+                }
+                lastPriceTicks = priceTicks;
+                return volatilityTicks;
+            } finally {
+                lock.unlock();
             }
-            lastPriceTicks = priceTicks;
-            return volatilityTicks;
         }
 
         private long volatilityTicks() {

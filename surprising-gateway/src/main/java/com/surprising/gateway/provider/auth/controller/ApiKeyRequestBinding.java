@@ -14,9 +14,11 @@ import java.util.Set;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /** API Key管理格式及Binance签名原始字节绑定，不访问账号或密钥仓储。 */
 public final class ApiKeyRequestBinding {
+    private static final Pattern API_KEY_PATTERN = Pattern.compile("sx_[A-Za-z0-9_-]{20,80}");
     private static final Set<String> PERMISSIONS = Set.of("READ", "TRADE", "WITHDRAW");
     private final ClientIpResolver addresses;
     public ApiKeyRequestBinding(GatewayProperties properties) { addresses = new ClientIpResolver(properties); }
@@ -31,7 +33,7 @@ public final class ApiKeyRequestBinding {
 
     private ApiKeyAuthenticationRequest bind(HttpServletRequest request, byte[] body, boolean nativeApi) {
         String apiKey = request.getHeader(nativeApi ? "X-API-Key" : "X-MBX-APIKEY");
-        if (apiKey == null || !apiKey.matches("sx_[A-Za-z0-9_-]{20,80}")) {
+        if (apiKey == null || !API_KEY_PATTERN.matcher(apiKey).matches()) {
             throw new IllegalArgumentException("api key is invalid");
         }
         var parameters = formParameters(request, nativeApi ? null : body);
@@ -70,12 +72,20 @@ public final class ApiKeyRequestBinding {
 
     private static void addForm(Map<String, List<String>> parameters, String form) {
         if (form == null || form.isBlank()) return;
-        for (String field : form.split("&")) {
-            if (field.isEmpty()) continue;
-            int separator = field.indexOf('=');
-            String key = URLDecoder.decode(separator < 0 ? field : field.substring(0, separator), StandardCharsets.UTF_8);
-            String value = URLDecoder.decode(separator < 0 ? "" : field.substring(separator + 1), StandardCharsets.UTF_8);
-            parameters.computeIfAbsent(key, ignored -> new ArrayList<>()).add(value);
+        int start = 0;
+        int len = form.length();
+        while (start < len) {
+            int amp = form.indexOf('&', start);
+            int end = amp < 0 ? len : amp;
+            if (end > start) {
+                int separator = form.indexOf('=', start);
+                boolean hasSep = separator >= start && separator < end;
+                String key = URLDecoder.decode(hasSep ? form.substring(start, separator) : form.substring(start, end), StandardCharsets.UTF_8);
+                String value = hasSep ? URLDecoder.decode(form.substring(separator + 1, end), StandardCharsets.UTF_8) : "";
+                parameters.computeIfAbsent(key, ignored -> new ArrayList<>()).add(value);
+            }
+            if (amp < 0) break;
+            start = amp + 1;
         }
     }
 

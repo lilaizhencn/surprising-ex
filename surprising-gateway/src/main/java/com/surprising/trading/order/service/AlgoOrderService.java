@@ -23,6 +23,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -37,6 +39,7 @@ public class AlgoOrderService {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(AlgoOrderService.class);
 
     private static final int MAX_OPEN_CANCEL_LIMIT = 1000;
+    private static final int ORDER_LOCK_STRIPES = 64;
     private static final AlgoOrderStatus[] ALGO_ORDER_STATUSES = AlgoOrderStatus.values();
 
     private final TradingOrderProperties properties;
@@ -44,6 +47,8 @@ public class AlgoOrderService {
     private final AeronAlgoOrderStore store;
     private final com.surprising.trading.order.repository.AlgoOrderProjectionRepository projection;
     private final com.surprising.trading.order.repository.AeronOrderProjectionRepository receipts;
+    private final AtomicLong lastScanNanos = new AtomicLong();
+    private final Object[] orderLocks = createOrderLocks();
 
     @Autowired
     public AlgoOrderService(TradingOrderProperties properties,
@@ -199,11 +204,12 @@ public class AlgoOrderService {
         return new AlgoOrderQueryResponse(orders.size(), orders);
     }
 
-    private long lastScanNanos;
-    public synchronized void scanDueAlgoOrders() {
+    public void scanDueAlgoOrders() {
         long scanNow = System.nanoTime();
-        if (scanNow - lastScanNanos < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(properties.getAlgo().getScanDelayMs())) return;
-        lastScanNanos = scanNow;
+        long previous = lastScanNanos.get();
+        long minDelayNanos = TimeUnit.MILLISECONDS.toNanos(properties.getAlgo().getScanDelayMs());
+        if (previous != 0 && scanNow - previous < minDelayNanos) return;
+        if (!lastScanNanos.compareAndSet(previous, scanNow)) return;
         if (!properties.getAlgo().isEnabled()) {
             return;
         }
@@ -216,20 +222,22 @@ public class AlgoOrderService {
                         || value.statusCode() == AlgoOrderStatus.CANCEL_REQUESTED.ordinal())
                 .toList();
         for (var candidate : due) {
-            AlgoOrderRecord record = store.record(candidate);
-            AlgoOrderRecord claimed = withStatus(record, record.status() == AlgoOrderStatus.CANCEL_REQUESTED
-                    ? AlgoOrderStatus.CANCEL_REQUESTED : AlgoOrderStatus.RUNNING, record.rejectReason(),
-                    now.plus(lease), now, record.currentOrderId());
-            var claimedView = store.tryClaim(candidate, claimed);
-            if (claimedView == null) {
-                continue;
-            }
-            try {
-                executeDue(store.record(claimedView), now);
-            } catch (RuntimeException ex) {
-                // A lost placement/cancellation reply cannot prove failure. Keep the claim;
-                // the next attempt recovers its immutable child key before doing more work.
-                LOG.warn("algo step awaits recovery userId={} algoOrderId={}", claimedView.userId(), claimedView.algoOrderId(), ex);
+            synchronized (orderLock(candidate.algoOrderId())) {
+                AlgoOrderRecord record = store.record(candidate);
+                AlgoOrderRecord claimed = withStatus(record, record.status() == AlgoOrderStatus.CANCEL_REQUESTED
+                        ? AlgoOrderStatus.CANCEL_REQUESTED : AlgoOrderStatus.RUNNING, record.rejectReason(),
+                        now.plus(lease), now, record.currentOrderId());
+                var claimedView = store.tryClaim(candidate, claimed);
+                if (claimedView == null) {
+                    continue;
+                }
+                try {
+                    executeDue(store.record(claimedView), now);
+                } catch (RuntimeException ex) {
+                    // A lost placement/cancellation reply cannot prove failure. Keep the claim;
+                    // the next attempt recovers its immutable child key before doing more work.
+                    LOG.warn("algo step awaits recovery userId={} algoOrderId={}", claimedView.userId(), claimedView.algoOrderId(), ex);
+                }
             }
         }
     }
@@ -274,39 +282,53 @@ public class AlgoOrderService {
         store.update(updated, current.revision(), child.orderId());
     }
 
-    // Share the existing scheduler monitor: finish linking any locally submitted child
+    // Serialize per algoOrderId: finish linking any locally submitted child
     // before recording cancellation, then refresh the revision and child identities.
-    private synchronized AlgoOrderResponse cancelRecord(AlgoOrderRecord record, String requestedReason) {
-        var current = store.get(record.userId(), record.algoOrderId());
-        record = store.record(current);
-        requireCurrentProductLine(record);
-        if (isTerminal(record.status())) {
-            return store.response(current);
-        }
-        Instant now = Instant.now();
-        String reason = requestedReason == null ? record.rejectReason() : requestedReason;
-        AlgoOrderRecord requested = withStatus(record, AlgoOrderStatus.CANCEL_REQUESTED, reason,
-                now.plusSeconds(1), now, record.currentOrderId());
-        store.update(requested, current.revision(), 0);
-        current = recoverUnlinkedChild(store.get(record.userId(), record.algoOrderId()));
-        RuntimeException cancellationFailure = null;
-        for (long childOrderId : current.childOrderIds()) {
-            try {
-                orderService.cancel(new CancelOrderRequest(record.userId(), childOrderId));
-            } catch (RuntimeException failure) {
-                cancellationFailure = failure;
+    private AlgoOrderResponse cancelRecord(AlgoOrderRecord record, String requestedReason) {
+        synchronized (orderLock(record.algoOrderId())) {
+            var current = store.get(record.userId(), record.algoOrderId());
+            record = store.record(current);
+            requireCurrentProductLine(record);
+            if (isTerminal(record.status())) {
+                return store.response(current);
             }
+            Instant now = Instant.now();
+            String reason = requestedReason == null ? record.rejectReason() : requestedReason;
+            AlgoOrderRecord requested = withStatus(record, AlgoOrderStatus.CANCEL_REQUESTED, reason,
+                    now.plusSeconds(1), now, record.currentOrderId());
+            store.update(requested, current.revision(), 0);
+            current = recoverUnlinkedChild(store.get(record.userId(), record.algoOrderId()));
+            RuntimeException cancellationFailure = null;
+            for (long childOrderId : current.childOrderIds()) {
+                try {
+                    orderService.cancel(new CancelOrderRequest(record.userId(), childOrderId));
+                } catch (RuntimeException failure) {
+                    cancellationFailure = failure;
+                }
+            }
+            current = store.get(record.userId(), record.algoOrderId());
+            if (isTerminal(ALGO_ORDER_STATUSES[current.statusCode()])) return store.response(current);
+            if (current.activeChildOrderCount() > 0) {
+                if (cancellationFailure != null) throw cancellationFailure;
+                return store.response(current);
+            }
+            AlgoOrderRecord canceled = withStatus(store.record(current), AlgoOrderStatus.CANCELED, reason,
+                    null, Instant.now(), current.currentOrderId() == 0 ? null : current.currentOrderId());
+            store.update(canceled, current.revision(), 0);
+            return store.response(store.get(canceled.userId(), canceled.algoOrderId()));
         }
-        current = store.get(record.userId(), record.algoOrderId());
-        if (isTerminal(ALGO_ORDER_STATUSES[current.statusCode()])) return store.response(current);
-        if (current.activeChildOrderCount() > 0) {
-            if (cancellationFailure != null) throw cancellationFailure;
-            return store.response(current);
+    }
+
+    private Object orderLock(long algoOrderId) {
+        return orderLocks[Long.hashCode(algoOrderId) & (ORDER_LOCK_STRIPES - 1)];
+    }
+
+    private static Object[] createOrderLocks() {
+        Object[] locks = new Object[ORDER_LOCK_STRIPES];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new Object();
         }
-        AlgoOrderRecord canceled = withStatus(store.record(current), AlgoOrderStatus.CANCELED, reason,
-                null, Instant.now(), current.currentOrderId() == 0 ? null : current.currentOrderId());
-        store.update(canceled, current.revision(), 0);
-        return store.response(store.get(canceled.userId(), canceled.algoOrderId()));
+        return locks;
     }
 
     private com.surprising.aeron.protocol.CoreAlgoOrderView recoverUnlinkedChild(com.surprising.aeron.protocol.CoreAlgoOrderView parent) {

@@ -44,7 +44,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups wakeups;
-    private final Object configurationLock = new Object();
+    private final java.util.concurrent.locks.ReentrantLock configurationLock = new java.util.concurrent.locks.ReentrantLock();
     private volatile MarketMakerProperties.ReferenceMarket loadedConfiguration;
     private volatile long configurationGeneration;
     private final Map<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
@@ -70,16 +70,23 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     public ReferenceOrderBookSnapshot snapshot(String instrumentId, ProductLine productLine, InstrumentResponse instrument) {
         MarketMakerProperties.ReferenceMarket referenceMarket = properties.getReferenceMarket();
         long generation;
-        synchronized (configurationLock) {
-            if (loadedConfiguration != referenceMarket) {
-                for (var state : webSockets.values()) {
-                    state.retired = true;
-                    if (state.webSocket != null) state.webSocket.abort();
+        if (loadedConfiguration != referenceMarket) {
+            configurationLock.lock();
+            try {
+                if (loadedConfiguration != referenceMarket) {
+                    for (var state : webSockets.values()) {
+                        state.retired = true;
+                        if (state.webSocket != null) state.webSocket.abort();
+                    }
+                    webSockets.clear(); liveBooks.clear(); cache.clear();
+                    loadedConfiguration = referenceMarket;
+                    configurationGeneration++;
                 }
-                webSockets.clear(); liveBooks.clear(); cache.clear();
-                loadedConfiguration = referenceMarket;
-                configurationGeneration++;
+                generation = configurationGeneration;
+            } finally {
+                configurationLock.unlock();
             }
+        } else {
             generation = configurationGeneration;
         }
         if (!referenceMarket.isEnabled() || instrument == null) {
@@ -526,37 +533,58 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     private static final class LiveBook {
+        private final java.util.concurrent.locks.ReentrantReadWriteLock rwLock = new java.util.concurrent.locks.ReentrantReadWriteLock();
         private final NavigableMap<Long, Long> bids = new TreeMap<>(Comparator.reverseOrder());
         private final NavigableMap<Long, Long> asks = new TreeMap<>();
 
-        synchronized boolean isEmpty() {
-            return bids.isEmpty() || asks.isEmpty();
-        }
-
-        synchronized void replace(List<ReferenceOrderBookLevel> bidLevels,
-                                  List<ReferenceOrderBookLevel> askLevels) {
-            bids.clear();
-            asks.clear();
-            putAll(bids, bidLevels);
-            putAll(asks, askLevels);
-        }
-
-        synchronized void applyDeltas(List<ReferenceOrderBookLevel> bidLevels,
-                                      List<ReferenceOrderBookLevel> askLevels) {
-            applyDelta(bids, bidLevels);
-            applyDelta(asks, askLevels);
-        }
-
-        synchronized ReferenceOrderBookSnapshot snapshot(String source,
-                                                         String instrumentId,
-                                                         Instant receivedAt,
-                                                         int depthLevels) {
-            List<ReferenceOrderBookLevel> bidLevels = topLevels(bids, depthLevels);
-            List<ReferenceOrderBookLevel> askLevels = topLevels(asks, depthLevels);
-            if (bidLevels.isEmpty() || askLevels.isEmpty()) {
-                return null;
+        boolean isEmpty() {
+            rwLock.readLock().lock();
+            try {
+                return bids.isEmpty() || asks.isEmpty();
+            } finally {
+                rwLock.readLock().unlock();
             }
-            return new ReferenceOrderBookSnapshot(source, "WEBSOCKET", instrumentId, bidLevels, askLevels, receivedAt);
+        }
+
+        void replace(List<ReferenceOrderBookLevel> bidLevels,
+                     List<ReferenceOrderBookLevel> askLevels) {
+            rwLock.writeLock().lock();
+            try {
+                bids.clear();
+                asks.clear();
+                putAll(bids, bidLevels);
+                putAll(asks, askLevels);
+            } finally {
+                rwLock.writeLock().unlock();
+            }
+        }
+
+        void applyDeltas(List<ReferenceOrderBookLevel> bidLevels,
+                         List<ReferenceOrderBookLevel> askLevels) {
+            rwLock.writeLock().lock();
+            try {
+                applyDelta(bids, bidLevels);
+                applyDelta(asks, askLevels);
+            } finally {
+                rwLock.writeLock().unlock();
+            }
+        }
+
+        ReferenceOrderBookSnapshot snapshot(String source,
+                                            String instrumentId,
+                                            Instant receivedAt,
+                                            int depthLevels) {
+            rwLock.readLock().lock();
+            try {
+                List<ReferenceOrderBookLevel> bidLevels = topLevels(bids, depthLevels);
+                List<ReferenceOrderBookLevel> askLevels = topLevels(asks, depthLevels);
+                if (bidLevels.isEmpty() || askLevels.isEmpty()) {
+                    return null;
+                }
+                return new ReferenceOrderBookSnapshot(source, "WEBSOCKET", instrumentId, bidLevels, askLevels, receivedAt);
+            } finally {
+                rwLock.readLock().unlock();
+            }
         }
 
         private void putAll(NavigableMap<Long, Long> side, List<ReferenceOrderBookLevel> levels) {

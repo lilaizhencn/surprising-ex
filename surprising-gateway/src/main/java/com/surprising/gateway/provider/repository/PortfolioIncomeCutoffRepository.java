@@ -4,6 +4,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.gateway.provider.model.PortfolioIncomeRows.*;
 import java.math.BigInteger;
 import java.util.*;
+import java.util.regex.Pattern;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -17,6 +18,9 @@ public class PortfolioIncomeCutoffRepository {
     public PortfolioIncomeCutoffRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
+
+    private static final Pattern ASSET_PATTERN = Pattern.compile("[A-Z0-9]{2,20}");
+    private static final Pattern UNITS_PATTERN = Pattern.compile("-?[0-9]{1,40}");
 
     private final tools.jackson.databind.ObjectMapper json = new tools.jackson.databind.ObjectMapper();
 
@@ -43,8 +47,8 @@ public class PortfolioIncomeCutoffRepository {
             Map<?, ?> raw = json.readValue(text, Map.class);
             var units = new TreeMap<String, BigInteger>();
             for (var entry : raw.entrySet()) {
-                if (!(entry.getKey() instanceof String asset) || !asset.matches("[A-Z0-9]{2,20}")
-                        || !(entry.getValue() instanceof String value) || !value.matches("-?[0-9]{1,40}")) return null;
+                if (!(entry.getKey() instanceof String asset) || !ASSET_PATTERN.matcher(asset).matches()
+                        || !(entry.getValue() instanceof String value) || !UNITS_PATTERN.matcher(value).matches()) return null;
                 units.put(asset, new BigInteger(value));
             }
             return Map.copyOf(units);

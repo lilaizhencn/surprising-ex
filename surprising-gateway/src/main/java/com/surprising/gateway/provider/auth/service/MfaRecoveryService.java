@@ -15,7 +15,7 @@ import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -39,7 +39,6 @@ public class MfaRecoveryService {
     private final ObjectProvider<SmsMessageSender> sms;
     private final AdminAuditRepository audit;
     private final SecurityNotificationService notifications;
-    private final SecureRandom random = new SecureRandom();
 
     public MfaRecoveryService(AuthPersistenceService users, GatewayAuthChallengeRepository challenges,
                               LoginVerificationService loginVerification,
@@ -82,7 +81,7 @@ public class MfaRecoveryService {
             throw new IllegalStateException("A recovery code was already sent. Check your inbox or messages.");
         }
         boolean simulated = properties.getSecurity().isSimulatedVerificationCodesEnabled();
-        String code = simulated ? "123456" : String.format(Locale.ROOT, "%06d", random.nextInt(1_000_000));
+        String code = AuthCodeFormats.sixDigitCode(simulated);
         var challenge = challenges.create(userId, PURPOSE, channel, destination,
                 digest(code, userId, destination), now.plusSeconds(300), requestIp, now);
         try {

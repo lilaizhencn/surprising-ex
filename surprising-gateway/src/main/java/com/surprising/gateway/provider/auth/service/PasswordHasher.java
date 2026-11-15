@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.service;
 
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.util.Base64;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
@@ -15,7 +15,6 @@ public class PasswordHasher {
     private static final int KEY_LENGTH_BITS = 256;
     private static final int SALT_LENGTH_BYTES = 16;
 
-    private final SecureRandom secureRandom = new SecureRandom();
     private final java.util.concurrent.Semaphore hashes;
     private final String dummyHash;
 
@@ -28,7 +27,7 @@ public class PasswordHasher {
         if (password == null || password.length() < 8 || password.length() > 128)
             throw new IllegalArgumentException("password length must be 8-128");
         byte[] salt = new byte[SALT_LENGTH_BYTES];
-        secureRandom.nextBytes(salt);
+        AuthCodeFormats.SECURE_RANDOM.nextBytes(salt);
         byte[] derived = derive(password, salt, ITERATIONS);
         return FORMAT + "$" + ITERATIONS + "$" + Base64.getEncoder().encodeToString(salt)
                 + "$" + Base64.getEncoder().encodeToString(derived);

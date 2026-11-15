@@ -8,6 +8,6 @@ import org.springframework.stereotype.Component;
 public class LifecycleBusinessSettingsTask {
     private final LifecycleBusinessSettingsService settings;
     public LifecycleBusinessSettingsTask(LifecycleBusinessSettingsService settings) { this.settings = settings; }
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelayString = "${surprising.lifecycle.settings-refresh-ms:5000}")
     public void reload() { settings.reload(); }
 }

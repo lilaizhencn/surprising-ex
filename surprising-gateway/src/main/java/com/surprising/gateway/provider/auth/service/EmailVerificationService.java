@@ -8,7 +8,7 @@ import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepos
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
@@ -23,7 +23,6 @@ public class EmailVerificationService {
     private final GatewayAuthChallengeRepository repository;
     private final EmailMessageSender sender;
     private final GatewayUserRepository users;
-    private final SecureRandom secureRandom = new SecureRandom();
 
     public EmailVerificationService(GatewayProperties properties,
                                     GatewayAuthChallengeRepository repository,
@@ -39,7 +38,7 @@ public class EmailVerificationService {
     public IssuedChallenge issueEmailVerification(long userId, String email, String requestIp, Instant now) {
         String destination = normalizeEmail(email);
         boolean simulated = properties.getSecurity().isSimulatedVerificationCodesEnabled();
-        String code = simulated ? "123456" : String.format("%06d", secureRandom.nextInt(1_000_000));
+        String code = AuthCodeFormats.sixDigitCode(simulated);
         Instant expiresAt = now.plus(properties.getSecurity().getVerificationCodeTtl());
         AuthChallenge challenge = repository.create(userId, PURPOSE, "EMAIL", destination,
                 digest(code, PURPOSE, destination), expiresAt, requestIp, now);

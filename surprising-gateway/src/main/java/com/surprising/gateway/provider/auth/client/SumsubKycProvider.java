@@ -25,6 +25,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class SumsubKycProvider implements KycProvider {
+    private static final java.time.format.DateTimeFormatter SUMSUB_TIMESTAMP =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss[.SSS]");
     private final GatewayProperties properties;
     private final ObjectMapper mapper;
     private final HttpClient http;
@@ -118,7 +120,7 @@ public class SumsubKycProvider implements KycProvider {
             String reason = root.path("reviewResult").path("clientComment").asString("");
             String timestamp = root.path("createdAtMs").asString(root.path("createdAt").asString(""));
             Instant occurredAt = timestamp.contains("T") ? Instant.parse(timestamp)
-                    : java.time.LocalDateTime.parse(timestamp, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss[.SSS]")).toInstant(java.time.ZoneOffset.UTC);
+                    : java.time.LocalDateTime.parse(timestamp, SUMSUB_TIMESTAMP).toInstant(java.time.ZoneOffset.UTC);
             Instant evidenceExpiry = null;
             if ("VERIFIED".equals(status)) {
                 final JsonNode applicant;

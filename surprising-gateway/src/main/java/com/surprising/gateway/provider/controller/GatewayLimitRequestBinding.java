@@ -46,17 +46,26 @@ public final class GatewayLimitRequestBinding {
 
     /** Read query text only; IP admission must precede form/body parsing and authentication. */
     public int publicCost(HttpServletRequest request) {
-        if (!"GET".equals(request.getMethod()) || request.getQueryString() == null) return 1;
+        String query = request.getQueryString();
+        if (!"GET".equals(request.getMethod()) || query == null || query.isEmpty()) return 1;
         int cost = 1;
-        for (String part : request.getQueryString().split("&")) {
-            int separator = part.indexOf('=');
-            if (separator < 0) continue;
-            String name = java.net.URLDecoder.decode(part.substring(0, separator), java.nio.charset.StandardCharsets.UTF_8);
-            if (!name.equals("limit") && !name.equals("depth")) continue;
-            try {
-                long count = Long.parseLong(java.net.URLDecoder.decode(part.substring(separator + 1), java.nio.charset.StandardCharsets.UTF_8));
-                if (count > 0) cost = Math.max(cost, (int) Math.min(10000, 1 + (count - 1) / 50));
-            } catch (NumberFormatException invalid) { throw new IllegalArgumentException("limit is invalid", invalid); }
+        int start = 0;
+        int len = query.length();
+        while (start <= len) {
+            int amp = query.indexOf('&', start);
+            int end = amp < 0 ? len : amp;
+            int separator = query.indexOf('=', start);
+            if (separator >= start && separator < end) {
+                String name = java.net.URLDecoder.decode(query.substring(start, separator), java.nio.charset.StandardCharsets.UTF_8);
+                if (name.equals("limit") || name.equals("depth")) {
+                    try {
+                        long count = Long.parseLong(java.net.URLDecoder.decode(query.substring(separator + 1, end), java.nio.charset.StandardCharsets.UTF_8));
+                        if (count > 0) cost = Math.max(cost, (int) Math.min(10000, 1 + (count - 1) / 50));
+                    } catch (NumberFormatException invalid) { throw new IllegalArgumentException("limit is invalid", invalid); }
+                }
+            }
+            if (amp < 0) break;
+            start = amp + 1;
         }
         return cost;
     }

@@ -16,7 +16,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class PortfolioIncomeControllerTest {
     private final AuthService auth = mock(AuthService.class);
     private final PortfolioIncomeService service = mock(PortfolioIncomeService.class);
-    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new PortfolioIncomeController(auth, service)).build();
+    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new PortfolioIncomeController(auth, service))
+            .setCustomArgumentResolvers(new com.surprising.gateway.provider.config.CurrentUserArgumentResolver(auth))
+            .build();
 
     @Test void ownerIsTakenOnlyFromAuthenticationAndResponseCannotBeCached() throws Exception {
         when(auth.authenticateBearer("Bearer own")).thenReturn(new JwtPrincipal(7, "nickname", "ACTIVE", List.of(), Instant.now().plusSeconds(60)));

@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -20,6 +21,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * 下游控制器统一按 Bearer 处理。校验只看签名和 Valkey 会话，不访问 Postgres。
  */
 public final class GatewayBearerFilter extends OncePerRequestFilter {
+    private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
     private final AuthService auth;
     private final com.surprising.gateway.provider.config.GatewayProperties properties;
     public GatewayBearerFilter(AuthService auth, com.surprising.gateway.provider.config.GatewayProperties properties) {
@@ -36,7 +38,7 @@ public final class GatewayBearerFilter extends OncePerRequestFilter {
             GatewaySecurityErrors.write(response, 400, "INVALID_BROWSER_CLIENT"); return;
         }
         String origin = request.getHeader("Origin");
-        if (browser && "admin".equals(request.getHeader("X-Auth-Client")) && ((origin == null && !List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod()))
+        if (browser && "admin".equals(request.getHeader("X-Auth-Client")) && ((origin == null && !SAFE_METHODS.contains(request.getMethod()))
                 || (origin != null && !properties.getSecurity().getAdminBrowserAllowedOrigins().contains(origin)))) {
             GatewaySecurityErrors.write(response, 403, "ADMIN_ORIGIN_DENIED"); return;
         }
@@ -55,7 +57,7 @@ public final class GatewayBearerFilter extends OncePerRequestFilter {
             }
             try {
                 var principal = auth.verifyBearer(header);
-                var token = UsernamePasswordAuthenticationToken.authenticated(principal, null,
+                var token = UsernamePasswordAuthenticationToken.authenticated(principal, header,
                         principal.roles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList());
                 SecurityContextHolder.getContext().setAuthentication(token);
             } catch (IllegalArgumentException invalid) {
