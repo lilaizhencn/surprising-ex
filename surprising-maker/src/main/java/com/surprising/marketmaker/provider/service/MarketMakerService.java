@@ -1819,7 +1819,7 @@ public class MarketMakerService {
 
     private static final class PriceState {
         private long lastPriceTicks;
-        private long volatilityTicks;
+        private volatile long volatilityTicks;
 
         private synchronized long observe(long priceTicks) {
             if (lastPriceTicks > 0) {
@@ -1831,7 +1831,7 @@ public class MarketMakerService {
             return volatilityTicks;
         }
 
-        private synchronized long volatilityTicks() {
+        private long volatilityTicks() {
             return volatilityTicks;
         }
     }

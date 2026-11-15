@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth.client;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -23,6 +24,8 @@ import org.springframework.web.client.RestTemplate;
 @Component
 public class TelegramOidcClient {
     public static final String ISSUER = "https://oauth.telegram.org";
+    private static final Pattern CONTROL_OR_BIDI = Pattern.compile("[\\p{Cc}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]");
+    private static final Pattern TELEGRAM_SUBJECT = Pattern.compile("[0-9]{1,32}");
     private final String clientId, clientSecret, redirectUri;
     private final RestClient http;
     private final NimbusJwtDecoder decoder;
@@ -96,7 +99,7 @@ public class TelegramOidcClient {
 
     public static Profile validate(Jwt token, String expectedNonce, Instant now) {
         if (expectedNonce == null || !expectedNonce.equals(token.getClaimAsString("nonce"))
-                || token.getSubject() == null || !token.getSubject().matches("[0-9]{1,32}")
+                || token.getSubject() == null || !TELEGRAM_SUBJECT.matcher(token.getSubject()).matches()
                 || token.getIssuedAt() == null || token.getIssuedAt().isAfter(now.plusSeconds(30))
                 || token.getIssuedAt().isBefore(now.minusSeconds(600))
                 || token.getExpiresAt() == null || !token.getExpiresAt().isAfter(now))
@@ -104,7 +107,7 @@ public class TelegramOidcClient {
         String name = token.getClaimAsString("name");
         if (name == null || name.isBlank()) name = token.getClaimAsString("preferred_username");
         if (name == null || name.isBlank()) name = "Telegram";
-        name = name.replaceAll("[\\p{Cc}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]", "").strip();
+        name = CONTROL_OR_BIDI.matcher(name).replaceAll("").strip();
         if (name.isBlank()) name = "Telegram";
         name = name.substring(0, name.offsetByCodePoints(0, Math.min(name.codePointCount(0, name.length()), 128)));
         return new Profile(token.getSubject(), name);

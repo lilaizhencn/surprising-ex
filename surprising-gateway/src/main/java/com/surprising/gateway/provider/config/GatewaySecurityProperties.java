@@ -109,8 +109,12 @@ public class GatewaySecurityProperties {
     }
 
     public void setResendBaseUrl(String resendBaseUrl) {
-        this.resendBaseUrl = resendBaseUrl == null || resendBaseUrl.isBlank()
-                ? "https://api.resend.com" : resendBaseUrl.replaceAll("/$", "");
+        if (resendBaseUrl == null || resendBaseUrl.isBlank()) {
+            this.resendBaseUrl = "https://api.resend.com";
+        } else {
+            this.resendBaseUrl = resendBaseUrl.endsWith("/")
+                    ? resendBaseUrl.substring(0, resendBaseUrl.length() - 1) : resendBaseUrl;
+        }
     }
 
     public void setVerificationCodePepper(String verificationCodePepper) {

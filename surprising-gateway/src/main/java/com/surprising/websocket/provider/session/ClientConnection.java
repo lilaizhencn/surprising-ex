@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>Backpressure is enforced by the underlying transport (Netty write-buffer watermarks in
  * production): a slow client is closed immediately instead of allowing one WebSocket connection to
- * hold memory or block Kafka fanout for other sessions on the same node.</p>
+ * hold memory or block realtime fanout for other sessions on the same node.</p>
  */
 public class ClientConnection implements AutoCloseable {
 

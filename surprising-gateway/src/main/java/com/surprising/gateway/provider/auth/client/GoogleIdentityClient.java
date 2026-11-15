@@ -5,6 +5,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.security.oauth2.core.*;
@@ -16,6 +17,9 @@ import org.springframework.web.client.RestTemplate;
 /** Only signed Google ID tokens may cross this identity boundary. */
 @Component
 public class GoogleIdentityClient {
+    private static final Pattern CONTROL_OR_BIDI = Pattern.compile("[\\p{Cc}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]");
+    private static final Pattern GOOGLE_SUBJECT = Pattern.compile("[A-Za-z0-9_-]{1,255}");
+
     private final GoogleLoginProperties properties;
     private final JwtDecoder decoder;
 
@@ -74,13 +78,13 @@ public class GoogleIdentityClient {
         if (!properties.enabled() || !validPresenter
                 || !isGoogleIssuer(token.getClaimAsString("iss"))
                 || !List.of(properties.getWebClientId()).equals(token.getAudience())
-                || token.getSubject() == null || !token.getSubject().matches("[A-Za-z0-9_-]{1,255}")
+                || token.getSubject() == null || !GOOGLE_SUBJECT.matcher(token.getSubject()).matches()
                 || token.getIssuedAt() == null || token.getIssuedAt().isAfter(now.plusSeconds(30))
                 || token.getExpiresAt() == null || !token.getExpiresAt().isAfter(now))
             throw new IllegalArgumentException("Invalid Google identity");
         String name = token.getClaimAsString("name");
         if (name == null) name = "";
-        name = name.replaceAll("[\\p{Cc}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]", "").strip();
+        name = CONTROL_OR_BIDI.matcher(name).replaceAll("").strip();
         if (name.isBlank()) name = "Google";
         name = name.substring(0, name.offsetByCodePoints(0, Math.min(name.codePointCount(0, name.length()), 128)));
         return new Profile(token.getSubject(), name);

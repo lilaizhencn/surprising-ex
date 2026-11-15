@@ -16,6 +16,26 @@ public final class GatewayKycProperties {
     private GatewayKycProperties() {
     }
 
+    private static String stripTrailingSlashes(String value) {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '/') {
+            end--;
+        }
+        return value.substring(0, end);
+    }
+
+    private static String stripSlashes(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end && value.charAt(start) == '/') {
+            start++;
+        }
+        while (end > start && value.charAt(end - 1) == '/') {
+            end--;
+        }
+        return value.substring(start, end);
+    }
+
     @Getter
     public static class KycDocuments {
         @Setter
@@ -35,7 +55,7 @@ public final class GatewayKycProperties {
         }
 
         public void setEndpoint(String endpoint) {
-            this.endpoint = endpoint == null ? "" : endpoint.trim().replaceAll("/$", "");
+            this.endpoint = endpoint == null ? "" : stripTrailingSlashes(endpoint.trim());
         }
 
         public void setBucket(String bucket) {
@@ -59,7 +79,7 @@ public final class GatewayKycProperties {
         }
 
         public void setPrefix(String prefix) {
-            this.prefix = prefix == null || prefix.isBlank() ? "kyc" : prefix.trim().replaceAll("^/+|/+$", "");
+            this.prefix = prefix == null || prefix.isBlank() ? "kyc" : stripSlashes(prefix.trim());
         }
 
         public void setMaxFileSizeBytes(long maxFileSizeBytes) {
@@ -134,7 +154,7 @@ public final class GatewayKycProperties {
         }
 
         public void setBaseUrl(String value) {
-            baseUrl = value == null || value.isBlank() ? "https://api.sumsub.com" : value.trim().replaceAll("/$", "");
+            baseUrl = value == null || value.isBlank() ? "https://api.sumsub.com" : stripTrailingSlashes(value.trim());
         }
     }
 
@@ -159,7 +179,7 @@ public final class GatewayKycProperties {
 
         public void setBaseUrl(String value) {
             baseUrl = value == null || value.isBlank()
-                    ? "https://stationapi.veriff.com" : value.trim().replaceAll("/$", "");
+                    ? "https://stationapi.veriff.com" : stripTrailingSlashes(value.trim());
         }
     }
 }

@@ -2,9 +2,11 @@ package com.surprising.gateway.provider.utils;
 
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** KYC文档输入的纯格式处理，不访问存储或业务状态。 */
 public final class KycDocumentFormats {
+    private static final Pattern UNSAFE_FILENAME_CHARS = Pattern.compile("[^A-Za-z0-9._-]");
     private KycDocumentFormats() {}
     private static final Set<String> DOCUMENT_TYPES = Set.of(
             "DRIVING_LICENSE", "DRIVING_LICENSE_FRONT", "DRIVING_LICENSE_BACK", "RESIDENCE_PERMIT", "RESIDENCE_PERMIT_FRONT", "RESIDENCE_PERMIT_BACK", "ID_CARD", "ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
@@ -75,7 +77,7 @@ public final class KycDocumentFormats {
         value = value.replace('\\', '/');
         int slash = value.lastIndexOf('/');
         value = slash >= 0 ? value.substring(slash + 1) : value;
-        value = value.replaceAll("[^A-Za-z0-9._-]", "_");
+        value = UNSAFE_FILENAME_CHARS.matcher(value).replaceAll("_");
         if (value.isBlank() || value.equals(".") || value.equals("..")) {
             value = "document" + extension;
         }

@@ -26,6 +26,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class KycDocumentStorageService {
 
+    private static final java.util.regex.Pattern S3_BUCKET_NAME = java.util.regex.Pattern.compile("[A-Za-z0-9.-]{3,63}");
+    private static final java.util.regex.Pattern S3_OBJECT_KEY = java.util.regex.Pattern.compile("[A-Za-z0-9._/-]{1,240}");
+
     private static final DateTimeFormatter AWS_DATE = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
             .withZone(ZoneOffset.UTC);
     private static final DateTimeFormatter AWS_DAY = DateTimeFormatter.ofPattern("yyyyMMdd")
@@ -185,17 +188,17 @@ public class KycDocumentStorageService {
             throw new KycDocumentStorageUnavailableException("KYC S3 endpoint must use HTTP or HTTPS");
         }
         if (endpoint.getHost() == null || endpoint.getRawQuery() != null || endpoint.getRawFragment() != null
-                || !config.getBucket().matches("[A-Za-z0-9.-]{3,63}")
+                || !S3_BUCKET_NAME.matcher(config.getBucket()).matches()
                 || objectKey == null || objectKey.contains("..")
-                || !objectKey.matches("[A-Za-z0-9._/-]{1,240}")) {
+                || !S3_OBJECT_KEY.matcher(objectKey).matches()) {
             throw new KycDocumentStorageUnavailableException("KYC S3 storage configuration is invalid");
         }
     }
 
     private URI objectUri(GatewayProperties.KycDocuments config, String objectKey) {
         String basePath = URI.create(config.getEndpoint()).getRawPath();
-        String path = (basePath == null ? "" : basePath.replaceAll("/$", ""))
-                + "/" + config.getBucket() + "/" + objectKey;
+        String trimmedPath = basePath == null ? "" : (basePath.endsWith("/") ? basePath.substring(0, basePath.length() - 1) : basePath);
+        String path = trimmedPath + "/" + config.getBucket() + "/" + objectKey;
         URI endpoint = URI.create(config.getEndpoint());
         return URI.create(endpoint.getScheme() + "://" + endpoint.getRawAuthority() + path);
     }

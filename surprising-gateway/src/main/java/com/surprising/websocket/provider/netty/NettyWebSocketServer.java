@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Embedded Netty WebSocket server replacing Tomcat's blocking WebSocket endpoint.
- * Shares the Spring application context (auth, limits, subscription registry, Kafka fanout)
+ * Shares the Spring application context (auth, limits, subscription registry, realtime fanout)
  * while handling all WebSocket I/O on non-blocking Netty EventLoops.
  */
 @Slf4j
