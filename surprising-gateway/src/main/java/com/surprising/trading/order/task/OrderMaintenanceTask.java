@@ -20,7 +20,7 @@ public class OrderMaintenanceTask {
         this.cancelAllAfterService = cancelAllAfterService;
     }
 
-    @Scheduled(fixedDelay = 25)
+    @Scheduled(fixedDelayString = "${surprising.trading.order.algo.scan-delay-ms:250}")
     public void scanAlgoOrders() {
         algoOrderService.scanDueAlgoOrders();
     }
