@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 /** 定时线程入口；状态、业务规则及续办顺序由MarkPriceMarketSubscription持有。 */
 @Component
-@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true", matchIfMissing = true)
 public final class MarkPriceMarketLeaseTask {
     private final MarkPriceMarketSubscription service;
 

@@ -99,8 +99,15 @@ public class FundingService {
         }
     }
 
-    public synchronized SettlementCycle settleDueRates() {
-        return lifecycleRetry.execute(this::settleDueRatesInternal);
+    private final java.util.concurrent.atomic.AtomicBoolean settling = new java.util.concurrent.atomic.AtomicBoolean();
+
+    public SettlementCycle settleDueRates() {
+        if (!settling.compareAndSet(false, true)) return SettlementCycle.disabled();
+        try {
+            return lifecycleRetry.execute(this::settleDueRatesInternal);
+        } finally {
+            settling.set(false);
+        }
     }
 
     private SettlementCycle settleDueRatesInternal() {

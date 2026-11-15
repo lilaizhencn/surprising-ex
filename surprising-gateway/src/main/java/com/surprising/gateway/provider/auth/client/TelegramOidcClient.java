@@ -1,10 +1,12 @@
 package com.surprising.gateway.provider.auth.client;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
@@ -25,14 +27,20 @@ public class TelegramOidcClient {
     private final RestClient http;
     private final NimbusJwtDecoder decoder;
 
+    public TelegramOidcClient(String clientId, String clientSecret, String redirectUri) {
+        this(clientId, clientSecret, redirectUri,
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
+    }
+
+    @Autowired
     public TelegramOidcClient(@Value("${telegram.login.client-id:}") String clientId,
                               @Value("${telegram.login.client-secret:}") String clientSecret,
-                              @Value("${telegram.login.redirect-uri:}") String redirectUri) {
+                              @Value("${telegram.login.redirect-uri:}") String redirectUri,
+                              HttpClient gatewayHttpClient) {
         this.clientId = clientId;
         this.clientSecret = clientSecret;
         this.redirectUri = redirectUri;
-        var factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofSeconds(5));
+        var factory = new JdkClientHttpRequestFactory(gatewayHttpClient);
         factory.setReadTimeout(Duration.ofSeconds(10));
         http = RestClient.builder().requestFactory(factory).build();
         decoder = decoder(clientId, ISSUER + "/.well-known/jwks.json", factory);

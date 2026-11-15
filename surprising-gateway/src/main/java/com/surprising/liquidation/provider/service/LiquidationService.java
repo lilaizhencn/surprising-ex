@@ -30,8 +30,15 @@ public class LiquidationService {
         this.projections = projections;
     }
 
-    public synchronized WorkCycle processWork() {
-        return lifecycleRetry.execute(this::processWorkInternal);
+    private final java.util.concurrent.atomic.AtomicBoolean working = new java.util.concurrent.atomic.AtomicBoolean();
+
+    public WorkCycle processWork() {
+        if (!working.compareAndSet(false, true)) return new WorkCycle(false, 0, 0, 0, 0, 0);
+        try {
+            return lifecycleRetry.execute(this::processWorkInternal);
+        } finally {
+            working.set(false);
+        }
     }
 
     private WorkCycle processWorkInternal() {

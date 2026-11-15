@@ -87,29 +87,12 @@ public class ExternalSpotPriceClient {
     }
 
     public BigDecimal fetchTickerPrice(String baseUrl, String path, String parser) throws Exception {
-        boolean acquired = false;
-        try {
-            requestPermits.acquire();
-            acquired = true;
-            HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path))
-                    .timeout(properties.getHttp().getRequestTimeout())
-                    .header("User-Agent", properties.getHttp().getUserAgent())
-                    .GET()
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalArgumentException("ticker http status " + response.statusCode());
-            }
-            ParsedTicker ticker = parseTicker(parser, objectMapper.readTree(response.body()));
-            return ticker.price();
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw ex;
-        } finally {
-            if (acquired) {
-                requestPermits.release();
-            }
+        HttpResponse<String> response = sendGet(baseUrl + path);
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalArgumentException("ticker http status " + response.statusCode());
         }
+        ParsedTicker ticker = parseTicker(parser, objectMapper.readTree(response.body()));
+        return ticker.price();
     }
 
     @PreDestroy
@@ -119,16 +102,8 @@ public class ExternalSpotPriceClient {
 
     private SourceQuote fetchBlocking(IndexPriceProperties.SourceConfig source) {
         Instant start = Instant.now();
-        boolean acquired = false;
         try {
-            requestPermits.acquire();
-            acquired = true;
-            HttpRequest request = HttpRequest.newBuilder(URI.create(source.getBaseUrl() + source.getPath()))
-                    .timeout(properties.getHttp().getRequestTimeout())
-                    .header("User-Agent", properties.getHttp().getUserAgent())
-                    .GET()
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = sendGet(source.getBaseUrl() + source.getPath());
             return parseResponse(source, response, start);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
@@ -137,6 +112,20 @@ public class ExternalSpotPriceClient {
         } catch (Exception ex) {
             return error(source, SourceStatus.ERROR, ex.getMessage(), Instant.now(),
                     elapsedMillis(start, Instant.now()));
+        }
+    }
+
+    private HttpResponse<String> sendGet(String url) throws Exception {
+        boolean acquired = false;
+        try {
+            requestPermits.acquire();
+            acquired = true;
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(properties.getHttp().getRequestTimeout())
+                    .header("User-Agent", properties.getHttp().getUserAgent())
+                    .GET()
+                    .build();
+            return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         } finally {
             if (acquired) {
                 requestPermits.release();

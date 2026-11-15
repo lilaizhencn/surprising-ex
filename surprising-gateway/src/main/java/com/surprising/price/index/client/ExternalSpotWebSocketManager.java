@@ -28,6 +28,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,7 +53,7 @@ public class ExternalSpotWebSocketManager {
     private final LatestSourceQuoteStore latestSourceQuoteStore;
     private final TaskScheduler taskScheduler;
     private volatile HttpClient httpClient;
-    private volatile ScheduledFuture<?> healthCheckFuture;
+    private final AtomicReference<ScheduledFuture<?>> healthCheckFuture = new AtomicReference<>();
     private final Map<String, WsSession> sessions = new ConcurrentHashMap<>();
     private volatile boolean running;
 
@@ -80,28 +81,33 @@ public class ExternalSpotWebSocketManager {
     @EventListener(ContextRefreshedEvent.class)
     public void start() {
         running = true;
-        Map<String, List<TrackedSource>> grouped = properties.getWebSocket().isEnabled() ? groupedSources() : Map.of();
-        if (grouped.isEmpty()) {
+        if (!refreshAndSchedule()) {
             log.info("No external spot WebSocket sources configured");
-        } else {
-            refreshConnections(grouped);
-            ensureHealthCheckScheduled();
         }
     }
 
     private void ensureHealthCheckScheduled() {
-        if (healthCheckFuture != null || taskScheduler == null) return;
+        if (taskScheduler == null || healthCheckFuture.get() != null) return;
         long intervalMs = Math.max(1000L, properties.getWebSocket().getHealthCheckInterval().toMillis());
-        healthCheckFuture = taskScheduler.scheduleAtFixedRate(this::checkIdleSessions, Duration.ofMillis(intervalMs));
+        ScheduledFuture<?> scheduled = taskScheduler.scheduleAtFixedRate(this::checkIdleSessions, Duration.ofMillis(intervalMs));
+        if (!healthCheckFuture.compareAndSet(null, scheduled)) {
+            scheduled.cancel(false);
+        }
     }
 
     public void refreshConnections() {
         if (!running) return;
+        refreshAndSchedule();
+    }
+
+    private boolean refreshAndSchedule() {
         Map<String, List<TrackedSource>> grouped = properties.getWebSocket().isEnabled() ? groupedSources() : Map.of();
         refreshConnections(grouped);
         if (!grouped.isEmpty()) {
             ensureHealthCheckScheduled();
+            return true;
         }
+        return false;
     }
 
     public List<WebSocketHealth> health() {
@@ -120,8 +126,7 @@ public class ExternalSpotWebSocketManager {
     @PreDestroy
     public void stop() {
         running = false;
-        ScheduledFuture<?> future = healthCheckFuture;
-        healthCheckFuture = null;
+        ScheduledFuture<?> future = healthCheckFuture.getAndSet(null);
         if (future != null) future.cancel(false);
         sessions.values().forEach(session -> {
             session.listener = null;

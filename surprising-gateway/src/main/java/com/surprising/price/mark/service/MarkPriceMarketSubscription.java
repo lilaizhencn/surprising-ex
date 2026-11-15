@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 
 /** 接收已提交行情；只做协议和精度转换，最新计算输入仍由 MarkPriceService 持有。 */
 @Component
-@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true", matchIfMissing = true)
 public final class MarkPriceMarketSubscription implements AutoCloseable {
     private static final CoreOrderSide[] ORDER_SIDES = CoreOrderSide.values();
     private final MarkPriceProperties properties;

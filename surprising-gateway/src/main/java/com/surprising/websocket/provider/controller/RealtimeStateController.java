@@ -10,7 +10,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true", matchIfMissing = true)
 @RequestMapping("/api/v1/realtime")
 public final class RealtimeStateController {
     private final RealtimeWebSocketBridge bridge;

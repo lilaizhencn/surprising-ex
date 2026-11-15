@@ -31,23 +31,29 @@ public class InstrumentCoreSyncService {
         this.cache=cache; this.gateway=gateway; this.line=properties.getProductLine(); this.properties=properties;
     }
 
-    public synchronized void reconcile() {
-        if (!cache.initialized(line)) return;
-        long now=System.nanoTime();
-        for (var value : cache.current(line).stream().sorted(Comparator.comparing(InstrumentResponse::instrumentId)).toList()) {
-            var attempt=attempts.get(Integer.toString(value.instrumentId()));
-            RegisterInstrumentCommand configuration;
-            try {
-                configuration=command(value);
-            } catch (RuntimeException failure) {
-                if (attempt!=null && attempt.configuration()==null && now<attempt.retryAfterNanos()) continue;
-                attempts.put(Integer.toString(value.instrumentId()),new Attempt(null,null,false,false,
-                        now+java.util.concurrent.TimeUnit.SECONDS.toNanos(5),error(failure)));
-                continue;
+    private final java.util.concurrent.atomic.AtomicBoolean reconciling = new java.util.concurrent.atomic.AtomicBoolean();
+
+    public void reconcile() {
+        if (!cache.initialized(line) || !reconciling.compareAndSet(false, true)) return;
+        try {
+            long now=System.nanoTime();
+            for (var value : cache.current(line).stream().sorted(Comparator.comparing(InstrumentResponse::instrumentId)).toList()) {
+                var attempt=attempts.get(Integer.toString(value.instrumentId()));
+                RegisterInstrumentCommand configuration;
+                try {
+                    configuration=command(value);
+                } catch (RuntimeException failure) {
+                    if (attempt!=null && attempt.configuration()==null && now<attempt.retryAfterNanos()) continue;
+                    attempts.put(Integer.toString(value.instrumentId()),new Attempt(null,null,false,false,
+                            now+java.util.concurrent.TimeUnit.SECONDS.toNanos(5),error(failure)));
+                    continue;
+                }
+                if (attempt!=null && configuration.equals(attempt.configuration())
+                        && (attempt.applied() || now < attempt.retryAfterNanos())) continue;
+                applyConfiguration(configuration,attempt);
             }
-            if (attempt!=null && configuration.equals(attempt.configuration())
-                    && (attempt.applied() || now < attempt.retryAfterNanos())) continue;
-            applyConfiguration(configuration,attempt);
+        } finally {
+            reconciling.set(false);
         }
     }
 

@@ -43,6 +43,44 @@ public final class RealtimeFrameCodec {
     public static byte[] encode(ProductLine productLine, RealtimeFrame.Kind kind, long userId, long sequence,
                                 int ordinal, long timestamp, long snapshotId, String symbolValue,
                                 String entityId, byte[] payload) {
+        int length = validatedLength(productLine, kind, userId, sequence, ordinal,
+                timestamp, snapshotId, symbolValue, entityId, payload);
+        ByteBuffer b = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        writeFrame(b, productLine, kind, userId, sequence, ordinal, timestamp, snapshotId, symbolValue, entityId, payload);
+        return b.array();
+    }
+
+    /** Returns the exact encoded frame length after validating all frame fields. */
+    public static int encodedLength(RealtimeFrame frame) {
+        return validatedLength(frame.productLine(), frame.kind(), frame.userId(), frame.sequence(),
+                frame.ordinal(), frame.timestamp(), frame.snapshotId(), frame.instrumentId(),
+                frame.entityId(), frame.payloadUnsafe());
+    }
+
+    /**
+     * Encodes {@code frame} into {@code target} starting at its current position and returns the encoded byte length.
+     * The caller must ensure {@code target} has at least {@link #encodedLength(RealtimeFrame)} remaining bytes.
+     */
+    public static int encode(RealtimeFrame frame, ByteBuffer target) {
+        int length = encodedLength(frame);
+        if (target == null || target.remaining() < length) {
+            throw new IllegalArgumentException("target buffer too small");
+        }
+        ByteOrder previousOrder = target.order();
+        target.order(ByteOrder.LITTLE_ENDIAN);
+        try {
+            writeFrame(target, frame.productLine(), frame.kind(), frame.userId(), frame.sequence(),
+                    frame.ordinal(), frame.timestamp(), frame.snapshotId(), frame.instrumentId(),
+                    frame.entityId(), frame.payloadUnsafe());
+        } finally {
+            target.order(previousOrder);
+        }
+        return length;
+    }
+
+    private static int validatedLength(ProductLine productLine, RealtimeFrame.Kind kind, long userId, long sequence,
+                                       int ordinal, long timestamp, long snapshotId, String symbolValue,
+                                       String entityId, byte[] payload) {
         if (productLine == null || kind == null || userId < 0 || sequence < 0 || ordinal < 0
                 || timestamp < 0 || snapshotId < 0 || symbolValue == null || entityId == null || payload == null) {
             throw new IllegalArgumentException("invalid realtime frame");
@@ -50,16 +88,21 @@ public final class RealtimeFrameCodec {
         int symbolLength = CoreStateQueryCodec.utf8Length(symbolValue);
         int entityLength = CoreStateQueryCodec.utf8Length(entityId);
         int length = Math.addExact(64, Math.addExact(symbolLength, Math.addExact(entityLength, payload.length)));
-        if (symbolLength > 128 || entityLength > 256 || length > MAX_FRAME_BYTES)
+        if (symbolLength > 128 || entityLength > 256 || length > MAX_FRAME_BYTES) {
             throw new IllegalArgumentException("realtime frame too large");
-        ByteBuffer b = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        }
+        return length;
+    }
+
+    private static void writeFrame(ByteBuffer b, ProductLine productLine, RealtimeFrame.Kind kind, long userId,
+                                   long sequence, int ordinal, long timestamp, long snapshotId,
+                                   String symbolValue, String entityId, byte[] payload) {
         b.putInt(MAGIC).putInt(1).putInt(productLine.ordinal()).putInt(kind.ordinal());
         b.putLong(userId).putLong(sequence).putInt(ordinal);
         b.putLong(timestamp).putLong(snapshotId);
         CoreStateQueryCodec.putText(b, symbolValue, true, 128);
         CoreStateQueryCodec.putText(b, entityId, true, 256);
         put(b, payload);
-        return b.array();
     }
 
     public static byte[] encodeLongPayload(ProductLine productLine, RealtimeFrame.Kind kind, long userId, long sequence,

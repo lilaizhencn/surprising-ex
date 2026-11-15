@@ -37,8 +37,15 @@ public class AdlService {
         this.events = events;
     }
 
-    public synchronized AdlCycle processResidualDeficits() {
-        return lifecycleRetry.execute(this::processResidualDeficitsInternal);
+    private final java.util.concurrent.atomic.AtomicBoolean running = new java.util.concurrent.atomic.AtomicBoolean();
+
+    public AdlCycle processResidualDeficits() {
+        if (!running.compareAndSet(false, true)) return AdlCycle.disabled();
+        try {
+            return lifecycleRetry.execute(this::processResidualDeficitsInternal);
+        } finally {
+            running.set(false);
+        }
     }
 
     private AdlCycle processResidualDeficitsInternal() {

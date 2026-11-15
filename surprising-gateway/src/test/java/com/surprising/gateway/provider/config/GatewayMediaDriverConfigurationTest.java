@@ -20,6 +20,7 @@ class GatewayMediaDriverConfigurationTest {
 
     @Test void disabledRealtimeDoesNotStartDriver() {
         new ApplicationContextRunner().withUserConfiguration(GatewayMediaDriverConfiguration.class)
+                .withPropertyValues("surprising.realtime.enabled=false")
                 .run(context -> assertThat(context).hasNotFailed().doesNotHaveBean(MediaDriver.class));
     }
 

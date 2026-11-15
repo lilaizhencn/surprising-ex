@@ -24,6 +24,8 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class KycDocumentService {
 
+    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper();
+
     private final KycDocumentRepository repository;
     private final KycDocumentStorageService storage;
     private final GatewayProperties properties;
@@ -38,7 +40,7 @@ public class KycDocumentService {
         this.repository = repository;
         this.storage = storage;
         this.properties = properties;
-        this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.objectMapper = objectMapper == null ? DEFAULT_OBJECT_MAPPER : objectMapper;
         this.limits = limits; this.scanner = scanner;
     }
 

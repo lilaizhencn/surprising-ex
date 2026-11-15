@@ -1,10 +1,12 @@
 package com.surprising.gateway.provider.auth.client;
 
 import com.surprising.gateway.provider.config.GoogleLoginProperties;
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.security.oauth2.core.*;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
@@ -17,11 +19,14 @@ public class GoogleIdentityClient {
     private final GoogleLoginProperties properties;
     private final JwtDecoder decoder;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public GoogleIdentityClient(GoogleLoginProperties properties) {
+        this(properties, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
+    }
+
+    @Autowired
+    public GoogleIdentityClient(GoogleLoginProperties properties, HttpClient gatewayHttpClient) {
         this.properties = properties;
-        var factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofSeconds(5));
+        var factory = new JdkClientHttpRequestFactory(gatewayHttpClient);
         factory.setReadTimeout(Duration.ofSeconds(10));
         decoder = decoder("https://www.googleapis.com/oauth2/v3/certs", new RestTemplate(factory));
     }

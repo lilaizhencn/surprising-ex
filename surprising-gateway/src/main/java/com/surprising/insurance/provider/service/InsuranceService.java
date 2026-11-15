@@ -43,8 +43,15 @@ import java.util.UUID;
         this.aeron = aeron;
     }
 
-    public synchronized CoverageCycle coverDeficits() {
-        return lifecycleRetry.execute(this::coverDeficitsInternal);
+    private final java.util.concurrent.atomic.AtomicBoolean covering = new java.util.concurrent.atomic.AtomicBoolean();
+
+    public CoverageCycle coverDeficits() {
+        if (!covering.compareAndSet(false, true)) return CoverageCycle.disabled();
+        try {
+            return lifecycleRetry.execute(this::coverDeficitsInternal);
+        } finally {
+            covering.set(false);
+        }
     }
 
     private CoverageCycle coverDeficitsInternal() {

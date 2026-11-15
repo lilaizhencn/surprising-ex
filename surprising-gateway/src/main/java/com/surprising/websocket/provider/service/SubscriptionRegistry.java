@@ -366,7 +366,7 @@ public class SubscriptionRegistry {
                 .description("Bounded WebSocket queue capacity across active sessions")
                 .register(meterRegistry);
         Gauge.builder("surprising.websocket.fanout.batches", fanoutBatches, LongAdder::sum)
-                .description("WebSocket Kafka 批量 fanout 次数")
+                .description("WebSocket 批量 fanout 次数")
                 .register(meterRegistry);
         Gauge.builder("surprising.websocket.fanout.messages", fanoutMessages, LongAdder::sum)
                 .description("WebSocket fanout 消息数")

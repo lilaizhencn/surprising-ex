@@ -11,6 +11,8 @@ import jakarta.annotation.PreDestroy;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -54,6 +56,9 @@ public final class RealtimeRouter implements AutoCloseable {
     private final AeronRealtimeReceiver receiver;
     private final Thread worker;
     private volatile boolean running = true;
+    // Reused exclusively on the single router worker thread to avoid per-frame byte[]/UnsafeBuffer allocation.
+    private ByteBuffer sendScratch = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
+    private final UnsafeBuffer sendBuffer = new UnsafeBuffer(sendScratch.array());
 
     @org.springframework.beans.factory.annotation.Autowired
     public RealtimeRouter(
@@ -295,8 +300,14 @@ public final class RealtimeRouter implements AutoCloseable {
 
     private void sendToNodes(Aeron aeron, RealtimeFrame f, long now, Map<String, String> targets) {
         if (targets.isEmpty()) return;
-        byte[] bytes = RealtimeFrameCodec.encode(f);
-        var buffer = new UnsafeBuffer(bytes);
+        int needed = RealtimeFrameCodec.encodedLength(f);
+        if (needed > sendScratch.capacity()) {
+            sendScratch = ByteBuffer.allocate(Math.max(needed, sendScratch.capacity() * 2)).order(ByteOrder.LITTLE_ENDIAN);
+            sendBuffer.wrap(sendScratch.array());
+        }
+        sendScratch.clear();
+        int encodedLength = RealtimeFrameCodec.encode(f, sendScratch);
+        byte[] queuedCopy = null;
         for (var entry : targets.entrySet()) {
             Node node = nodes.get(entry.getKey());
             if (node != null && !node.endpoint.equals(entry.getValue())) {
@@ -318,10 +329,13 @@ public final class RealtimeRouter implements AutoCloseable {
             node.lastUsed = now;
             // A later update must not overtake an earlier update waiting for this same node.
             if (!node.pending.isEmpty()) {
-                enqueue(node, bytes, f);
+                if (queuedCopy == null) {
+                    queuedCopy = Arrays.copyOf(sendScratch.array(), encodedLength);
+                }
+                enqueue(node, queuedCopy, f);
                 continue;
             }
-            long result = node.publication.offer(buffer);
+            long result = node.publication.offer(sendBuffer, 0, encodedLength);
             if (result > 0) {
                 if (log.isDebugEnabled()) log.debug("router.send.end productLine={} kind={} entityId={} node={} result=OFFERED",
                         f.productLine(), f.kind(), f.entityId(), entry.getKey());
@@ -332,7 +346,12 @@ public final class RealtimeRouter implements AutoCloseable {
                 dirtySources.add(f.productLine());
                 closeNode(node);
                 nodes.remove(entry.getKey());
-            } else enqueue(node, bytes, f);
+            } else {
+                if (queuedCopy == null) {
+                    queuedCopy = Arrays.copyOf(sendScratch.array(), encodedLength);
+                }
+                enqueue(node, queuedCopy, f);
+            }
         }
     }
 

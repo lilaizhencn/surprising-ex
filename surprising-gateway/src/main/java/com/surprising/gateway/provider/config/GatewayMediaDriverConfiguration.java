@@ -9,7 +9,7 @@ import org.springframework.core.env.Environment;
 
 /** Gateway owns the app-side driver; other local apps connect to the same mapped directory. */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true", matchIfMissing = true)
 public class GatewayMediaDriverConfiguration {
     @Bean(destroyMethod = "close")
     public MediaDriver appMediaDriver(Environment environment) {
