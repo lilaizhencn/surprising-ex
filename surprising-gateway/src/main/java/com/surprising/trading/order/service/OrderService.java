@@ -557,11 +557,6 @@ public class OrderService {
         return queries.openOrders(userId, instrumentId, query, minExportSequence);
     }
 
-    private List<OrderResponse> activeOpenOrders(ProductLine productLine, Long userId, String instrumentId,
-                                                 int limit) {
-        return queries.activeOpenOrders(productLine, userId, instrumentId, limit);
-    }
-
     public OrderQueryResponse historyOrders(long userId,
                                             String instrumentId,
                                             int limit,
