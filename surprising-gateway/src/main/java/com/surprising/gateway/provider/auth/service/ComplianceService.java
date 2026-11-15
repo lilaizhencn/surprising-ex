@@ -48,8 +48,6 @@ public class ComplianceService {
     private final ComplianceUserProjectionRepository userProjectionRepository;
     private final ComplianceKycRepository kycRepository;
     private final KycProviderEventRepository providerEvents;
-    private final ComplianceRiskTagRepository riskTagRepository;
-    private final ComplianceAmlCaseRepository amlCaseRepository;
     private final AuthService authService;
     private final AdminAuthService adminAuthService;
     private final AdminApprovalService approvalService;
@@ -59,6 +57,7 @@ public class ComplianceService {
     private final SecurityNotificationService notifications;
     private final KycProviderRegistry kycProviders;
     private final CountryRepository countries;
+    private final ComplianceAmlRiskService amlRiskService;
 
     public ComplianceService(ComplianceUserProjectionRepository userProjectionRepository,
                              ComplianceKycRepository kycRepository,
@@ -95,8 +94,6 @@ public class ComplianceService {
         this.userProjectionRepository = userProjectionRepository;
         this.kycRepository = kycRepository;
         this.providerEvents = providerEvents;
-        this.riskTagRepository = riskTagRepository;
-        this.amlCaseRepository = amlCaseRepository;
         this.authService = authService;
         this.adminAuthService = adminAuthService;
         this.approvalService = approvalService;
@@ -106,6 +103,8 @@ public class ComplianceService {
         this.notifications = notifications;
         this.kycProviders = kycProviders;
         this.countries = countries;
+        this.amlRiskService = new ComplianceAmlRiskService(
+                riskTagRepository, amlCaseRepository, adminAuthService, approvalService);
     }
 
     public AdminCursorPage.CursorPage<ComplianceUserSummary> adminUsersPage(
@@ -376,9 +375,7 @@ public class ComplianceService {
                                       RiskTagCreateRequest request,
                                       AdminRequestMetadata metadata,
                                       byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
-        adminAuthService.adminUser(authorization, userId);
-        return createRiskTag(userId, principal.userId(), request, Instant.now());
+        return amlRiskService.adminCreateRiskTag(authorization, userId, request, metadata, body);
     }
 
     @Transactional
@@ -386,8 +383,7 @@ public class ComplianceService {
                                        long tagId,
                                        AdminRequestMetadata metadata,
                                        byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
-        return resolveRiskTag(tagId, principal.userId(), Instant.now());
+        return amlRiskService.adminResolveRiskTag(authorization, tagId, metadata, body);
     }
 
     @Transactional
@@ -396,9 +392,7 @@ public class ComplianceService {
                                       AmlCaseCreateRequest request,
                                       AdminRequestMetadata metadata,
                                       byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
-        adminAuthService.adminUser(authorization, userId);
-        return createAmlCase(userId, principal.userId(), request, Instant.now());
+        return amlRiskService.adminCreateAmlCase(authorization, userId, request, metadata, body);
     }
 
     @Transactional
@@ -407,8 +401,7 @@ public class ComplianceService {
                                             AmlCaseStatusUpdateRequest request,
                                             AdminRequestMetadata metadata,
                                             byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
-        return updateAmlCaseStatus(caseId, principal.userId(), request, Instant.now());
+        return amlRiskService.adminUpdateAmlCaseStatus(authorization, caseId, request, metadata, body);
     }
 
     private AuthModels.JwtPrincipal requireAdminWrite(
@@ -503,55 +496,48 @@ public class ComplianceService {
     }
 
     public List<RiskTag> riskTags(Long userId, String status, int limit) {
-        return riskTagRepository.find(userId, status, limit);
+        return amlRiskService.riskTags(userId, status, limit);
     }
 
     public AdminCursorPage.CursorPage<RiskTag> riskTagsPage(Long userId,
                                                             String status,
                                                             AuthPageQuery pageQuery) {
-        return riskTagRepository.findPage(userId, status, pageQuery);
+        return amlRiskService.riskTagsPage(userId, status, pageQuery);
     }
 
     public RiskTag createRiskTag(long userId,
                                  long adminUserId,
                                  RiskTagCreateRequest request,
                                  Instant now) {
-        try {
-            return riskTagRepository.create(userId, adminUserId, request, now);
-        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
-            throw new IllegalArgumentException("active risk tag already exists", duplicate);
-        }
+        return amlRiskService.createRiskTag(userId, adminUserId, request, now);
     }
 
     public RiskTag resolveRiskTag(long tagId, long adminUserId, Instant now) {
-        return riskTagRepository.resolve(tagId, adminUserId, now)
-                .orElseThrow(() -> new IllegalArgumentException("risk tag not found"));
+        return amlRiskService.resolveRiskTag(tagId, adminUserId, now);
     }
 
     public List<AmlCase> amlCases(Long userId, String status, int limit) {
-        return amlCaseRepository.find(userId, status, limit);
+        return amlRiskService.amlCases(userId, status, limit);
     }
 
     public AdminCursorPage.CursorPage<AmlCase> amlCasesPage(Long userId,
                                                             String status,
                                                             AuthPageQuery pageQuery) {
-        return amlCaseRepository.findPage(userId, status, pageQuery);
+        return amlRiskService.amlCasesPage(userId, status, pageQuery);
     }
 
     public AmlCase createAmlCase(long userId,
                                  long adminUserId,
                                  AmlCaseCreateRequest request,
                                  Instant now) {
-        return amlCaseRepository.create(userId, adminUserId, request, now);
+        return amlRiskService.createAmlCase(userId, adminUserId, request, now);
     }
 
     public AmlCase updateAmlCaseStatus(long caseId,
                                        long adminUserId,
                                        AmlCaseStatusUpdateRequest request,
                                        Instant now) {
-        Instant closedAt = List.of("CLEARED", "CLOSED").contains(request.status()) ? now : null;
-        return amlCaseRepository.updateStatus(caseId, adminUserId, request.status(), request.riskScore(), closedAt, now)
-                .orElseThrow(() -> new IllegalArgumentException("aml case not found"));
+        return amlRiskService.updateAmlCaseStatus(caseId, adminUserId, request, now);
     }
 
     /**

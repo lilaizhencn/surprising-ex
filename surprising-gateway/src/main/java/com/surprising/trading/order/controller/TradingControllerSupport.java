@@ -9,6 +9,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.order.exception.OrderCommandRejectedException;
 import com.surprising.trading.order.model.ActiveOrderPageQuery;
+import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.LeverageService;
 import com.surprising.trading.order.service.TradingFeeService;
 import com.surprising.trading.order.utils.ActiveOrderCursors;
@@ -16,6 +17,8 @@ import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -113,6 +116,44 @@ public final class TradingControllerSupport {
             throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return value;
+    }
+
+    public static <T> T call(Supplier<T> action) {
+        return callWithState(action, HttpStatus.NOT_FOUND);
+    }
+
+    public static <T> T callWithState(Supplier<T> action, HttpStatus illegalStateStatus) {
+        try {
+            return action.get();
+        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
+        } catch (ProjectionReadResult.ProjectionLagException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(illegalStateStatus, ex.getMessage(), ex);
+        }
+    }
+
+    public static <T> T callUnavailable(Supplier<T> action, String unavailableMessage) {
+        try {
+            return action.get();
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (DataAccessException | IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, unavailableMessage, ex);
+        }
+    }
+
+    public static <T> CompletionStage<T> callAsync(Supplier<CompletionStage<T>> action, HttpStatus illegalStateStatus) {
+        try {
+            return mapAsyncFailure(action.get(), illegalStateStatus);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(illegalStateStatus, ex.getMessage(), ex);
+        }
     }
 
     public static <T> CompletionStage<T> mapAsyncFailure(CompletionStage<T> stage, HttpStatus illegalStateStatus) {

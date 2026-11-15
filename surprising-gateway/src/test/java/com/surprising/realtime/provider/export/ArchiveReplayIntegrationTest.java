@@ -44,7 +44,7 @@ class ArchiveReplayIntegrationTest {
                      .ownsAeronClient(false).controlRequestChannel(control).controlResponseChannel("aeron:ipc"))) {
             archive.startRecording("aeron:ipc", 1001, SourceLocation.LOCAL);
             try (var publication = aeron.addExclusivePublication("aeron:ipc?mtu=128", 1001);
-                 var replay = new CommittedTradeExporter.ArchiveReplay(aeron, archive, ProductLine.SPOT)) {
+                 var replay = new CommittedTradeArchiveReplay(aeron, archive, ProductLine.SPOT)) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                 int recordingCounter;
                 while ((recordingCounter = RecordingPos.findCounterIdBySession(

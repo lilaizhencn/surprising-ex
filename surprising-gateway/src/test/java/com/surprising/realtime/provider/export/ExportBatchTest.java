@@ -24,7 +24,7 @@ class ExportBatchTest {
             if (attempts.size() == 1) throw new IllegalStateException("SQL failed");
             return null;
         }).when(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(1L), anyList(), anyList(), anyList(), eq(List.of()));
-        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
+        var batch = new CommittedTradeExportBatch(ProductLine.SPOT, orders, sink);
         batch.add(List.of(), null, 1, 1, List.of(), flow);
         assertThatThrownBy(() -> batch.flush(1)).hasMessage("SQL failed");
         verifyNoInteractions(sink);
@@ -36,7 +36,7 @@ class ExportBatchTest {
     @Test void liquidationOnlyChangesFlushAtTheSameExportSequenceAndSurviveSqlFailure() {
         var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
-        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.LINEAR_PERPETUAL, orders, sink);
+        var batch = new CommittedTradeExportBatch(ProductLine.LINEAR_PERPETUAL, orders, sink);
         batch.flush(0);
         clearInvocations(orders, sink);
         var change = mock(com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange.class);
@@ -60,7 +60,7 @@ class ExportBatchTest {
     @Test void liquidationRepairWritesOnlyItsHistoryWithoutKafkaOrOrderWatermark() {
         var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
-        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.OPTION, orders, sink,
+        var batch = new CommittedTradeExportBatch(ProductLine.OPTION, orders, sink,
                 CommittedTradeExporter.ExportMode.LIQUIDATION_REPAIR);
         var change = mock(com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange.class);
         doAnswer(call -> {
@@ -77,7 +77,7 @@ class ExportBatchTest {
     @Test void executionRepairNeverPublishesKafkaOrWritesOrdersAndReceipts() {
         var repository = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
-        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.OPTION,repository,sink,CommittedTradeExporter.ExportMode.EXECUTION_REPAIR);
+        var batch = new CommittedTradeExportBatch(ProductLine.OPTION,repository,sink,CommittedTradeExporter.ExportMode.EXECUTION_REPAIR);
         batch.add(List.of(frame(ProductLine.OPTION,RealtimeFrame.Kind.TRADE,1)),null,1,0);
         batch.flush(1);
         verify(repository).repairExecutions(eq(ProductLine.OPTION),anyList());
@@ -86,7 +86,7 @@ class ExportBatchTest {
     @Test void receiptRepairNeverPublishesTradesOrAdvancesTheOrderProjection() {
         var repository = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
-        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, repository, sink,
+        var batch = new CommittedTradeExportBatch(ProductLine.SPOT, repository, sink,
                 CommittedTradeExporter.ExportMode.COMMAND_RESULT_REPAIR);
         var result = new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
                 ProductLine.SPOT, 7, new java.util.UUID(0, 1), com.surprising.aeron.protocol.CoreMessageType.CANCEL_ORDER,
@@ -105,7 +105,7 @@ class ExportBatchTest {
     @Test void receiptsFlushEvenWhenThereAreNoOrderChangesAndTheExportSequenceHasNotChanged() {
         var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
-        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
+        var batch = new CommittedTradeExportBatch(ProductLine.SPOT, orders, sink);
         batch.flush(0);
         clearInvocations(orders, sink);
         var result = new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
@@ -131,7 +131,7 @@ class ExportBatchTest {
     void coalescesSmallCommittedBatchesUntilDeadlineAndFlushesInBusinessOrder(ProductLine product) {
         var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
-        var batch = new CommittedTradeExporter.ExportBatch(product, orders, sink);
+        var batch = new CommittedTradeExportBatch(product, orders, sink);
         var projected = new ArrayList<RealtimeFrame>();
         var published = new ArrayList<RealtimeFrame>();
         doAnswer(call -> { projected.addAll(call.getArgument(1)); return null; })
@@ -161,7 +161,7 @@ class ExportBatchTest {
     @Test void enforcesCommandAndFrameBoundsBeforeDeadlineAndFlushesWatermarkWithoutOrders() {
         var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
-        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
+        var batch = new CommittedTradeExportBatch(ProductLine.SPOT, orders, sink);
         for (int i=0;i<256;i++) batch.add(List.of(), null, i, i);
         verify(orders).persist(eq(ProductLine.SPOT), anyList(), anyList(), eq(255L), anyList(), anyList(), anyList(), eq(List.of()));
         verify(sink).publish(anyList());
@@ -173,7 +173,7 @@ class ExportBatchTest {
     @Test void failuresRetainBatchAndDoNotMarkItFlushed() {
         var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
-        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
+        var batch = new CommittedTradeExportBatch(ProductLine.SPOT, orders, sink);
         batch.add(List.of(frame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 1)), null,1,0);
         doThrow(new IllegalStateException("SQL failed")).doNothing()
                 .when(orders).persist(any(),anyList(), anyList(),anyLong(), anyList(), anyList(), anyList(), eq(List.of()));
@@ -194,7 +194,7 @@ class ExportBatchTest {
         var projected = new ArrayList<RealtimeFrame>();
         doAnswer(call -> { projected.addAll(call.getArgument(1)); return null; })
                 .when(orders).persist(eq(product), anyList(), anyList(), anyLong(), anyList(), anyList(), anyList(), eq(List.of()));
-        var batch = new CommittedTradeExporter.ExportBatch(product, orders, sink);
+        var batch = new CommittedTradeExportBatch(product, orders, sink);
         batch.catchUp(true);
         // A historical command taking 2ms previously triggered a SQL commit every
         // few commands. Recovery batches retain command order without this churn.

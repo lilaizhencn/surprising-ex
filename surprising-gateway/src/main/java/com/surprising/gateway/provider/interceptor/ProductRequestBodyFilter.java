@@ -4,6 +4,8 @@ import jakarta.servlet.*;
 import jakarta.servlet.http.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
+import java.util.regex.Pattern;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -15,16 +17,22 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public final class ProductRequestBodyFilter extends OncePerRequestFilter {
     public static final String BODY = ProductRequestBodyFilter.class.getName() + ".body";
     private static final int MAX_BYTES = 1024 * 1024;
+    private static final Set<String> BODYLESS_METHODS = Set.of("GET", "HEAD", "OPTIONS");
+    private static final Pattern ANNOUNCEMENT_SAVE_PATH =
+            Pattern.compile("/api/v1/admin/announcements(?:/[0-9]+)?");
+    private static final Pattern LEGAL_REVISION_SAVE_PATH =
+            Pattern.compile("/api/v1/admin/legal/revisions(?:/[0-9]+)?");
+
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
         String type = request.getContentType();
-        return java.util.List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod())
+        return BODYLESS_METHODS.contains(request.getMethod())
                 || (type != null && (type.startsWith("multipart/") || type.startsWith("application/x-www-form-urlencoded")));
     }
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                               FilterChain chain) throws ServletException, IOException {
-        String path=request.getRequestURI();
-        boolean articleSave=("POST".equals(request.getMethod()) || "PUT".equals(request.getMethod()))
-                && (path.matches("/api/v1/admin/announcements(?:/[0-9]+)?") || path.matches("/api/v1/admin/legal/revisions(?:/[0-9]+)?"));
+        String path = request.getRequestURI();
+        boolean articleSave = ("POST".equals(request.getMethod()) || "PUT".equals(request.getMethod()))
+                && (ANNOUNCEMENT_SAVE_PATH.matcher(path).matches() || LEGAL_REVISION_SAVE_PATH.matcher(path).matches());
         int limit=articleSave?3*MAX_BYTES:MAX_BYTES;
         byte[] body = request.getInputStream().readNBytes(limit + 1);
         if (body.length > limit) { response.sendError(413, "product request body is too large"); return; }

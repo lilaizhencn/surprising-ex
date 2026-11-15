@@ -100,6 +100,7 @@ public class OrderService {
     private final BracketOrderDispatcher bracketOrderDispatcher;
     private final OrderQueryService queries;
     private final OrderAdminService adminOps;
+    private final OrderBatchService batchOps;
 
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderAeronGateway aeron, AeronOrderProjectionRepository aeronOrderProjection,
@@ -131,6 +132,7 @@ public class OrderService {
         this.bracketOrderDispatcher = bracketOrderDispatcher;
         this.queries = queries;
         this.adminOps = new OrderAdminService(this, queries);
+        this.batchOps = new OrderBatchService(this, queries);
     }
 
     public ObjectNode tradingMetrics(int window, int limit, ProductLine requestedProduct) {
@@ -206,7 +208,7 @@ public class OrderService {
                 .thenApply(outcome -> new CommandExecution(commandId, List.of(orderId), outcome, CommandKind.PLACE));
     }
 
-    private PlaceOrderRequest prepareOrder(PlaceOrderRequest request) {
+    PlaceOrderRequest prepareOrder(PlaceOrderRequest request) {
         return prepareOrder(request, false);
     }
 
@@ -225,66 +227,23 @@ public class OrderService {
     }
 
     public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
-        return terminalBatchResult(placeBatchCommand(request), OrderBatchResponse.class);
+        return batchOps.placeBatch(request);
     }
 
     public OrderCommandReceipt placeBatchCommand(BatchPlaceOrderRequest request) {
-        List<PlaceOrderRequest> orders = prepareBatchOrders(request);
-        requireAeron();
-        return receipt(submitPlaceBatchCommand(request.batchKey(), orders));
+        return batchOps.placeBatchCommand(request);
     }
 
     public CompletionStage<OrderCommandReceipt> placeBatchCommandAsync(BatchPlaceOrderRequest request) {
-        List<PlaceOrderRequest> orders = prepareBatchOrders(request);
-        requireAeron();
-        return submitPlaceBatchCommandAsync(request.batchKey(), orders).thenApply(this::receipt);
+        return batchOps.placeBatchCommandAsync(request);
     }
 
     CommandExecution submitPlaceBatchCommand(String batchKey, List<PlaceOrderRequest> requests) {
-        requireBatchKey(batchKey);
-        requireBatchListSize(requests, com.surprising.aeron.protocol.PlaceOrderBatchCommand.MAX_ORDERS, "orders");
-        ProductLine productLine = configuredProductLine();
-        long userId = requireSingleUser(requests);
-        List<PlaceOrderCommand> commands = new ArrayList<>(requests.size());
-        List<Long> prospectiveIds = new ArrayList<>(requests.size());
-        for (PlaceOrderRequest request : requests) {
-            String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
-            long orderId = StableOrderIdentity.orderId(productLine, userId, clientOrderId);
-            prospectiveIds.add(orderId);
-            commands.add(buildPlaceCommand(orderId, request));
-        }
-        UUID commandId = batchCommandId(productLine, userId, "place", batchKey);
-        CoreCommandOutcome outcome = requireAeron().commandOutcome(CoreMessageType.PLACE_ORDER_BATCH, commandId, userId,
-                TradingOrderBatchCodec.encodePlaceOrderBatch(new com.surprising.aeron.protocol.PlaceOrderBatchCommand(commands)));
-        return new CommandExecution(commandId, prospectiveIds, outcome, CommandKind.PLACE_BATCH);
+        return batchOps.submitPlaceBatchCommand(batchKey, requests);
     }
 
     CompletionStage<CommandExecution> submitPlaceBatchCommandAsync(String batchKey, List<PlaceOrderRequest> requests) {
-        requireBatchKey(batchKey);
-        requireBatchListSize(requests, com.surprising.aeron.protocol.PlaceOrderBatchCommand.MAX_ORDERS, "orders");
-        ProductLine productLine = configuredProductLine();
-        long userId = requireSingleUser(requests);
-        List<PlaceOrderCommand> commands = new ArrayList<>(requests.size());
-        List<Long> prospectiveIds = new ArrayList<>(requests.size());
-        for (PlaceOrderRequest request : requests) {
-            long orderId = StableOrderIdentity.orderId(productLine, userId,
-                    requireClientKey(request.clientOrderId(), "clientOrderId"));
-            prospectiveIds.add(orderId);
-            commands.add(buildPlaceCommand(orderId, request));
-        }
-        UUID commandId = batchCommandId(productLine, userId, "place", batchKey);
-        byte[] payload = TradingOrderBatchCodec.encodePlaceOrderBatch(
-                new com.surprising.aeron.protocol.PlaceOrderBatchCommand(commands));
-        return requireAeron().commandOutcomeAsync(CoreMessageType.PLACE_ORDER_BATCH, commandId, userId, payload)
-                .thenApply(outcome -> new CommandExecution(commandId, prospectiveIds, outcome, CommandKind.PLACE_BATCH));
-    }
-
-    private List<PlaceOrderRequest> prepareBatchOrders(BatchPlaceOrderRequest request) {
-        if (request == null) throw new IllegalArgumentException("place batch request is required");
-        requireBatchSize(request.orders().size(), 20, "orders");
-        List<PlaceOrderRequest> orders = new ArrayList<>(request.orders().size());
-        for (PlaceOrderRequest order : request.orders()) orders.add(prepareOrder(order));
-        return orders;
+        return batchOps.submitPlaceBatchCommandAsync(batchKey, requests);
     }
 
     public TestOrderResponse test(PlaceOrderRequest request) {
@@ -381,68 +340,23 @@ public class OrderService {
     }
 
     public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
-        return terminalBatchResult(amendBatchCommand(request), AmendOrderBatchResponse.class);
+        return batchOps.amendBatch(request);
     }
 
     public OrderCommandReceipt amendBatchCommand(BatchAmendOrdersRequest request) {
-        if (request == null) {
-            throw new IllegalArgumentException("amend batch request is required");
-        }
-        requireBatchSize(request.orders().size(), 20, "orders");
-        List<AmendOrderRequest> normalized = request.orders().stream().map(this::normalizeAmend).toList();
-        requireAeron();
-        return receipt(submitAmendBatchCommand(request.batchKey(), normalized));
+        return batchOps.amendBatchCommand(request);
     }
 
     public CompletionStage<OrderCommandReceipt> amendBatchCommandAsync(BatchAmendOrdersRequest request) {
-        if (request == null) throw new IllegalArgumentException("amend batch request is required");
-        requireBatchSize(request.orders().size(), 20, "orders");
-        List<AmendOrderRequest> normalized = request.orders().stream().map(this::normalizeAmend).toList();
-        requireAeron();
-        return submitAmendBatchCommandAsync(request.batchKey(), normalized).thenApply(this::receipt);
+        return batchOps.amendBatchCommandAsync(request);
     }
 
     CommandExecution submitAmendBatchCommand(String batchKey, List<AmendOrderRequest> requests) {
-        requireBatchKey(batchKey);
-        requireBatchListSize(requests, com.surprising.aeron.protocol.AmendOrderBatchCommand.MAX_ORDERS, "orders");
-        ProductLine productLine = configuredProductLine();
-        long userId = requireSingleUser(requests);
-        List<AmendOrderCommand> commands = new ArrayList<>(requests.size());
-        List<Long> prospectiveIds = new ArrayList<>(requests.size());
-        for (AmendOrderRequest request : requests) {
-            String clientOrderId = requireClientKey(request.newClientOrderId(), "newClientOrderId");
-            long replacementOrderId = StableOrderIdentity.replacementOrderId(productLine, userId, clientOrderId);
-            prospectiveIds.add(replacementOrderId);
-            commands.add(new AmendOrderCommand(request.orderId(), replacementOrderId, clientOrderId,
-                    request.priceTicks(), request.quantitySteps(),
-                    request.timeInForce() == null ? null : timeInForce(request.timeInForce()), request.postOnly()));
-        }
-        UUID commandId = batchCommandId(productLine, userId, "amend", batchKey);
-        CoreCommandOutcome outcome = requireAeron().commandOutcome(CoreMessageType.AMEND_ORDER_BATCH, commandId, userId,
-                TradingOrderBatchCodec.encodeAmendOrderBatch(new com.surprising.aeron.protocol.AmendOrderBatchCommand(commands)));
-        return new CommandExecution(commandId, prospectiveIds, outcome, CommandKind.AMEND_BATCH);
+        return batchOps.submitAmendBatchCommand(batchKey, requests);
     }
 
     CompletionStage<CommandExecution> submitAmendBatchCommandAsync(String batchKey, List<AmendOrderRequest> requests) {
-        requireBatchKey(batchKey);
-        requireBatchListSize(requests, com.surprising.aeron.protocol.AmendOrderBatchCommand.MAX_ORDERS, "orders");
-        ProductLine productLine = configuredProductLine();
-        long userId = requireSingleUser(requests);
-        List<AmendOrderCommand> commands = new ArrayList<>(requests.size());
-        List<Long> prospectiveIds = new ArrayList<>(requests.size());
-        for (var request : requests) {
-            long replacementOrderId = StableOrderIdentity.replacementOrderId(productLine, userId,
-                    requireClientKey(request.newClientOrderId(), "newClientOrderId"));
-            prospectiveIds.add(replacementOrderId);
-            commands.add(new AmendOrderCommand(request.orderId(), replacementOrderId, request.newClientOrderId(),
-                    request.priceTicks(), request.quantitySteps(),
-                    request.timeInForce() == null ? null : timeInForce(request.timeInForce()), request.postOnly()));
-        }
-        UUID commandId = batchCommandId(productLine, userId, "amend", batchKey);
-        byte[] payload = TradingOrderBatchCodec.encodeAmendOrderBatch(
-                new com.surprising.aeron.protocol.AmendOrderBatchCommand(commands));
-        return requireAeron().commandOutcomeAsync(CoreMessageType.AMEND_ORDER_BATCH, commandId, userId, payload)
-                .thenApply(outcome -> new CommandExecution(commandId, prospectiveIds, outcome, CommandKind.AMEND_BATCH));
+        return batchOps.submitAmendBatchCommandAsync(batchKey, requests);
     }
 
     public OrderResponse closePosition(ClosePositionRequest request) {
@@ -558,57 +472,23 @@ public class OrderService {
     }
 
     public OrderBatchResponse cancelBatch(BatchCancelOrdersRequest request) {
-        return terminalBatchResult(cancelBatchCommand(request), OrderBatchResponse.class);
+        return batchOps.cancelBatch(request);
     }
 
     public OrderCommandReceipt cancelBatchCommand(BatchCancelOrdersRequest request) {
-        if (request == null) {
-            throw new IllegalArgumentException("cancel batch request is required");
-        }
-        requireBatchSize(request.orders().size(), 50, "orders");
-        request.orders().forEach(this::validateCancelRequest);
-        requireAeron();
-        return receipt(submitCancelBatchCommand(request.batchKey(), request.orders()));
+        return batchOps.cancelBatchCommand(request);
     }
 
     public CompletionStage<OrderCommandReceipt> cancelBatchCommandAsync(BatchCancelOrdersRequest request) {
-        if (request == null) throw new IllegalArgumentException("cancel batch request is required");
-        requireBatchSize(request.orders().size(), 50, "orders");
-        request.orders().forEach(this::validateCancelRequest);
-        requireAeron();
-        return submitCancelBatchCommandAsync(request.batchKey(), request.orders())
-                .thenApply(this::receipt);
+        return batchOps.cancelBatchCommandAsync(request);
     }
 
     CommandExecution submitCancelBatchCommand(String batchKey, List<CancelOrderRequest> requests) {
-        requireBatchKey(batchKey);
-        requireBatchListSize(requests, com.surprising.aeron.protocol.CancelOrderBatchCommand.MAX_ORDERS, "orders");
-        ProductLine productLine = configuredProductLine();
-        long userId = requireSingleUser(requests);
-        List<CancelOrderCommand> commands = requests.stream()
-                .map(request -> new CancelOrderCommand(request.orderId())).toList();
-        List<Long> prospectiveIds = requests.stream().map(CancelOrderRequest::orderId).toList();
-        UUID commandId = batchCommandId(productLine, userId, "cancel", batchKey);
-        CoreCommandOutcome outcome = requireAeron().commandOutcome(CoreMessageType.CANCEL_ORDER_BATCH, commandId, userId,
-                TradingOrderBatchCodec.encodeCancelOrderBatch(new com.surprising.aeron.protocol.CancelOrderBatchCommand(commands)));
-        return new CommandExecution(commandId, prospectiveIds, outcome, CommandKind.CANCEL_BATCH);
+        return batchOps.submitCancelBatchCommand(batchKey, requests);
     }
 
     CompletionStage<CommandExecution> submitCancelBatchCommandAsync(String batchKey, List<CancelOrderRequest> requests) {
-        requireBatchKey(batchKey);
-        requireBatchListSize(requests, com.surprising.aeron.protocol.CancelOrderBatchCommand.MAX_ORDERS, "orders");
-        ProductLine productLine = configuredProductLine();
-        long userId = requireSingleUser(requests);
-        List<CancelOrderCommand> commands = requests.stream()
-                .map(request -> new CancelOrderCommand(request.orderId())).toList();
-        List<Long> prospectiveIds = requests.stream()
-                .map(CancelOrderRequest::orderId).toList();
-        UUID commandId = batchCommandId(productLine, userId, "cancel", batchKey);
-        byte[] payload = TradingOrderBatchCodec.encodeCancelOrderBatch(
-                new com.surprising.aeron.protocol.CancelOrderBatchCommand(commands));
-        return requireAeron().commandOutcomeAsync(CoreMessageType.CANCEL_ORDER_BATCH, commandId, userId, payload)
-                .thenApply(outcome -> new CommandExecution(
-                        commandId, prospectiveIds, outcome, CommandKind.CANCEL_BATCH));
+        return batchOps.submitCancelBatchCommandAsync(batchKey, requests);
     }
 
     public OrderCommandReceipt commandResult(long userId, UUID commandId) {
@@ -640,32 +520,12 @@ public class OrderService {
     }
 
     public OrderBatchResponse cancelOpenOrders(CancelOpenOrdersRequest request) {
-        if (request == null) {
-            throw new IllegalArgumentException("cancel open orders request is required");
-        }
-        if (request.userId() <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        int limit = request.limit() == null ? 1000 : request.limit();
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
-        }
-        String instrumentId = request.instrumentId() == null || request.instrumentId().isBlank()
-                ? null : normalizeInstrumentId(request.instrumentId());
-        List<OrderResponse> open = activeOpenOrders(currentProductLine(), request.userId(), instrumentId, limit);
-        requireAeron();
-        List<CancelOrderRequest> requests = open.stream()
-                .map(order -> new CancelOrderRequest(request.userId(), order.orderId()))
-                .toList();
-        return orderBatchResponse(cancelOrderChunks(requests));
+        return batchOps.cancelOpenOrders(request);
     }
 
     /** 定时撤单从所属Core读取本批目标，完成判断不依赖公开查询投影的进度。 */
     OrderBatchResponse cancelTimerOrders(long userId, String instrumentId, int limit) {
-        List<CancelOrderRequest> requests = openOrdersFromCore(userId, instrumentId, 0, limit).stream()
-                .map(order -> new CancelOrderRequest(userId, order.orderId()))
-                .toList();
-        return orderBatchResponse(cancelOrderChunks(requests));
+        return batchOps.cancelTimerOrders(userId, instrumentId, limit);
     }
 
     public List<OrderResponse> openOrdersFromCore(long userId, String instrumentId, long beforeOrderId, int limit) {
@@ -789,7 +649,7 @@ public class OrderService {
         return adminOps.hasLifecycleActiveOrders(instrumentId);
     }
 
-    private PlaceOrderCommand buildPlaceCommand(long orderId, PlaceOrderRequest request) {
+    PlaceOrderCommand buildPlaceCommand(long orderId, PlaceOrderRequest request) {
         long limitPriceTicks = request.orderType() == OrderType.LIMIT ? request.priceTicks() : 0;
         if (request.orderType() == OrderType.MARKET && configuredProductLine() == ProductLine.SPOT) {
             if (bboOrderBook == null) throw new IllegalStateException("SPOT market order book is unavailable");
@@ -844,7 +704,7 @@ public class OrderService {
         return StableOrderIdentity.commandId(productLine, userId, "batch:" + kind + ':' + batchKey);
     }
 
-    private ProductLine configuredProductLine() {
+    ProductLine configuredProductLine() {
         return requireProductLine(properties.getProductLine());
     }
 
@@ -872,70 +732,17 @@ public class OrderService {
                 stage, null, null, 0L);
     }
 
-    private void requireBatchSize(int size, int max, String field) {
+    void requireBatchSize(int size, int max, String field) {
         if (size < 1 || size > max) {
             throw new IllegalArgumentException(field + " size must be in [1, " + max + "]");
         }
     }
 
-    private OrderBatchResponse orderBatchResponse(List<OrderBatchItemResponse> results) {
-        int completed = (int) results.stream().filter(OrderBatchItemResponse::success).count();
-        return new OrderBatchResponse(results.size(), completed, results.size() - completed, results);
-    }
-
     List<OrderBatchItemResponse> cancelOrderChunks(List<CancelOrderRequest> requests) {
-        if (requests.isEmpty()) {
-            return List.of();
-        }
-        Map<Long, List<IndexedCancelRequest>> requestsByUser = new LinkedHashMap<>();
-        for (int index = 0; index < requests.size(); index++) {
-            CancelOrderRequest request = requests.get(index);
-            validateCancelRequest(request);
-            requestsByUser.computeIfAbsent(request.userId(), ignored -> new ArrayList<>())
-                    .add(new IndexedCancelRequest(index, request));
-        }
-
-        List<OrderBatchItemResponse> results = new ArrayList<>(requests.size());
-        for (List<IndexedCancelRequest> userRequests : requestsByUser.values()) {
-            for (int start = 0; start < userRequests.size(); start += MAX_CANCEL_BATCH_SIZE) {
-                List<IndexedCancelRequest> chunk = userRequests.subList(start,
-                        Math.min(start + MAX_CANCEL_BATCH_SIZE, userRequests.size()));
-                List<CancelOrderRequest> chunkRequests = chunk.stream()
-                        .map(IndexedCancelRequest::request)
-                        .toList();
-                OrderBatchResponse response;
-                try {
-                    response = cancelBatch(new BatchCancelOrdersRequest(chunkRequests));
-                } catch (RuntimeException exception) {
-                    response = failedCancelBatch(chunkRequests, exception.getMessage());
-                }
-                for (int localIndex = 0; localIndex < chunk.size(); localIndex++) {
-                    int resultIndex = localIndex;
-                    IndexedCancelRequest indexed = chunk.get(localIndex);
-                    OrderBatchItemResponse item = response.results().stream()
-                            .filter(value -> value != null && value.index() == resultIndex)
-                            .findFirst()
-                            .orElseGet(() -> new OrderBatchItemResponse(resultIndex, false,
-                                    "batch cancellation result is missing", null));
-                    results.add(new OrderBatchItemResponse(indexed.index(), item.success(), item.message(),
-                            item.order()));
-                }
-            }
-        }
-        results.sort(Comparator.comparingInt(OrderBatchItemResponse::index));
-        return List.copyOf(results);
+        return batchOps.cancelOrderChunks(requests);
     }
 
-    private OrderBatchResponse failedCancelBatch(List<CancelOrderRequest> requests, String message) {
-        String reason = message == null || message.isBlank() ? "batch cancellation failed" : message;
-        List<OrderBatchItemResponse> results = new ArrayList<>(requests.size());
-        for (int index = 0; index < requests.size(); index++) {
-            results.add(new OrderBatchItemResponse(index, false, reason, null));
-        }
-        return new OrderBatchResponse(results.size(), 0, results.size(), results);
-    }
-
-    private <T> T terminalBatchResult(OrderCommandReceipt receipt, Class<T> type) {
+    <T> T terminalBatchResult(OrderCommandReceipt receipt, Class<T> type) {
         if (type.isInstance(receipt.result())) {
             return type.cast(receipt.result());
         }
@@ -951,13 +758,10 @@ public class OrderService {
         throw new IllegalStateException(receipt.code() + ": batch result is unavailable");
     }
 
-    private void validateCancelRequest(CancelOrderRequest request) {
+    void validateCancelRequest(CancelOrderRequest request) {
         if (request == null || request.userId() <= 0L || request.orderId() <= 0L) {
             throw new IllegalArgumentException("userId and orderId must be positive");
         }
-    }
-
-    private record IndexedCancelRequest(int index, CancelOrderRequest request) {
     }
 
     private PlaceOrderRequest normalize(PlaceOrderRequest request) {
@@ -1021,7 +825,7 @@ public class OrderService {
         return prices.get(mode.depth() - 1);
     }
 
-    private AmendOrderRequest normalizeAmend(AmendOrderRequest request) {
+    AmendOrderRequest normalizeAmend(AmendOrderRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("amend order request is required");
         }

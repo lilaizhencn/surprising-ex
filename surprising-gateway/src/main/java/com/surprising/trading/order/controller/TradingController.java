@@ -100,12 +100,8 @@ public class TradingController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "instrumentId", required = false) String instrumentId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                    .body(orderQueryService.cancellationPlan(userId, instrumentId));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(orderQueryService.cancellationPlan(userId, instrumentId)));
     }
 
     @GetMapping("/api/v1/trading/orders/cancellation-batches")
@@ -115,13 +111,9 @@ public class TradingController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("batchKey") String batchKey) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return commandResponse(orderQueryService.cancellationBatch(userId, batchKey));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (DataAccessException | IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed cancellation batch is unavailable", ex);
-        }
+        return TradingControllerSupport.callUnavailable(
+                () -> commandResponse(orderQueryService.cancellationBatch(userId, batchKey)),
+                "committed cancellation batch is unavailable");
     }
 
     @GetMapping("/api/v1/trading/orders/amendments")
@@ -131,13 +123,9 @@ public class TradingController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("clientRequestId") String clientRequestId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return commandResponse(orderQueryService.amendment(userId, clientRequestId));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (DataAccessException | IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed amendment result is unavailable", ex);
-        }
+        return TradingControllerSupport.callUnavailable(
+                () -> commandResponse(orderQueryService.amendment(userId, clientRequestId)),
+                "committed amendment result is unavailable");
     }
 
     @GetMapping("/api/v1/trading/orders/cancellations/{orderId}")
@@ -147,13 +135,9 @@ public class TradingController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("orderId") long orderId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return commandResponse(orderQueryService.cancellation(userId, orderId));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (DataAccessException | IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed cancellation result is unavailable", ex);
-        }
+        return TradingControllerSupport.callUnavailable(
+                () -> commandResponse(orderQueryService.cancellation(userId, orderId)),
+                "committed cancellation result is unavailable");
     }
 
     @GetMapping("/api/v1/trading/orders/submission")
@@ -163,15 +147,11 @@ public class TradingController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("clientOrderId") String clientOrderId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
+        return TradingControllerSupport.callUnavailable(() -> {
             var result = orderQueryService.submission(userId, clientOrderId);
             return ResponseEntity.status("TERMINAL".equals(result.outcome()) ? HttpStatus.OK : HttpStatus.ACCEPTED)
                     .cacheControl(CacheControl.noStore()).body(result);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (DataAccessException | IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed submission result is unavailable", ex);
-        }
+        }, "committed submission result is unavailable");
     }
 
     @GetMapping("/api/v1/trading/orders/price-protection")
@@ -187,64 +167,36 @@ public class TradingController {
             @RequestParam("clientOrderId") String clientOrderId,
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return orderQueryService.getByClientOrderId(userId, clientOrderId, minExportSequence);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (ProjectionReadResult.ProjectionLagException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderQueryService.getByClientOrderId(userId, clientOrderId, minExportSequence));
     }
 
     @PostMapping("/api/v1/trading/orders/cancel-all-after")
     public CancelAllAfterResponse cancelAllAfter(@RequestBody CancelAllAfterRequest request) {
-        try {
-            return cancelAllAfterService.set(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> cancelAllAfterService.set(request));
     }
 
     @PostMapping("/api/v1/trading/orders/close-position")
     public OrderResponse closePosition(@Valid @RequestBody ClosePositionRequest request) {
-        try {
-            return orderService.closePosition(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderService.closePosition(request));
     }
 
     @PostMapping("/api/v1/trading/orders/batch-cancel")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> cancelBatch(@Valid @RequestBody BatchCancelOrdersRequest request) {
-        try {
-            return mapAsyncFailure(orderService.cancelBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.NOT_FOUND);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.callAsync(
+                () -> orderService.cancelBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse),
+                HttpStatus.NOT_FOUND);
     }
 
     @PostMapping("/api/v1/trading/orders/batch-amend")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> amendBatch(@Valid @RequestBody BatchAmendOrdersRequest request) {
-        try {
-            return mapAsyncFailure(orderService.amendBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.CONFLICT);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.callAsync(
+                () -> orderService.amendBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse),
+                HttpStatus.CONFLICT);
     }
 
     @PostMapping("/api/v1/trading/orders/cancel-open")
     public OrderBatchResponse cancelOpen(@RequestBody CancelOpenOrdersRequest request) {
-        try {
-            return orderService.cancelOpenOrders(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderService.cancelOpenOrders(request));
     }
 
     @GetMapping("/api/v1/trading/orders/history")
@@ -261,57 +213,34 @@ public class TradingController {
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence,
             @RequestParam(value = "status", required = false) String status) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return orderQueryService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence, status);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (ProjectionReadResult.ProjectionLagException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() ->
+                orderQueryService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence, status));
     }
 
     @PostMapping("/api/v1/trading/orders/cancel")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> cancel(@RequestBody CancelOrderRequest request) {
-        try {
-            return mapAsyncFailure(orderService.cancelCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.NOT_FOUND);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.callAsync(
+                () -> orderService.cancelCommandAsync(request).thenApply(TradingControllerSupport::commandResponse),
+                HttpStatus.NOT_FOUND);
     }
 
     @PostMapping("/api/v1/trading/orders/batch")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> placeBatch(@Valid @RequestBody BatchPlaceOrderRequest request) {
-        try {
-            return mapAsyncFailure(orderService.placeBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.CONFLICT);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.callAsync(
+                () -> orderService.placeBatchCommandAsync(request).thenApply(TradingControllerSupport::commandResponse),
+                HttpStatus.CONFLICT);
     }
 
     @PostMapping("/api/v1/trading/orders/amend")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> amend(@Valid @RequestBody AmendOrderRequest request) {
-        try {
-            return mapAsyncFailure(orderService.amendCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.CONFLICT);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.callAsync(
+                () -> orderService.amendCommandAsync(request).thenApply(TradingControllerSupport::commandResponse),
+                HttpStatus.CONFLICT);
     }
 
     @PostMapping("/api/v1/trading/orders/test")
     public TestOrderResponse test(@Valid @RequestBody PlaceOrderRequest request) {
-        try {
-            return orderService.test(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderService.test(request));
     }
 
     @GetMapping("/api/v1/trading/orders/open")
@@ -324,27 +253,17 @@ public class TradingController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
+        return TradingControllerSupport.call(() -> {
             if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
             return orderQueryService.openOrders(userId, activeInstrument(instrumentId), activePage(limit, cursor), minExportSequence);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (ProjectionReadResult.ProjectionLagException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        }
+        });
     }
 
     @PostMapping("/api/v1/trading/orders")
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> place(@Valid @RequestBody PlaceOrderRequest request) {
-        try {
-            return mapAsyncFailure(orderService.placeCommandAsync(request).thenApply(TradingControllerSupport::commandResponse), HttpStatus.CONFLICT);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.callAsync(
+                () -> orderService.placeCommandAsync(request).thenApply(TradingControllerSupport::commandResponse),
+                HttpStatus.CONFLICT);
     }
 
     @GetMapping("/api/v1/trading/orders/commands/{commandId}")
@@ -354,13 +273,9 @@ public class TradingController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("commandId") UUID commandId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return commandResponse(orderQueryService.commandResult(userId, commandId));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (DataAccessException | IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed command result is unavailable", ex);
-        }
+        return TradingControllerSupport.callUnavailable(
+                () -> commandResponse(orderQueryService.commandResult(userId, commandId)),
+                "committed command result is unavailable");
     }
 
     @GetMapping("/api/v1/trading/orders/{orderId}")
@@ -371,16 +286,6 @@ public class TradingController {
             @PathVariable("orderId") long orderId,
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return orderQueryService.get(userId, orderId, minExportSequence);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (ProjectionReadResult.ProjectionLagException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderQueryService.get(userId, orderId, minExportSequence));
     }
 }

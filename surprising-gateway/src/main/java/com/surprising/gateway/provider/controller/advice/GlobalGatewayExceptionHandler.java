@@ -8,6 +8,7 @@ import com.surprising.gateway.provider.legal.exception.LegalProblem;
 import com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection;
 import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import com.surprising.trading.order.exception.OrderCommandRejectedException;
+import com.surprising.trading.order.repository.ProjectionReadResult;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Map;
@@ -121,6 +122,11 @@ public class GlobalGatewayExceptionHandler {
     public ResponseEntity<Map<String, String>> illegalArgument(IllegalArgumentException failure) {
         return ResponseEntity.badRequest().cacheControl(CacheControl.noStore())
                 .body(Map.of("message", failure.getMessage() == null ? "" : failure.getMessage()));
+    }
+
+    @ExceptionHandler(ProjectionReadResult.ResponseTooLargeException.class)
+    public ProblemDetail projectionTooLarge(ProjectionReadResult.ResponseTooLargeException failure) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.PAYLOAD_TOO_LARGE, failure.getMessage());
     }
 
     @ExceptionHandler(StatusException.class)

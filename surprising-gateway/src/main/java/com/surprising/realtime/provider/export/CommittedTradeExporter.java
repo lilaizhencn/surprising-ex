@@ -164,7 +164,7 @@ final class CommittedTradeExporter {
         return true;
     }
 
-    private void publishPortfolioCutoffs(CommittedTradeReplay replay, ExportBatch batch,
+    private void publishPortfolioCutoffs(CommittedTradeReplay replay, CommittedTradeExportBatch batch,
                                          long position, long nextCommandTimestamp, long coveredFrom) {
         long now = clock.millis();
         long opening = PortfolioIncomePeriod.dayStart(now);
@@ -253,7 +253,7 @@ final class CommittedTradeExporter {
                                             .controlRequestChannel(config.archiveControlChannel())
                                             .controlResponseChannel("aeron:ipc"));
                     var recordingLog = new RecordingLog(config.clusterDirectory().toFile(), false);
-                    var archiveReplay = new ArchiveReplay(aeron, archive, product)) {
+                    var archiveReplay = new CommittedTradeArchiveReplay(aeron, archive, product)) {
                 long cursor = checkpoint.logPosition();
                 if (mode == ExportMode.LIVE) {
                     orders.initializeFees(product, replay);
@@ -262,7 +262,7 @@ final class CommittedTradeExporter {
                 }
                 boolean[] initialStatisticsPublished={false};
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
-                var batch = new ExportBatch(product, orders, sink, mode);
+                var batch = new CommittedTradeExportBatch(product, orders, sink, mode);
                 long portfolioCoveredFrom = mode == ExportMode.LIVE
                         ? orders.portfolio().start(product, checkpoint.logPosition(), replay.clusterTimestamp()).timestamp() : 0;
                 long[] delivered = {checkpoint.logPosition()};
@@ -364,20 +364,20 @@ final class CommittedTradeExporter {
                             "archive history before the export checkpoint is unavailable");
                     safeEnd = archiveReplay.committedEnd(term.recordingId, term.leadershipTermId,
                             position, safeEnd, System.nanoTime());
-                    if (archiveReplay.recordingId != term.recordingId) {
+                    if (archiveReplay.recordingId() != term.recordingId) {
                         if (partialMessage[0])
                             throw new IllegalStateException("fragmented command crosses archive recordings");
                         assembler.clear();
                     }
                     archiveReplay.follow(term.recordingId, position, safeEnd);
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-                    while (archiveReplay.subscription.imageCount() == 0) {
+                    while (archiveReplay.subscription().imageCount() == 0) {
                         if (!running.get() || Thread.currentThread().isInterrupted()) break exportLoop;
                         if (System.nanoTime() > deadline)
                             throw new IllegalStateException("archive replay image unavailable");
                         LockSupport.parkNanos(100_000);
                     }
-                    Image image = archiveReplay.subscription.imageAtIndex(0);
+                    Image image = archiveReplay.subscription().imageAtIndex(0);
                     // Aeron catches callback exceptions and can advance the image. Stop on the
                     // export thread before applying or checkpointing any subsequent message.
                     RuntimeException[] replayFailure = {null};
@@ -424,196 +424,4 @@ final class CommittedTradeExporter {
         }
     }
 
-    /** Export-worker-owned batch: bounded by commands/frames and a delivery deadline. */
-    static final class ExportBatch {
-        private static final long MAX_DELAY_NANOS = TimeUnit.MILLISECONDS.toNanos(5);
-        private static final long CATCH_UP_DELAY_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
-        private final ProductLine product;
-        private final CommittedOrderProjectionService orders;
-        private final ReliableTradeKafkaSink sink;
-        private final ExportMode mode;
-        private final ArrayList<RealtimeFrame> trades = new ArrayList<>();
-        private final ArrayList<RealtimeFrame> orderChanges = new ArrayList<>();
-        private final ArrayList<CommittedTradeReplay.CommittedCommandResult> commandResults = new ArrayList<>();
-        private final ArrayList<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges = new ArrayList<>();
-        private final ArrayList<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows = new ArrayList<>();
-        private final ArrayList<LiquidationChange> liquidationChanges = new ArrayList<>();
-        private final ArrayList<com.surprising.aeron.protocol.CoreTradeFeeObservation> feeObservations = new ArrayList<>();
-        private int messages;
-        private long startedAt, flushedSequence = -1;
-        private long maxDelayNanos = MAX_DELAY_NANOS;
-
-        ExportBatch(ProductLine product, CommittedOrderProjectionService orders, ReliableTradeKafkaSink sink) {
-            this(product, orders, sink, ExportMode.LIVE);
-        }
-
-        ExportBatch(ProductLine product, CommittedOrderProjectionService orders, ReliableTradeKafkaSink sink,
-                    ExportMode mode) {
-            this.product = product;
-            this.orders = orders;
-            this.sink = sink;
-            this.mode = mode;
-        }
-
-        void addFees(List<com.surprising.aeron.protocol.CoreTradeFeeObservation> observations) { feeObservations.addAll(observations); }
-
-        void catchUp(boolean behind) {
-            maxDelayNanos = behind ? CATCH_UP_DELAY_NANOS : MAX_DELAY_NANOS;
-        }
-
-        void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
-                 long sequence, long now) {
-            add(changes, commandResult, sequence, now, List.of());
-        }
-
-        void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
-                 long sequence, long now, List<com.surprising.aeron.protocol.CoreAlgoOrderView> algos) {
-            add(changes, commandResult, sequence, now, algos, null);
-        }
-
-        void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
-                 long sequence, long now, List<com.surprising.aeron.protocol.CoreAlgoOrderView> algos,
-                 CommittedTradeReplay.CommittedBalanceFlow balanceFlow) {
-            add(changes, commandResult, sequence, now, algos, balanceFlow, List.of());
-        }
-
-        void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
-                 long sequence, long now, List<com.surprising.aeron.protocol.CoreAlgoOrderView> algos,
-                 CommittedTradeReplay.CommittedBalanceFlow balanceFlow, List<LiquidationChange> liquidations) {
-            if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
-            if (mode == ExportMode.LIVE || mode == ExportMode.LIQUIDATION_REPAIR) liquidationChanges.addAll(liquidations);
-            if (mode == ExportMode.LIVE) algoChanges.addAll(algos);
-            if ((mode == ExportMode.LIVE || mode == ExportMode.PORTFOLIO_REPAIR) && balanceFlow != null) balanceFlows.add(balanceFlow);
-            if (messages++ == 0) startedAt = now;
-            if (commandResult != null && mode != ExportMode.EXECUTION_REPAIR && mode != ExportMode.LIQUIDATION_REPAIR) commandResults.add(commandResult);
-            for (var change : mode == ExportMode.LIVE || mode == ExportMode.EXECUTION_REPAIR ? changes : List.<RealtimeFrame>of()) {
-                if (change.kind() == RealtimeFrame.Kind.TRADE && mode == ExportMode.LIVE) trades.add(change);
-                orderChanges.add(change);
-            }
-            if (messages >= 256 || trades.size() + orderChanges.size() + algoChanges.size() + liquidationChanges.size() >= 4096
-                    || now - startedAt >= maxDelayNanos) flush(sequence);
-        }
-
-        void flushIfDue(long sequence, long now) {
-            if (messages > 0 && now - startedAt >= maxDelayNanos) flush(sequence);
-        }
-
-        long waitNanos(long now, long maxWaitNanos) {
-            return messages == 0 ? maxWaitNanos
-                    : Math.max(1, Math.min(maxWaitNanos, maxDelayNanos - (now - startedAt)));
-        }
-
-        void flush(long sequence) {
-            if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
-            if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty() || !algoChanges.isEmpty() || !balanceFlows.isEmpty() || !liquidationChanges.isEmpty()) {
-                if (mode == ExportMode.COMMAND_RESULT_REPAIR) orders.repairCommandResults(product, commandResults);
-                else if (mode == ExportMode.EXECUTION_REPAIR) orders.repairExecutions(product, orderChanges);
-                else if (mode == ExportMode.LIQUIDATION_REPAIR) orders.repairLiquidations(product, liquidationChanges);
-                else if (mode == ExportMode.STATISTICS_REPAIR) orders.statistics().repair(product,commandResults);
-                else if (mode == ExportMode.PORTFOLIO_REPAIR) orders.portfolio().persist(balanceFlows);
-                else {
-                    orders.persist(product, orderChanges, commandResults, sequence, algoChanges, liquidationChanges, balanceFlows, feeObservations);
-                    sink.publish(trades);
-                }
-                // Neither the checkpoint nor this marker advances when either sink fails.
-                flushedSequence = sequence;
-            }
-            feeObservations.clear();
-            algoChanges.clear();
-            liquidationChanges.clear();
-            balanceFlows.clear();
-            orderChanges.clear();
-            commandResults.clear();
-            trades.clear();
-            messages = 0;
-        }
-    }
-
-    /** Owns one bounded replay and its limit counter for the lifetime of this export worker. */
-    static final class ArchiveReplay implements AutoCloseable {
-        private static final int STREAM_ID = 22001;
-        private static final long BOUNDS_REFRESH_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
-        private final Aeron aeron;
-        private final AeronArchive archive;
-        private final Counter limit;
-        private long recordingId = Aeron.NULL_VALUE;
-        private long sessionId = Aeron.NULL_VALUE;
-        private Subscription subscription;
-        // Export-worker-owned Archive metadata, revalidated on a new term/recording,
-        // every 100ms, and whenever the cached stopped boundary is reached.
-        private long boundsRecordingId = Aeron.NULL_VALUE, boundsTermId = Aeron.NULL_VALUE;
-        private long recordingStart, recordingStop, boundsCheckedAt;
-
-        long committedEnd(long recordingId, long termId, long position, long committed, long now) {
-            if (boundsRecordingId != recordingId || boundsTermId != termId
-                    || now - boundsCheckedAt >= BOUNDS_REFRESH_NANOS
-                    || (recordingStop >= 0 && position >= recordingStop)) {
-                long start = archive.getStartPosition(recordingId);
-                long stop = archive.getStopPosition(recordingId);
-                recordingStart = start;
-                recordingStop = stop;
-                boundsRecordingId = recordingId;
-                boundsTermId = termId;
-                boundsCheckedAt = now;
-            }
-            long end = recordingStop >= 0 ? Math.min(committed, recordingStop) : committed;
-            if (recordingStart < 0 || recordingStart > position || end <= position)
-                throw new IllegalStateException("archive gap at trade export checkpoint " + position);
-            return end;
-        }
-
-        ArchiveReplay(Aeron aeron, AeronArchive archive, ProductLine product) {
-            this.aeron = aeron;
-            this.archive = archive;
-            this.limit = aeron.addCounter(0, "trade-export replay limit " + product);
-        }
-
-        long position(long initialPosition) {
-            return subscription == null || subscription.imageCount() == 0
-                    ? initialPosition : subscription.imageAtIndex(0).position();
-        }
-
-        void follow(long recordingId, long position, long committed) {
-            if (this.recordingId == recordingId) {
-                limit.set(committed);
-                return;
-            }
-            closeReplay();
-            limit.set(committed);
-            sessionId = archive.startBoundedReplay(recordingId, position, AeronArchive.NULL_LENGTH,
-                    limit.id(), "aeron:ipc", STREAM_ID);
-            subscription = aeron.addSubscription("aeron:ipc?session-id=" + (int) sessionId, STREAM_ID);
-            this.recordingId = recordingId;
-        }
-
-        private void closeReplay() {
-            try {
-                if (sessionId != Aeron.NULL_VALUE) {
-                    try {
-                        archive.stopReplay(sessionId);
-                    } catch (io.aeron.archive.client.ArchiveException failure) {
-                        // A stopped recording can finish its replay before we switch recordings.
-                        if (failure.errorCode() != io.aeron.archive.client.ArchiveException.UNKNOWN_REPLAY)
-                            throw failure;
-                    }
-                }
-            } finally {
-                sessionId = Aeron.NULL_VALUE;
-                recordingId = Aeron.NULL_VALUE;
-                if (subscription != null) {
-                    subscription.close();
-                    subscription = null;
-                }
-            }
-        }
-
-        @Override
-        public void close() {
-            try {
-                closeReplay();
-            } finally {
-                limit.close();
-            }
-        }
-    }
 }

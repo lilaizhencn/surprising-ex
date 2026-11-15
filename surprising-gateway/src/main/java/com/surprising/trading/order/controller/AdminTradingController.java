@@ -114,13 +114,8 @@ public class AdminTradingController {
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @Valid @RequestBody AdminCancelByInstrumentRequest request) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        try {
-            return orderService.adminCancelByInstrument(request, TradingControllerSupport.productLine(queryProductLine, headerProductLine));
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderService.adminCancelByInstrument(
+                request, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
     @GetMapping("/api/v1/admin/trading/orders/cancel-preview")
@@ -132,14 +127,8 @@ public class AdminTradingController {
             @RequestParam(value = "instrumentId", required = false) String instrumentId,
             @RequestParam(value = "limit", defaultValue = "100") int limit) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        try {
-            return orderService.adminCancelPreview(userId, instrumentId, limit,
-                    TradingControllerSupport.productLine(queryProductLine, headerProductLine));
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderService.adminCancelPreview(
+                userId, instrumentId, limit, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
     @GetMapping("/api/v1/admin/trading/trigger-orders")
@@ -155,7 +144,7 @@ public class AdminTradingController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        try {
+        return TradingControllerSupport.call(() -> {
             ProductLine productLine = TradingControllerSupport.productLine(queryProductLine, headerProductLine);
             if (userId != null && userId <= 0) throw new IllegalArgumentException("userId must be positive");
             if (triggerOrderId != null && triggerOrderId <= 0) throw new IllegalArgumentException("triggerOrderId must be positive");
@@ -172,9 +161,7 @@ public class AdminTradingController {
             var after = cursor == null || cursor.isBlank() ? null : TriggerReadCursors.decode(cursor,
                     TriggerReadCursors.scope(effective, userId, instrument, state, triggerOrderId, ascending));
             return triggerOrderService.adminOrders(userId, instrument, state, triggerOrderId, limit, after, ascending, productLine);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        });
     }
 
     @GetMapping("/api/v1/admin/trading/trigger-orders/{triggerOrderId}/timeline")
@@ -184,13 +171,8 @@ public class AdminTradingController {
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @PathVariable("triggerOrderId") long triggerOrderId) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        try {
-            return triggerOrderService.adminTimeline(triggerOrderId, TradingControllerSupport.productLine(queryProductLine, headerProductLine));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> triggerOrderService.adminTimeline(
+                triggerOrderId, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
     @GetMapping("/api/v1/admin/trading/trigger-orders/{triggerOrderId}")
@@ -200,13 +182,8 @@ public class AdminTradingController {
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @PathVariable("triggerOrderId") long triggerOrderId) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        try {
-            return triggerOrderService.get(triggerOrderId, TradingControllerSupport.productLine(queryProductLine, headerProductLine));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> triggerOrderService.get(
+                triggerOrderId, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
     @PostMapping("/api/v1/admin/trading/orders/cancel")
@@ -216,13 +193,8 @@ public class AdminTradingController {
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @Valid @RequestBody(required = false) AdminBatchCancelOrdersRequest request) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        try {
-            return orderService.adminCancelOrders(request, TradingControllerSupport.productLine(queryProductLine, headerProductLine));
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderService.adminCancelOrders(
+                request, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
     @GetMapping("/api/v1/admin/trading/orders")
@@ -238,14 +210,9 @@ public class AdminTradingController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        try {
-            return orderQueryService.adminOrders(userId, instrumentId, status, orderId, limit, cursor, sort,
-                    TradingControllerSupport.productLine(queryProductLine, headerProductLine));
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderQueryService.adminOrders(
+                userId, instrumentId, status, orderId, limit, cursor, sort,
+                TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
     @PostMapping("/api/v1/admin/trading/orders/{orderId}/cancel")
@@ -256,15 +223,8 @@ public class AdminTradingController {
             @PathVariable("orderId") long orderId,
             @Valid @RequestBody(required = false) AdminCancelOrderRequest request) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        try {
-            return orderService.adminCancelOrder(orderId, request == null ? null : request.reason(),
-                    TradingControllerSupport.productLine(queryProductLine, headerProductLine));
-        } catch (ProjectionReadResult.ResponseTooLargeException ex) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
+        return TradingControllerSupport.call(() -> orderService.adminCancelOrder(
+                orderId, request == null ? null : request.reason(),
+                TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 }

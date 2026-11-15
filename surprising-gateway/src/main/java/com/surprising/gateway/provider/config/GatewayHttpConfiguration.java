@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.ClientHttpResponse;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.DefaultResponseErrorHandler;
 import org.springframework.web.client.RestTemplate;
 
@@ -24,16 +24,14 @@ public class GatewayHttpConfiguration {
 
     @Bean
     @Primary
-    public RestTemplate gatewayRestTemplate(GatewayProperties properties) {
-        return restTemplate(properties.getHttpClient().getConnectTimeout(),
-                properties.getHttpClient().getReadTimeout());
+    public RestTemplate gatewayRestTemplate(GatewayProperties properties, HttpClient gatewayHttpClient) {
+        return restTemplate(gatewayHttpClient, properties.getHttpClient().getReadTimeout());
     }
 
     @Bean
     @Qualifier("custodyWalletRestTemplate")
-    public RestTemplate custodyWalletRestTemplate(GatewayProperties properties) {
-        RestTemplate template = restTemplate(properties.getHttpClient().getConnectTimeout(),
-                properties.getCustodyWallet().getRequestTimeout());
+    public RestTemplate custodyWalletRestTemplate(GatewayProperties properties, HttpClient gatewayHttpClient) {
+        RestTemplate template = restTemplate(gatewayHttpClient, properties.getCustodyWallet().getRequestTimeout());
         var mapper = tools.jackson.databind.json.JsonMapper.builder()
                 .enable(tools.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
         template.getMessageConverters().replaceAll(converter ->
@@ -42,9 +40,8 @@ public class GatewayHttpConfiguration {
         return template;
     }
 
-    private RestTemplate restTemplate(java.time.Duration connectTimeout, java.time.Duration readTimeout) {
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(connectTimeout);
+    private RestTemplate restTemplate(HttpClient httpClient, java.time.Duration readTimeout) {
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(readTimeout);
         RestTemplate restTemplate = new RestTemplate(requestFactory);
         restTemplate.setErrorHandler(new DefaultResponseErrorHandler() {
