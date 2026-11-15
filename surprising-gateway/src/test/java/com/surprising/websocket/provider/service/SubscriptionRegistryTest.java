@@ -3,7 +3,6 @@ package com.surprising.websocket.provider.service;
 import com.surprising.websocket.provider.session.ClientConnection;
 
 import com.surprising.websocket.provider.model.ChannelMetric;
-import com.surprising.websocket.provider.model.TimedPayload;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -35,7 +34,7 @@ class SubscriptionRegistryTest {
 
         var topic = new SubscriptionTopic(WsChannel.EXECUTION_REPORTS, "1", null, 1001L, product);
         var time = Instant.parse("2026-09-26T00:00:00Z");
-        registry.publishTimedBatch(topic, java.util.List.of(new TimedPayload("fill", time)));
+        registry.publish(topic, "fill", time);
         ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
         verify(subscriber).send(messages.capture());
         var event = new ObjectMapper().readTree(messages.getValue());
@@ -45,18 +44,15 @@ class SubscriptionRegistryTest {
     }
 
     @Test
-    void timedBatchPreservesEachPayloadAndEventTime() {
+    void publishBatchPreservesAllPayloadsAndEventTime() {
         var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
-        var subscriber = connection("timed-batch");
+        var subscriber = connection("batch");
         var topic = new SubscriptionTopic(WsChannel.TRADES, "1", null, null, ProductLine.LINEAR_PERPETUAL);
         registry.add(subscriber);
         registry.subscribe(subscriber, topic);
         when(subscriber.sendBatch(org.mockito.ArgumentMatchers.anyList())).thenReturn(true);
-        var firstTime = Instant.parse("2026-09-26T00:00:00Z");
-        var secondTime = firstTime.plusSeconds(1);
-        registry.publishTimedBatch(topic, java.util.List.of(
-                new TimedPayload("first", firstTime),
-                new TimedPayload("second", secondTime)));
+        var eventTime = Instant.parse("2026-09-26T00:00:00Z");
+        registry.publishBatch(topic, java.util.List.of("first", "second"), eventTime);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<java.util.List<String>> batch = ArgumentCaptor.forClass(java.util.List.class);
         verify(subscriber).sendBatch(batch.capture());
@@ -64,8 +60,8 @@ class SubscriptionRegistryTest {
         var second = new ObjectMapper().readTree(batch.getValue().getLast());
         assertThat(first.path("data").asText()).isEqualTo("first");
         assertThat(second.path("data").asText()).isEqualTo("second");
-        assertThat(first.path("eventTime").asText()).isEqualTo(firstTime.toString());
-        assertThat(second.path("eventTime").asText()).isEqualTo(secondTime.toString());
+        assertThat(first.path("eventTime").asText()).isEqualTo(eventTime.toString());
+        assertThat(second.path("eventTime").asText()).isEqualTo(eventTime.toString());
     }
 
     @Test

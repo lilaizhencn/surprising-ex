@@ -2,10 +2,9 @@ package com.surprising.websocket.provider.service;
 
 import com.surprising.websocket.provider.session.ClientConnection;
 
+import com.surprising.websocket.provider.model.ChannelMetric;
 import com.surprising.websocket.provider.model.DepthUpdate;
 import com.surprising.websocket.provider.model.WebSocketAdminMetrics;
-import com.surprising.websocket.provider.model.ChannelMetric;
-import com.surprising.websocket.provider.model.TimedPayload;
 
 import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.websocket.api.model.SubscriptionTopic;
@@ -41,6 +40,7 @@ public class SubscriptionRegistry {
     private final Map<String, ClientConnection> sessions = new ConcurrentHashMap<>();
     private final Map<String, Set<SubscriptionTopic>> sessionTopics = new ConcurrentHashMap<>();
     private final Map<SubscriptionTopic, Set<ClientConnection>> subscribers = new ConcurrentHashMap<>();
+    private final Map<Long, Set<ClientConnection>> userConnections = new ConcurrentHashMap<>();
     // Last book accepted by each connection queue; immutable Core views are shared, never copied.
     // Owned by this registry under its monitor and removed on unsubscribe/disconnect.
     private final Map<SubscriptionTopic, Map<String, CoreOrderBookView>> depthBaselines = new HashMap<>();
@@ -118,6 +118,9 @@ public class SubscriptionRegistry {
                 // Install the local recipient first: a synchronous first Core baseline must not be lost.
                 topics.add(topic);
                 subscribers.computeIfAbsent(topic, ignored -> ConcurrentHashMap.newKeySet()).add(connection);
+                if (topic.userId() != null) {
+                    userConnections.computeIfAbsent(topic.userId(), ignored -> ConcurrentHashMap.newKeySet()).add(connection);
+                }
                 lifecycle = routeLifecycle;
             }
             try {
@@ -153,6 +156,19 @@ public class SubscriptionRegistry {
             connections.remove(connection);
             if (connections.isEmpty()) subscribers.remove(topic, connections);
         }
+        Long userId = topic.userId();
+        if (userId != null) {
+            Set<SubscriptionTopic> remaining = sessionTopics.get(connection.id());
+            boolean stillSubscribedForUser = remaining != null
+                    && remaining.stream().anyMatch(t -> userId.equals(t.userId()));
+            if (!stillSubscribedForUser) {
+                Set<ClientConnection> indexed = userConnections.get(userId);
+                if (indexed != null) {
+                    indexed.remove(connection);
+                    if (indexed.isEmpty()) userConnections.remove(userId, indexed);
+                }
+            }
+        }
     }
 
     public List<ClientConnection> connections() {
@@ -173,7 +189,14 @@ public class SubscriptionRegistry {
     }
 
     public void publish(SubscriptionTopic topic, Object payload, Instant eventTime) {
-        publishBatch(topic, List.of(payload), eventTime);
+        fanoutBatches.increment();
+        fanoutMessages.increment();
+        if (!hasSubscribers(topic)) return;
+        String encoded = encode(WsServerMessage.event(topic, payload, eventTime));
+        sendEncoded(topic, encoded, null);
+        if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
+            sendEncoded(topic.withInstrumentId(SubscriptionTopic.WILDCARD), encoded, null);
+        }
     }
 
     private void removeDepthBaseline(SubscriptionTopic topic, String sessionId) {
@@ -218,7 +241,7 @@ public class SubscriptionRegistry {
         if (failed != null) for (ClientConnection connection : failed) disconnect(connection);
     }
 
-    /** 将同一 Kafka 拉取批次的事件一次性投递到每个连接的有界环形队列。 */
+    /** 将同一批次的事件一次性投递到每个连接的有界环形队列。 */
     public void publishBatch(SubscriptionTopic topic, List<?> payloads, Instant eventTime) {
         if (payloads == null || payloads.isEmpty()) {
             return;
@@ -226,31 +249,32 @@ public class SubscriptionRegistry {
         fanoutBatches.increment();
         fanoutMessages.add(payloads.size());
         if (!hasSubscribers(topic)) return;
-        var messages = payloads.stream().map(payload -> encode(WsServerMessage.event(topic, payload, eventTime))).toList();
-        fanout(topic, messages);
-    }
-
-    /** 按事件自身时间批量编码，避免同一 Kafka 批次被拆成逐条网络写入。 */
-    public void publishTimedBatch(SubscriptionTopic topic, List<TimedPayload> events) {
-        if (events == null || events.isEmpty()) {
-            return;
+        List<String> messages = new ArrayList<>(payloads.size());
+        for (Object payload : payloads) {
+            messages.add(encode(WsServerMessage.event(topic, payload, eventTime)));
         }
-        fanoutBatches.increment();
-        fanoutMessages.add(events.size());
-        if (!hasSubscribers(topic)) return;
-        var messages = events.stream().map(event -> encode(WsServerMessage.event(
-                topic, event.payload(), event.eventTime()))).toList();
         fanout(topic, messages);
     }
 
-    public void publishUserSnapshot(com.surprising.product.api.ProductLine product,long userId,Object payload) {
-        var encoded=encode(new WsServerMessage("snapshot",null,null,null,null,
-                userId,product,payload,null,Instant.now()));
-        sessionTopics.forEach((sessionId,topics)->{
-            boolean subscribed=topics.stream().anyMatch(t->t.productLine()==product && t.userId()!=null && t.userId()==userId);
-            ClientConnection connection=sessions.get(sessionId);
-            if(subscribed && connection!=null && !connection.send(encoded))disconnect(connection);
-        });
+    public void publishUserSnapshot(com.surprising.product.api.ProductLine product, long userId, Object payload) {
+        Set<ClientConnection> candidates = userConnections.get(userId);
+        if (candidates == null || candidates.isEmpty()) return;
+        String encoded = encode(new WsServerMessage("snapshot", null, null, null, null,
+                userId, product, payload, null, Instant.now()));
+        for (ClientConnection connection : candidates) {
+            Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
+            if (topics == null) continue;
+            boolean subscribed = false;
+            for (SubscriptionTopic topic : topics) {
+                if (topic.productLine() == product && topic.userId() != null && topic.userId() == userId) {
+                    subscribed = true;
+                    break;
+                }
+            }
+            if (subscribed && !connection.send(encoded)) {
+                disconnect(connection);
+            }
+        }
     }
 
     public List<SubscriptionTopic> topics(WsChannel channel) {
@@ -363,27 +387,38 @@ public class SubscriptionRegistry {
     }
 
     private void fanout(SubscriptionTopic topic, List<String> messages) {
-        sendEncodedBatch(topic, messages);
+        sendEncoded(topic, null, messages);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
-            sendEncodedBatch(topic.withInstrumentId(SubscriptionTopic.WILDCARD), messages);
+            sendEncoded(topic.withInstrumentId(SubscriptionTopic.WILDCARD), null, messages);
         }
     }
 
-    private void sendEncodedBatch(SubscriptionTopic subscription, List<String> messages) {
+    private void sendEncoded(SubscriptionTopic subscription, String singleMessage, List<String> messages) {
         Set<ClientConnection> connections = subscribers.get(subscription);
         if (connections == null || connections.isEmpty()) return;
         List<io.netty.buffer.ByteBuf> frames = null;
+        List<String> batchView = null;
         try {
             for (ClientConnection connection : connections) {
                 boolean accepted;
                 if (connection.supportsZeroCopyFrames()) {
                     if (frames == null) {
-                        frames = new ArrayList<>(messages.size());
-                        for (String msg : messages) {
-                            frames.add(io.netty.buffer.ByteBufUtil.writeUtf8(io.netty.buffer.ByteBufAllocator.DEFAULT, msg));
+                        if (singleMessage != null) {
+                            frames = List.of(io.netty.buffer.ByteBufUtil.writeUtf8(
+                                    io.netty.buffer.ByteBufAllocator.DEFAULT, singleMessage));
+                            batchView = List.of(singleMessage);
+                        } else {
+                            frames = new ArrayList<>(messages.size());
+                            for (String msg : messages) {
+                                frames.add(io.netty.buffer.ByteBufUtil.writeUtf8(
+                                        io.netty.buffer.ByteBufAllocator.DEFAULT, msg));
+                            }
+                            batchView = messages;
                         }
                     }
-                    accepted = connection.sendFrames(frames, messages);
+                    accepted = connection.sendFrames(frames, batchView);
+                } else if (singleMessage != null) {
+                    accepted = connection.send(singleMessage);
                 } else {
                     accepted = messages.size() == 1
                             ? connection.send(messages.getFirst()) : connection.sendBatch(messages);

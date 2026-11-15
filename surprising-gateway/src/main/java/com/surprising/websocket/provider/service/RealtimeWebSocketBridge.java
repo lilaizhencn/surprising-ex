@@ -274,7 +274,8 @@ public final class RealtimeWebSocketBridge
                     case USER, BALANCE, METADATA, RESERVATION, LEVERAGE, POSITION ->
                             CoreStateQueryCodec.decodeUserState(f.payload());
                     case TRADE -> publicTrade(f);
-                    default -> mapper.readTree(f.payload());
+                    default -> new tools.jackson.databind.util.RawValue(
+                            new String(f.payload(), java.nio.charset.StandardCharsets.UTF_8));
                 };
         String instrumentId = f.instrumentId().isBlank() ? SubscriptionTopic.WILDCARD : f.instrumentId();
         var topic =
@@ -307,16 +308,15 @@ public final class RealtimeWebSocketBridge
         }
         if (f.kind() == RealtimeFrame.Kind.BOOK) {
             var book = (CoreOrderBookView) value;
-            var bid =
-                    book.levels().stream()
-                            .filter(l -> l.side() == CoreOrderSide.BUY)
-                            .max(Comparator.comparingLong(CoreBookLevelView::priceTicks))
-                            .orElse(null);
-            var ask =
-                    book.levels().stream()
-                            .filter(l -> l.side() == CoreOrderSide.SELL)
-                            .min(Comparator.comparingLong(CoreBookLevelView::priceTicks))
-                            .orElse(null);
+            CoreBookLevelView bid = null;
+            CoreBookLevelView ask = null;
+            for (CoreBookLevelView level : book.levels()) {
+                if (level.side() == CoreOrderSide.BUY) {
+                    if (bid == null || level.priceTicks() > bid.priceTicks()) bid = level;
+                } else if (level.side() == CoreOrderSide.SELL) {
+                    if (ask == null || level.priceTicks() < ask.priceTicks()) ask = level;
+                }
+            }
             var ticker = new BookTicker(bid, ask);
             registry.publish(
                     new SubscriptionTopic(
