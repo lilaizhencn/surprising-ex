@@ -51,11 +51,11 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.bind.annotation.RequestMapping;
 import tools.jackson.databind.ObjectMapper;
 
-class BinanceApiControllerTest {
+class OpenApiControllerTest {
 
     @Test
     void exposesBinanceProductApiNamespaces() throws NoSuchMethodException {
-        RequestMapping mapping = BinanceApiController.class
+        RequestMapping mapping = OpenApiController.class
                 .getMethod("handle", HttpServletRequest.class, byte[].class)
                 .getAnnotation(RequestMapping.class);
 
@@ -74,7 +74,7 @@ class BinanceApiControllerTest {
         when(accountRequests.transfer(any(ProductTransferRequest.class)))
                 .thenReturn(new ProductTransferResponse(7123L, 42L, AccountType.SPOT, AccountType.USDT_PERPETUAL, "USDT", 1_250_000L, "ref", "COMPLETED", null, null, Instant.now()));
 
-        BinanceApiController controller = new BinanceApiController(properties,
+        OpenApiController controller = new OpenApiController(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
@@ -111,7 +111,7 @@ class BinanceApiControllerTest {
         when(accountRequests.transfer(any(ProductTransferRequest.class)))
                 .thenReturn(new ProductTransferResponse(7124L, 42L, AccountType.SPOT, AccountType.COIN_PERPETUAL, "USDT", 1_000_000L, "ref", "COMPLETED", null, null, Instant.now()));
 
-        BinanceApiController controller = new BinanceApiController(properties,
+        OpenApiController controller = new OpenApiController(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), bearerAuth(),
@@ -141,7 +141,7 @@ class BinanceApiControllerTest {
         when(verification.verify(eq(1001L), eq("WITHDRAWAL"), eq("email-code"), eq("totp-code"), any()))
                 .thenReturn(false);
         CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
-        BinanceApiController controller = controller(properties, authService, verification, withdrawalService);
+        OpenApiController controller = controller(properties, authService, verification, withdrawalService);
 
         MockHttpServletRequest request = withdrawalRequest();
         request.addHeader("X-Security-Email-Code", "email-code");
@@ -171,7 +171,7 @@ class BinanceApiControllerTest {
                         withdrawalId, "SUBMITTED", "wallet-withdrawal-1", BigDecimal.ONE, now, now, "25", "0", "25", 0L));
         CustodyWalletClient custodyWalletClient = mock(CustodyWalletClient.class);
 
-        BinanceApiController controller = new BinanceApiController(properties,
+        OpenApiController controller = new OpenApiController(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,
@@ -224,7 +224,7 @@ class BinanceApiControllerTest {
         request.setParameter("orderId", "1");
         request.setParameter("startTime", "1754006400000");
 
-        BinanceApiController controller = new BinanceApiController(properties,
+        OpenApiController controller = new OpenApiController(properties,
                 mock(InstrumentService.class), orderRequests,
                 mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
@@ -250,7 +250,7 @@ class BinanceApiControllerTest {
         ComplianceService compliance = mock(ComplianceService.class);
         when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "STANDARD", "PENDING", "US",
                 "PASSPORT", "SELF", null, null, null, null, null, null, null));
-        BinanceApiController controller = new BinanceApiController(properties,
+        OpenApiController controller = new OpenApiController(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), bearerAuth(),
@@ -282,7 +282,7 @@ class BinanceApiControllerTest {
                         "assetSymbols", List.of("USDT")),
                 Map.of("chain", "ETH", "enabled", true, "withdrawalEnabled", false,
                         "assetSymbols", List.of("USDT"))));
-        BinanceApiController controller = new BinanceApiController(properties,
+        OpenApiController controller = new OpenApiController(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
@@ -323,7 +323,7 @@ class BinanceApiControllerTest {
                         List.of(new OrderBookLevel(12345L, 2000L, 1L)),
                         List.of(new OrderBookLevel(12355L, 3000L, 1L)),
                         Instant.now()));
-        BinanceApiController controller = new BinanceApiController(properties,
+        OpenApiController controller = new OpenApiController(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 mock(AccountService.class), marketData,
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class),
@@ -341,13 +341,13 @@ class BinanceApiControllerTest {
                 .containsEntry("askQty", "3");
     }
 
-    private BinanceApiController controller(GatewayProperties properties, AuthService authService,
+    private OpenApiController controller(GatewayProperties properties, AuthService authService,
                                              SensitiveActionVerificationService verification,
                                              CustodyWithdrawalService withdrawalService) {
         ComplianceService compliance = mock(ComplianceService.class);
         when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "BASIC", "VERIFIED", "US",
                 "PASSPORT", "self", null, null, null, null, null, null, null));
-        return new BinanceApiController(properties,
+        return new OpenApiController(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,

@@ -2,8 +2,8 @@ package com.surprising.gateway.provider.interceptor;
 
 import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.controller.GatewayLimitErrors;
 import com.surprising.gateway.provider.controller.GatewayLimitRequestBinding;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.gateway.provider.service.GatewayRequestLimits;
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
@@ -54,7 +54,7 @@ public final class GatewayLimitFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
         } catch (GatewayRequestLimits.Rejection rejection) {
             if (!corsError(request, response)) return;
-            var result = GatewayLimitErrors.response(rejection);
+            var result = GlobalGatewayExceptionHandler.limitResponse(rejection);
             response.setStatus(result.getStatusCode().value());
             result.getHeaders().forEach((name, values) -> values.forEach(value -> response.addHeader(name, value)));
             response.setContentType("application/json");

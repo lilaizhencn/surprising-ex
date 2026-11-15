@@ -1,0 +1,254 @@
+package com.surprising.gateway.provider.controller;
+
+import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferResponse;
+import com.surprising.account.provider.service.AccountService;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.client.CustodyWalletClient;
+import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
+import com.surprising.gateway.provider.service.CustodyWithdrawalService;
+import jakarta.servlet.http.HttpServletRequest;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+
+/**
+ * 公开 Open API 资金与充提端点处理（transfer、deposit、capital/config、withdraw）。
+ */
+@Service
+public class OpenCapitalApiService {
+
+    private final GatewayProperties properties;
+    private final AccountService accountService;
+    private final SensitiveActionVerificationService verificationService;
+    private final ComplianceService complianceService;
+    private final CustodyWalletClient custodyWalletClient;
+    private final CustodyWithdrawalService withdrawalService;
+    private final UserDepositAddressRepository depositAddressRepository;
+    private final OpenApiSupport support;
+
+    public OpenCapitalApiService(GatewayProperties properties,
+                                 AccountService accountService,
+                                 SensitiveActionVerificationService verificationService,
+                                 ComplianceService complianceService,
+                                 CustodyWalletClient custodyWalletClient,
+                                 CustodyWithdrawalService withdrawalService,
+                                 @Autowired(required = false) UserDepositAddressRepository depositAddressRepository,
+                                 OpenApiSupport support) {
+        this.properties = properties;
+        this.accountService = accountService;
+        this.verificationService = verificationService;
+        this.complianceService = complianceService;
+        this.custodyWalletClient = custodyWalletClient;
+        this.withdrawalService = withdrawalService;
+        this.depositAddressRepository = depositAddressRepository;
+        this.support = support;
+    }
+
+    public ResponseEntity<byte[]> transfer(HttpServletRequest request, byte[] body) {
+        Map<String, Object> params = support.parameters(request, body);
+        long userId = support.authenticate(request, "TRADE", body);
+        String type = support.required(params, "type").toUpperCase(Locale.ROOT);
+        String asset = support.required(params, "asset");
+        GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(asset);
+        String idempotencyKey = support.first(params, "clientTranId", "clientOrderId");
+        if (idempotencyKey == null) {
+            idempotencyKey = request.getHeader("Idempotency-Key");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("clientTranId or Idempotency-Key is required");
+        }
+        ProductTransferRequest transferRequest = new ProductTransferRequest(
+                userId,
+                AccountType.valueOf(transferAccount(type, true)),
+                AccountType.valueOf(transferAccount(type, false)),
+                asset.toUpperCase(Locale.ROOT),
+                support.decimalUnits(support.required(params, "amount"), scale.getQuantityScale()),
+                idempotencyKey.trim(),
+                "binance asset transfer"
+        );
+        ProductTransferResponse result = accountService.transfer(transferRequest);
+        return support.json(HttpStatus.OK, Map.of("tranId", result.transferId()));
+    }
+
+    public ResponseEntity<byte[]> depositAddress(HttpServletRequest request) {
+        long userId = support.authenticate(request, "READ");
+        String chain = support.requiredParameter(request, "network");
+        if (depositAddressRepository != null) {
+            var cached = depositAddressRepository.find(userId, chain, 1L);
+            if (cached.isPresent()) {
+                var r = cached.get();
+                return support.json(HttpStatus.OK, Map.of(
+                        "coin", support.requiredParameter(request, "coin"),
+                        "address", r.address(),
+                        "tag", r.memo(),
+                        "url", ""
+                ));
+            }
+        }
+        Map<String, Object> result = custodyWalletClient.createAddress(userId, chain, null);
+        if (result != null && depositAddressRepository != null && result.get("address") instanceof String address && !address.isBlank()) {
+            String memo = Objects.toString(result.get("memo"), "");
+            String family = "generic";
+            try {
+                for (var c : custodyWalletClient.chains()) {
+                    if (chain.equals(c.get("chain")) && c.get("family") instanceof String f) {
+                        family = f.toLowerCase(Locale.ROOT);
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            depositAddressRepository.save(userId, chain, family, address, memo, 1L);
+        }
+        return support.json(HttpStatus.OK, Map.of("coin", support.requiredParameter(request, "coin"),
+                "address", support.stringValue(result.get("address")), "tag", support.stringValue(result.get("memo")),
+                "url", ""));
+    }
+
+    public ResponseEntity<byte[]> depositHistory(HttpServletRequest request) {
+        long userId = support.authenticate(request, "READ");
+        String chain = request.getParameter("network");
+        String asset = request.getParameter("coin");
+        return support.json(HttpStatus.OK, custodyWalletClient.deposits(userId, chain, asset,
+                support.capped(request.getParameter("limit"))));
+    }
+
+    public ResponseEntity<byte[]> capitalConfig(HttpServletRequest request) {
+        support.authenticate(request, "READ");
+        GatewayProperties.CustodyWallet wallet = properties.getCustodyWallet();
+        if (!wallet.isEnabled()) {
+            return support.json(HttpStatus.OK, List.of());
+        }
+        Map<String, List<Map<String, Object>>> networksByAsset = new LinkedHashMap<>();
+        for (Map<String, Object> chain : custodyWalletClient.chains()) {
+            if (!Boolean.TRUE.equals(chain.get("enabled"))) {
+                continue;
+            }
+            String network = support.stringValue(chain.get("chain"));
+            if (network.isBlank()) {
+                continue;
+            }
+            boolean withdrawEnabled = Boolean.TRUE.equals(chain.get("withdrawalEnabled"));
+            Object assets = chain.get("assetSymbols");
+            if (!(assets instanceof List<?> assetList)) {
+                continue;
+            }
+            for (Object asset : assetList) {
+                String normalizedAsset = String.valueOf(asset).trim().toUpperCase(Locale.ROOT);
+                if (normalizedAsset.isBlank()) {
+                    continue;
+                }
+                List<Map<String, Object>> networks = networksByAsset.computeIfAbsent(
+                        normalizedAsset, ignored -> new ArrayList<>());
+                networks.add(Map.of(
+                        "coin", normalizedAsset,
+                        "network", network.toUpperCase(Locale.ROOT),
+                        "depositEnable", true,
+                        "withdrawEnable", withdrawEnabled,
+                        "isDefault", networks.isEmpty()));
+            }
+        }
+        List<Map<String, Object>> result = networksByAsset.entrySet().stream()
+                .map(entry -> Map.<String, Object>of(
+                        "coin", entry.getKey(),
+                        "name", entry.getKey(),
+                        "networkList", entry.getValue()))
+                .toList();
+        return support.json(HttpStatus.OK, result);
+    }
+
+    public ResponseEntity<byte[]> withdrawQuote(HttpServletRequest request, byte[] body) {
+        support.authenticate(request, "WITHDRAW", body);
+        var params = support.parameters(request, body);
+        return support.json(HttpStatus.OK, withdrawalService.quote(
+                support.required(params, "coin"),
+                support.required(params, "network"),
+                support.required(params, "amount")));
+    }
+
+    public ResponseEntity<byte[]> withdraw(HttpServletRequest request, byte[] body) {
+        Map<String, Object> params = support.parameters(request, body);
+        boolean apiKeyRequest = request.getHeader("X-MBX-APIKEY") != null
+                && !request.getHeader("X-MBX-APIKEY").isBlank();
+        long userId = support.authenticate(request, "WITHDRAW", body);
+        String asset = support.required(params, "coin");
+        String chain = support.required(params, "network");
+        String idempotencyKey = support.first(params, "withdrawOrderId", "clientOrderId");
+        if (idempotencyKey == null) {
+            idempotencyKey = request.getHeader("Idempotency-Key");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("withdrawOrderId or Idempotency-Key is required");
+        }
+        String amount = support.required(params, "amount");
+        String revision = support.required(params, "networkRevision");
+        var intent = new CustodyWithdrawalService.WithdrawalRequest(null, chain, asset, support.required(params, "address"), amount, null, Long.parseLong(revision));
+        var result = withdrawalService.replay(userId, idempotencyKey, intent);
+        if (result == null) {
+            requireWithdrawalSecurity(request, userId, apiKeyRequest ? "API_WITHDRAWAL" : "WITHDRAWAL");
+            requireKyc(userId);
+            complianceService.requireWithdrawalEligibility(userId);
+            result = withdrawalService.submit(userId, idempotencyKey, intent);
+        }
+        return support.json(HttpStatus.OK, Map.of("id", result.walletWithdrawalId() == null
+                        ? result.withdrawalId().toString() : result.walletWithdrawalId(),
+                "withdrawalId", result.withdrawalId().toString(), "status", result.status(),
+                "msg", "success", "success", true, "amount", result.amount(), "platformFee", result.fee(), "receivedAmount", result.receivedAmount()));
+    }
+
+    public ResponseEntity<byte[]> withdrawHistory(HttpServletRequest request) {
+        long userId = support.authenticate(request, "READ");
+        return support.json(HttpStatus.OK, withdrawalService.history(userId, request.getParameter("network"),
+                request.getParameter("coin"), support.capped(request.getParameter("limit"))));
+    }
+
+    private void requireKyc(long userId) {
+        KycProfile profile = complianceService.kyc(userId);
+        if (!isKycVerified(profile)) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                    "verified KYC is required for withdrawals");
+        }
+    }
+
+    private boolean isKycVerified(KycProfile profile) {
+        return profile != null && "VERIFIED".equalsIgnoreCase(profile.status())
+                && (profile.expiresAt() == null || !profile.expiresAt().isBefore(Instant.now()));
+    }
+
+    private void requireWithdrawalSecurity(HttpServletRequest request, long userId, String scene) {
+        if (!verificationService.verify(userId, scene,
+                request.getHeader("X-Security-Email-Code"),
+                request.getHeader("X-Security-TOTP-Code"), Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+                    "security verification is required or invalid");
+        }
+    }
+
+    private String transferAccount(String type, boolean source) {
+        return switch (type) {
+            case "MAIN_UMFUTURE" -> source ? "FUNDING" : "USDT_PERPETUAL";
+            case "UMFUTURE_MAIN" -> source ? "USDT_PERPETUAL" : "FUNDING";
+            case "MAIN_CM" -> source ? "FUNDING" : "COIN_PERPETUAL";
+            case "CM_MAIN" -> source ? "COIN_PERPETUAL" : "FUNDING";
+            case "MAIN_CMFUTURE" -> source ? "FUNDING" : "COIN_PERPETUAL";
+            case "CMFUTURE_MAIN" -> source ? "COIN_PERPETUAL" : "FUNDING";
+            case "MAIN_SPOT" -> source ? "FUNDING" : "SPOT";
+            case "SPOT_MAIN" -> source ? "SPOT" : "FUNDING";
+            default -> throw new IllegalArgumentException("unsupported transfer type");
+        };
+    }
+}

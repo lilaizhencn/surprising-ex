@@ -4,24 +4,14 @@ import com.surprising.gateway.provider.product.GatewayUserContext;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.realtime.api.exception.ReadViewUnavailableException;
-import com.surprising.trading.api.model.AlgoOrderBatchResponse;
-import com.surprising.trading.api.model.AlgoOrderQueryResponse;
-import com.surprising.trading.api.model.AlgoOrderResponse;
-import com.surprising.trading.api.model.AlgoOrderSubmissionResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.BatchAmendOrdersRequest;
 import com.surprising.trading.api.model.BatchCancelOrdersRequest;
-import com.surprising.trading.api.model.BatchCancelTriggerOrdersRequest;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
-import com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest;
-import com.surprising.trading.api.model.CancelAlgoOrderRequest;
 import com.surprising.trading.api.model.CancelAllAfterRequest;
 import com.surprising.trading.api.model.CancelAllAfterResponse;
-import com.surprising.trading.api.model.CancelOpenAlgoOrdersRequest;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
-import com.surprising.trading.api.model.CancelOpenTriggerOrdersRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
-import com.surprising.trading.api.model.CancelTriggerOrderRequest;
 import com.surprising.trading.api.model.CancellationPlanResponse;
 import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
@@ -35,32 +25,22 @@ import com.surprising.trading.api.model.OrderPriceProtectionResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSubmissionResponse;
-import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
 import com.surprising.trading.api.model.PlaceOrderRequest;
-import com.surprising.trading.api.model.PlaceTriggerOrderRequest;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TradeFillQueryResponse;
-import com.surprising.trading.api.model.TriggerOrderBatchResponse;
-import com.surprising.trading.api.model.TriggerOrderQueryResponse;
-import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
 import com.surprising.trading.order.exception.OrderCommandRejectedException;
 import com.surprising.trading.order.model.ActiveOrderPageQuery;
 import com.surprising.trading.order.repository.ProjectionReadResult;
-import com.surprising.trading.order.service.AlgoOrderService;
 import com.surprising.trading.order.service.CancelAllAfterService;
 import com.surprising.trading.order.service.LeverageService;
+import com.surprising.trading.order.service.OrderQueryService;
 import com.surprising.trading.order.service.OrderService;
 import com.surprising.trading.order.service.TradingFeeService;
 import com.surprising.trading.order.utils.ActiveOrderCursors;
 import com.surprising.trading.order.utils.TradeReadCursors;
-import com.surprising.trading.trigger.model.OpenTriggerPageQuery;
-import com.surprising.trading.trigger.service.TriggerOrderAeronGateway;
-import com.surprising.trading.trigger.service.TriggerOrderService;
-import com.surprising.trading.trigger.utils.OpenTriggerCursors;
 import jakarta.validation.Valid;
 import java.util.Locale;
-import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -82,38 +62,35 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 public class TradingController {
     private final OrderService orderService;
-    private final AlgoOrderService algoOrderService;
+    private final OrderQueryService orderQueryService;
     private final CancelAllAfterService cancelAllAfterService;
-    private final TriggerOrderService triggerOrderService;
     private final LeverageService leverageService;
     private final TradingFeeService tradingFeeService;
     private final MatchingMarketDataService marketDataService;
 
     @Autowired
     public TradingController(OrderService orderService,
-                             AlgoOrderService algoOrderService,
+                             OrderQueryService orderQueryService,
                              CancelAllAfterService cancelAllAfterService,
-                             TriggerOrderService triggerOrderService,
                              LeverageService leverageService,
                              TradingFeeService tradingFeeService,
                              MatchingMarketDataService marketDataService) {
         this.orderService = orderService;
-        this.algoOrderService = algoOrderService;
+        this.orderQueryService = orderQueryService;
         this.cancelAllAfterService = cancelAllAfterService;
-        this.triggerOrderService = triggerOrderService;
         this.leverageService = leverageService;
         this.tradingFeeService = tradingFeeService;
         this.marketDataService = marketDataService;
     }
 
     public TradingController(OrderService orderService,
-                             AlgoOrderService algoOrderService,
+                             OrderQueryService orderQueryService,
                              CancelAllAfterService cancelAllAfterService) {
-        this(orderService, algoOrderService, cancelAllAfterService, null, null, null, null);
+        this(orderService, orderQueryService, cancelAllAfterService, null, null, null);
     }
 
     public TradingController(MatchingMarketDataService marketDataService) {
-        this(null, null, null, null, null, null, marketDataService);
+        this(null, null, null, null, null, marketDataService);
     }
 
     @GetMapping("/api/v1/trading/orders/trades")
@@ -137,9 +114,9 @@ public class TradingController {
             instrumentId = instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase(Locale.ROOT);
             if (instrumentId != null) InstrumentIds.parse(instrumentId);
             var after = cursor == null || cursor.isBlank() ? null : TradeReadCursors.fill(cursor,
-                    TradeReadCursors.fillScope(orderService.currentProductLine(), userId, instrumentId, orderId, startTime, endTime));
+                    TradeReadCursors.fillScope(orderQueryService.currentProductLine(), userId, instrumentId, orderId, startTime, endTime));
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                    .body(orderService.ownFills(userId, instrumentId, orderId, startTime, endTime, limit, after));
+                    .body(orderQueryService.ownFills(userId, instrumentId, orderId, startTime, endTime, limit, after));
         } catch (IllegalArgumentException invalid) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
         }
@@ -154,7 +131,7 @@ public class TradingController {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                    .body(orderService.cancellationPlan(userId, instrumentId));
+                    .body(orderQueryService.cancellationPlan(userId, instrumentId));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -168,7 +145,7 @@ public class TradingController {
             @RequestParam("batchKey") String batchKey) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
-            return commandResponse(orderService.cancellationBatch(userId, batchKey));
+            return commandResponse(orderQueryService.cancellationBatch(userId, batchKey));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (DataAccessException | IllegalStateException ex) {
@@ -184,7 +161,7 @@ public class TradingController {
             @RequestParam("clientRequestId") String clientRequestId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
-            return commandResponse(orderService.amendment(userId, clientRequestId));
+            return commandResponse(orderQueryService.amendment(userId, clientRequestId));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (DataAccessException | IllegalStateException ex) {
@@ -200,7 +177,7 @@ public class TradingController {
             @PathVariable("orderId") long orderId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
-            return commandResponse(orderService.cancellation(userId, orderId));
+            return commandResponse(orderQueryService.cancellation(userId, orderId));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (DataAccessException | IllegalStateException ex) {
@@ -216,7 +193,7 @@ public class TradingController {
             @RequestParam("clientOrderId") String clientOrderId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
-            var result = orderService.submission(userId, clientOrderId);
+            var result = orderQueryService.submission(userId, clientOrderId);
             return ResponseEntity.status("TERMINAL".equals(result.outcome()) ? HttpStatus.OK : HttpStatus.ACCEPTED)
                     .cacheControl(CacheControl.noStore()).body(result);
         } catch (IllegalArgumentException ex) {
@@ -226,31 +203,9 @@ public class TradingController {
         }
     }
 
-    @GetMapping("/api/v1/trading/orders/algo/submission")
-    public ResponseEntity<AlgoOrderSubmissionResponse> algoSubmission(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestParam("clientAlgoOrderId") String clientAlgoOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-            if (clientAlgoOrderId == null || clientAlgoOrderId.isBlank() || clientAlgoOrderId.trim().length() > 64) {
-                throw new IllegalArgumentException("clientAlgoOrderId is required and must be at most 64 characters");
-            }
-            var result = algoOrderService.submission(userId, clientAlgoOrderId.trim());
-            return ResponseEntity.status("TERMINAL".equals(result.outcome()) ? HttpStatus.OK : HttpStatus.ACCEPTED)
-                    .cacheControl(CacheControl.noStore()).body(result);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (DataAccessException | IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed algo creation result is unavailable", ex);
-        }
-    }
-
     @GetMapping("/api/v1/trading/orders/price-protection")
     public OrderPriceProtectionResponse priceProtection() {
-        return orderService.priceProtection();
+        return orderQueryService.priceProtection();
     }
 
     @GetMapping("/api/v1/trading/market/orderbook")
@@ -279,24 +234,6 @@ public class TradingController {
         return effectiveFee(tradingFeeService, userId, instrumentId, instrumentChangeId, headerProductLine, queryProductLine);
     }
 
-    @PostMapping("/api/v1/trading/trigger-orders/batch-cancel")
-    public TriggerOrderBatchResponse cancelTriggerBatch(@RequestBody BatchCancelTriggerOrdersRequest request) {
-        try {
-            return triggerOrderService.cancelBatch(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping("/api/v1/trading/trigger-orders/cancel-open")
-    public TriggerOrderBatchResponse cancelTriggerOpen(@RequestBody CancelOpenTriggerOrdersRequest request) {
-        try {
-            return triggerOrderService.cancelOpenOrders(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
     @GetMapping("/api/v1/trading/orders/by-client-order-id")
     public OrderResponse getByClientOrderId(
             @RequestParam(value = "userId", required = false) Long queryUserId,
@@ -306,7 +243,7 @@ public class TradingController {
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
-            return orderService.getByClientOrderId(userId, clientOrderId, minExportSequence);
+            return orderQueryService.getByClientOrderId(userId, clientOrderId, minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
@@ -327,26 +264,6 @@ public class TradingController {
         }
     }
 
-    @PostMapping("/api/v1/trading/orders/algo/cancel-open")
-    public AlgoOrderBatchResponse cancelOpenAlgo(@RequestBody CancelOpenAlgoOrdersRequest request) {
-        try {
-            return algoOrderService.cancelOpen(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping("/api/v1/trading/trigger-orders/cancel")
-    public CompletionStage<TriggerOrderResponse> cancelTrigger(@RequestBody CancelTriggerOrderRequest request) {
-        try {
-            return mapAsyncFailure(triggerOrderService.cancelAsync(request), HttpStatus.NOT_FOUND);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
     @PostMapping("/api/v1/trading/orders/close-position")
     public OrderResponse closePosition(@Valid @RequestBody ClosePositionRequest request) {
         try {
@@ -355,77 +272,6 @@ public class TradingController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping("/api/v1/trading/trigger-orders/batch")
-    public CompletionStage<TriggerOrderBatchResponse> placeTriggerBatch(@RequestBody BatchPlaceTriggerOrderRequest request) {
-        try {
-            return mapAsyncFailure(triggerOrderService.placeBatchAsync(request), HttpStatus.CONFLICT);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/api/v1/trading/trigger-orders/open")
-    public TriggerOrderQueryResponse openTriggerOrders(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestParam(value = "instrumentId", required = false) String instrumentId,
-            @RequestParam(value = "limit", defaultValue = "100") int limit,
-            @RequestParam(value = "cursor", required = false) String cursor) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-            return triggerOrderService.openOrders(userId, activeInstrument(instrumentId), activeTriggerPage(limit, cursor));
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @GetMapping("/api/v1/trading/trigger-orders/oco-submission")
-    public OrderCommandReceipt triggerOcoSubmission(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestParam("takeProfitClientId") String takeProfitClientId,
-            @RequestParam("stopLossClientId") String stopLossClientId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return orderService.commandResult(userId, triggerOrderService.ocoCommandId(userId, takeProfitClientId, stopLossClientId));
-        } catch (IllegalArgumentException invalid) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
-        }
-    }
-
-    @GetMapping("/api/v1/trading/trigger-orders/submission")
-    public OrderCommandReceipt triggerSubmission(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestParam("clientTriggerOrderId") String clientTriggerOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return orderService.commandResult(userId, triggerOrderService.submissionCommandId(userId, clientTriggerOrderId));
-        } catch (IllegalArgumentException invalid) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
-        }
-    }
-
-    @GetMapping("/api/v1/trading/trigger-orders/cancellations/{triggerOrderId}")
-    public OrderCommandReceipt triggerCancellation(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @PathVariable("triggerOrderId") long triggerOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return orderService.commandResult(userId, TriggerOrderAeronGateway.cancellationCommandId(userId, triggerOrderId));
-        } catch (IllegalArgumentException invalid) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
         }
     }
 
@@ -456,17 +302,6 @@ public class TradingController {
         }
     }
 
-    @PostMapping("/api/v1/trading/orders/algo/cancel")
-    public AlgoOrderResponse cancelAlgo(@RequestBody CancelAlgoOrderRequest request) {
-        try {
-            return algoOrderService.cancel(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
     @PostMapping("/api/v1/trading/leverage/settings")
     public LeverageSettingResponse setLeverage(
             @RequestBody LeverageSettingRequest request,
@@ -488,36 +323,6 @@ public class TradingController {
         return getLeverage(leverageService, userId, instrumentId, marginMode, headerProductLine, queryProductLine);
     }
 
-    @GetMapping("/api/v1/trading/orders/algo/open")
-    public AlgoOrderQueryResponse openAlgoOrders(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @RequestParam(value = "instrumentId", required = false) String instrumentId,
-            @RequestParam(value = "limit", defaultValue = "100") int limit) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
-            instrumentId = instrumentId == null || instrumentId.isBlank() ? null : instrumentId;
-            if (instrumentId != null) InstrumentIds.parse(instrumentId);
-            return algoOrderService.openOrders(userId, instrumentId, limit);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
-    @PostMapping("/api/v1/trading/trigger-orders")
-    public CompletionStage<TriggerOrderResponse> placeTrigger(@RequestBody PlaceTriggerOrderRequest request) {
-        try {
-            return mapAsyncFailure(triggerOrderService.placeAsync(request), HttpStatus.CONFLICT);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
-        }
-    }
-
     @GetMapping("/api/v1/trading/orders/history")
     public OrderQueryResponse historyOrders(
             @RequestParam(value = "userId", required = false) Long queryUserId,
@@ -533,7 +338,7 @@ public class TradingController {
             @RequestParam(value = "status", required = false) String status) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
-            return orderService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence, status);
+            return orderQueryService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence, status);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
@@ -585,15 +390,6 @@ public class TradingController {
         }
     }
 
-    @PostMapping("/api/v1/trading/orders/algo")
-    public AlgoOrderResponse placeAlgo(@RequestBody PlaceAlgoOrderRequest request) {
-        try {
-            return algoOrderService.place(request);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
-    }
-
     @GetMapping("/api/v1/trading/orders/open")
     public OrderQueryResponse openOrders(
             @RequestParam(value = "userId", required = false) Long queryUserId,
@@ -606,7 +402,7 @@ public class TradingController {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-            return orderService.openOrders(userId, activeInstrument(instrumentId), activePage(limit, cursor), minExportSequence);
+            return orderQueryService.openOrders(userId, activeInstrument(instrumentId), activePage(limit, cursor), minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
@@ -627,22 +423,6 @@ public class TradingController {
         }
     }
 
-    @GetMapping("/api/v1/trading/trigger-orders/{triggerOrderId}")
-    public TriggerOrderResponse getTrigger(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @PathVariable("triggerOrderId") long triggerOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            return triggerOrderService.get(userId, triggerOrderId);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
     @GetMapping("/api/v1/trading/orders/commands/{commandId}")
     public ResponseEntity<OrderCommandReceipt> commandResult(
             @RequestParam(value = "userId", required = false) Long queryUserId,
@@ -651,31 +431,11 @@ public class TradingController {
             @PathVariable("commandId") UUID commandId) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
-            return commandResponse(orderService.commandResult(userId, commandId));
+            return commandResponse(orderQueryService.commandResult(userId, commandId));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (DataAccessException | IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed command result is unavailable", ex);
-        }
-    }
-
-    @GetMapping("/api/v1/trading/orders/algo/{algoOrderId}")
-    public AlgoOrderResponse getAlgo(
-            @RequestParam(value = "userId", required = false) Long queryUserId,
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
-            @PathVariable("algoOrderId") long algoOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
-        try {
-            if (algoOrderId <= 0) throw new IllegalArgumentException("algoOrderId must be positive");
-            if (userId <= 0) throw new IllegalArgumentException("invalid algo owner");
-            return algoOrderService.get(userId, algoOrderId);
-        } catch (NoSuchElementException missing) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, missing.getMessage(), missing);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 
@@ -688,7 +448,7 @@ public class TradingController {
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
         long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
-            return orderService.get(userId, orderId, minExportSequence);
+            return orderQueryService.get(userId, orderId, minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
@@ -768,12 +528,7 @@ public class TradingController {
         return new ActiveOrderPageQuery(limit, ActiveOrderCursors.decode(cursor));
     }
 
-    public static OpenTriggerPageQuery activeTriggerPage(int limit, String cursor) {
-        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
-        return new OpenTriggerPageQuery(limit, OpenTriggerCursors.decode(cursor));
-    }
-
-    private static String activeInstrument(String instrumentId) {
+    static String activeInstrument(String instrumentId) {
         if (instrumentId == null || instrumentId.isBlank()) return null;
         String value = instrumentId.trim().toUpperCase(Locale.ROOT);
         if (!InstrumentIds.valid(value)) {
@@ -788,7 +543,7 @@ public class TradingController {
         return response;
     }
 
-    private static <T> CompletionStage<T> mapAsyncFailure(CompletionStage<T> stage, HttpStatus illegalStateStatus) {
+    static <T> CompletionStage<T> mapAsyncFailure(CompletionStage<T> stage, HttpStatus illegalStateStatus) {
         CompletableFuture<T> mapped = new CompletableFuture<>();
         stage.whenComplete((value, failure) -> {
             if (failure == null) {

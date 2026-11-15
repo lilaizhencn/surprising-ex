@@ -94,9 +94,7 @@ public class OrderService {
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
     private final OrderAeronGateway aeron;
-    private final AeronOrderProjectionRepository aeronOrderProjection;
     private final MatchingMarketDataService bboOrderBook;
-    private final ValkeyUserQueries realtimeQueries;
     private final BracketOrderDispatcher bracketOrderDispatcher;
     private final OrderQueryService queries;
 
@@ -108,21 +106,27 @@ public class OrderService {
                 tradingMetrics, tradeProjection, realtimeQueries, null);
     }
 
-    @Autowired
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderAeronGateway aeron, AeronOrderProjectionRepository aeronOrderProjection,
                         MatchingMarketDataService bboOrderBook, TradingMetricsService tradingMetrics,
                         TradeProjectionRepository tradeProjection, ValkeyUserQueries realtimeQueries,
-                        @Autowired(required = false) BracketOrderDispatcher bracketOrderDispatcher) {
+                        BracketOrderDispatcher bracketOrderDispatcher) {
+        this(properties, orderValidator, aeron, bboOrderBook, bracketOrderDispatcher,
+                new OrderQueryService(properties, aeron, aeronOrderProjection,
+                        tradingMetrics, tradeProjection, realtimeQueries));
+    }
+
+    @Autowired
+    public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
+                        OrderAeronGateway aeron, MatchingMarketDataService bboOrderBook,
+                        @Autowired(required = false) BracketOrderDispatcher bracketOrderDispatcher,
+                        OrderQueryService queries) {
         this.properties = properties;
         this.orderValidator = orderValidator;
         this.aeron = aeron;
-        this.aeronOrderProjection = aeronOrderProjection;
         this.bboOrderBook = bboOrderBook;
-        this.realtimeQueries = realtimeQueries;
         this.bracketOrderDispatcher = bracketOrderDispatcher;
-        this.queries = new OrderQueryService(properties, aeron, aeronOrderProjection,
-                tradingMetrics, tradeProjection, realtimeQueries);
+        this.queries = queries;
     }
 
     public ObjectNode tradingMetrics(int window, int limit, ProductLine requestedProduct) {
@@ -140,8 +144,7 @@ public class OrderService {
     }
 
     public OrderPriceProtectionResponse priceProtection() {
-        return new OrderPriceProtectionResponse(
-                currentProductLine(), properties.getRisk().getMarketMaxSlippagePpm());
+        return queries.priceProtection();
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
@@ -605,79 +608,31 @@ public class OrderService {
     }
 
     public OrderCommandReceipt commandResult(long userId, UUID commandId) {
-        if (commandId == null) {
-            throw new IllegalArgumentException("commandId is required");
-        }
-        return requireProjection().commandResult(currentProductLine(), userId, commandId);
+        return queries.commandResult(userId, commandId);
     }
 
     public OrderCommandReceipt commandResultFromCore(UUID commandId) {
-        if (commandId == null) throw new IllegalArgumentException("commandId is required");
-        try {
-            CoreResponse response = requireAeron().commandResult(commandId);
-            if (response.resultCode() == CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION) {
-                return new OrderCommandReceipt(commandId, "OUTSIDE_RETENTION",
-                        CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION.name(),
-                        CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION.name(), null, List.of(),
-                        null, null);
-            }
-            if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                return new OrderCommandReceipt(commandId, "MATCHING_PENDING",
-                        CoreResultCode.MATCHING_PENDING.name(), "matching pending",
-                        commandResultUrl(commandId), List.of(),
-                        null, null);
-            }
-            return new OrderCommandReceipt(commandId, "TERMINAL", response.resultCode().name(),
-                    response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
-                    commandResultUrl(commandId), List.of(), null, null);
-        } catch (com.surprising.aeron.client.ResultUnknownException exception) {
-            return new OrderCommandReceipt(commandId, "RESULT_UNKNOWN", "RESULT_UNKNOWN",
-                    "command result is unknown", commandResultUrl(commandId), List.of(),
-                    null, null);
-        } catch (CoreCommandOutcome.NotAcceptedException exception) {
-            CoreCommandOutcome.NotAccepted rejection = exception.rejection();
-            return new OrderCommandReceipt(commandId, "NOT_ACCEPTED", rejection.reason().name(),
-                    rejection.reason().name(), null, List.of(), null, rejection.rawOfferResult());
-        }
+        return queries.commandResultFromCore(commandId);
     }
 
     public OrderSubmissionResponse submission(long userId, String clientOrderId) {
-        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        String key = normalizeClientOrderId(clientOrderId);
-        var product = currentProductLine();
-        return requireProjection().submission(product, userId, key, StableOrderIdentity.commandId(product, userId, key));
+        return queries.submission(userId, clientOrderId);
     }
 
     public CancellationPlanResponse cancellationPlan(long userId, String instrumentId) {
-        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        var product = currentProductLine();
-        String instrument = instrumentId == null ? null : normalizeInstrumentId(instrumentId);
-        var view = requireRealtimeQueries().require(product, userId, null);
-        var ids = view.openOrders().stream().filter(v -> instrument == null || instrument.equals(v.instrumentId()))
-                .map(CoreOrderStateView::orderId).distinct().sorted().toList();
-        return new CancellationPlanResponse(userId, product, instrument, ids);
+        return queries.cancellationPlan(userId, instrumentId);
     }
 
     public OrderCommandReceipt cancellationBatch(long userId, String batchKey) {
-        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        var product = currentProductLine();
-        return requireProjection().cancellationBatch(product, userId,
-                batchCommandId(product, userId, "cancel", normalizeClientOrderId(batchKey)));
+        return queries.cancellationBatch(userId, batchKey);
     }
 
     public OrderCommandReceipt amendment(long userId, String clientRequestId) {
-        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        var product = currentProductLine();
-        return requireProjection().amendment(product, userId,
-                StableOrderIdentity.replacementCommandId(product, userId, normalizeClientOrderId(clientRequestId)));
+        return queries.amendment(userId, clientRequestId);
     }
 
     public OrderCommandReceipt cancellation(long userId, long orderId) {
-        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        requireOrderId(orderId);
-        var product = currentProductLine();
-        return requireProjection().cancellation(product, userId, orderId,
-                StableOrderIdentity.commandId(product, userId, "cancel:" + orderId));
+        return queries.cancellation(userId, orderId);
     }
 
     public OrderBatchResponse cancelOpenOrders(CancelOpenOrdersRequest request) {
@@ -942,7 +897,11 @@ public class OrderService {
     }
 
     private String commandResultUrl(UUID commandId) {
-        return OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=" + configuredProductLine().name();
+        return commandResultUrl(configuredProductLine(), commandId);
+    }
+
+    static String commandResultUrl(ProductLine productLine, UUID commandId) {
+        return OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=" + productLine.name();
     }
 
     static OrderResponse toOrder(CoreOrderStateView view) {
@@ -1111,18 +1070,6 @@ public class OrderService {
     private static CorePositionSide positionSide(PositionSide value) { return CorePositionSide.valueOf(value.name()); }
     private static CoreOrderType orderType(OrderType value) { return CoreOrderType.valueOf(value.name()); }
     private static CoreTimeInForce timeInForce(TimeInForce value) { return CoreTimeInForce.valueOf(value.name()); }
-
-    private AeronOrderProjectionRepository requireProjection() {
-        if (aeronOrderProjection == null) {
-            throw new IllegalStateException("order projection repository is required");
-        }
-        return aeronOrderProjection;
-    }
-
-    private ValkeyUserQueries requireRealtimeQueries() {
-        if (realtimeQueries == null) throw new ReadViewUnavailableException("READ_VIEW_UNAVAILABLE");
-        return realtimeQueries;
-    }
 
     private OrderAeronGateway requireAeron() {
         if (aeron == null) throw new IllegalStateException("Aeron order gateway is required");

@@ -15,12 +15,15 @@ import com.surprising.trading.api.client.OrderRpcApi;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
 import com.surprising.trading.order.controller.AdminTradingController;
 import com.surprising.trading.order.controller.OrderBusinessSettingsController;
+import com.surprising.trading.order.controller.TradingAlgoController;
 import com.surprising.trading.order.controller.TradingController;
+import com.surprising.trading.order.controller.TradingTriggerController;
 import com.surprising.trading.order.service.AlgoOrderService;
 import com.surprising.trading.order.service.CancelAllAfterService;
 import com.surprising.trading.order.service.InstrumentCoreSyncService;
 import com.surprising.trading.order.service.LeverageService;
 import com.surprising.trading.order.service.OrderBusinessSettingsService;
+import com.surprising.trading.order.service.OrderQueryService;
 import com.surprising.trading.order.service.OrderService;
 import com.surprising.trading.order.service.TradingFeeService;
 import com.surprising.trading.trigger.service.TriggerOrderService;
@@ -38,11 +41,15 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 class InternalBusinessContractTest {
     @Test
     void independentMakerFeignContractsStillHaveInternalHttpEndpoints() {
-        Map.of(AccountRpcApi.class, AccountController.class,
-                OrderRpcApi.class, TradingController.class,
-                MarketDataRpcApi.class, TradingController.class).forEach((api, controller) -> {
+        Map.of(AccountRpcApi.class, java.util.List.of(AccountController.class),
+                OrderRpcApi.class, java.util.List.of(TradingController.class, TradingAlgoController.class),
+                MarketDataRpcApi.class, java.util.List.of(TradingController.class)).forEach((api, controllers) -> {
                     String prefix = api.getAnnotation(FeignClient.class).path();
-                    assertThat(routes(controller, "")).as("%s internal contract", api.getSimpleName())
+                    var actual = new java.util.LinkedHashSet<String>();
+                    for (Class<?> controller : controllers) {
+                        actual.addAll(routes(controller, ""));
+                    }
+                    assertThat(actual).as("%s internal contract", api.getSimpleName())
                             .containsAll(routes(api, prefix));
                 });
     }
@@ -75,7 +82,8 @@ class InternalBusinessContractTest {
 
     @Test
     void localControllersDependOnHandlersNotOtherRestControllers() {
-        for (Class<?> entry : java.util.List.of(TradingController.class, AdminTradingController.class,
+        for (Class<?> entry : java.util.List.of(TradingController.class, TradingTriggerController.class,
+                TradingAlgoController.class, AdminTradingController.class,
                 AccountController.class, InstrumentController.class, OrderBusinessSettingsController.class)) {
             for (var field : entry.getDeclaredFields()) {
                 assertThat(field.getType().isAnnotationPresent(
@@ -91,14 +99,19 @@ class InternalBusinessContractTest {
         var context = new StaticApplicationContext();
         context.registerBean(TradingController.class, () -> new TradingController(
                 mock(OrderService.class),
-                mock(AlgoOrderService.class),
+                mock(OrderQueryService.class),
                 mock(CancelAllAfterService.class),
-                mock(TriggerOrderService.class),
                 mock(LeverageService.class),
                 mock(TradingFeeService.class),
                 mock(MatchingMarketDataService.class)));
+        context.registerBean(TradingTriggerController.class, () -> new TradingTriggerController(
+                mock(OrderQueryService.class),
+                mock(TriggerOrderService.class)));
+        context.registerBean(TradingAlgoController.class, () -> new TradingAlgoController(
+                mock(AlgoOrderService.class)));
         context.registerBean(AdminTradingController.class, () -> new AdminTradingController(
                 mock(OrderService.class),
+                mock(OrderQueryService.class),
                 mock(TriggerOrderService.class),
                 mock(MaintenanceService.class),
                 mock(LeverageService.class),

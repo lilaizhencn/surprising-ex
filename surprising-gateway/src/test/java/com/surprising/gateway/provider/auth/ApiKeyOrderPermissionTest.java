@@ -13,7 +13,7 @@ import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.TotpService;
 import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.controller.BinanceApiController;
+import com.surprising.gateway.provider.controller.OpenApiController;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.OrderCommandReceipt;
@@ -76,8 +76,8 @@ class ApiKeyOrderPermissionTest {
         return request;
     }
 
-    private BinanceApiController controller() {
-        return new BinanceApiController(properties,
+    private OpenApiController controller() {
+        return new OpenApiController(properties,
                 mock(InstrumentService.class),
                 orderService,
                 mock(AccountService.class),

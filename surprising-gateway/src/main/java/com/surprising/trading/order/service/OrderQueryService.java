@@ -1,13 +1,20 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CoreOrderStateView;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.ValkeyUserQueries;
 import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import com.surprising.trading.api.model.AdminTradeQueryResponse;
+import com.surprising.trading.api.model.CancellationPlanResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
+import com.surprising.trading.api.model.OrderPriceProtectionResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.OrderSubmissionResponse;
 import com.surprising.trading.api.model.TradeFillQueryResponse;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.ActiveOrderPageQuery;
@@ -22,13 +29,16 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * Read/query projection delegate for {@link OrderService}: handles active order queries,
- * historical order/trade projections, and Core direct read views.
+ * Read/query projection service for orders, fills, metrics, and command receipts.
  */
-final class OrderQueryService {
+@Service
+public class OrderQueryService {
 
     private final TradingOrderProperties properties;
     private final OrderAeronGateway aeron;
@@ -37,12 +47,13 @@ final class OrderQueryService {
     private final TradeProjectionRepository tradeProjection;
     private final ValkeyUserQueries realtimeQueries;
 
-    OrderQueryService(TradingOrderProperties properties,
-                      OrderAeronGateway aeron,
-                      AeronOrderProjectionRepository aeronOrderProjection,
-                      TradingMetricsService tradingMetrics,
-                      TradeProjectionRepository tradeProjection,
-                      ValkeyUserQueries realtimeQueries) {
+    @Autowired
+    public OrderQueryService(TradingOrderProperties properties,
+                             OrderAeronGateway aeron,
+                             AeronOrderProjectionRepository aeronOrderProjection,
+                             TradingMetricsService tradingMetrics,
+                             TradeProjectionRepository tradeProjection,
+                             ValkeyUserQueries realtimeQueries) {
         this.properties = properties;
         this.aeron = aeron;
         this.aeronOrderProjection = aeronOrderProjection;
@@ -51,7 +62,7 @@ final class OrderQueryService {
         this.realtimeQueries = realtimeQueries;
     }
 
-    ObjectNode tradingMetrics(int window, int limit, ProductLine requestedProduct) {
+    public ObjectNode tradingMetrics(int window, int limit, ProductLine requestedProduct) {
         var product = currentProductLine();
         if (requestedProduct != null && requestedProduct != product)
             throw new IllegalArgumentException("product line does not match provider");
@@ -59,17 +70,17 @@ final class OrderQueryService {
         return tradingMetrics.require(product, window, limit);
     }
 
-    TradeFillQueryResponse ownFills(long userId, String instrumentId,
-                                    Long orderId, Long startTime, Long endTime,
-                                    int limit, TradeReadCursor.Fill cursor) {
+    public TradeFillQueryResponse ownFills(long userId, String instrumentId,
+                                           Long orderId, Long startTime, Long endTime,
+                                           int limit, TradeReadCursor.Fill cursor) {
         if (tradeProjection == null) throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE");
         String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeInstrumentId(instrumentId);
         return tradeProjection.ownFills(currentProductLine(), userId, instrument, orderId, startTime, endTime, limit, cursor);
     }
 
-    AdminTradeQueryResponse adminTrades(Long userId, String instrumentId,
-                                        Long orderId, int limit, TradeReadCursor.Execution cursor,
-                                        boolean ascending, ProductLine requestedProduct) {
+    public AdminTradeQueryResponse adminTrades(Long userId, String instrumentId,
+                                               Long orderId, int limit, TradeReadCursor.Execution cursor,
+                                               boolean ascending, ProductLine requestedProduct) {
         ProductLine product = currentProductLine();
         if (requestedProduct != null && requestedProduct != product)
             throw new IllegalArgumentException("product line does not match provider");
@@ -78,13 +89,95 @@ final class OrderQueryService {
         return tradeProjection.search(product, userId, instrument, orderId, limit, cursor, ascending);
     }
 
-    List<OrderResponse> openOrdersFromCore(long userId, String instrumentId, long beforeOrderId, int limit) {
+    public OrderPriceProtectionResponse priceProtection() {
+        return new OrderPriceProtectionResponse(
+                currentProductLine(), properties.getRisk().getMarketMaxSlippagePpm());
+    }
+
+    public OrderCommandReceipt commandResult(long userId, UUID commandId) {
+        if (commandId == null) {
+            throw new IllegalArgumentException("commandId is required");
+        }
+        return requireProjection().commandResult(currentProductLine(), userId, commandId);
+    }
+
+    public OrderCommandReceipt commandResultFromCore(UUID commandId) {
+        if (commandId == null) throw new IllegalArgumentException("commandId is required");
+        ProductLine product = currentProductLine();
+        try {
+            CoreResponse response = requireAeron().commandResult(commandId);
+            if (response.resultCode() == CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION) {
+                return new OrderCommandReceipt(commandId, "OUTSIDE_RETENTION",
+                        CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION.name(),
+                        CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION.name(), null, List.of(),
+                        null, null);
+            }
+            if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                return new OrderCommandReceipt(commandId, "MATCHING_PENDING",
+                        CoreResultCode.MATCHING_PENDING.name(), "matching pending",
+                        OrderService.commandResultUrl(product, commandId), List.of(),
+                        null, null);
+            }
+            return new OrderCommandReceipt(commandId, "TERMINAL", response.resultCode().name(),
+                    response.resultCode() == CoreResultCode.NONE ? "completed" : response.resultCode().name(),
+                    OrderService.commandResultUrl(product, commandId), List.of(), null, null);
+        } catch (com.surprising.aeron.client.ResultUnknownException exception) {
+            return new OrderCommandReceipt(commandId, "RESULT_UNKNOWN", "RESULT_UNKNOWN",
+                    "command result is unknown", OrderService.commandResultUrl(product, commandId), List.of(),
+                    null, null);
+        } catch (CoreCommandOutcome.NotAcceptedException exception) {
+            CoreCommandOutcome.NotAccepted rejection = exception.rejection();
+            return new OrderCommandReceipt(commandId, "NOT_ACCEPTED", rejection.reason().name(),
+                    rejection.reason().name(), null, List.of(), null, rejection.rawOfferResult());
+        }
+    }
+
+    public OrderSubmissionResponse submission(long userId, String clientOrderId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        String key = normalizeClientOrderId(clientOrderId);
+        var product = currentProductLine();
+        return requireProjection().submission(product, userId, key, StableOrderIdentity.commandId(product, userId, key));
+    }
+
+    public CancellationPlanResponse cancellationPlan(long userId, String instrumentId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        var product = currentProductLine();
+        String instrument = instrumentId == null ? null : normalizeInstrumentId(instrumentId);
+        var view = requireRealtimeQueries().require(product, userId, null);
+        var ids = view.openOrders().stream().filter(v -> instrument == null || instrument.equals(v.instrumentId()))
+                .map(CoreOrderStateView::orderId).distinct().sorted().toList();
+        return new CancellationPlanResponse(userId, product, instrument, ids);
+    }
+
+    public OrderCommandReceipt cancellationBatch(long userId, String batchKey) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        var product = currentProductLine();
+        return requireProjection().cancellationBatch(product, userId,
+                OrderService.batchCommandId(product, userId, "cancel", normalizeClientOrderId(batchKey)));
+    }
+
+    public OrderCommandReceipt amendment(long userId, String clientRequestId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        var product = currentProductLine();
+        return requireProjection().amendment(product, userId,
+                StableOrderIdentity.replacementCommandId(product, userId, normalizeClientOrderId(clientRequestId)));
+    }
+
+    public OrderCommandReceipt cancellation(long userId, long orderId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        requireOrderId(orderId);
+        var product = currentProductLine();
+        return requireProjection().cancellation(product, userId, orderId,
+                StableOrderIdentity.commandId(product, userId, "cancel:" + orderId));
+    }
+
+    public List<OrderResponse> openOrdersFromCore(long userId, String instrumentId, long beforeOrderId, int limit) {
         return requireAeron().openOrders(userId, instrumentId, beforeOrderId, limit).stream()
                 .map(OrderService::toOrder)
                 .toList();
     }
 
-    List<OrderResponse> lifecycleOpenOrders(String instrumentId, int limit) {
+    public List<OrderResponse> lifecycleOpenOrders(String instrumentId, int limit) {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
@@ -94,7 +187,11 @@ final class OrderQueryService {
                 .toList();
     }
 
-    OrderResponse get(long userId, long orderId, Long minExportSequence) {
+    public OrderResponse get(long userId, long orderId) {
+        return get(userId, orderId, null);
+    }
+
+    public OrderResponse get(long userId, long orderId, Long minExportSequence) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -107,7 +204,11 @@ final class OrderQueryService {
         return current;
     }
 
-    OrderResponse getByClientOrderId(long userId, String clientOrderId, Long minExportSequence) {
+    public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
+        return getByClientOrderId(userId, clientOrderId, null);
+    }
+
+    public OrderResponse getByClientOrderId(long userId, String clientOrderId, Long minExportSequence) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -120,8 +221,8 @@ final class OrderQueryService {
         return current;
     }
 
-    OrderQueryResponse openOrders(long userId, String instrumentId, ActiveOrderPageQuery query,
-                                  Long minExportSequence) {
+    public OrderQueryResponse openOrders(long userId, String instrumentId, ActiveOrderPageQuery query,
+                                         Long minExportSequence) {
         int limit = query.limit();
         long beforeOrderId = query.beforeId();
         List<OrderResponse> orders = requireRealtimeQueries().require(currentProductLine(), userId, minExportSequence).openOrders().stream()
@@ -144,9 +245,14 @@ final class OrderQueryService {
         return readyProjection(requireProjection().openOrders(productLine, null, instrumentId, null, limit, null));
     }
 
-    OrderQueryResponse historyOrders(long userId, String instrumentId, int limit, Long minimumOrderId,
-                                     Long startTimeMillis, Long endTimeMillis, String cursor,
-                                     Long minExportSequence, String status) {
+    public OrderQueryResponse historyOrders(long userId, String instrumentId, int limit, Long minimumOrderId,
+                                            Long startTimeMillis, Long endTimeMillis) {
+        return historyOrders(userId, instrumentId, limit, minimumOrderId, startTimeMillis, endTimeMillis, null, null, null);
+    }
+
+    public OrderQueryResponse historyOrders(long userId, String instrumentId, int limit, Long minimumOrderId,
+                                            Long startTimeMillis, Long endTimeMillis, String cursor,
+                                            Long minExportSequence, String status) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -170,8 +276,17 @@ final class OrderQueryService {
                 "updatedAt.desc", limit);
     }
 
-    OrderQueryResponse adminOrders(Long userId, String instrumentId, String status, Long orderId,
-                                   int limit, String cursor, String sort, ProductLine productLine) {
+    public OrderQueryResponse adminOrders(Long userId, String instrumentId, String status, Long orderId, int limit) {
+        return adminOrders(userId, instrumentId, status, orderId, limit, null, null, null);
+    }
+
+    public OrderQueryResponse adminOrders(Long userId, String instrumentId, String status, Long orderId,
+                                          int limit, String cursor, String sort) {
+        return adminOrders(userId, instrumentId, status, orderId, limit, cursor, sort, null);
+    }
+
+    public OrderQueryResponse adminOrders(Long userId, String instrumentId, String status, Long orderId,
+                                          int limit, String cursor, String sort, ProductLine productLine) {
         if (userId != null && userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -239,7 +354,7 @@ final class OrderQueryService {
         return aeron;
     }
 
-    private ProductLine currentProductLine() {
+    public ProductLine currentProductLine() {
         return properties.getProductLine();
     }
 

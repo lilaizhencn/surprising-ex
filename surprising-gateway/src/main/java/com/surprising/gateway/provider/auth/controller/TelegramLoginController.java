@@ -26,7 +26,11 @@ public class TelegramLoginController {
     @PostMapping("/start")
     public ResponseEntity<TelegramLoginService.Started> start(@RequestHeader("X-Device-Id") String deviceId,
             @RequestBody(required = false) Start request) {
-        return noStore().body(login.start(deviceId, request != null && Boolean.TRUE.equals(request.returnToApp())));
+        try {
+            return noStore().body(login.start(deviceId, request != null && Boolean.TRUE.equals(request.returnToApp())));
+        } catch (IllegalStateException failure) {
+            throw unavailable();
+        }
     }
 
     @GetMapping(value = "/callback", produces = MediaType.TEXT_HTML_VALUE)
@@ -66,20 +70,18 @@ public class TelegramLoginController {
     @PostMapping("/complete")
     public ResponseEntity<?> complete(@Valid @RequestBody Complete request,
             @RequestHeader("X-Device-Id") String deviceId, HttpServletRequest http) {
-        var result = login.complete(request.flowId(), request.verifier(), deviceId, clients.bind(http));
-        return result == null ? noStore().body(new Pending(true)) : noStore().body(result);
+        try {
+            var result = login.complete(request.flowId(), request.verifier(), deviceId, clients.bind(http));
+            return result == null ? noStore().body(new Pending(true)) : noStore().body(result);
+        } catch (IllegalStateException failure) {
+            throw unavailable();
+        }
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<?> invalid(IllegalArgumentException error) {
-        return ResponseEntity.badRequest().cacheControl(CacheControl.noStore())
-                .body(java.util.Map.of("message", error.getMessage()));
-    }
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<?> unavailable(IllegalStateException error) {
-        return ResponseEntity.status(login.enabled() ? 403 : 503).cacheControl(CacheControl.noStore())
-                .body(java.util.Map.of("message", login.enabled() ? "Telegram login is not permitted" : "Telegram login is not configured"));
+    private com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler.StatusException unavailable() {
+        return new com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler.StatusException(
+                login.enabled() ? 403 : 503,
+                login.enabled() ? "Telegram login is not permitted" : "Telegram login is not configured");
     }
 
     private static ResponseEntity.BodyBuilder noStore() {
@@ -92,8 +94,12 @@ public class TelegramLoginController {
             return ResponseEntity.badRequest().cacheControl(CacheControl.noStore())
                     .body(java.util.Map.of("message", "initData is required"));
         }
-        var result = login.loginWebApp(request.initData(), clients.bind(http));
-        return noStore().body(result);
+        try {
+            var result = login.loginWebApp(request.initData(), clients.bind(http));
+            return noStore().body(result);
+        } catch (IllegalStateException failure) {
+            throw unavailable();
+        }
     }
 
     public record Start(Boolean returnToApp) {}

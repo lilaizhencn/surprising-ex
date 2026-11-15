@@ -33,6 +33,7 @@ import com.surprising.trading.order.model.FeeSchedulePageQuery;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.InstrumentCoreSyncService;
 import com.surprising.trading.order.service.LeverageService;
+import com.surprising.trading.order.service.OrderQueryService;
 import com.surprising.trading.order.service.OrderService;
 import com.surprising.trading.order.service.TradingFeeService;
 import com.surprising.trading.order.utils.TradeReadCursors;
@@ -58,11 +59,29 @@ import tools.jackson.databind.node.ObjectNode;
 @RestController
 public class AdminTradingController {
     private final OrderService orderService;
+    private final OrderQueryService orderQueryService;
     private final TriggerOrderService triggerOrderService;
     private final MaintenanceService maintenanceService;
     private final LeverageService leverageService;
     private final TradingFeeService tradingFeeService;
     private final InstrumentCoreSyncService instrumentCoreSyncService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AdminTradingController(OrderService orderService,
+                                  OrderQueryService orderQueryService,
+                                  TriggerOrderService triggerOrderService,
+                                  MaintenanceService maintenanceService,
+                                  LeverageService leverageService,
+                                  TradingFeeService tradingFeeService,
+                                  InstrumentCoreSyncService instrumentCoreSyncService) {
+        this.orderService = orderService;
+        this.orderQueryService = orderQueryService;
+        this.triggerOrderService = triggerOrderService;
+        this.maintenanceService = maintenanceService;
+        this.leverageService = leverageService;
+        this.tradingFeeService = tradingFeeService;
+        this.instrumentCoreSyncService = instrumentCoreSyncService;
+    }
 
     public AdminTradingController(OrderService orderService,
                                   TriggerOrderService triggerOrderService,
@@ -70,12 +89,7 @@ public class AdminTradingController {
                                   LeverageService leverageService,
                                   TradingFeeService tradingFeeService,
                                   InstrumentCoreSyncService instrumentCoreSyncService) {
-        this.orderService = orderService;
-        this.triggerOrderService = triggerOrderService;
-        this.maintenanceService = maintenanceService;
-        this.leverageService = leverageService;
-        this.tradingFeeService = tradingFeeService;
-        this.instrumentCoreSyncService = instrumentCoreSyncService;
+        this(orderService, null, triggerOrderService, maintenanceService, leverageService, tradingFeeService, instrumentCoreSyncService);
     }
 
     @GetMapping("/api/v1/admin/trading/orders/metrics")
@@ -90,7 +104,7 @@ public class AdminTradingController {
             if (!Set.of(60, 360, 1440, 10080).contains(windowMinutes) || limit < 1 || limit > 100) {
                 throw new IllegalArgumentException("statistics window must be 60,360,1440,10080 and limit in [1,100]");
             }
-            return orderService.tradingMetrics(windowMinutes, limit, TradingController.productLine(queryProductLine, headerProductLine));
+            return orderQueryService.tradingMetrics(windowMinutes, limit, TradingController.productLine(queryProductLine, headerProductLine));
         } catch (IllegalArgumentException invalid) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
         }
@@ -120,10 +134,10 @@ public class AdminTradingController {
             }
             boolean ascending = ordering.endsWith("asc");
             ProductLine requested = TradingController.productLine(queryProductLine, headerProductLine);
-            ProductLine effective = requested == null ? orderService.currentProductLine() : requested;
+            ProductLine effective = requested == null ? orderQueryService.currentProductLine() : requested;
             var after = cursor == null || cursor.isBlank() ? null : TradeReadCursors.execution(cursor,
                     TradeReadCursors.executionScope(effective, userId, instrumentId, orderId, ascending));
-            return orderService.adminTrades(userId, instrumentId, orderId, limit, after, ascending, requested);
+            return orderQueryService.adminTrades(userId, instrumentId, orderId, limit, after, ascending, requested);
         } catch (IllegalArgumentException invalid) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
         }
@@ -442,7 +456,7 @@ public class AdminTradingController {
             @RequestParam(value = "sort", required = false) String sort) {
         GatewayUserContext.requireAdminUserId(adminUserId);
         try {
-            return orderService.adminOrders(userId, instrumentId, status, orderId, limit, cursor, sort,
+            return orderQueryService.adminOrders(userId, instrumentId, status, orderId, limit, cursor, sort,
                     TradingController.productLine(queryProductLine, headerProductLine));
         } catch (ProjectionReadResult.ResponseTooLargeException ex) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);

@@ -35,17 +35,14 @@ public class GoogleLoginController {
     }
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody Login request, HttpServletRequest http) {
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(
-                login.login(request.credential(), request.nonce(), request.platform(), request.inviteCode(), clients.bind(http)));
-    }
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<?> invalid(IllegalArgumentException failure) { return error(400, failure.getMessage()); }
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<?> unavailable(IllegalStateException failure) {
-        return error(properties.enabled() ? 403 : 503, properties.enabled() ? "Google login is not permitted" : "Google login is not configured");
-    }
-    private static ResponseEntity<?> error(int status, String message) {
-        return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(Map.of("message", message));
+        try {
+            return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(
+                    login.login(request.credential(), request.nonce(), request.platform(), request.inviteCode(), clients.bind(http)));
+        } catch (IllegalStateException failure) {
+            throw new com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler.StatusException(
+                    properties.enabled() ? 403 : 503,
+                    properties.enabled() ? "Google login is not permitted" : "Google login is not configured");
+        }
     }
     public record Config(boolean enabled, String webClientId, String iosClientId, boolean androidEnabled, boolean iosEnabled) {}
     public record Login(@NotBlank @Size(max = 16384) String credential,

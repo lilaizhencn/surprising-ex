@@ -10,7 +10,7 @@ import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.TotpService;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.controller.BinanceApiController;
+import com.surprising.gateway.provider.controller.OpenApiController;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -120,8 +120,8 @@ class ApiKeyHttpBoundaryTest {
         request.addParameter("timestamp",timestamp);request.addParameter("signature",service.sign("secret","timestamp="+timestamp));
         request.setQueryString("timestamp="+timestamp+"&signature="+request.getParameter("signature"));return request;
     }
-    private BinanceApiController controller(GatewayApiKeyService business) {
+    private OpenApiController controller(GatewayApiKeyService business) {
         properties.getBinanceApi().setEnabled(true);
-        return new BinanceApiController(properties, null, null, null, null, business, null, auth, null, null, null, new ObjectMapper());
+        return new OpenApiController(properties, null, null, null, null, business, null, auth, null, null, null, new ObjectMapper());
     }
 }

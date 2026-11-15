@@ -52,7 +52,7 @@ class OpenPlatformBrowserQaTest {
     @Configuration @EnableWebMvc
     static class Web {
         @Bean UserApiKeyController keyController() { return new UserApiKeyController(keys, properties); }
-        @Bean GatewayLimitErrors errors() { return new GatewayLimitErrors(); }
+        @Bean com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler errors() { return new com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler(); }
         @Bean Probes probes() { return new Probes(); }
         @Bean SubscriptionRegistry subscriptions() { return new SubscriptionRegistry(json, websocket); }
         @Bean ClientWebSocketHandler handler() { return new ClientWebSocketHandler(json, subscriptions(), websocket,

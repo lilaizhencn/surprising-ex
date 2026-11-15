@@ -42,11 +42,12 @@ class ActiveOrderQueryBoundaryTest {
         var account=new AccountProperties();account.getKafka().setProductLine(line);
         var triggerProperties=new TriggerProperties();triggerProperties.setProductLine(line);
         var order=new OrderService(properties,null,core,null,null,null,null,views);
+        var orderQueries=new OrderQueryService(properties,core,null,null,null,views);
         var trigger=new TriggerOrderService(triggerProperties,triggerCore,views,null);
-        mvc=MockMvcBuilders.standaloneSetup(new TradingController(
-                order, mock(AlgoOrderService.class), mock(CancelAllAfterService.class),
-                trigger, mock(LeverageService.class), mock(TradingFeeService.class),
-                mock(com.surprising.trading.matching.service.MatchingMarketDataService.class)))
+        mvc=MockMvcBuilders.standaloneSetup(
+                new TradingController(order, orderQueries, mock(CancelAllAfterService.class), mock(LeverageService.class),
+                        mock(TradingFeeService.class), mock(com.surprising.trading.matching.service.MatchingMarketDataService.class)),
+                new TradingTriggerController(orderQueries, trigger))
                 .setControllerAdvice(new BadRequestAdvice()).build();
     }
     @RestControllerAdvice

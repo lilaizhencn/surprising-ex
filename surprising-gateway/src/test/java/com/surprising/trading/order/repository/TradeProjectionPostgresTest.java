@@ -124,19 +124,18 @@ class TradeProjectionPostgresTest {
         assertThatThrownBy(()->search(ProductLine.OPTION,null,"604",null,1,page.nextCursor(),null)).isInstanceOfSatisfying(ResponseStatusException.class, failure -> assertThat(failure.getStatusCode().value()).isEqualTo(400));
         assertThatThrownBy(()->search(ProductLine.OPTION,null,null,null,1,page.nextCursor(),"eventTime.asc")).isInstanceOfSatisfying(ResponseStatusException.class, failure -> assertThat(failure.getStatusCode().value()).isEqualTo(400));
     }
-    private com.surprising.trading.order.service.OrderService service(ProductLine line) {
-        var properties = new com.surprising.trading.order.config.TradingOrderProperties();
-        properties.getKafka().setProductLine(line);
-        return new com.surprising.trading.order.service.OrderService(properties,null,null,null,null,null,repository,null);
+    private com.surprising.trading.order.service.OrderQueryService queryService(ProductLine line) {
+        var properties=new com.surprising.trading.order.config.TradingOrderProperties();properties.getKafka().setProductLine(line);
+        return new com.surprising.trading.order.service.OrderQueryService(properties,null,null,null,repository,null);
     }
     private com.surprising.trading.api.model.TradeFillQueryResponse fills(ProductLine line,long user,String instrument,
             Long order,Long start,Long end,int limit,String cursor) {
-        return new com.surprising.trading.order.controller.TradingController(service(line),null,null)
+        return new com.surprising.trading.order.controller.TradingController(null, queryService(line), null)
                 .ownFills(user,null,null,instrument,order,start,end,limit,cursor).getBody();
     }
     private com.surprising.trading.api.model.AdminTradeQueryResponse search(ProductLine line,Long user,String instrument,
             Long order,int limit,String cursor,String sort) {
-        return new com.surprising.trading.order.controller.AdminTradingController(service(line),null,null,null,null,null)
+        return new com.surprising.trading.order.controller.AdminTradingController(null, queryService(line), null,null,null,null,null)
                 .trades("1",null,line.name(),user,instrument,order,limit,cursor,sort);
     }
 

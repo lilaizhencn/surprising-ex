@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 
 import com.surprising.gateway.provider.config.GatewayLimitProperties;
 import com.surprising.gateway.provider.config.GatewayLimitProperties.*;
-import com.surprising.gateway.provider.controller.GatewayLimitErrors;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.product.api.ProductLine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
@@ -121,7 +121,7 @@ class GatewayRequestLimitsRedisTest {
 
     @Test void quotaResponsesHaveRetryAfterAndDoNotExposeActorKeys() {
         var rejection = new GatewayRequestLimits.Rejection(GatewayRequestLimits.Reason.RATE_LIMITED, "ORDER", 1201);
-        var response = GatewayLimitErrors.response(rejection);
+        var response = GlobalGatewayExceptionHandler.limitResponse(rejection);
         assertThat(response.getStatusCode().value()).isEqualTo(429);
         assertThat(response.getHeaders().getFirst("Retry-After")).isEqualTo("2");
         assertThat(response.getBody()).containsEntry("code", "RATE_LIMITED").containsEntry("retryAfterSeconds", 2L);
