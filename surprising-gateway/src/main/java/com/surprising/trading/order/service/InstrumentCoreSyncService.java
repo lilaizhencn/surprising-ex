@@ -9,7 +9,7 @@ import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.maintenance.service.MaintenanceAeronGateway;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import java.util.Comparator;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
@@ -22,8 +22,8 @@ public class InstrumentCoreSyncService {
     private final ProductLine line;
     private final TradingOrderProperties properties;
     private final ConcurrentHashMap<String, Attempt> attempts = new ConcurrentHashMap<>();
-    private record Attempt(RegisterInstrumentCommand configuration, UUID commandId, boolean outcomeUnknown, boolean applied,
-                           long retryAfterNanos, String error) { }
+    private record Attempt(long lastChangeId, CoreOrderProtection protection, RegisterInstrumentCommand configuration,
+                           UUID commandId, boolean outcomeUnknown, boolean applied, long retryAfterNanos, String error) { }
     public record SyncState(String productLine, String instrumentId, String state, String error, long appliedChangeId) { }
 
     public InstrumentCoreSyncService(InstrumentSnapshotCache cache,
@@ -37,27 +37,36 @@ public class InstrumentCoreSyncService {
         if (!cache.initialized(line) || !reconciling.compareAndSet(false, true)) return;
         try {
             long now=System.nanoTime();
-            for (var value : cache.current(line).stream().sorted(Comparator.comparing(InstrumentResponse::instrumentId)).toList()) {
+            CoreOrderProtection protection=properties.getRisk().protection();
+            for (var value : cache.current(line)) {
                 var attempt=attempts.get(Integer.toString(value.instrumentId()));
+                if (attempt!=null && attempt.lastChangeId()==value.lastChangeId()
+                        && Objects.equals(attempt.protection(), protection)
+                        && (attempt.applied() || now < attempt.retryAfterNanos())) continue;
                 RegisterInstrumentCommand configuration;
                 try {
-                    configuration=command(value);
+                    configuration=command(value, protection);
                 } catch (RuntimeException failure) {
                     if (attempt!=null && attempt.configuration()==null && now<attempt.retryAfterNanos()) continue;
-                    attempts.put(Integer.toString(value.instrumentId()),new Attempt(null,null,false,false,
+                    attempts.put(Integer.toString(value.instrumentId()),new Attempt(value.lastChangeId(), protection, null,null,false,false,
                             now+java.util.concurrent.TimeUnit.SECONDS.toNanos(5),error(failure)));
                     continue;
                 }
                 if (attempt!=null && configuration.equals(attempt.configuration())
-                        && (attempt.applied() || now < attempt.retryAfterNanos())) continue;
-                applyConfiguration(configuration,attempt);
+                        && (attempt.applied() || now < attempt.retryAfterNanos())) {
+                    attempts.put(configuration.instrumentId(), new Attempt(value.lastChangeId(), protection, configuration,
+                            attempt.commandId(), attempt.outcomeUnknown(), attempt.applied(), attempt.retryAfterNanos(), attempt.error()));
+                    continue;
+                }
+                applyConfiguration(value.lastChangeId(), protection, configuration, attempt);
             }
         } finally {
             reconciling.set(false);
         }
     }
 
-    private void applyConfiguration(RegisterInstrumentCommand configuration,Attempt previous) {
+    private void applyConfiguration(long lastChangeId, CoreOrderProtection protection,
+                                    RegisterInstrumentCommand configuration, Attempt previous) {
         String error=null;
         UUID id=previous!=null && configuration.equals(previous.configuration()) && previous.outcomeUnknown()
                 ?previous.commandId():UUID.randomUUID();
@@ -79,7 +88,7 @@ public class InstrumentCoreSyncService {
             outcomeUnknown=true;
             error=error(failure);
         }
-        attempts.put(configuration.instrumentId(),new Attempt(configuration,id,outcomeUnknown,applied,
+        attempts.put(configuration.instrumentId(),new Attempt(lastChangeId, protection, configuration, id, outcomeUnknown, applied,
                 System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5),error));
     }
 
@@ -102,11 +111,15 @@ public class InstrumentCoreSyncService {
     }
 
     RegisterInstrumentCommand command(InstrumentResponse value) {
+        return command(value, properties.getRisk().protection());
+    }
+
+    private RegisterInstrumentCommand command(InstrumentResponse value, CoreOrderProtection protection) {
         long settleScale=value.contractType().isInverse()
                 ?cache.scale(line,value.settleAsset()).orElseThrow(
                         ()->new IllegalStateException("settlement asset scale is missing")):1L;
         return command(value,settleScale,
-                value.contractType() == ContractType.SPOT ? null : properties.getRisk().protection());
+                value.contractType() == ContractType.SPOT ? null : protection);
     }
 
     private static RegisterInstrumentCommand command(InstrumentResponse value,long settleScale, CoreOrderProtection protection) {

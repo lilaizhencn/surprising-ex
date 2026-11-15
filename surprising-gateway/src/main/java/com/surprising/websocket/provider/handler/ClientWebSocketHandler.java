@@ -100,16 +100,14 @@ public class ClientWebSocketHandler {
                 var challenge = connection.apiChallenge();
                 long user = authenticator.authenticateApiKey(proof.apiKey(), connection.clientIp(),
                         proof.timestamp(), proof.signature(), challenge.challenge());
-                synchronized (connection) {
-                    try {
-                        connection.renewLimits(limits.renewSocket(connection.clientIp(), user, connection.id()));
-                        connection.authenticateApiKey(user, proof.apiKey(), challenge);
-                    } catch (RuntimeException failure) {
-                        limits.releaseSocket(connection.clientIp(), user, connection.id());
-                        connection.close(WsCloseStatus.SERVICE_OVERLOAD.withReason(failure instanceof com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection rejected
-                                ? rejected.reason().name() : "websocket authorization unavailable"));
-                        throw failure;
-                    }
+                try {
+                    connection.renewLimits(limits.renewSocket(connection.clientIp(), user, connection.id()));
+                    connection.authenticateApiKey(user, proof.apiKey(), challenge);
+                } catch (RuntimeException failure) {
+                    limits.releaseSocket(connection.clientIp(), user, connection.id());
+                    connection.close(WsCloseStatus.SERVICE_OVERLOAD.withReason(failure instanceof com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection rejected
+                            ? rejected.reason().name() : "websocket authorization unavailable"));
+                    throw failure;
                 }
                 connection.send(objectMapper.writeValueAsString(WsServerMessage.authenticated(proof.id(), user)));
                 connection.admittedMessage();
@@ -180,18 +178,16 @@ public class ClientWebSocketHandler {
                 ? command.token() : connection.browserSessionToken();
         var principal = authenticator.principal(token, connection.clientIp());
         long userId = principal.userId();
-        synchronized (connection) {
-            try {
-                if (connection.authenticatedUserId() != null && connection.authenticatedUserId() != userId)
-                    throw new IllegalArgumentException("websocket session is already authenticated");
-                connection.renewLimits(limits.renewSocket(connection.clientIp(), userId, connection.id()));
-                connection.authenticate(userId, token, principal.expiresAt());
-            } catch (RuntimeException failure) {
-                limits.releaseSocket(connection.clientIp(), userId, connection.id());
-                connection.close(WsCloseStatus.SERVICE_OVERLOAD.withReason(failure instanceof com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection rejected
-                        ? rejected.reason().name() : "websocket authorization unavailable"));
-                throw failure;
-            }
+        try {
+            if (connection.authenticatedUserId() != null && connection.authenticatedUserId() != userId)
+                throw new IllegalArgumentException("websocket session is already authenticated");
+            connection.renewLimits(limits.renewSocket(connection.clientIp(), userId, connection.id()));
+            connection.authenticate(userId, token, principal.expiresAt());
+        } catch (RuntimeException failure) {
+            limits.releaseSocket(connection.clientIp(), userId, connection.id());
+            connection.close(WsCloseStatus.SERVICE_OVERLOAD.withReason(failure instanceof com.surprising.gateway.provider.service.GatewayRequestLimits.Rejection rejected
+                    ? rejected.reason().name() : "websocket authorization unavailable"));
+            throw failure;
         }
         connection.send(objectMapper.writeValueAsString(WsServerMessage.authenticated(command.id(), userId)));
     }

@@ -82,7 +82,7 @@ public final class GatewayProductServices implements AutoCloseable {
                 updated.put(product, runtime);
                 products = Collections.unmodifiableMap(updated); // 完整初始化后一次发布，不暴露半成品。
             } catch (RuntimeException failure) {
-                failures.put(product, "初始化失败，请检查 Core、Kafka 连接及本机服务日志；系统会自动重试");
+                failures.put(product, "初始化失败，请检查 Core 及本机服务日志；系统会自动重试");
                 org.slf4j.LoggerFactory.getLogger(getClass()).warn("product activation failed product={}", product, failure);
             }
         }

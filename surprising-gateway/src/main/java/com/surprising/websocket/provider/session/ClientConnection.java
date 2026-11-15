@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * One connected browser/app session backed by a non-blocking {@link WsTransportSession}.
@@ -20,12 +21,12 @@ public class ClientConnection implements AutoCloseable {
     /** 握手时浏览器带来的登录 Cookie 令牌；网页端 JavaScript 读不到它，认证时由服务端代为使用。 */
     public static final String BROWSER_SESSION_TOKEN = ClientConnection.class.getName() + ".browserSessionToken";
     private final String clientIp;
-    private volatile Long authenticatedUserId;
+    private final AtomicReference<Long> authenticatedUserId = new AtomicReference<>();
     private record Authorization(String token, String apiKey, java.time.Instant expiresAt,
                                  long deadlineMillis, long refreshAtMillis) {}
-    private volatile Authorization authorization;
+    private final AtomicReference<Authorization> authorization = new AtomicReference<>();
     public record ApiChallenge(String challenge, java.time.Instant expiresAt) {}
-    private ApiChallenge apiChallenge;
+    private volatile ApiChallenge apiChallenge;
     private record LimitLease(long deadlineNanos, long refreshNanos) {}
     private volatile LimitLease limitLease;
     private long inboundAtNanos;
@@ -37,7 +38,7 @@ public class ClientConnection implements AutoCloseable {
     public ClientConnection(WsTransportSession session, Long authenticatedUserId) {
         this.session = Objects.requireNonNull(session, "session");
         this.clientIp = session.clientIp();
-        this.authenticatedUserId = authenticatedUserId;
+        this.authenticatedUserId.set(authenticatedUserId);
     }
 
     public ClientConnection(WsTransportSession session,
@@ -52,11 +53,11 @@ public class ClientConnection implements AutoCloseable {
     }
 
     public Long authenticatedUserId() {
-        return authenticatedUserId;
+        return authenticatedUserId.get();
     }
 
-    public String accessToken() { var current = authorization; return current == null ? null : current.token(); }
-    public String apiKey() { var current = authorization; return current == null ? null : current.apiKey(); }
+    public String accessToken() { var current = authorization.get(); return current == null ? null : current.token(); }
+    public String apiKey() { var current = authorization.get(); return current == null ? null : current.apiKey(); }
     public String clientIp() { return clientIp; }
     public String browserSessionToken() { return session.browserSessionToken(); }
 
@@ -67,7 +68,7 @@ public class ClientConnection implements AutoCloseable {
     public boolean limitRefreshDue(long now) { var lease = limitLease; return lease != null && now >= lease.refreshNanos(); }
     public boolean limitLeaseExpired(long now) { var lease = limitLease; return lease != null && now >= lease.deadlineNanos(); }
 
-    public synchronized long consumeInbound(int rate, int burst, long periodMillis) {
+    public long consumeInbound(int rate, int burst, long periodMillis) {
         long now = System.nanoTime();
         long capacity = burst * periodMillis;
         long elapsed = Math.max(0, now - inboundAtNanos) / 1_000_000L;
@@ -78,27 +79,28 @@ public class ClientConnection implements AutoCloseable {
         inboundTokens -= periodMillis;
         return 0;
     }
-    public synchronized boolean rejectLimit() { return ++limitRejections >= 3; }
-    public synchronized void admittedMessage() { limitRejections = 0; }
+    public boolean rejectLimit() { return ++limitRejections >= 3; }
+    public void admittedMessage() { limitRejections = 0; }
 
-    public synchronized ApiChallenge issueApiChallenge() {
-        if (authenticatedUserId != null) throw new IllegalStateException("websocket session is already authenticated");
+    public ApiChallenge issueApiChallenge() {
+        if (authenticatedUserId.get() != null) throw new IllegalStateException("websocket session is already authenticated");
         apiChallenge = new ApiChallenge(java.util.UUID.randomUUID().toString(), java.time.Instant.now().plusSeconds(60));
         return apiChallenge;
     }
-    public synchronized ApiChallenge apiChallenge() {
-        if (apiChallenge == null || !apiChallenge.expiresAt().isAfter(java.time.Instant.now()))
+    public ApiChallenge apiChallenge() {
+        var challenge = apiChallenge;
+        if (challenge == null || !challenge.expiresAt().isAfter(java.time.Instant.now()))
             throw new IllegalArgumentException("request a fresh websocket API challenge");
-        return apiChallenge;
+        return challenge;
     }
 
-    public synchronized void authenticateApiKey(long userId, String key, ApiChallenge challenge) {
-        if (authenticatedUserId != null || !Objects.equals(apiChallenge(), challenge))
+    public void authenticateApiKey(long userId, String key, ApiChallenge challenge) {
+        if (authenticatedUserId.get() != null || !Objects.equals(apiChallenge(), challenge))
             throw new IllegalArgumentException("websocket API challenge was already consumed or replaced");
         authenticate(userId);
         apiChallenge = null;
-        authorization = authorization(null, key, java.time.Instant.now().plusSeconds(900));
-        if (!open.get()) { authorization = null; throw new IllegalStateException("websocket session is closed"); }
+        authorization.set(authorization(null, key, java.time.Instant.now().plusSeconds(900)));
+        if (!open.get()) { authorization.set(null); throw new IllegalStateException("websocket session is closed"); }
     }
 
     public void onClosed(Runnable cleanup) {
@@ -108,13 +110,13 @@ public class ClientConnection implements AutoCloseable {
 
     public boolean isOpen() { return open.get() && session.isOpen(); }
 
-    public synchronized void authenticate(long userId, String token, java.time.Instant expiresAt) {
+    public void authenticate(long userId, String token, java.time.Instant expiresAt) {
         if (apiKey() != null) throw new IllegalArgumentException("reconnect to change websocket authentication");
         authenticate(userId);
         apiChallenge = null;
-        authorization = authorization(Objects.requireNonNull(token, "token"), null, expiresAt);
+        authorization.set(authorization(Objects.requireNonNull(token, "token"), null, expiresAt));
         if (!open.get()) {
-            authorization = null;
+            authorization.set(null);
             throw new IllegalStateException("websocket session is closed");
         }
     }
@@ -126,38 +128,47 @@ public class ClientConnection implements AutoCloseable {
         return new Authorization(token, apiKey, expiresAt, Math.min(expiry, now + 5000), Math.min(expiry, now + 3000));
     }
 
-    public synchronized void renewAuthorization(String checkedToken, java.time.Instant expiresAt) {
-        var current = authorization;
+    public void renewAuthorization(String checkedToken, java.time.Instant expiresAt) {
+        var current = authorization.get();
         if (current == null || current.apiKey() != null || !Objects.equals(current.token(), checkedToken)) return;
-        authorization = authorization(checkedToken, null, expiresAt);
-        if (!open.get()) authorization = null;
+        Authorization next = open.get() ? authorization(checkedToken, null, expiresAt) : null;
+        authorization.compareAndSet(current, next);
     }
 
-    public synchronized void renewApiKeyAuthorization(String checkedKey) {
-        var current = authorization;
+    public void renewApiKeyAuthorization(String checkedKey) {
+        var current = authorization.get();
         if (current == null || !Objects.equals(current.apiKey(), checkedKey)) return;
-        authorization = authorization(null, checkedKey, current.expiresAt());
-        if (!open.get()) authorization = null;
+        Authorization next = open.get() ? authorization(null, checkedKey, current.expiresAt()) : null;
+        authorization.compareAndSet(current, next);
     }
 
     public boolean authorizationRefreshDue(long now) {
-        var current = authorization;
+        var current = authorization.get();
         return current != null && now >= current.refreshAtMillis();
     }
 
     public boolean authorizationExpired(long now) {
-        var current = authorization;
+        var current = authorization.get();
         return current != null && now >= current.deadlineMillis();
     }
 
-    public synchronized void authenticate(long userId) {
+    public void authenticate(long userId) {
         if (userId <= 0L) {
             throw new IllegalArgumentException("websocket userId must be positive");
         }
-        if (authenticatedUserId != null && authenticatedUserId != userId) {
-            throw new IllegalArgumentException("websocket session is already authenticated");
+        Long existing = authenticatedUserId.get();
+        if (existing != null) {
+            if (existing != userId) {
+                throw new IllegalArgumentException("websocket session is already authenticated");
+            }
+            return;
         }
-        authenticatedUserId = userId;
+        if (!authenticatedUserId.compareAndSet(null, userId)) {
+            Long current = authenticatedUserId.get();
+            if (current != null && current != userId) {
+                throw new IllegalArgumentException("websocket session is already authenticated");
+            }
+        }
     }
 
     public boolean send(String payload) {
@@ -221,7 +232,7 @@ public class ClientConnection implements AutoCloseable {
         if (!open.compareAndSet(true, false)) {
             return;
         }
-        authorization = null;
+        authorization.set(null);
         try {
             if (session.isOpen()) {
                 session.close(status == null ? WsCloseStatus.NORMAL : status);

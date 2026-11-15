@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 import java.time.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 @org.springframework.context.annotation.DependsOn("appMediaDriver")
@@ -25,8 +26,7 @@ public final class RealtimeWebSocketBridge
     private final ValkeyRouteDirectory directory;
     private final ValkeyReadViewStore views;
     private final ValkeySnapshotRequests refresh;
-    private final Map<RealtimeRoute, Integer> memberships = new HashMap<>();
-    private final Object membershipLock = new Object();
+    private final Map<RealtimeRoute, Integer> memberships = new ConcurrentHashMap<>();
     private final Object heartbeatLock = new Object();
     private final AeronRealtimeReceiver receiver;
     private final ObjectMapper mapper;
@@ -73,13 +73,12 @@ public final class RealtimeWebSocketBridge
         if (closed || continuityLost.get() || !receiver.ready())
             throw new IllegalStateException("realtime receiver unavailable");
         RealtimeRoute route = route(topic);
-        boolean firstSubscriber;
-        synchronized (membershipLock) {
-            int priorCount = memberships.getOrDefault(route, 0);
-            memberships.put(route, priorCount + 1);
-            firstSubscriber = priorCount == 0;
-        }
-        if (!firstSubscriber) {
+        boolean[] firstSubscriber = {false};
+        memberships.compute(route, (ignored, priorCount) -> {
+            firstSubscriber[0] = priorCount == null || priorCount == 0;
+            return (priorCount == null ? 0 : priorCount) + 1;
+        });
+        if (!firstSubscriber[0]) {
             return;
         }
         long now = System.currentTimeMillis();
@@ -90,19 +89,16 @@ public final class RealtimeWebSocketBridge
             directory.register(route, node, now + 15000);
             renewSnapshot(route, now);
         } catch (RuntimeException failure) {
-            boolean shouldUnregister;
-            synchronized (membershipLock) {
-                Integer current = memberships.get(route);
-                if (current == null || current <= 1) {
-                    memberships.remove(route);
-                    shouldUnregister = true;
-                } else {
-                    memberships.put(route, current - 1);
-                    shouldUnregister = false;
+            boolean[] shouldUnregister = {false};
+            memberships.computeIfPresent(route, (ignored, current) -> {
+                if (current <= 1) {
+                    shouldUnregister[0] = true;
+                    return null;
                 }
-            }
+                return current - 1;
+            });
             // A write can reach Redis before its response fails; clear an orphaned first lease.
-            if (shouldUnregister) {
+            if (shouldUnregister[0]) {
                 try { directory.unregister(route, node); }
                 catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
             }
@@ -120,18 +116,15 @@ public final class RealtimeWebSocketBridge
     public void unsubscribed(SubscriptionTopic topic) {
         if (topic.channel() == WsChannel.OPEN_INTEREST) return;
         RealtimeRoute route = route(topic);
-        boolean lastSubscriber;
-        synchronized (membershipLock) {
-            Integer count = memberships.get(route);
-            if (count == null) return;
-            if (count > 1) {
-                memberships.put(route, count - 1);
-                return;
+        boolean[] lastSubscriber = {false};
+        memberships.computeIfPresent(route, (ignored, count) -> {
+            if (count <= 1) {
+                lastSubscriber[0] = true;
+                return null;
             }
-            memberships.remove(route);
-            lastSubscriber = true;
-        }
-        if (lastSubscriber) {
+            return count - 1;
+        });
+        if (lastSubscriber[0]) {
             try {
                 directory.unregister(route, node);
             } catch (RuntimeException failure) {
@@ -148,9 +141,7 @@ public final class RealtimeWebSocketBridge
             registry.resetRealtime();
             synchronized (heartbeatLock) {
                 snapshots = new SnapshotAssembler();
-                synchronized (membershipLock) {
-                    memberships.clear();
-                }
+                memberships.clear();
                 directory.removeNode(node);
                 continuityLost.set(false);
                 receiver.resumeAfterRecovery(recoveryVersion);
@@ -168,11 +159,7 @@ public final class RealtimeWebSocketBridge
             }
             long now = System.currentTimeMillis();
             directory.heartbeat(node, endpoint, Duration.ofSeconds(15));
-            List<RealtimeRoute> activeRoutes;
-            synchronized (membershipLock) {
-                activeRoutes = List.copyOf(memberships.keySet());
-            }
-            for (RealtimeRoute route : activeRoutes) {
+            for (RealtimeRoute route : memberships.keySet()) {
                 directory.register(route, node, now + 15000);
                 renewSnapshot(route, now);
             }
@@ -379,9 +366,7 @@ public final class RealtimeWebSocketBridge
             if (closed && receiver.terminated()) return;
             closed = true;
             registry.routeLifecycle(null);
-            synchronized (membershipLock) {
-                memberships.clear();
-            }
+            memberships.clear();
         }
         try { receiver.close(); }
         finally {

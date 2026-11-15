@@ -42,8 +42,7 @@ public class SubscriptionRegistry {
     private final Map<SubscriptionTopic, Set<ClientConnection>> subscribers = new ConcurrentHashMap<>();
     private final Map<Long, Set<ClientConnection>> userConnections = new ConcurrentHashMap<>();
     // Last book accepted by each connection queue; immutable Core views are shared, never copied.
-    // Owned by this registry under its monitor and removed on unsubscribe/disconnect.
-    private final Map<SubscriptionTopic, Map<String, CoreOrderBookView>> depthBaselines = new HashMap<>();
+    private final Map<SubscriptionTopic, Map<String, CoreOrderBookView>> depthBaselines = new ConcurrentHashMap<>();
     private final LongAdder fanoutBatches = new LongAdder();
     private final LongAdder fanoutMessages = new LongAdder();
     private final LongAdder backpressureRejections = new LongAdder();
@@ -80,73 +79,61 @@ public class SubscriptionRegistry {
     }
 
     private void remove(ClientConnection connection) {
+        List<SubscriptionTopic> removed;
         synchronized (connection) {
-            List<SubscriptionTopic> removed;
-            synchronized (this) {
-                sessions.remove(connection.id(), connection);
-                Set<SubscriptionTopic> topics = sessionTopics.remove(connection.id());
-                removed = topics == null ? List.of() : List.copyOf(topics);
-                for (SubscriptionTopic topic : removed) removeSubscription(connection, topic);
-            }
-            connection.close();
-            RouteLifecycle lifecycle = routeLifecycle;
-            if (lifecycle != null) for (SubscriptionTopic topic : removed) lifecycle.unsubscribed(topic);
+            sessions.remove(connection.id(), connection);
+            Set<SubscriptionTopic> topics = sessionTopics.remove(connection.id());
+            removed = topics == null ? List.of() : List.copyOf(topics);
+            for (SubscriptionTopic topic : removed) removeSubscription(connection, topic);
         }
+        connection.close();
+        RouteLifecycle lifecycle = routeLifecycle;
+        if (lifecycle != null) for (SubscriptionTopic topic : removed) lifecycle.unsubscribed(topic);
     }
 
     /** Fanout only detaches recipients; its socket watcher performs external lease cleanup. */
     private void disconnect(ClientConnection connection) {
-        synchronized (this) {
-            if (sessions.remove(connection.id(), connection)) {
-                Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
-                if (topics != null) for (SubscriptionTopic topic : topics) removeSubscription(connection, topic);
-            }
+        if (sessions.remove(connection.id(), connection)) {
+            Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
+            if (topics != null) for (SubscriptionTopic topic : topics) removeSubscription(connection, topic);
         }
         connection.close();
     }
 
     public void subscribe(ClientConnection connection, SubscriptionTopic topic) {
         synchronized (connection) {
-            RouteLifecycle lifecycle;
-            synchronized (this) {
-                if (sessions.get(connection.id()) != connection)
-                    throw new IllegalStateException("websocket session is not registered");
-                Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
-                if (topics.contains(topic)) return;
-                if (topics.size() >= properties.getSession().getMaxSubscriptions())
-                    throw new IllegalStateException("maximum websocket subscriptions exceeded");
-                // Install the local recipient first: a synchronous first Core baseline must not be lost.
-                topics.add(topic);
-                subscribers.computeIfAbsent(topic, ignored -> ConcurrentHashMap.newKeySet()).add(connection);
-                if (topic.userId() != null) {
-                    userConnections.computeIfAbsent(topic.userId(), ignored -> ConcurrentHashMap.newKeySet()).add(connection);
-                }
-                lifecycle = routeLifecycle;
+            if (sessions.get(connection.id()) != connection)
+                throw new IllegalStateException("websocket session is not registered");
+            Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
+            if (topics.contains(topic)) return;
+            if (topics.size() >= properties.getSession().getMaxSubscriptions())
+                throw new IllegalStateException("maximum websocket subscriptions exceeded");
+            // Install the local recipient first: a synchronous first Core baseline must not be lost.
+            topics.add(topic);
+            subscribers.computeIfAbsent(topic, ignored -> ConcurrentHashMap.newKeySet()).add(connection);
+            if (topic.userId() != null) {
+                userConnections.computeIfAbsent(topic.userId(), ignored -> ConcurrentHashMap.newKeySet()).add(connection);
             }
+            RouteLifecycle lifecycle = routeLifecycle;
             try {
                 if (lifecycle != null) lifecycle.subscribed(topic);
             } catch (RuntimeException failure) {
-                synchronized (this) {
-                    var topics = sessionTopics.get(connection.id());
-                    if (topics != null) topics.remove(topic);
-                    removeSubscription(connection, topic);
-                }
+                topics.remove(topic);
+                removeSubscription(connection, topic);
                 throw failure;
             }
         }
     }
 
     public void unsubscribe(ClientConnection connection, SubscriptionTopic topic) {
+        boolean removed;
         synchronized (connection) {
-            boolean removed;
-            synchronized (this) {
-                Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
-                removed = topics != null && topics.remove(topic);
-                if (removed) removeSubscription(connection, topic);
-            }
-            RouteLifecycle lifecycle = routeLifecycle;
-            if (removed && lifecycle != null) lifecycle.unsubscribed(topic);
+            Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
+            removed = topics != null && topics.remove(topic);
+            if (removed) removeSubscription(connection, topic);
         }
+        RouteLifecycle lifecycle = routeLifecycle;
+        if (removed && lifecycle != null) lifecycle.unsubscribed(topic);
     }
 
     private void removeSubscription(ClientConnection connection, SubscriptionTopic topic) {
@@ -177,7 +164,7 @@ public class SubscriptionRegistry {
 
     /** Failure notification is local only: no Redis calls on the receiver/conductor thread. */
     public void invalidateRealtime() {
-        synchronized (this) { depthBaselines.clear(); }
+        depthBaselines.clear();
         for (ClientConnection connection : connections())
             connection.close(com.surprising.websocket.provider.session.WsCloseStatus.SERVICE_RESTARTED);
     }
@@ -209,15 +196,15 @@ public class SubscriptionRegistry {
     public void publishDepth(SubscriptionTopic topic,
             CoreOrderBookView book,
             String version, String entityId, Instant eventTime) {
+        if (topic.channel() != WsChannel.DEPTH || topic.productLine() == null)
+            throw new IllegalArgumentException("depth requires an explicit product line");
+        var connections = subscribers.get(topic);
+        if (connections == null || connections.isEmpty()) return;
+        fanoutBatches.increment();
+        fanoutMessages.increment();
+        var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new ConcurrentHashMap<>());
         List<ClientConnection> failed = null;
-        synchronized (this) {
-            if (topic.channel() != WsChannel.DEPTH || topic.productLine() == null)
-                throw new IllegalArgumentException("depth requires an explicit product line");
-            var connections = subscribers.get(topic);
-            if (connections == null || connections.isEmpty()) return;
-            fanoutBatches.increment();
-            fanoutMessages.increment();
-            var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new HashMap<>());
+        synchronized (baselines) {
             var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, String>();
             for (ClientConnection connection : connections) {
                 var previous = baselines.get(connection.id());
@@ -237,7 +224,7 @@ public class SubscriptionRegistry {
                 }
             }
         }
-        // Disconnect and lease cleanup may perform external I/O; never under the global book lock.
+        // Disconnect and lease cleanup may perform external I/O; never under the topic baseline lock.
         if (failed != null) for (ClientConnection connection : failed) disconnect(connection);
     }
 
@@ -278,7 +265,11 @@ public class SubscriptionRegistry {
     }
 
     public List<SubscriptionTopic> topics(WsChannel channel) {
-        return subscribers.keySet().stream().filter(topic -> topic.channel() == channel).toList();
+        List<SubscriptionTopic> result = new ArrayList<>();
+        for (SubscriptionTopic topic : subscribers.keySet()) {
+            if (topic.channel() == channel) result.add(topic);
+        }
+        return List.copyOf(result);
     }
 
     public int subscriberCount(SubscriptionTopic topic) {

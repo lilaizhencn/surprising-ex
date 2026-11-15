@@ -75,15 +75,13 @@ public final class AeronRealtimeReceiver implements AutoCloseable {
                     });
                     try (var subscription = aeron.addSubscription(channel, streamId, null,
                             unavailable -> {
-                                synchronized (assembler) { assembler.freeSessionBuffer(unavailable.sessionId()); }
                                 if (running) transportFailed(new IllegalStateException("realtime source image unavailable"));
                             })) {
                         var idle = new BackoffIdleStrategy(0, 0, 100_000L, 250_000L);
                         transportReady = true;
                         while (running && transportReady && !subscription.isClosed() && !aeron.isClosed()) {
                             if (recoveryRequired) { idle.idle(0); continue; }
-                            int fragments;
-                            synchronized (assembler) { fragments = subscription.poll(assembler, 64); }
+                            int fragments = subscription.poll(assembler, 64);
                             idle.idle(fragments);
                         }
                     }
