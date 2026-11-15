@@ -39,8 +39,6 @@ Chat, private attachments, temporary R2 access, and support audit reuse exchange
 
 The earlier foundation, chat, and merchant-acceptance documents are not present in this checkout. Consult Git history for those recorded runs; do not interpret the historical scope above as current end-to-end acceptance.
 
-`scripts/c2c-fused-live.py` is a stateful local QA tool with explicit run ownership, dedicated database identity, and real Gateway PID/port checks. Do not bypass duplicate-action protections by changing fixtures after funds operations start. Retain original credentials and query original operations after connection/restart failures. Real payment data, temporary databases, screenshots, APKs, and runtime clusters are not source artifacts.
-
 ## Architecture reference
 
 See the [project architecture and class-level trading flows](../../../../../../../../README.md). Historical validation notes describe their recorded versions, not guarantees for the current implementation.
