@@ -51,7 +51,7 @@ install -m 0644 deployment/test-single-node/surprising-admin-headers.conf /etc/n
 nginx -t
 ```
 
-Trust only actual proxy addresses. Same-host loopback is the default deployment case; configure `GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST` for actual remote proxies. Configure admin browser origins, HTTPS, private probes, and ClamAV scanning. Upload scanning fails closed if unavailable. See [Gateway security](../../docs/gateway-security.md).
+Trust only actual proxy addresses. Same-host loopback is the default deployment case; configure `GATEWAY_ADMIN_TRUSTED_PROXY_IP_ALLOWLIST` for actual remote proxies. Configure admin browser origins, HTTPS, private probes, and ClamAV scanning. Upload scanning fails closed if unavailable.
 
 ## Upgrade, startup, and shutdown
 

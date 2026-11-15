@@ -48,7 +48,7 @@ See controllers and route configuration for exact public/admin URLs and authoriz
 
 ## Security and administration
 
-REST and WebSocket share trading authentication. Login issues one signed session token; its validity is the Valkey session (7-day sliding window, shorter for administrators) and the request path never reads Postgres (see [gateway security](../docs/gateway-security.md)). Validate session/device state, MFA requirements, role/permission scopes, and product access. Open-platform API credentials use their own configured scopes, signature checks, and rate limits. Approval and audit requirements apply to protected administrative changes; a successful HTTP request must not bypass them.
+REST and WebSocket share trading authentication. Login issues one signed session token; its validity is the Valkey session (7-day sliding window, shorter for administrators) and the request path never reads Postgres. Validate session/device state, MFA requirements, role/permission scopes, and product access. Open-platform API credentials use their own configured scopes, signature checks, and rate limits. Approval and audit requirements apply to protected administrative changes; a successful HTTP request must not bypass them.
 
 Transfer orchestration retains persisted immutable intent and stable funds IDs. Unknown outcomes are reconciled with the original identity. C2C escrow uses actual Core balances, not a second SQL wallet. See [C2C](src/main/java/com/surprising/gateway/c2c/README.md).
 
