@@ -105,6 +105,27 @@ class AuthStateTest {
     }
 
     @Test
+    void Telegram映射写入后本机命中不再读Valkey_其他节点收到广播后看到新值() {
+        var other = new AuthState(fixture.backend, fixture.properties, fixture.backend.clock::get);
+        fixture.state.putTelegramIdentity("123", 7L);
+        assertThat(fixture.backend.published).contains("telegram:123");
+        assertThat(fixture.backend.ttlMillis("auth:telegram:123")).isEqualTo(-1);
+        int reads = fixture.backend.reads;
+        assertThat(fixture.state.telegramUserId("123")).isEqualTo(7L);
+        assertThat(fixture.state.telegramUserId("123")).isEqualTo(7L);
+        assertThat(fixture.backend.reads).as("第二次只读本机缓存").isEqualTo(reads + 1);
+        assertThat(other.telegramUserId("123")).isEqualTo(7L);
+        fixture.state.putTelegramIdentity("123", 9L);
+        assertThat(other.telegramUserId("123")).isEqualTo(9L);
+    }
+
+    @Test
+    void Valkey宕机时Telegram映射回源而不是失败() {
+        fixture.backend.down = true;
+        assertThat(fixture.state.telegramUserId("123")).isNull();
+    }
+
+    @Test
     void 缓存有效期内的请求不再访问Valkey() {
         var state = fixture.state;
         state.session(会话);

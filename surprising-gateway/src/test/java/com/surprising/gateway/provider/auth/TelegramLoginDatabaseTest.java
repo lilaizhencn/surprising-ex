@@ -9,7 +9,11 @@ import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.TelegramIdentityBinder;
+import com.surprising.gateway.provider.auth.service.TelegramIdentityService;
 import com.surprising.gateway.provider.auth.service.TelegramLoginService;
+import com.surprising.gateway.provider.auth.state.AuthStateFixture;
+import com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository;
 
 import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
 import static org.assertj.core.api.Assertions.*;
@@ -92,7 +96,11 @@ class TelegramLoginDatabaseTest {
                     "access", Instant.now().plusSeconds(600));
         });
         manager = new DataSourceTransactionManager(ds);
-        var proxy = new ProxyFactory(new TelegramLoginService(repository, new com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository(jdbc), userRepository, oidc, users, auth));
+        var identities = new TelegramIdentityRepository(jdbc);
+        var authState = new AuthStateFixture().state;
+        var identityService = new TelegramIdentityService(identities, authState,
+                new TelegramIdentityBinder(identities, users, userRepository, authState));
+        var proxy = new ProxyFactory(new TelegramLoginService(repository, identityService, userRepository, oidc, auth));
         proxy.setProxyTargetClass(true);
         proxy.addAdvice(new TransactionInterceptor(manager, new AnnotationTransactionAttributeSource()));
         login = (TelegramLoginService) proxy.getProxy();

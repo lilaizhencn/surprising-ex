@@ -4,7 +4,6 @@ import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
 import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 
-import com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository;
 import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
 import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
 import java.nio.charset.StandardCharsets;
@@ -19,21 +18,20 @@ import org.springframework.transaction.annotation.Transactional;
 public class TelegramLoginService {
     private final TelegramLoginFlowRepository flows;
     private final TelegramOidcClient oidc;
-    private final TelegramIdentityRepository identities;
+    private final TelegramIdentityService identities;
     private final GatewayUserRepository userRows;
-    private final AuthPersistenceService users;
     private final AuthService auth;
     private final com.surprising.gateway.provider.telegram.bot.service.TelegramWebAppInitDataVerifier webAppVerifier;
     private final com.surprising.gateway.provider.telegram.bot.config.TelegramBotProperties botProperties;
 
-    public TelegramLoginService(TelegramLoginFlowRepository flows, TelegramIdentityRepository identities, GatewayUserRepository userRows, TelegramOidcClient oidc,
-                                AuthPersistenceService users, AuthService auth) {
-        this(flows, identities, userRows, oidc, users, auth, null, null);
+    public TelegramLoginService(TelegramLoginFlowRepository flows, TelegramIdentityService identities, GatewayUserRepository userRows, TelegramOidcClient oidc,
+                                AuthService auth) {
+        this(flows, identities, userRows, oidc, auth, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public TelegramLoginService(TelegramLoginFlowRepository flows, TelegramIdentityRepository identities, GatewayUserRepository userRows, TelegramOidcClient oidc,
-                                AuthPersistenceService users, AuthService auth,
+    public TelegramLoginService(TelegramLoginFlowRepository flows, TelegramIdentityService identities, GatewayUserRepository userRows, TelegramOidcClient oidc,
+                                AuthService auth,
                                 @org.springframework.beans.factory.annotation.Autowired(required = false)
                                 com.surprising.gateway.provider.telegram.bot.service.TelegramWebAppInitDataVerifier webAppVerifier,
                                 @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -42,7 +40,6 @@ public class TelegramLoginService {
         this.identities = identities;
         this.userRows = userRows;
         this.oidc = oidc;
-        this.users = users;
         this.auth = auth;
         this.webAppVerifier = webAppVerifier;
         this.botProperties = botProperties;
@@ -98,13 +95,8 @@ public class TelegramLoginService {
         if (result.failed()) throw new IllegalArgumentException("Telegram authorization was not completed");
         if (result.subject() == null) return null;
         Instant now = Instant.now();
-        long userId = identities.lockIdentity(result.subject()).orElseGet(() -> {
-            // No password, email, phone or nickname is used to identify or auto-link an account.
-            var user = users.createUser(null, null, null, now);
-            users.ensureDefaultRole(user.userId(), now);
-            identities.bind(result.subject(), user.userId(), now);
-            return user.userId();
-        });
+        // No password, email, phone or nickname is used to identify or auto-link an account.
+        long userId = identities.resolve(result.subject());
         userRows.updateNickname(userId, result.displayName(), now);
         var login = auth.loginTelegram(userId, request);
         flows.consume(key);
@@ -146,12 +138,7 @@ public class TelegramLoginService {
         var user = verifiedOpt.get();
         String subject = String.valueOf(user.telegramId());
         Instant now = Instant.now();
-        long userId = identities.lockIdentity(subject).orElseGet(() -> {
-            var newUser = users.createUser(null, null, null, now);
-            users.ensureDefaultRole(newUser.userId(), now);
-            identities.bind(subject, newUser.userId(), now);
-            return newUser.userId();
-        });
+        long userId = identities.resolve(subject);
         userRows.updateNickname(userId, user.getDisplayName(), now);
         return auth.loginTelegram(userId, request);
     }

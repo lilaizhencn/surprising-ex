@@ -11,7 +11,10 @@ import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.TelegramIdentityBinder;
+import com.surprising.gateway.provider.auth.service.TelegramIdentityService;
 import com.surprising.gateway.provider.auth.service.TelegramLoginService;
+import com.surprising.gateway.provider.auth.state.AuthStateFixture;
 
 import com.surprising.gateway.provider.auth.model.TelegramLoginRows;
 import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
@@ -31,7 +34,10 @@ class TelegramLoginServiceTest {
     TelegramOidcClient oidc = mock(TelegramOidcClient.class);
     AuthPersistenceService users = mock(AuthPersistenceService.class);
     AuthService auth = mock(AuthService.class);
-    TelegramLoginService service = new TelegramLoginService(repository, identities, userRows, oidc, users, auth);
+    AuthStateFixture authState = new AuthStateFixture();
+    TelegramIdentityService identityService = new TelegramIdentityService(identities, authState.state,
+            new TelegramIdentityBinder(identities, users, userRows, authState.state));
+    TelegramLoginService service = new TelegramLoginService(repository, identityService, userRows, oidc, auth);
     String state = "s".repeat(43), verifier = "v".repeat(43);
     com.surprising.gateway.provider.auth.model.AuthClientMetadata http = new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest());
 
@@ -71,6 +77,7 @@ class TelegramLoginServiceTest {
     void registersWithoutPasswordAndReturnsExistingMfaChallenge() {
         when(repository.lockResult(any(), any(), any(), any())).thenReturn(Optional.of(
                 new TelegramLoginRows.Result("123", "小李", false)));
+        when(identities.find("123")).thenReturn(Optional.empty());
         when(users.createUser(isNull(), isNull(), isNull(), any()))
                 .thenReturn(new AuthModels.AuthenticatedUser(7, null, null, "NORMAL", List.of("USER"), Instant.now()));
         var challenge = new LoginVerificationModels.ChallengeResponse(true, "challenge", Instant.now().plusSeconds(300),
@@ -87,11 +94,13 @@ class TelegramLoginServiceTest {
     void repeatLoginUsesSubjectEvenWhenNicknameChanges() {
         when(repository.lockResult(any(), any(), any(), any())).thenReturn(Optional.of(
                 new TelegramLoginRows.Result("123", "新的昵称", false)));
-        when(identities.lockIdentity("123")).thenReturn(Optional.of(7L));
+        when(identities.find("123")).thenReturn(Optional.of(7L));
         service.complete(state, verifier, "device", http);
+        service.complete(state, verifier, "device", http);
+        verify(identities, times(1)).find("123");
         verifyNoInteractions(users);
-        verify(userRows).updateNickname(eq(7L), eq("新的昵称"), any());
-        verify(auth).loginTelegram(7, http);
+        verify(userRows, times(2)).updateNickname(eq(7L), eq("新的昵称"), any());
+        verify(auth, times(2)).loginTelegram(7, http);
     }
 
     @Test

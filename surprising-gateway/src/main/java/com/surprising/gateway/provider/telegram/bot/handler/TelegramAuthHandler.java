@@ -1,8 +1,6 @@
 package com.surprising.gateway.provider.telegram.bot.handler;
 
-import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
-import com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository;
-import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.TelegramIdentityService;
 import com.surprising.gateway.provider.telegram.bot.client.TelegramBotClient;
 import com.surprising.gateway.provider.telegram.bot.config.TelegramBotProperties;
 import com.surprising.gateway.provider.telegram.bot.model.TelegramSecuritySettings;
@@ -13,36 +11,25 @@ import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramKeybo
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramReplyKeyboardMarkup;
 import com.surprising.gateway.provider.telegram.bot.service.TelegramBotSecurityService;
 import com.surprising.gateway.provider.telegram.bot.service.TelegramI18nService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
 import java.util.Locale;
 
 @Component
 public class TelegramAuthHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(TelegramAuthHandler.class);
-
-    private final TelegramIdentityRepository identities;
-    private final AuthPersistenceService authPersistence;
-    private final GatewayUserRepository users;
+    private final TelegramIdentityService identities;
     private final TelegramBotClient botClient;
     private final TelegramBotProperties properties;
     private final TelegramI18nService i18n;
     private final TelegramBotSecurityService securityService;
 
-    public TelegramAuthHandler(TelegramIdentityRepository identities,
-                               AuthPersistenceService authPersistence,
-                               GatewayUserRepository users,
+    public TelegramAuthHandler(TelegramIdentityService identities,
                                TelegramBotClient botClient,
                                TelegramBotProperties properties,
                                TelegramI18nService i18n,
                                TelegramBotSecurityService securityService) {
         this.identities = identities;
-        this.authPersistence = authPersistence;
-        this.users = users;
         this.botClient = botClient;
         this.properties = properties;
         this.i18n = i18n;
@@ -50,16 +37,7 @@ public class TelegramAuthHandler {
     }
 
     public long resolveUserId(TelegramUser tgUser) {
-        String subject = String.valueOf(tgUser.id());
-        Instant now = Instant.now();
-        long userId = identities.lockIdentity(subject).orElseGet(() -> {
-            log.info("New Telegram user auto-registration: id={}, name={}", tgUser.id(), tgUser.getDisplayName());
-            var user = authPersistence.createUser(null, null, null, now);
-            authPersistence.ensureDefaultRole(user.userId(), now);
-            identities.bind(subject, user.userId(), now);
-            users.updateNickname(user.userId(), tgUser.getDisplayName(), now);
-            return user.userId();
-        });
+        long userId = identities.resolve(String.valueOf(tgUser.id()), tgUser.getDisplayName());
 
         // 尝试加载用户保存的偏好语言以热身 i18n 缓存
         try {

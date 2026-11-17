@@ -35,6 +35,8 @@ public class AuthState {
     private final LocalCache<SessionState> sessions = new LocalCache<>();
     private final LocalCache<UserState> users = new LocalCache<>();
     private final LocalCache<ApiKeyState> apiKeys = new LocalCache<>();
+    /** Telegram subject → userId。映射一旦写入不再变化，所以不使用会话那种几秒 TTL。 */
+    private final ConcurrentHashMap<String, Long> telegramIds = new ConcurrentHashMap<>();
     private final LongFunction<SessionState> sessionLoader = this::loadSession;
     private final LongFunction<UserState> userLoader = this::loadUser;
     private final Function<String, ApiKeyState> apiKeyLoader = this::loadApiKey;
@@ -161,11 +163,51 @@ public class AuthState {
         return backend.exists(apiKeyKey(apiKey));
     }
 
+    // ---------------------------------------------------------------- Telegram 身份
+
+    /**
+     * 读取 Telegram subject 对应的用户。本机没有再读 Valkey；Valkey 没有或不可用时返回 null，由调用方回源数据库。
+     * 不缓存未绑定的 subject。
+     */
+    public Long telegramUserId(String subject) {
+        if (subject == null || subject.isBlank()) return null;
+        String key = telegramKey(subject);
+        Long cached = telegramIds.get(key);
+        if (cached != null) return cached;
+        try {
+            String uid = backend.hashGet(key).get("uid");
+            if (uid == null) return null;
+            long userId = Long.parseLong(uid);
+            rememberTelegram(key, userId);
+            return userId;
+        } catch (AuthStateUnavailableException | NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    /** 绑定提交成功后写入 Valkey，并通知其他网关丢掉本机条目。 */
+    public void putTelegramIdentity(String subject, long userId) {
+        String key = telegramKey(subject);
+        try {
+            backend.hashPut(key, Map.of("uid", Long.toString(userId)), null);
+            telegramIds.remove(key);
+            broadcast("telegram:" + subject);
+        } catch (AuthStateUnavailableException ex) {
+            log.warn("telegram identity cache write failed for subject {}: {}", subject, ex.getMessage());
+        }
+    }
+
+    private void rememberTelegram(String key, long userId) {
+        if (telegramIds.size() >= MAX_LOCAL_ENTRIES) telegramIds.clear();
+        telegramIds.put(key, userId);
+    }
+
     // ---------------------------------------------------------------- 内部
 
     static String sessionKey(long sessionId) { return "auth:session:" + sessionId; }
     static String userKey(long userId) { return "auth:user:" + userId; }
     static String apiKeyKey(String apiKey) { return "auth:apikey:" + apiKey; }
+    static String telegramKey(String subject) { return "auth:telegram:" + subject; }
 
     private <V> V lookupLong(LocalCache<V> cache, String key, long id, LongFunction<V> remote) {
         long now = clock.getAsLong();
@@ -222,6 +264,7 @@ public class AuthState {
             case "session" -> sessions.remove("auth:session:" + id);
             case "user" -> users.remove("auth:user:" + id);
             case "apikey" -> apiKeys.remove("auth:apikey:" + id);
+            case "telegram" -> telegramIds.remove("auth:telegram:" + id);
             default -> { }
         }
     }
