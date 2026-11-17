@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreTriggerOrderState;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.AccountBalance;
 import com.surprising.aeron.service.account.UserAccount;

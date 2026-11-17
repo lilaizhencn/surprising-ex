@@ -22,11 +22,15 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.regex.Pattern;
+
 /**
  * Administrative trading fee query and fee-schedule management endpoints.
  */
 @RestController
 public class AdminTradingFeeController {
+
+    private static final Pattern TIER_CODE_PATTERN = Pattern.compile("[A-Z0-9][A-Z0-9_-]{0,31}");
 
     private final TradingFeeService tradingFeeService;
 
@@ -127,7 +131,7 @@ public class AdminTradingFeeController {
             throw new IllegalArgumentException("reason is required");
         }
         if (request.tierCode() != null && !request.tierCode().isBlank()
-                && !request.tierCode().trim().toUpperCase().matches("[A-Z0-9][A-Z0-9_-]{0,31}")) {
+                && !TIER_CODE_PATTERN.matcher(request.tierCode().trim().toUpperCase()).matches()) {
             throw new IllegalArgumentException("invalid tierCode: " + request.tierCode());
         }
         return new FeeScheduleUpsertRequest(request.feeScheduleId(), request.productLine(), request.userId(), symbol,

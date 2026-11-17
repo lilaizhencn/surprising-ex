@@ -40,20 +40,26 @@ public class AssetRepository {
     public Asset save(AssetRequest value) {
         if (value.assetId() == null) {
             return jdbc.queryForObject("""
-                    INSERT INTO assets(asset,display_name,logo_url,scale_units,listed,trading_enabled)
-                    VALUES (?,?,?,?,?,?) RETURNING *
+                    INSERT INTO assets(asset,display_name,logo_url,scale_units,listed,trading_enabled,
+                        deposit_enabled,withdrawal_enabled,transfer_enabled)
+                    VALUES (?,?,?,?,?,?,?,?,?) RETURNING *
                     """, this::map, value.asset(), value.displayName(), value.logoUrl(), value.scaleUnits(),
-                    value.listed(), value.tradingEnabled());
+                    value.listed(), value.tradingEnabled(), value.depositEnabled(),
+                    value.withdrawalEnabled(), value.transferEnabled());
         }
         return jdbc.queryForObject("""
                 UPDATE assets SET display_name=?,logo_url=?,listed=?,trading_enabled=?,
+                    deposit_enabled=?,withdrawal_enabled=?,transfer_enabled=?,
                     revision=revision+1,updated_at=now() WHERE asset_id=? RETURNING *
-                """, this::map, value.displayName(), value.logoUrl(), value.listed(), value.tradingEnabled(), value.assetId());
+                """, this::map, value.displayName(), value.logoUrl(), value.listed(), value.tradingEnabled(),
+                value.depositEnabled(), value.withdrawalEnabled(), value.transferEnabled(), value.assetId());
     }
 
     private Asset map(ResultSet rs, int row) throws SQLException {
         return new Asset(rs.getInt("asset_id"), rs.getString("asset"), rs.getString("display_name"),
                 rs.getString("logo_url"), rs.getLong("scale_units"), rs.getBoolean("listed"),
-                rs.getBoolean("trading_enabled"), rs.getLong("revision"), rs.getTimestamp("updated_at").toInstant());
+                rs.getBoolean("trading_enabled"), rs.getBoolean("deposit_enabled"),
+                rs.getBoolean("withdrawal_enabled"), rs.getBoolean("transfer_enabled"),
+                rs.getLong("revision"), rs.getTimestamp("updated_at").toInstant());
     }
 }

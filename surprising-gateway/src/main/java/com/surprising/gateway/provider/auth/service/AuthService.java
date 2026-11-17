@@ -39,7 +39,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
-import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -339,17 +338,34 @@ public class AuthService {
     }
 
     private boolean wildcardPermissionMatches(String pattern, String required) {
-        StringBuilder regex = new StringBuilder();
-        for (char item : pattern.toCharArray()) {
-            if (item == '*') {
-                regex.append("[a-z0-9._-]*");
-            } else if (Character.isLetterOrDigit(item) || item == '_') {
-                regex.append(item);
+        int pi = 0;
+        int ri = 0;
+        int starIdx = -1;
+        int matchIdx = 0;
+        int pLen = pattern.length();
+        int rLen = required.length();
+        while (ri < rLen) {
+            if (pi < pLen && pattern.charAt(pi) == required.charAt(ri) && pattern.charAt(pi) != '*') {
+                pi++;
+                ri++;
+            } else if (pi < pLen && pattern.charAt(pi) == '*') {
+                starIdx = pi++;
+                matchIdx = ri;
+            } else if (starIdx != -1 && isPermissionTokenChar(required.charAt(matchIdx))) {
+                pi = starIdx + 1;
+                ri = ++matchIdx;
             } else {
-                regex.append('\\').append(item);
+                return false;
             }
         }
-        return required.matches(regex.toString());
+        while (pi < pLen && pattern.charAt(pi) == '*') {
+            pi++;
+        }
+        return pi == pLen;
+    }
+
+    private static boolean isPermissionTokenChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
     }
 
 

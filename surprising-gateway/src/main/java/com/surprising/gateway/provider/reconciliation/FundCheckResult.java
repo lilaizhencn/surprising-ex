@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
-public record ReconciliationResult(
+public record FundCheckResult(
         boolean healthy,
         long totalAccountsChecked,
         long negativeBalanceCount,
@@ -14,8 +14,8 @@ public record ReconciliationResult(
         Instant executionTime,
         long durationMs
 ) {
-    public static ReconciliationResult healthy(long totalAccounts, long pendingWithdrawals, long durationMs) {
-        return new ReconciliationResult(
+    public static FundCheckResult healthy(long totalAccounts, long pendingWithdrawals, long durationMs) {
+        return new FundCheckResult(
                 true,
                 totalAccounts,
                 0,
@@ -27,9 +27,9 @@ public record ReconciliationResult(
         );
     }
 
-    public static ReconciliationResult anomaly(long totalAccounts, long negativeBalances, long pendingWithdrawals,
-                                               BigDecimal discrepancy, List<String> issues, long durationMs) {
-        return new ReconciliationResult(
+    public static FundCheckResult anomaly(long totalAccounts, long negativeBalances, long pendingWithdrawals,
+                                          BigDecimal discrepancy, List<String> issues, long durationMs) {
+        return new FundCheckResult(
                 false,
                 totalAccounts,
                 negativeBalances,

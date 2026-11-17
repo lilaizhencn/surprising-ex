@@ -37,7 +37,7 @@ class ProductUnavailableHttpBoundaryTest {
                 .isInstanceOfSatisfying(ProductUnavailableException.class, failure->assertThat(failure.product()).isEqualTo(line));
         var auth=mock(AuthService.class);when(auth.authenticateBearer("Bearer own")).thenReturn(
                 new JwtPrincipal(42,"user","NORMAL",List.of(),Instant.now().plusSeconds(60)));
-        var mvc=MockMvcBuilders.standaloneSetup(new AccountAssetsController(auth,
+        var mvc=MockMvcBuilders.standaloneSetup(new AccountAssetsController(
                 new GatewayProductSelection(products,new ObjectMapper()),products))
                 .setCustomArgumentResolvers(new com.surprising.gateway.provider.config.CurrentUserArgumentResolver(auth))
                 .setControllerAdvice(new GlobalGatewayExceptionHandler()).build();

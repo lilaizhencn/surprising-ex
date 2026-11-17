@@ -16,12 +16,28 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public final class ProductRequestBodyFilter extends OncePerRequestFilter {
     public static final String BODY = ProductRequestBodyFilter.class.getName() + ".body";
+    private static final String JSON_TREE = ProductRequestBodyFilter.class.getName() + ".jsonTree";
     private static final int MAX_BYTES = 1024 * 1024;
     private static final Set<String> BODYLESS_METHODS = Set.of("GET", "HEAD", "OPTIONS");
     private static final Pattern ANNOUNCEMENT_SAVE_PATH =
             Pattern.compile("/api/v1/admin/announcements(?:/[0-9]+)?");
     private static final Pattern LEGAL_REVISION_SAVE_PATH =
             Pattern.compile("/api/v1/admin/legal/revisions(?:/[0-9]+)?");
+
+    private record CachedJsonTree(byte[] body, tools.jackson.databind.JsonNode tree) {}
+
+    public static tools.jackson.databind.JsonNode requestTree(
+            HttpServletRequest request, byte[] body, tools.jackson.databind.ObjectMapper mapper) {
+        if (body == null || body.length == 0) return null;
+        if (request != null && request.getAttribute(JSON_TREE) instanceof CachedJsonTree cached && cached.body() == body) {
+            return cached.tree();
+        }
+        tools.jackson.databind.JsonNode tree = mapper.readTree(body);
+        if (request != null) {
+            request.setAttribute(JSON_TREE, new CachedJsonTree(body, tree));
+        }
+        return tree;
+    }
 
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
         String type = request.getContentType();

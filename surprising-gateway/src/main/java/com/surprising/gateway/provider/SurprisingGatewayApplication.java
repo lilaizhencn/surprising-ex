@@ -26,6 +26,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         com.surprising.realtime.provider.config.RealtimeRouterProperties.class})
 @org.springframework.context.annotation.Import({
         com.surprising.realtime.provider.RealtimeRouter.class,
+        com.surprising.realtime.api.RealtimeJsonPublisher.class,
         com.surprising.gateway.config.GatewayExchangeRateConfiguration.class})
 @EnableKafka
 @EnableAsync

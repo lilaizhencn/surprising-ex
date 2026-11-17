@@ -25,10 +25,17 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /** 密码验证后的短时挑战。此处不签发会话，所有要求的方式一起通过后才交回 AuthService。 */
 @Service
 public class LoginVerificationService {
+
+    private static final Pattern SIX_DIGIT_PATTERN = Pattern.compile("[0-9]{6}");
+    private static final Pattern TOKEN_PATTERN = Pattern.compile("[A-Za-z0-9_-]{43}");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("[^\\s@]+@[^\\s@]+\\.[^\\s@]+");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("\\+[1-9][0-9]{6,14}");
+
     private final LoginChallengeRepository challenges;
     private final AuthPersistenceService users;
     private final LoginFactorRepository factorRows;
@@ -348,10 +355,10 @@ public class LoginVerificationService {
     private String availableContactMethod(List<Setting> settings, String email, String phone) {
         boolean emailBound = settings.stream().anyMatch(setting -> setting.type().equals("EMAIL") && setting.bound());
         boolean phoneBound = settings.stream().anyMatch(setting -> setting.type().equals("PHONE") && setting.bound());
-        if (emailBound && email != null && email.trim().matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) return "EMAIL";
-        if (phoneBound && phone != null && phone.trim().matches("\\+[1-9][0-9]{6,14}")) return "PHONE";
-        if (email != null && email.trim().matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) return "EMAIL";
-        if (phone != null && phone.trim().matches("\\+[1-9][0-9]{6,14}")) return "PHONE";
+        if (emailBound && email != null && EMAIL_PATTERN.matcher(email.trim()).matches()) return "EMAIL";
+        if (phoneBound && phone != null && PHONE_PATTERN.matcher(phone.trim()).matches()) return "PHONE";
+        if (email != null && EMAIL_PATTERN.matcher(email.trim()).matches()) return "EMAIL";
+        if (phone != null && PHONE_PATTERN.matcher(phone.trim()).matches()) return "PHONE";
         throw new VerificationFailure("LOGIN_CONTACT_MISSING");
     }
 
@@ -432,7 +439,7 @@ public class LoginVerificationService {
 
     private LoginVerificationRows.Challenge active(
             String token, String purpose, Instant now) {
-        if (token == null || !token.matches("[A-Za-z0-9_-]{43}"))
+        if (token == null || !TOKEN_PATTERN.matcher(token).matches())
             throw new VerificationFailure("LOGIN_CHALLENGE_EXPIRED");
         String hash = digest(token);
         var initial =
@@ -494,7 +501,7 @@ public class LoginVerificationService {
     private boolean matches(String expected, String code, String tokenHash, String method) {
         return expected != null
                 && code != null
-                && code.matches("[0-9]{6}")
+                && SIX_DIGIT_PATTERN.matcher(code).matches()
                 && MessageDigest.isEqual(
                         expected.getBytes(StandardCharsets.UTF_8),
                         codeHash(code, tokenHash, method).getBytes(StandardCharsets.UTF_8));

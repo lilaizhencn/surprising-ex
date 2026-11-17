@@ -30,9 +30,12 @@ public class ProductTransferSecurityService {
     }
 
     public void requireIfNeeded(long userId, com.surprising.gateway.provider.model.ProductTransferAmount transfer, String emailCode, String totpCode, Instant now) {
-        long scale = assets.byAccountingCode(transfer.asset())
-                .orElseThrow(() -> new IllegalArgumentException("transfer asset is not supported"))
-                .scaleUnits();
+        var asset = assets.byAccountingCode(transfer.asset())
+                .orElseThrow(() -> new IllegalArgumentException("transfer asset is not supported"));
+        if (!asset.listed() || !asset.transferEnabled()) {
+            throw new IllegalArgumentException("asset transfer is disabled");
+        }
+        long scale = asset.scaleUnits();
         BigDecimal threshold = properties.getProductTransfer().getVerificationThresholdUsdt();
         if (threshold.signum() > 0) {
             BigDecimal usdtValue;

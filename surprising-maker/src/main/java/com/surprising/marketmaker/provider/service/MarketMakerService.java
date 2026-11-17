@@ -163,7 +163,7 @@ public class MarketMakerService {
         try {
             InstrumentResponse instrument = currentInstrument(strategy.getProductLine(), instrumentId);
             requireTradable(instrument, strategy.getProductLine());
-            MarkPriceResponse mark = latestMarkPrice(instrumentId, instrument.changeId());
+            MarkPriceResponse mark = latestMarkPrice(strategy.getProductLine(), instrumentId, instrument);
             StrategyRuntimeState state = state(strategy);
             return maybeTrade(strategy, state, state.cycleSequence(), instrumentId, instrument, mark, Instant.now());
         } catch (RuntimeException ex) {
@@ -368,7 +368,7 @@ public class MarketMakerService {
             PositionResponse position = currentPosition(strategy, accountId, instrumentId, instrument);
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
                     properties.getQuoting().getOrderBookDepth());
-            MarkPriceResponse markPrice = latestMarkPrice(instrumentId, instrument.changeId());
+            MarkPriceResponse markPrice = latestMarkPrice(productLine, instrumentId, instrument);
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId, productLine, instrument);
             QuotePlan plan = !isTradableForProduct(instrument, productLine)
                     || properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
@@ -695,7 +695,7 @@ public class MarketMakerService {
                 requireTradable(instrument, strategy.getProductLine());
                 OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
                         properties.getQuoting().getOrderBookDepth());
-                MarkPriceResponse markPrice = latestMarkPrice(instrumentId, instrument.changeId());
+                MarkPriceResponse markPrice = latestMarkPrice(strategy.getProductLine(), instrumentId, instrument);
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId,
                         strategy.getProductLine(), instrument);
                 long volatilityTicks = observeVolatility(strategy, instrumentId, instrument, orderBook, markPrice);
@@ -1489,7 +1489,34 @@ public class MarketMakerService {
         return productLine.name() + ":" + accountId + ":" + instrumentId;
     }
 
-    private MarkPriceResponse latestMarkPrice(String instrumentId, long instrumentChangeId) {
+    private MarkPriceResponse latestMarkPrice(ProductLine productLine,
+                                              String instrumentId,
+                                              InstrumentResponse instrument) {
+        long instrumentChangeId = instrument.changeId();
+        var cached = markPriceCache.fresh(instrumentId);
+        if (cached.isPresent()) {
+            MarkPriceEvent event = cached.get();
+            if (event.instrumentChangeId() != instrumentChangeId) {
+                throw new IllegalStateException("mark price instrument version mismatch for " + instrumentId
+                        + ": expected=" + instrumentChangeId + ", actual=" + event.instrumentChangeId());
+            }
+            return new MarkPriceResponse(event.instrumentId(), event.markPrice(), event.markPriceUnits(), event.indexPrice(),
+                    event.price1(), event.price2(), event.lastTradePrice(), event.bestBidPrice(), event.bestAskPrice(),
+                    event.fundingRate(), event.nextFundingTime(), event.timeUntilFundingSeconds(), event.basisAverage(),
+                    event.basisWindowSeconds(), event.clampLow(), event.clampHigh(), event.sequence(), event.status(),
+                    event.eventTime());
+        }
+        if (properties.getReferenceMarket().isEnabled()) {
+            ReferenceOrderBookSnapshot ref = referenceMarketProvider.snapshot(instrumentId, productLine, instrument);
+            if (ref != null && ref.midPriceTicks() > 0 && instrument.priceTickUnits() > 0) {
+                long midUnits = Math.multiplyExact(ref.midPriceTicks(), instrument.priceTickUnits());
+                return new MarkPriceResponse(instrumentId, null, midUnits, null,
+                        null, null, null, null, null,
+                        java.math.BigDecimal.ZERO, null, 0L, java.math.BigDecimal.ZERO,
+                        0L, null, null, 0L, com.surprising.price.api.model.PriceStatus.HEALTHY,
+                        ref.receivedAt() != null ? ref.receivedAt() : Instant.now());
+            }
+        }
         MarkPriceEvent event = markPriceCache.requireFresh(instrumentId);
         if (event.instrumentChangeId() != instrumentChangeId) {
             throw new IllegalStateException("mark price instrument version mismatch for " + instrumentId
@@ -1571,7 +1598,7 @@ public class MarketMakerService {
 
     /** Strategies start from YAML; administrator changes live only in this process. */
     public List<MarketMakerProperties.Strategy> configuredStrategies() {
-        return overrideStore.definitions().stream().filter(d -> d.productLine() == properties.getProductLine()).map(com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition::strategy).toList();
+        return overrideStore.definitions().stream().map(com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition::strategy).toList();
     }
 
     public List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> strategyDefinitions(ProductLine line) {
@@ -1581,7 +1608,7 @@ public class MarketMakerService {
 
     public com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveStrategyDefinition(
             com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition) {
-        com.surprising.product.api.ProductLineConfiguration.requireSame(properties.getProductLine(), definition.productLine(), "market-maker strategy");
+        if (definition.productLine() == null) throw new IllegalArgumentException("productLine is required");
         for (String id : definition.instrumentIds()) {
             var instrument = instrumentSnapshotCache.current(definition.productLine(), Integer.parseInt(id))
                     .orElseThrow(() -> new IllegalArgumentException("instrument is not initialized: " + id));

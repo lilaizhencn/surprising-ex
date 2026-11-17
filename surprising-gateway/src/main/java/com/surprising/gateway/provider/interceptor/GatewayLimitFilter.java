@@ -45,11 +45,13 @@ public final class GatewayLimitFilter extends OncePerRequestFilter {
             return;
         }
         try {
-            admission = limits.admit(requests.group(request));
+            var group = requests.group(request);
+            admission = limits.admit(group);
             String ip = addresses.resolve(request);
             String path = request.getRequestURI();
+            String method = request.getMethod();
             limits.checkIp(ip, cost, (path.equals("/api/v1/auth/login") || path.equals("/api/v1/auth/google/login") || path.equals("/api/v1/auth/google/challenge")));
-            limits.checkPublicRequest(ip, path, !java.util.List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod()), requests.group(request));
+            limits.checkPublicRequest(ip, path, !("GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method)), group);
             request.setAttribute(GatewayLimitRequestBinding.ACTIVE, Boolean.TRUE);
             chain.doFilter(request, response);
         } catch (GatewayRequestLimits.Rejection rejection) {

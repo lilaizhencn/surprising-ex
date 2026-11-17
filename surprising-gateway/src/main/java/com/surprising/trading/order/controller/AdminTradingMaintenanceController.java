@@ -19,11 +19,16 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.regex.Pattern;
+
 /**
  * Administrative order-book maintenance task endpoints.
  */
 @RestController
 public class AdminTradingMaintenanceController {
+
+    private static final Pattern ADMIN_PATTERN = Pattern.compile("[1-9][0-9]{0,18}");
+    private static final Pattern DECIMAL_INT_PATTERN = Pattern.compile("0|[1-9][0-9]*");
 
     private final MaintenanceService maintenanceService;
 
@@ -124,7 +129,7 @@ public class AdminTradingMaintenanceController {
     }
 
     private void authorizeMaintenance(String admin, String header, ProductLine productLine) {
-        if (admin == null || !admin.matches("[1-9][0-9]{0,18}")) {
+        if (admin == null || !ADMIN_PATTERN.matcher(admin).matches()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "trusted admin identity is required");
         }
         if (productLine != maintenanceService.productLine() || header == null || !header.equals(productLine.name())) {
@@ -136,7 +141,7 @@ public class AdminTradingMaintenanceController {
         if (value == null || value.isBlank()) {
             return 0;
         }
-        if (!value.matches("0|[1-9][0-9]*")) {
+        if (!DECIMAL_INT_PATTERN.matcher(value).matches()) {
             badRequest("identifiers and prices must be decimal integer strings");
         }
         try {

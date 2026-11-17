@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.controller;
+package com.surprising.gateway.provider.service;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductTransferRequest;
@@ -10,7 +10,6 @@ import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationS
 import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
-import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -18,7 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,7 +26,6 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * 公开 Open API 资金与充提端点处理（transfer、deposit、capital/config、withdraw）。
  */
-@Service
 public class OpenCapitalApiService {
 
     private final GatewayProperties properties;
@@ -87,36 +84,15 @@ public class OpenCapitalApiService {
     public ResponseEntity<byte[]> depositAddress(HttpServletRequest request) {
         long userId = support.authenticate(request, "READ");
         String chain = support.requiredParameter(request, "network");
-        if (depositAddressRepository != null) {
-            var cached = depositAddressRepository.find(userId, chain, 1L);
-            if (cached.isPresent()) {
-                var r = cached.get();
-                return support.json(HttpStatus.OK, Map.of(
-                        "coin", support.requiredParameter(request, "coin"),
-                        "address", r.address(),
-                        "tag", r.memo(),
-                        "url", ""
-                ));
-            }
-        }
-        Map<String, Object> result = custodyWalletClient.createAddress(userId, chain, null);
-        if (result != null && depositAddressRepository != null && result.get("address") instanceof String address && !address.isBlank()) {
-            String memo = Objects.toString(result.get("memo"), "");
-            String family = "generic";
-            try {
-                for (var c : custodyWalletClient.chains()) {
-                    if (chain.equals(c.get("chain")) && c.get("family") instanceof String f) {
-                        family = f.toLowerCase(Locale.ROOT);
-                        break;
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-            depositAddressRepository.save(userId, chain, family, address, memo, 1L);
-        }
-        return support.json(HttpStatus.OK, Map.of("coin", support.requiredParameter(request, "coin"),
-                "address", support.stringValue(result.get("address")), "tag", support.stringValue(result.get("memo")),
-                "url", ""));
+        String coin = support.requiredParameter(request, "coin");
+        Map<String, Object> result = WalletFundingService.resolveOrCreateChainAddress(
+                userId, chain, 1L, null, depositAddressRepository, custodyWalletClient);
+        return support.json(HttpStatus.OK, Map.of(
+                "coin", coin,
+                "address", result == null ? "" : support.stringValue(result.get("address")),
+                "tag", result == null ? "" : support.stringValue(result.get("memo")),
+                "url", ""
+        ));
     }
 
     public ResponseEntity<byte[]> depositHistory(HttpServletRequest request) {

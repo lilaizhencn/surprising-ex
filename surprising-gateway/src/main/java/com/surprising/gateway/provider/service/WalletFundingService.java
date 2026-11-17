@@ -7,11 +7,15 @@ import com.surprising.asset.model.AssetConfiguration.*;
 import com.surprising.asset.repository.AssetRepository;
 import com.surprising.asset.repository.AssetNetworkRepository;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /** Admin configuration controls visibility; local persistence caches addresses; custody owns supported chains and user addresses. */
 @Service
 public class WalletFundingService {
+    private static final Logger log = LoggerFactory.getLogger(WalletFundingService.class);
     private final AssetRepository assets;
     private final AssetNetworkRepository networks;
     private final CustodyWalletClient custody;
@@ -21,8 +25,10 @@ public class WalletFundingService {
         this(assets, networks, custody, null);
     }
 
+    @Autowired
     public WalletFundingService(AssetRepository assets, AssetNetworkRepository networks,
-                                CustodyWalletClient custody, UserDepositAddressRepository addressRepository) {
+                                CustodyWalletClient custody,
+                                @Autowired(required = false) UserDepositAddressRepository addressRepository) {
         this.assets = assets;
         this.networks = networks;
         this.custody = custody;
@@ -33,11 +39,64 @@ public class WalletFundingService {
         return custody.chains();
     }
 
+    public Map<String, Object> createChainAddress(long userId, String chain, Long requestedVersion) {
+        long version = requestedVersion == null ? 1L : requestedVersion;
+        return resolveOrCreateChainAddress(userId, chain, version, version, addressRepository, custody);
+    }
+
+    public static Map<String, Object> resolveOrCreateChainAddress(
+            long userId,
+            String chain,
+            long cacheVersion,
+            Long custodyVersion,
+            UserDepositAddressRepository addressRepository,
+            CustodyWalletClient walletClient) {
+        if (addressRepository != null) {
+            var cached = addressRepository.find(userId, chain, cacheVersion);
+            if (cached.isPresent()) {
+                var r = cached.get();
+                return Map.of(
+                        "address", r.address(),
+                        "chain", r.networkCode(),
+                        "subject", "user:" + userId,
+                        "status", "ACTIVE",
+                        "addressVersion", r.addressVersion(),
+                        "memo", r.memo()
+                );
+            }
+        }
+        Map<String, Object> response = walletClient.createAddress(userId, chain, custodyVersion);
+        if (response != null && addressRepository != null && response.get("address") instanceof String address && !address.isBlank()) {
+            String memo = Objects.toString(response.get("memo"), "");
+            String family = resolveChainFamily(walletClient, chain);
+            addressRepository.save(userId, chain, family, address, memo, cacheVersion);
+        }
+        return response;
+    }
+
+    private static String resolveChainFamily(CustodyWalletClient walletClient, String chain) {
+        try {
+            List<Map<String, Object>> chains = walletClient.chains();
+            if (chains != null) {
+                for (var c : chains) {
+                    if (chain.equals(c.get("chain")) && c.get("family") instanceof String f) {
+                        return f.toLowerCase(Locale.ROOT);
+                    }
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Failed to resolve custody chain family for {}, defaulting to generic", chain, ex);
+        }
+        return "generic";
+    }
+
     public List<FundingAsset> catalog(String operation) {
         if (!Set.of("deposit", "withdraw").contains(operation)) throw new IllegalArgumentException("invalid funding operation");
         var chains = custody.chains();
         var routes = networks.enabled();
-        return assets.list(false).stream().filter(Asset::listed).map(asset -> {
+        return assets.list(false).stream()
+                .filter(asset -> asset.listed() && ("deposit".equals(operation) ? asset.depositEnabled() : asset.withdrawalEnabled()))
+                .map(asset -> {
             var supported = new ArrayList<FundingNetwork>();
             for (var route : routes) {
                 if (route.assetId() != asset.assetId()
@@ -56,7 +115,7 @@ public class WalletFundingService {
 
     public DepositAddress depositAddress(long userId, String assetCode, String networkCode) {
         if (userId <= 0) throw new IllegalArgumentException("authenticated user required");
-        var asset = assets.byAccountingCode(assetCode).filter(Asset::listed)
+        var asset = assets.byAccountingCode(assetCode).filter(a -> a.listed() && a.depositEnabled())
                 .orElseThrow(() -> new IllegalArgumentException("asset is not supported for deposits"));
         var route = networks.list(asset.assetId()).stream()
                 .filter(n -> n.networkCode().equals(networkCode) && n.depositEnabled()).findFirst()

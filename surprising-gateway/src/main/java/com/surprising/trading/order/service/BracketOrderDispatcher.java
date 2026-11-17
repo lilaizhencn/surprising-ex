@@ -71,12 +71,12 @@ public class BracketOrderDispatcher {
 
     private void deployBracketTriggers(PlaceOrderRequest request, long quantitySteps) {
         OrderSide closeSide = request.side() == OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY;
-        String ocoGroupId = "oco-" + request.clientOrderId() + "-" + System.currentTimeMillis();
+        String ocoGroupId = boundedId("oco-", request.clientOrderId(), System.currentTimeMillis());
 
         // 部署止盈单 (Take Profit)
         if (request.takeProfitPriceTicks() > 0) {
             try {
-                String tpClientId = "tp-" + request.clientOrderId() + "-" + System.nanoTime() % 1_000_000;
+                String tpClientId = boundedId("tp-", request.clientOrderId(), Math.floorMod(System.nanoTime(), 1_000_000L));
                 PlaceTriggerOrderRequest tpRequest = new PlaceTriggerOrderRequest(
                         request.userId(),
                         tpClientId,
@@ -107,7 +107,7 @@ public class BracketOrderDispatcher {
         // 部署止损单 (Stop Loss)
         if (request.stopLossPriceTicks() > 0) {
             try {
-                String slClientId = "sl-" + request.clientOrderId() + "-" + System.nanoTime() % 1_000_000;
+                String slClientId = boundedId("sl-", request.clientOrderId(), Math.floorMod(System.nanoTime(), 1_000_000L));
                 PlaceTriggerOrderRequest slRequest = new PlaceTriggerOrderRequest(
                         request.userId(),
                         slClientId,
@@ -134,5 +134,17 @@ public class BracketOrderDispatcher {
                 log.warn("Failed to place bracket SL trigger for order {}: {}", request.clientOrderId(), ex.getMessage());
             }
         }
+    }
+
+    private static String boundedId(String prefix, String clientOrderId, long suffix) {
+        String base = clientOrderId == null ? "" : clientOrderId;
+        String tail = "-" + suffix;
+        int maxBaseLength = 64 - prefix.length() - tail.length();
+        if (base.length() > maxBaseLength) {
+            String hash = Integer.toHexString(base.hashCode());
+            int headLength = Math.max(0, maxBaseLength - 1 - hash.length());
+            base = base.substring(0, headLength) + "-" + hash;
+        }
+        return prefix + base + tail;
     }
 }

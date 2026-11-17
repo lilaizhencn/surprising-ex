@@ -249,15 +249,14 @@ public class AeronOrderProjectionRepository {
         List<Object> arguments = new ArrayList<>(query.arguments());
         arguments.set(0, productLine.name());
         List<ProjectionRow> candidates = jdbcTemplate.query(query.sql(), rowMapper(), arguments.toArray());
-        List<OrderResponse> orders = new ArrayList<>();
-        String nextCursor = null;
+        List<OrderResponse> orders = new ArrayList<>(Math.min(candidates.size(), query.limit()));
+        Cursor lastCursor = null;
         int encodedBytes = 2;
         boolean hasMore = false;
         for (int index = 0; index < candidates.size(); index++) {
             ProjectionRow candidate = candidates.get(index);
-            List<OrderResponse> next = new ArrayList<>(orders);
-            next.add(candidate.order());
-            int nextBytes = encodedBytes(next);
+            int itemBytes = encodedBytes(candidate.order());
+            int nextBytes = orders.isEmpty() ? 2 + itemBytes : encodedBytes + 1 + itemBytes;
             if (nextBytes > maxEncodedResponseBytes && !orders.isEmpty()) {
                 hasMore = true;
                 break;
@@ -268,14 +267,16 @@ public class AeronOrderProjectionRepository {
             }
             orders.add(candidate.order());
             encodedBytes = nextBytes;
-            nextCursor = encodeCursor(candidate.cursor().updatedAtEpochMillis(), candidate.cursor().orderId());
+            lastCursor = candidate.cursor();
             if (orders.size() == query.limit()) {
                 hasMore = candidates.size() > index + 1;
                 break;
             }
         }
-        if (!hasMore) nextCursor = null;
-        return ProjectionReadResult.ok(orders, hasMore ? nextCursor : null, hasMore,
+        String nextCursor = hasMore && lastCursor != null
+                ? encodeCursor(lastCursor.updatedAtEpochMillis(), lastCursor.orderId())
+                : null;
+        return ProjectionReadResult.ok(orders, nextCursor, hasMore,
                 readiness.observedExportSequence(), required, encodedBytes);
     }
 
@@ -287,9 +288,9 @@ public class AeronOrderProjectionRepository {
         };
     }
 
-    private int encodedBytes(List<OrderResponse> orders) {
+    private int encodedBytes(OrderResponse order) {
         try {
-            return objectMapper.writeValueAsBytes(orders).length;
+            return objectMapper.writeValueAsBytes(order).length;
         } catch (Exception exception) {
             throw new IllegalStateException("failed to encode projected order response", exception);
         }

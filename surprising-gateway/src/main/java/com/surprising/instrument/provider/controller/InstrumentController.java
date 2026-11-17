@@ -37,6 +37,8 @@ import tools.jackson.databind.ObjectMapper;
 @RestController
 @RequestMapping("/api/v1/instruments")
 public class InstrumentController {
+    private static final TypeReference<LinkedHashMap<String, Object>> MAP_TYPE_REF = new TypeReference<>() {};
+
     private final InstrumentService instrumentService;
     private final ObjectMapper objectMapper;
 
@@ -94,7 +96,7 @@ public class InstrumentController {
             if (!includeMarketSummary) return instruments;
             var summaries = catalog.summaries();
             List<Map<String, Object>> items = instruments.instruments().stream().map(instrument -> {
-                Map<String, Object> item = objectMapper.convertValue(instrument, new TypeReference<LinkedHashMap<String, Object>>() {});
+                Map<String, Object> item = objectMapper.convertValue(instrument, MAP_TYPE_REF);
                 var summary = summaries.get(instrument.instrumentId());
                 if (summary != null) {
                     item.put("lastPrice", summary.lastPrice());

@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.controller;
+package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.instrument.provider.service.InstrumentService;
@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 /**
  * 公开 Open API 行情与基础端点处理（ping、time、exchangeInfo、depth、bookTicker）。
  */
-@Service
 public class OpenMarketApiService {
 
     private final GatewayProperties properties;

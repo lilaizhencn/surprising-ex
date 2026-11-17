@@ -110,20 +110,20 @@ public class OrderService {
                 tradingMetrics, tradeProjection, realtimeQueries, null);
     }
 
+    @Autowired
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderAeronGateway aeron, AeronOrderProjectionRepository aeronOrderProjection,
                         MatchingMarketDataService bboOrderBook, TradingMetricsService tradingMetrics,
                         TradeProjectionRepository tradeProjection, ValkeyUserQueries realtimeQueries,
-                        BracketOrderDispatcher bracketOrderDispatcher) {
+                        @Autowired(required = false) BracketOrderDispatcher bracketOrderDispatcher) {
         this(properties, orderValidator, aeron, bboOrderBook, bracketOrderDispatcher,
                 new OrderQueryService(properties, aeron, aeronOrderProjection,
                         tradingMetrics, tradeProjection, realtimeQueries));
     }
 
-    @Autowired
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderAeronGateway aeron, MatchingMarketDataService bboOrderBook,
-                        @Autowired(required = false) BracketOrderDispatcher bracketOrderDispatcher,
+                        BracketOrderDispatcher bracketOrderDispatcher,
                         OrderQueryService queries) {
         this.properties = properties;
         this.orderValidator = orderValidator;
@@ -171,13 +171,22 @@ public class OrderService {
     public OrderCommandReceipt placeCommand(PlaceOrderRequest request) {
         requireAeron();
         PlaceOrderRequest prepared = prepareOrder(request);
-        return receipt(submitPlaceCommand(prepared));
+        return registerBracket(prepared, receipt(submitPlaceCommand(prepared)));
     }
 
     public CompletionStage<OrderCommandReceipt> placeCommandAsync(PlaceOrderRequest request) {
         requireAeron();
         PlaceOrderRequest prepared = prepareOrder(request);
-        return submitPlaceCommandAsync(prepared).thenApply(this::receipt);
+        return submitPlaceCommandAsync(prepared)
+                .thenApply(execution -> registerBracket(prepared, receipt(execution)));
+    }
+
+    private OrderCommandReceipt registerBracket(PlaceOrderRequest prepared, OrderCommandReceipt receipt) {
+        if (bracketOrderDispatcher != null && prepared.hasBracketOrders() && receipt != null
+                && receipt.result() instanceof OrderResponse order) {
+            bracketOrderDispatcher.registerBracket(prepared, order);
+        }
+        return receipt;
     }
 
     OrderResponse submitPlaceOrder(PlaceOrderRequest request) {
@@ -779,10 +788,12 @@ public class OrderService {
         if (currentProductLine() == ProductLine.SPOT && positionSide.isHedgeSide()) {
             throw new IllegalArgumentException("现货订单不支持 LONG/SHORT 仓位方向");
         }
+        MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         boolean reduceOnly = request.reduceOnly()
                 || positionSide.isHedgeSide() && positionSide.isClosingSide(request.side());
         if (request.bboPriceMode() == null && clientOrderId.equals(request.clientOrderId())
                 && instrumentId.equals(request.instrumentId()) && priceTicks == request.priceTicks()
+                && marginMode == request.marginMode() && positionSide == request.positionSide()
                 && reduceOnly == request.reduceOnly()) return request;
         return new PlaceOrderRequest(
                 request.userId(),
@@ -793,10 +804,15 @@ public class OrderService {
                 request.timeInForce(),
                 priceTicks,
                 request.quantitySteps(),
-                MarginMode.defaultIfNull(request.marginMode()),
+                marginMode,
                 positionSide,
                 reduceOnly,
-                request.postOnly());
+                request.postOnly(),
+                null,
+                request.takeProfitPriceTicks(),
+                request.stopLossPriceTicks(),
+                request.tpSlPriceSource(),
+                request.stpMode());
     }
 
     private long resolveLimitPrice(PlaceOrderRequest request, String instrumentId) {

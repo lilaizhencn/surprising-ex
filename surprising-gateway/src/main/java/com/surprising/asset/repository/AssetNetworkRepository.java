@@ -45,6 +45,22 @@ public class AssetNetworkRepository {
                 value.minDeposit(), value.minWithdrawal(), value.withdrawalFee(), value.confirmations(), assetId, value.networkId());
     }
 
+    /** 关闭币种充值总开关时级联关闭其所有网络的充值开关。 */
+    public int disableDepositByAsset(int assetId) {
+        return jdbc.update("""
+                UPDATE asset_networks SET deposit_enabled=FALSE, revision=revision+1, updated_at=now()
+                WHERE asset_id=? AND deposit_enabled
+                """, assetId);
+    }
+
+    /** 关闭币种提现总开关时级联关闭其所有网络的提现开关。 */
+    public int disableWithdrawalByAsset(int assetId) {
+        return jdbc.update("""
+                UPDATE asset_networks SET withdrawal_enabled=FALSE, revision=revision+1, updated_at=now()
+                WHERE asset_id=? AND withdrawal_enabled
+                """, assetId);
+    }
+
     private Network map(ResultSet rs, int row) throws SQLException {
         return new Network(rs.getInt("network_id"), rs.getInt("asset_id"), rs.getString("network_code"),
                 rs.getString("display_name"), rs.getString("contract_address"), rs.getBoolean("native_asset"),

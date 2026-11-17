@@ -17,6 +17,7 @@ import java.time.Instant;
 /** Peripheral price/candle producer. Never installed in the trading Core. */
 @Component
 @ConditionalOnProperty(name = "surprising.realtime.publish-json", havingValue = "true")
+@org.springframework.context.annotation.DependsOn("appMediaDriver")
 public final class RealtimeJsonPublisher implements AutoCloseable {
     private final RealtimeOutbox outbox = new RealtimeOutbox(2048, 8 * 1024 * 1024);
     private final AeronRealtimeSender sender;
@@ -46,13 +47,9 @@ public final class RealtimeJsonPublisher implements AutoCloseable {
             long sequence,
             Instant time,
             Object payload) {
-        if (!lock.tryLock()) {
-            dropped.increment();
-            return;
-        }
+        final byte[] encoded;
         try {
-            outbox.begin();
-            outbox.stage(
+            encoded =
                     RealtimeFrameCodec.encode(
                             new RealtimeFrame(
                                     product,
@@ -64,7 +61,18 @@ public final class RealtimeJsonPublisher implements AutoCloseable {
                                     0,
                                     instrumentId,
                                     entity,
-                                    mapper.writeValueAsBytes(payload))));
+                                    mapper.writeValueAsBytes(payload)));
+        } catch (RuntimeException failure) {
+            dropped.increment();
+            return;
+        }
+        if (!lock.tryLock()) {
+            dropped.increment();
+            return;
+        }
+        try {
+            outbox.begin();
+            outbox.stage(encoded);
             outbox.commit();
         } catch (RuntimeException failure) {
             outbox.abort();

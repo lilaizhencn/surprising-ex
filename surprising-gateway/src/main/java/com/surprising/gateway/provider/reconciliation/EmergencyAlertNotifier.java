@@ -25,7 +25,7 @@ public class EmergencyAlertNotifier {
         this.properties = properties;
     }
 
-    public void broadcastReconciliationAlert(ReconciliationResult result) {
+    public void broadcastFundCheckAlert(FundCheckResult result) {
         String timeStr = TIME_FMT.format(result.executionTime());
         StringBuilder sb = new StringBuilder();
         sb.append("🚨 <b>【CRITICAL 资金对账异常 - 紧急停机提现】</b>\n");

@@ -45,7 +45,6 @@ public class AdminAuthController {
     private final AdminApprovalService adminApprovalService;
     private final ObjectMapper objectMapper;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public AdminAuthController(AdminAuthService adminAuthService,
                                AdminApprovalService adminApprovalService,
                                ObjectMapper objectMapper) {
@@ -54,11 +53,21 @@ public class AdminAuthController {
         this.objectMapper = objectMapper;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public AdminAuthController(@org.springframework.beans.factory.annotation.Autowired(required = false) AdminAuthService adminAuthService,
+                               AuthService authService,
+                               AdminApprovalService adminApprovalService,
+                               ObjectMapper objectMapper) {
+        this(adminAuthService != null
+                        ? adminAuthService
+                        : new AdminAuthService(authService.properties(), authService.persistence(), authService),
+                adminApprovalService, objectMapper);
+    }
+
     public AdminAuthController(AuthService authService,
                                AdminApprovalService adminApprovalService,
                                ObjectMapper objectMapper) {
-        this(new AdminAuthService(authService.properties(), authService.persistence(), authService),
-                adminApprovalService, objectMapper);
+        this(null, authService, adminApprovalService, objectMapper);
     }
 
     @GetMapping("/users")

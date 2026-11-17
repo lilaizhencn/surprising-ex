@@ -236,6 +236,56 @@ public final class GatewayProductServices implements AutoCloseable {
                 ? env.getProperty("surprising.price.mark.market-channel", "aeron:udp?endpoint=127.0.0.1:21407")
                 : "aeron:udp?endpoint=127.0.0.1:21407";
         values.put("surprising.price.mark.market-channel", perProductChannel(baseMarketChannel, product));
+        if (env != null && "true".equalsIgnoreCase(env.getProperty("surprising.trade-export.enabled"))) {
+            String slug = product.name().toLowerCase(Locale.ROOT);
+            String baseClusterDir = env.getProperty("surprising.trade-export.cluster-directory");
+            if (baseClusterDir != null && !baseClusterDir.isBlank()) {
+                Path p = Path.of(baseClusterDir);
+                if (p.getNameCount() >= 3) {
+                    Path aeronRoot = p.getParent() != null && p.getParent().getParent() != null
+                            ? p.getParent().getParent().getParent() : null;
+                    if (aeronRoot != null) {
+                        Path candidate = aeronRoot.resolve(slug).resolve("node0").resolve("cluster");
+                        if (java.nio.file.Files.isDirectory(candidate)) {
+                            values.put("surprising.trade-export.cluster-directory", candidate.toString());
+                        }
+                    }
+                }
+            }
+            String baseAeronDir = env.getProperty("surprising.trade-export.aeron-directory");
+            if (baseAeronDir != null && !baseAeronDir.isBlank()) {
+                Path parentDir = Path.of(baseAeronDir).getParent();
+                if (parentDir != null) {
+                    Path c1 = parentDir.resolve("core-driver-surprising-" + slug + "-0");
+                    Path c2 = parentDir.resolve(slug + "-core-driver-surprising-" + slug + "-0");
+                    if (java.nio.file.Files.isDirectory(c1)) {
+                        values.put("surprising.trade-export.aeron-directory", c1.toString());
+                    } else if (java.nio.file.Files.isDirectory(c2)) {
+                        values.put("surprising.trade-export.aeron-directory", c2.toString());
+                    }
+                }
+            }
+            String baseArchive = env.getProperty("surprising.trade-export.archive-control-channel");
+            if (baseArchive != null && !baseArchive.isBlank()) {
+                int colon = baseArchive.lastIndexOf(':');
+                if (colon > 0) {
+                    int archivePort = 20000 + product.ordinal() * 1000 + 1;
+                    values.put("surprising.trade-export.archive-control-channel",
+                            baseArchive.substring(0, colon + 1) + archivePort);
+                }
+            }
+            values.put("surprising.trade-export.cluster-id", 100 + product.ordinal());
+            String baseCheckpoint = env.getProperty("surprising.trade-export.checkpoint");
+            String defaultProduct = env.getProperty("PRODUCT_LINE", "LINEAR_PERPETUAL");
+            if (baseCheckpoint != null && !baseCheckpoint.isBlank()
+                    && !product.name().equalsIgnoreCase(defaultProduct)) {
+                Path cpParent = Path.of(baseCheckpoint).getParent();
+                if (cpParent != null) {
+                    values.put("surprising.trade-export.checkpoint",
+                            cpParent.resolve("checkpoint-" + slug + ".bin").toString());
+                }
+            }
+        }
         return values;
     }
 

@@ -94,11 +94,16 @@ public final class ClientIpResolver {
     }
 
     public boolean isAllowed(String clientIp, List<String> allowlist) {
-        if (literalValue(clientIp) == null || allowlist == null || allowlist.isEmpty()) {
+        if (allowlist == null || allowlist.isEmpty()) {
             return false;
         }
+        InetAddress client = parseLiteral(clientIp);
+        if (client == null) {
+            return false;
+        }
+        byte[] clientBytes = client.getAddress();
         for (String rule : allowlist) {
-            if (matchesRule(clientIp, rule)) {
+            if (matchesRule(client, clientBytes, rule)) {
                 return true;
             }
         }
@@ -109,37 +114,56 @@ public final class ClientIpResolver {
         if (rule == null || rule.isBlank()) {
             return false;
         }
-        String[] parts = rule.trim().split("/", -1);
-        if (parts.length > 2 || literalValue(parts[0]) == null) {
+        String trimmed = rule.trim();
+        int slash = trimmed.indexOf('/');
+        if (slash < 0) {
+            return parseLiteral(trimmed) != null;
+        }
+        if (trimmed.indexOf('/', slash + 1) >= 0) {
             return false;
         }
-        if (parts.length == 1) {
-            return true;
+        InetAddress network = parseLiteral(trimmed.substring(0, slash));
+        if (network == null) {
+            return false;
         }
         try {
-            int prefix = Integer.parseInt(parts[1]);
-            return prefix >= 0 && prefix <= addressBits(parts[0]);
+            int prefix = Integer.parseInt(trimmed.substring(slash + 1));
+            return prefix >= 0 && prefix <= network.getAddress().length * 8;
         } catch (NumberFormatException ex) {
             return false;
         }
     }
 
-    private boolean matchesRule(String clientIp, String rule) {
-        if (!isValidRule(rule)) {
+    private boolean matchesRule(InetAddress client, byte[] clientBytes, String rule) {
+        if (rule == null || rule.isBlank()) {
             return false;
         }
-        String[] parts = rule.trim().split("/", -1);
-        InetAddress client = parseLiteral(clientIp);
-        InetAddress network = parseLiteral(parts[0]);
-        if (client == null || network == null || client.getAddress().length != network.getAddress().length) {
+        String trimmed = rule.trim();
+        int slash = trimmed.indexOf('/');
+        if (slash < 0) {
+            InetAddress network = parseLiteral(trimmed);
+            return network != null && clientBytes.length == network.getAddress().length && client.equals(network);
+        }
+        if (trimmed.indexOf('/', slash + 1) >= 0) {
             return false;
         }
-        if (parts.length == 1) {
-            return client.equals(network);
+        InetAddress network = parseLiteral(trimmed.substring(0, slash));
+        if (network == null) {
+            return false;
         }
-        int prefix = Integer.parseInt(parts[1]);
-        byte[] clientBytes = client.getAddress();
         byte[] networkBytes = network.getAddress();
+        if (clientBytes.length != networkBytes.length) {
+            return false;
+        }
+        int prefix;
+        try {
+            prefix = Integer.parseInt(trimmed.substring(slash + 1));
+        } catch (NumberFormatException ex) {
+            return false;
+        }
+        if (prefix < 0 || prefix > networkBytes.length * 8) {
+            return false;
+        }
         int fullBytes = prefix / 8;
         int remainingBits = prefix % 8;
         for (int index = 0; index < fullBytes; index++) {
@@ -154,11 +178,6 @@ public final class ClientIpResolver {
         return (clientBytes[fullBytes] & mask) == (networkBytes[fullBytes] & mask);
     }
 
-    private int addressBits(String value) {
-        InetAddress address = parseLiteral(value);
-        return address == null ? -1 : address.getAddress().length * 8;
-    }
-
     private String literalValue(String value) {
         return parseLiteral(value) == null ? null : value.trim();
     }
@@ -168,27 +187,62 @@ public final class ClientIpResolver {
             return null;
         }
         String candidate = value.trim();
-        if (candidate.isBlank()) {
+        if (candidate.isEmpty()) {
             return null;
-        }
-        if (candidate.indexOf(':') >= 0) {
-            if (!candidate.matches("[0-9A-Fa-f:.]+")) {
-                return null;
-            }
-        } else {
-            if (!candidate.matches("\\d{1,3}(?:\\.\\d{1,3}){3}")) {
-                return null;
-            }
-            for (String octet : candidate.split("\\.")) {
-                if (Integer.parseInt(octet) > 255) {
-                    return null;
-                }
-            }
         }
         try {
-            return InetAddress.getByName(candidate);
-        } catch (UnknownHostException | NumberFormatException ex) {
+            if (candidate.indexOf(':') >= 0) {
+                for (int i = 0; i < candidate.length(); i++) {
+                    char c = candidate.charAt(i);
+                    boolean validHexOrSep = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
+                            || (c >= 'A' && c <= 'F') || c == ':' || c == '.';
+                    if (!validHexOrSep) {
+                        return null;
+                    }
+                }
+                return InetAddress.getByName(candidate);
+            }
+            byte[] ipv4 = parseIpv4Bytes(candidate);
+            return ipv4 == null ? null : InetAddress.getByAddress(ipv4);
+        } catch (UnknownHostException ex) {
             return null;
         }
+    }
+
+    private static byte[] parseIpv4Bytes(String candidate) {
+        int len = candidate.length();
+        if (len < 7 || len > 15) {
+            return null;
+        }
+        byte[] bytes = new byte[4];
+        int octet = 0;
+        int digits = 0;
+        int part = 0;
+        for (int i = 0; i < len; i++) {
+            char c = candidate.charAt(i);
+            if (c >= '0' && c <= '9') {
+                if (++digits > 3) {
+                    return null;
+                }
+                octet = octet * 10 + (c - '0');
+                if (octet > 255) {
+                    return null;
+                }
+            } else if (c == '.') {
+                if (digits == 0 || part >= 3) {
+                    return null;
+                }
+                bytes[part++] = (byte) octet;
+                octet = 0;
+                digits = 0;
+            } else {
+                return null;
+            }
+        }
+        if (digits == 0 || part != 3) {
+            return null;
+        }
+        bytes[3] = (byte) octet;
+        return bytes;
     }
 }

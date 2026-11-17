@@ -38,7 +38,10 @@ public class AssetConfigurationService {
     public Asset save(AssetRequest request, long operatorId) {
         requireOperator(operatorId);
         requireScale(request.scaleUnits());
-        if (!request.listed() && request.tradingEnabled()) throw new IllegalArgumentException("unlisted asset cannot enable trading");
+        if (!request.listed() && (request.tradingEnabled() || request.depositEnabled()
+                || request.withdrawalEnabled() || request.transferEnabled())) {
+            throw new IllegalArgumentException("unlisted asset cannot enable trading, deposit, withdrawal or transfer");
+        }
         Asset before = null;
         if (request.assetId() != null) {
             before = assets.lock(request.assetId()).orElseThrow(() -> new IllegalArgumentException("asset not found"));
@@ -49,6 +52,12 @@ public class AssetConfigurationService {
             if (!request.listed() && networks.list(before.assetId()).stream()
                     .anyMatch(n -> n.depositEnabled() || n.withdrawalEnabled())) {
                 throw new IllegalStateException("disable deposit and withdrawal networks before unlisting the asset");
+            }
+            if (!request.depositEnabled()) {
+                networks.disableDepositByAsset(before.assetId());
+            }
+            if (!request.withdrawalEnabled()) {
+                networks.disableWithdrawalByAsset(before.assetId());
             }
         } else if (request.revision() != 0) {
             throw new IllegalArgumentException("new asset revision must be zero");
@@ -64,6 +73,12 @@ public class AssetConfigurationService {
         Asset asset = assets.lock(assetId).orElseThrow(() -> new IllegalArgumentException("asset not found"));
         if (!asset.listed() && (request.depositEnabled() || request.withdrawalEnabled())) {
             throw new IllegalStateException("unlisted asset cannot enable deposit or withdrawal");
+        }
+        if (!asset.depositEnabled() && request.depositEnabled()) {
+            throw new IllegalStateException("asset deposit master switch is disabled");
+        }
+        if (!asset.withdrawalEnabled() && request.withdrawalEnabled()) {
+            throw new IllegalStateException("asset withdrawal master switch is disabled");
         }
         requireAmount(request.minDeposit(), asset.scaleUnits(), request.chainDecimals(), false);
         requireAmount(request.minWithdrawal(), asset.scaleUnits(), request.chainDecimals(), false);
@@ -100,7 +115,8 @@ public class AssetConfigurationService {
 
     public WithdrawalQuote withdrawalQuote(String assetCode, String chain, String amount) {
         Asset asset = assets.byAccountingCode(assetCode)
-                .filter(Asset::listed).orElseThrow(() -> new IllegalArgumentException("asset is not listed for withdrawal"));
+                .filter(a -> a.listed() && a.withdrawalEnabled())
+                .orElseThrow(() -> new IllegalArgumentException("asset is not listed for withdrawal"));
         Network route = networks.list(asset.assetId()).stream()
                 .filter(network -> network.networkCode().equals(chain) && network.withdrawalEnabled())
                 .findFirst().orElseThrow(() -> new IllegalArgumentException("withdrawal network is disabled for this asset"));

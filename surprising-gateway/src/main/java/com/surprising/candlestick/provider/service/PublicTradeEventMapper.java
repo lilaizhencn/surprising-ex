@@ -65,11 +65,13 @@ public class PublicTradeEventMapper {
         InstrumentScale scale = scales.computeIfAbsent(instrumentId, this::loadScale);
         BigDecimal price = toDecimal(publicTrade.priceTicks(), scale.priceTickUnits(), scale.quoteScaleUnits());
         BigDecimal quantity;
-        if (productLine == com.surprising.product.api.ProductLine.LINEAR_PERPETUAL) {
+        if (productLine == com.surprising.product.api.ProductLine.LINEAR_PERPETUAL
+                || productLine == com.surprising.product.api.ProductLine.LINEAR_DELIVERY) {
             quantity = toDecimal(publicTrade.quantitySteps(), scale.contractMultiplierPpm(), 1_000_000L);
-        } else if (productLine == com.surprising.product.api.ProductLine.INVERSE_DELIVERY) {
+        } else if (productLine == com.surprising.product.api.ProductLine.INVERSE_PERPETUAL
+                || productLine == com.surprising.product.api.ProductLine.INVERSE_DELIVERY) {
             if (scale.notionalMultiplierUnits() <= 0) {
-                throw new IllegalArgumentException("inverse delivery quote face must be positive");
+                throw new IllegalArgumentException("inverse contract quote face must be positive");
             }
             // Quote face / actual quote price gives executed base volume. Quote asset
             // scale cancels; quantityStepUnits is not the inverse contract face.
@@ -78,8 +80,10 @@ public class PublicTradeEventMapper {
                     .divide(BigDecimal.valueOf(publicTrade.priceTicks())
                             .multiply(BigDecimal.valueOf(scale.priceTickUnits())), DISPLAY_SCALE, RoundingMode.HALF_UP)
                     .stripTrailingZeros();
-        } else {
+        } else if (scale.quantityStepUnits() > 0) {
             quantity = toDecimal(publicTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
+        } else {
+            quantity = toDecimal(publicTrade.quantitySteps(), scale.contractMultiplierPpm(), 1_000_000L);
         }
         return new TradeEvent(
                 instrumentId,

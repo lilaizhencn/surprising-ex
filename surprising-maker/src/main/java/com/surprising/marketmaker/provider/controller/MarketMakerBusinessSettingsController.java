@@ -43,8 +43,7 @@ public class MarketMakerBusinessSettingsController {
     }
     private void check(String admin, ProductLine line) {
         if (admin == null || admin.isBlank()) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        try { ProductLineConfiguration.requireSame(properties.getProductLine(), line, "maker settings"); }
-        catch (IllegalArgumentException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid); }
+        if (line == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "productLine is required");
     }
     private void validate(Update request, String admin) {
         if (request == null || request.settings() == null || request.expectedVersion() <= 0 || admin == null || admin.isBlank() || request.reason() == null || request.reason().isBlank() || request.reason().length() > 1000)

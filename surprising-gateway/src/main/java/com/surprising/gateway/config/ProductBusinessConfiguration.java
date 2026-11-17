@@ -25,7 +25,9 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
                 com.surprising.price.index.repository.ExchangeRateRepository.class,
                 com.surprising.price.index.service.ExchangeRateSnapshotCache.class,
                 com.surprising.price.index.client.FiatRateClient.class,
-                com.surprising.price.index.client.ExternalSpotPriceClient.class
+                com.surprising.price.index.client.ExternalSpotPriceClient.class,
+                com.surprising.price.index.client.ExternalSpotWebSocketManager.class,
+                com.surprising.price.index.service.LatestSourceQuoteStore.class
         }))
 @EnableConfigurationProperties({
         AccountProperties.class, TriggerProperties.class,

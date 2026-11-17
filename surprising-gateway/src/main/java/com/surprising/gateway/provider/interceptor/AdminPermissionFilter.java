@@ -127,6 +127,19 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         if (path.startsWith("/roles") || path.startsWith("/permissions")) {
             return "admin.permissions." + (read ? "read" : "write");
         }
+        if (path.equals("/affiliate") || path.startsWith("/affiliate/")) {
+            return "admin.affiliate." + (read ? "read" : "write");
+        }
+        for (String prefix : new String[] {
+            "/adl", "/funding", "/market-maker", "/risk", "/risk-admin", "/liquidations", "/liquidation-admin",
+            "/insurance-admin", "/instrument-admin", "/order-admin", "/account-admin",
+            "/fee-admin", "/fees", "/lifecycle", "/maintenance", "/alerts", "/exports",
+            "/queries", "/trading", "/accounts", "/instruments", "/orders", "/reports", "/market"
+        }) {
+            if (path.equals(prefix) || path.startsWith(prefix + "/")) {
+                return "admin.gateway." + prefix.substring(1) + "." + (read ? "read" : "write");
+            }
+        }
         return "admin.unmapped." + (read ? "read" : "write");
     }
 }

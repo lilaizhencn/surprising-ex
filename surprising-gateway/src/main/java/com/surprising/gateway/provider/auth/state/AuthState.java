@@ -1,11 +1,12 @@
 package com.surprising.gateway.provider.auth.state;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
-import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.LongFunction;
 import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,9 @@ public class AuthState {
     private final LocalCache<SessionState> sessions = new LocalCache<>();
     private final LocalCache<UserState> users = new LocalCache<>();
     private final LocalCache<ApiKeyState> apiKeys = new LocalCache<>();
+    private final LongFunction<SessionState> sessionLoader = this::loadSession;
+    private final LongFunction<UserState> userLoader = this::loadUser;
+    private final Function<String, ApiKeyState> apiKeyLoader = this::loadApiKey;
 
     @Autowired
     public AuthState(AuthStateBackend backend, GatewayProperties properties) {
@@ -51,19 +55,20 @@ public class AuthState {
 
     /** 请求路径：读取会话并按需滑动续期；会话不存在返回 null。 */
     public SessionState session(long sessionId) {
-        SessionState state = lookup(sessions, sessionKey(sessionId), () -> loadSession(sessionId));
+        String key = sessionKey(sessionId);
+        SessionState state = lookupLong(sessions, key, sessionId, sessionLoader);
         if (state == null) return state;
         long now = clock.getAsLong();
         if (now - state.renewedAtMillis() < properties.getSecurity().getSessionRenewInterval().toMillis()) return state;
         try {
-            boolean alive = backend.renewSession(sessionKey(sessionId), userKey(state.userId()),
+            boolean alive = backend.renewSession(key, userKey(state.userId()),
                     Duration.ofSeconds(state.ttlSeconds()), now);
             if (!alive) {
-                sessions.remove(sessionKey(sessionId));
+                sessions.remove(key);
                 return null;
             }
             SessionState renewed = state.renewedAt(now);
-            sessions.put(sessionKey(sessionId), renewed, now);
+            sessions.put(key, renewed, now);
             return renewed;
         } catch (AuthStateUnavailableException ex) {
             return state;
@@ -71,10 +76,11 @@ public class AuthState {
     }
 
     public void startSession(SessionState state, Duration ttl) {
-        backend.hashPut(sessionKey(state.sessionId()), state.toFields(), ttl);
+        String key = sessionKey(state.sessionId());
+        backend.hashPut(key, state.toFields(), ttl);
         // 顺带把该用户的状态键续到同样的有效期（常驻的用户状态不受影响）
-        backend.renewSession(sessionKey(state.sessionId()), userKey(state.userId()), ttl, clock.getAsLong());
-        sessions.remove(sessionKey(state.sessionId()));
+        backend.renewSession(key, userKey(state.userId()), ttl, clock.getAsLong());
+        sessions.remove(key);
     }
 
     public boolean sessionExists(long sessionId) {
@@ -98,23 +104,27 @@ public class AuthState {
     // ---------------------------------------------------------------- 用户
 
     public UserState user(long userId) {
-        return lookup(users, userKey(userId), () -> {
-            Map<String, String> fields = backend.hashGet(userKey(userId));
-            return fields.isEmpty() ? null : UserState.fromFields(userId, fields);
-        });
+        return lookupLong(users, userKey(userId), userId, userLoader);
+    }
+
+    private UserState loadUser(long userId) {
+        Map<String, String> fields = backend.hashGet(userKey(userId));
+        return fields.isEmpty() ? null : UserState.fromFields(userId, fields);
     }
 
     /** 写入用户状态；有 API Key 的用户常驻，其他用户使用会话滑动有效期。 */
     public void putUser(UserState state) {
         Duration ttl = state.hasApiKey() ? null : properties.getSecurity().getSessionTtl();
-        backend.hashPut(userKey(state.userId()), state.toFields(), ttl);
-        users.remove(userKey(state.userId()));
+        String key = userKey(state.userId());
+        backend.hashPut(key, state.toFields(), ttl);
+        users.remove(key);
         broadcast("user:" + state.userId());
     }
 
     public void deleteUser(long userId) {
-        backend.delete(userKey(userId));
-        users.remove(userKey(userId));
+        String key = userKey(userId);
+        backend.delete(key);
+        users.remove(key);
         broadcast("user:" + userId);
     }
 
@@ -125,21 +135,25 @@ public class AuthState {
     // ---------------------------------------------------------------- API Key
 
     public ApiKeyState apiKey(String apiKey) {
-        return lookup(apiKeys, apiKeyKey(apiKey), () -> {
-            Map<String, String> fields = backend.hashGet(apiKeyKey(apiKey));
-            return fields.isEmpty() ? null : ApiKeyState.fromFields(apiKey, fields);
-        });
+        return lookupString(apiKeys, apiKeyKey(apiKey), apiKey, apiKeyLoader);
+    }
+
+    private ApiKeyState loadApiKey(String apiKey) {
+        Map<String, String> fields = backend.hashGet(apiKeyKey(apiKey));
+        return fields.isEmpty() ? null : ApiKeyState.fromFields(apiKey, fields);
     }
 
     public void putApiKey(ApiKeyState state) {
-        backend.hashPut(apiKeyKey(state.apiKey()), state.toFields(), null);
-        apiKeys.remove(apiKeyKey(state.apiKey()));
+        String key = apiKeyKey(state.apiKey());
+        backend.hashPut(key, state.toFields(), null);
+        apiKeys.remove(key);
         broadcast("apikey:" + state.apiKey());
     }
 
     public void deleteApiKey(String apiKey) {
-        backend.delete(apiKeyKey(apiKey));
-        apiKeys.remove(apiKeyKey(apiKey));
+        String key = apiKeyKey(apiKey);
+        backend.delete(key);
+        apiKeys.remove(key);
         broadcast("apikey:" + apiKey);
     }
 
@@ -153,14 +167,33 @@ public class AuthState {
     static String userKey(long userId) { return "auth:user:" + userId; }
     static String apiKeyKey(String apiKey) { return "auth:apikey:" + apiKey; }
 
-    private <V> V lookup(LocalCache<V> cache, String key, java.util.function.Supplier<V> remote) {
+    private <V> V lookupLong(LocalCache<V> cache, String key, long id, LongFunction<V> remote) {
         long now = clock.getAsLong();
         LocalCache.Entry<V> cached = cache.entry(key);
         if (cached != null && now - cached.loadedAtMillis() < properties.getSecurity().getAuthLocalCacheTtl().toMillis()) {
             return cached.value();
         }
         try {
-            V value = remote.get();
+            V value = remote.apply(id);
+            if (value == null) cache.remove(key);
+            else cache.put(key, value, now);
+            return value;
+        } catch (AuthStateUnavailableException ex) {
+            if (cached != null && now - cached.loadedAtMillis() < properties.getSecurity().getAuthLocalStaleTtl().toMillis()) {
+                return cached.value();
+            }
+            throw ex;
+        }
+    }
+
+    private <V> V lookupString(LocalCache<V> cache, String key, String id, Function<String, V> remote) {
+        long now = clock.getAsLong();
+        LocalCache.Entry<V> cached = cache.entry(key);
+        if (cached != null && now - cached.loadedAtMillis() < properties.getSecurity().getAuthLocalCacheTtl().toMillis()) {
+            return cached.value();
+        }
+        try {
+            V value = remote.apply(id);
             if (value == null) cache.remove(key);
             else cache.put(key, value, now);
             return value;

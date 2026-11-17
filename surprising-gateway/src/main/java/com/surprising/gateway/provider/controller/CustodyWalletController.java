@@ -6,6 +6,7 @@ import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
+import com.surprising.gateway.provider.interceptor.GatewayAccessSupport;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import com.surprising.gateway.provider.service.WalletFundingService;
 import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
@@ -15,9 +16,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,7 +37,6 @@ public class CustodyWalletController {
     private final SensitiveActionVerificationService verificationService;
     private final ComplianceService complianceService;
     private final CustodyWithdrawalService withdrawalService;
-    private final UserDepositAddressRepository addressRepository;
     private final WalletFundingService fundingService;
 
     public CustodyWalletController(AuthService authService,
@@ -58,7 +56,6 @@ public class CustodyWalletController {
         this(authService, walletClient, verificationService, complianceService, withdrawalService, addressRepository, null);
     }
 
-    @Autowired
     public CustodyWalletController(AuthService authService,
                                    CustodyWalletClient walletClient,
                                    SensitiveActionVerificationService verificationService,
@@ -71,8 +68,19 @@ public class CustodyWalletController {
         this.verificationService = verificationService;
         this.complianceService = complianceService;
         this.withdrawalService = withdrawalService;
-        this.addressRepository = addressRepository;
-        this.fundingService = fundingService;
+        this.fundingService = fundingService != null
+                ? fundingService
+                : new WalletFundingService(null, null, walletClient, addressRepository);
+    }
+
+    @Autowired
+    public CustodyWalletController(AuthService authService,
+                                   CustodyWalletClient walletClient,
+                                   SensitiveActionVerificationService verificationService,
+                                   ComplianceService complianceService,
+                                   CustodyWithdrawalService withdrawalService,
+                                   WalletFundingService fundingService) {
+        this(authService, walletClient, verificationService, complianceService, withdrawalService, null, fundingService);
     }
 
     @GetMapping("/assets")
@@ -106,36 +114,7 @@ public class CustodyWalletController {
                                              @Valid @RequestBody CreateAddressRequest request) {
         try {
             JwtPrincipal principal = principal(authorization);
-            long version = request.addressVersion() == null ? 1L : request.addressVersion();
-            if (addressRepository != null) {
-                var cached = addressRepository.find(principal.userId(), request.chain(), version);
-                if (cached.isPresent()) {
-                    var r = cached.get();
-                    return Map.of(
-                            "address", r.address(),
-                            "chain", r.networkCode(),
-                            "subject", "user:" + principal.userId(),
-                            "status", "ACTIVE",
-                            "addressVersion", r.addressVersion(),
-                            "memo", r.memo()
-                    );
-                }
-            }
-            Map<String, Object> response = walletClient.createAddress(principal.userId(), request.chain(), version);
-            if (response != null && addressRepository != null && response.get("address") instanceof String address && !address.isBlank()) {
-                String memo = Objects.toString(response.get("memo"), "");
-                String family = "generic";
-                try {
-                    for (var c : walletClient.chains()) {
-                        if (request.chain().equals(c.get("chain")) && c.get("family") instanceof String f) {
-                            family = f.toLowerCase(Locale.ROOT);
-                            break;
-                        }
-                    }
-                } catch (Exception ignored) {}
-                addressRepository.save(principal.userId(), request.chain(), family, address, memo, version);
-            }
-            return response;
+            return fundingService.createChainAddress(principal.userId(), request.chain(), request.addressVersion());
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         } catch (IllegalStateException ex) {
@@ -255,13 +234,7 @@ public class CustodyWalletController {
     }
 
     private JwtPrincipal principal(String authorization) {
-        try {
-            return authService.authenticateBearer(authorization);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
+        return GatewayAccessSupport.authenticateBearerPrincipal(authService, authorization);
     }
 
     private ResponseStatusException badRequest(IllegalArgumentException ex) {

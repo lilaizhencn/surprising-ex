@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 /** All Valkey and per-node publication work is isolated from the trading process. */
 @Component
+@org.springframework.context.annotation.DependsOn("appMediaDriver")
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "surprising.realtime.router.enabled", havingValue = "true", matchIfMissing = true)
 public final class RealtimeRouter implements AutoCloseable {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RealtimeRouter.class);
@@ -41,6 +42,7 @@ public final class RealtimeRouter implements AutoCloseable {
     private final java.util.concurrent.atomic.AtomicLong pendingFrames = new java.util.concurrent.atomic.AtomicLong();
     private final LongAdder transportExpired = new LongAdder(), transportCapacityDropped = new LongAdder();
     private static final long SEND_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(5);
+    private static final byte[] EMPTY_BYTES = new byte[0];
     private final Map<ProductLine, ExclusivePublication> controls =
             new EnumMap<>(ProductLine.class);
     private final Map<ProductLine, Long> requestOffsets = new EnumMap<>(ProductLine.class);
@@ -460,8 +462,8 @@ public final class RealtimeRouter implements AutoCloseable {
                                         .nextLong(1, Long.MAX_VALUE),
                                 instrumentId,
                                 "",
-                                new byte[0]);
-                if (entry.getValue().offer(new UnsafeBuffer(RealtimeFrameCodec.encode(book))) > 0)
+                                EMPTY_BYTES);
+                if (offerControl(entry.getValue(), book))
                     pendingBooks.put(bookKey, now);
             }
             long offset = requestOffsets.getOrDefault(entry.getKey(), 0L);
@@ -486,12 +488,22 @@ public final class RealtimeRouter implements AutoCloseable {
                                 id,
                                 "",
                                 "",
-                                new byte[0]);
-                if (entry.getValue().offer(new UnsafeBuffer(RealtimeFrameCodec.encode(request)))
-                        > 0) outstanding.put(key, new Request(id, now));
+                                EMPTY_BYTES);
+                if (offerControl(entry.getValue(), request)) outstanding.put(key, new Request(id, now));
                 else requests.releaseClaim(entry.getKey(), userId);
             }
         }
+    }
+
+    private boolean offerControl(ExclusivePublication control, RealtimeFrame frame) {
+        int needed = RealtimeFrameCodec.encodedLength(frame);
+        if (needed > sendScratch.capacity()) {
+            sendScratch = ByteBuffer.allocate(Math.max(needed, sendScratch.capacity() * 2)).order(ByteOrder.LITTLE_ENDIAN);
+            sendBuffer.wrap(sendScratch.array());
+        }
+        sendScratch.clear();
+        int encodedLength = RealtimeFrameCodec.encode(frame, sendScratch);
+        return control.offer(sendBuffer, 0, encodedLength) > 0;
     }
 
     private void diagnostic(String operation, ProductLine product, String kind, Throwable failure) {

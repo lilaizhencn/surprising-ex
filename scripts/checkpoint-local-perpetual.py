@@ -41,7 +41,7 @@ def checkpoint(runtime, java, tools_jar, interval):
         return "RECENT", previous
     # Do not interrupt replay or mistake HTTP liveness for trading readiness.
     catalog_request = urllib.request.Request(
-        "http://127.0.0.1:9094/api/v1/gateway/instrument/list",
+        "http://127.0.0.1:9094/api/v1/instruments/list",
         headers={"X-Product-Line": "LINEAR_PERPETUAL"})
     with urllib.request.urlopen(catalog_request, timeout=5) as response:
         instruments = json.load(response)["instruments"]
@@ -49,7 +49,7 @@ def checkpoint(runtime, java, tools_jar, interval):
         raise RuntimeError("no visible contract available for Core readiness probe")
     instrument_id = int(instruments[0]["instrumentId"])
     request = urllib.request.Request(
-        f"http://127.0.0.1:9094/api/v1/gateway/trading-market/orderbook?instrumentId={instrument_id}&depth=1",
+        f"http://127.0.0.1:9094/api/v1/trading/market/orderbook?instrumentId={instrument_id}&depth=1",
         headers={"X-Product-Line": "LINEAR_PERPETUAL"})
     with urllib.request.urlopen(request, timeout=5) as response:
         book = json.load(response)

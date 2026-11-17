@@ -78,7 +78,7 @@ public final class CorePerpetualEndToEndBenchmark {
             Result result = run(state, sequences, cycles, makerDepth, true);
             return new BaselineResult(result.cycles(), result.makerDepth(), result.elapsedNanos(), result.latencies(),
                     result.matchedQuantity(), state.pendingMatching().size(),
-                    state.completedOrderArchiveTombstoneCount());
+                    state.completedOrderArchive().completedCount());
         }
     }
 

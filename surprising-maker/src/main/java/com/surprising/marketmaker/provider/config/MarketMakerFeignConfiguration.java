@@ -12,11 +12,14 @@ public class MarketMakerFeignConfiguration {
 
     @Bean
     public RequestInterceptor marketMakerProductLineRequestInterceptor() {
+        String internalToken = System.getenv("GATEWAY_JWT_SECRET");
         return template -> {
-
             ProductLine productLine = MarketMakerProductLineContext.current();
             if (productLine != null) {
                 template.header("X-Product-Line", productLine.name());
+            }
+            if (internalToken != null && !internalToken.isBlank()) {
+                template.header("X-Internal-Service-Token", internalToken);
             }
         };
     }

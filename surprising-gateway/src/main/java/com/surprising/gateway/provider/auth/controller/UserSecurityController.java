@@ -315,13 +315,7 @@ public class UserSecurityController {
     }
 
     private AuthModels.JwtPrincipal principal(String authorization) {
-        try {
-            return authService.authenticateBearer(authorization);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        }
+        return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.authenticateBearerPrincipal(authService, authorization);
     }
 
     private void mapAccessFailure(Runnable action) {

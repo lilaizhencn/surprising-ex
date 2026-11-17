@@ -140,7 +140,7 @@ public final class LinearPerpetualSaturationWorkload {
 
             @Override
             public int terminalTombstones() {
-                return harness.state().completedOrderArchiveTombstoneCount();
+                return harness.state().completedOrderArchive().completedCount();
             }
 
             @Override

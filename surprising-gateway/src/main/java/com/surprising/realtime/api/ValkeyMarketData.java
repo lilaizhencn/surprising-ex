@@ -8,6 +8,7 @@ import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.List;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
@@ -40,15 +41,28 @@ public final class ValkeyMarketData {
         try {
             // REST-only consumers also renew demand; the router coalesces it with WS demand.
             requests.renewBook(product, instrumentId, now + 30_000);
-            String value = redis.opsForValue().get(key(product, instrumentId));
-            String epoch = redis.opsForValue().get("rt:source:" + product.name());
+            String bookKey = key(product, instrumentId);
+            String epochKey = "rt:source:" + product.name();
+            List<String> results = redis.opsForValue().multiGet(List.of(bookKey, epochKey));
+            if (results == null || results.size() < 2) throw unavailable();
+            String value = results.get(0);
+            String epoch = results.get(1);
             if (value == null || epoch == null) throw unavailable();
-            String[] stored = value.split("\n", 3);
-            if (stored.length != 3 || !stored[0].equals(epoch)) throw unavailable();
-            long receivedAt = Long.parseLong(stored[1]);
+
+            int firstNewline = value.indexOf('\n');
+            if (firstNewline <= 0) throw unavailable();
+            int secondNewline = value.indexOf('\n', firstNewline + 1);
+            if (secondNewline <= firstNewline + 1) throw unavailable();
+
+            String storedEpoch = value.substring(0, firstNewline);
+            if (!storedEpoch.equals(epoch)) throw unavailable();
+
+            long receivedAt = Long.parseLong(value.substring(firstNewline + 1, secondNewline));
             long readAt = System.currentTimeMillis();
             if (receivedAt > readAt || readAt - receivedAt >= MAX_AGE_MILLIS) throw unavailable();
-            var frame = RealtimeFrameCodec.decode(Base64.getDecoder().decode(stored[2]));
+
+            String payloadBase64 = value.substring(secondNewline + 1);
+            var frame = RealtimeFrameCodec.decode(Base64.getDecoder().decode(payloadBase64));
             if (frame.productLine() != product || frame.kind() != RealtimeFrame.Kind.BOOK
                     || frame.userId() != 0 || !frame.instrumentId().equals(instrumentId)) throw unavailable();
             var book = CoreStateQueryCodec.decodeOrderBookView(frame.payload());

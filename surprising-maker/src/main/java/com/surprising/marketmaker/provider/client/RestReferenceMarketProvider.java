@@ -156,7 +156,20 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                                                      String payload,
                                                      Instant receivedAt) {
         try {
-            JsonNode root = objectMapper.readTree(payload);
+            return parseWebSocketPayload(source, instrumentId, instrument, objectMapper.readTree(payload), receivedAt);
+        } catch (IllegalArgumentException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("invalid reference order book websocket payload: " + ex.getMessage(), ex);
+        }
+    }
+
+    private ReferenceOrderBookSnapshot parseWebSocketPayload(MarketMakerProperties.ReferenceMarket.Source source,
+                                                             String instrumentId,
+                                                             InstrumentResponse instrument,
+                                                             JsonNode root,
+                                                             Instant receivedAt) {
+        try {
             ParsedBookUpdate update = parseLiveBookUpdate(liveParser(source), root);
             if (update == null || update.empty()) {
                 return null;
@@ -366,8 +379,19 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (!matches(source, productLine, instrumentId) || !hasText(source.getWebSocketUrl())) {
                 continue;
             }
-            String liveKey = liveKey(source, instrumentId);
-            WebSocketState state = webSockets.computeIfAbsent(liveKey, ignored -> new WebSocketState());
+            String resolvedUrl = template(source.getWebSocketUrl(), source);
+            WebSocketState state = webSockets.computeIfAbsent(resolvedUrl, ignored -> new WebSocketState());
+            String bindingKey = liveKey(source, instrumentId);
+            String subscribeMessage = hasText(source.getWebSocketSubscribeMessage())
+                    ? template(source.getWebSocketSubscribeMessage(), source)
+                    : null;
+            WebSocketBinding binding = new WebSocketBinding(bindingKey, source, instrumentId, instrument, subscribeMessage);
+            state.attach(binding);
+            WebSocket activeSocket = state.webSocket;
+            if (activeSocket != null && !activeSocket.isInputClosed() && !activeSocket.isOutputClosed()
+                    && subscribeMessage != null && state.sentSubscriptions.add(subscribeMessage)) {
+                activeSocket.sendText(subscribeMessage, true);
+            }
             if (!shouldConnect(state, now)) {
                 continue;
             }
@@ -376,21 +400,21 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             try {
                 httpClient.newWebSocketBuilder()
                         .connectTimeout(timeout())
-                        .buildAsync(URI.create(template(source.getWebSocketUrl(), source)),
-                                new ReferenceMarketWebSocketListener(source, instrumentId, instrument, state))
+                        .buildAsync(URI.create(resolvedUrl),
+                                new ReferenceMarketWebSocketListener(resolvedUrl, state))
                         .whenComplete((webSocket, error) -> {
                             if (error != null) {
                                 state.connecting = false;
                                 state.webSocket = null;
-                                log.debug("Reference market websocket connect failed source={} symbol={} error={}",
-                                        source.getName(), instrumentId, error.getMessage());
+                                log.debug("Reference market websocket connect failed url={} error={}",
+                                        resolvedUrl, error.getMessage());
                             }
                         });
             } catch (RuntimeException ex) {
                 state.connecting = false;
                 state.webSocket = null;
-                log.debug("Reference market websocket connect rejected source={} symbol={} error={}",
-                        source.getName(), instrumentId, ex.getMessage());
+                log.debug("Reference market websocket connect rejected url={} error={}",
+                        resolvedUrl, ex.getMessage());
             }
         }
     }
@@ -459,39 +483,45 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private record CachedSnapshot(ReferenceOrderBookSnapshot snapshot, Instant fetchedAt, boolean streaming) {
     }
 
+    private record WebSocketBinding(String key, MarketMakerProperties.ReferenceMarket.Source source,
+                                      String instrumentId, InstrumentResponse instrument, String subscribeMessage) {
+    }
+
     private static final class WebSocketState {
         private volatile WebSocket webSocket;
         private volatile boolean retired;
         private volatile boolean connecting;
         private volatile Instant lastAttempt = Instant.EPOCH;
+        private final Map<String, WebSocketBinding> bindings = new ConcurrentHashMap<>();
+        private final java.util.Set<String> sentSubscriptions = ConcurrentHashMap.newKeySet();
+
+        void attach(WebSocketBinding binding) {
+            bindings.putIfAbsent(binding.key(), binding);
+        }
     }
 
     private final class ReferenceMarketWebSocketListener implements WebSocket.Listener {
-        private final MarketMakerProperties.ReferenceMarket.Source source;
-        private final String instrumentId;
-        private final InstrumentResponse instrument;
+        private final String url;
         private final WebSocketState state;
         private final StringBuilder text = new StringBuilder();
 
-        private ReferenceMarketWebSocketListener(MarketMakerProperties.ReferenceMarket.Source source,
-                                                 String instrumentId,
-                                                 InstrumentResponse instrument,
-                                                 WebSocketState state) {
-            this.source = source;
-            this.instrumentId = instrumentId;
-            this.instrument = instrument;
+        private ReferenceMarketWebSocketListener(String url, WebSocketState state) {
+            this.url = url;
             this.state = state;
         }
 
         @Override
         public void onOpen(WebSocket webSocket) {
             if (state.retired) { webSocket.abort(); return; }
+            state.sentSubscriptions.clear();
             state.webSocket = webSocket;
             if (state.retired) { webSocket.abort(); return; }
             state.connecting = false;
-            String subscribeMessage = source.getWebSocketSubscribeMessage();
-            if (hasText(subscribeMessage)) {
-                webSocket.sendText(template(subscribeMessage, source), true);
+            for (WebSocketBinding binding : state.bindings.values()) {
+                String subscribeMessage = binding.subscribeMessage();
+                if (hasText(subscribeMessage) && state.sentSubscriptions.add(subscribeMessage)) {
+                    webSocket.sendText(subscribeMessage, true);
+                }
             }
             webSocket.request(1);
         }
@@ -504,12 +534,21 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 String payload = text.toString();
                 text.setLength(0);
                 try {
+                    JsonNode root = objectMapper.readTree(payload);
+                    String externalSymbol = extractExternalSymbol(root);
+                    Instant now = Instant.now();
                     synchronized (configurationLock) {
-                        if (!state.retired) parseWebSocketPayload(source, instrumentId, instrument, payload, Instant.now());
+                        if (!state.retired) {
+                            for (WebSocketBinding binding : state.bindings.values()) {
+                                if (matchesBinding(binding, externalSymbol, root, state.bindings.size())) {
+                                    parseWebSocketPayload(binding.source(), binding.instrumentId(), binding.instrument(), root, now);
+                                }
+                            }
+                        }
                     }
-                } catch (IllegalArgumentException ex) {
-                    log.debug("Reference market websocket message ignored source={} symbol={} error={}",
-                            source.getName(), instrumentId, ex.getMessage());
+                } catch (Exception ex) {
+                    log.debug("Reference market websocket message ignored url={} error={}",
+                            url, ex.getMessage());
                 }
             }
             webSocket.request(1);
@@ -520,6 +559,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
             state.webSocket = null;
             state.connecting = false;
+            state.sentSubscriptions.clear();
             return CompletableFuture.completedFuture(null);
         }
 
@@ -527,9 +567,37 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         public void onError(WebSocket webSocket, Throwable error) {
             state.webSocket = null;
             state.connecting = false;
-            log.debug("Reference market websocket failed source={} symbol={} error={}",
-                    source.getName(), instrumentId, error.getMessage());
+            state.sentSubscriptions.clear();
+            log.debug("Reference market websocket failed url={} error={}",
+                    url, error.getMessage());
         }
+    }
+
+    private static String extractExternalSymbol(JsonNode root) {
+        if (root == null) return "";
+        String okxInst = root.path("arg").path("instId").asString("");
+        if (!okxInst.isEmpty()) return okxInst;
+        String bybitSymbol = root.path("data").path("s").asString("");
+        if (!bybitSymbol.isEmpty()) return bybitSymbol;
+        String binanceSymbol = root.path("s").asString("");
+        if (!binanceSymbol.isEmpty()) return binanceSymbol;
+        String topic = root.path("topic").asString("");
+        if (!topic.isEmpty()) {
+            int dot = topic.lastIndexOf('.');
+            if (dot >= 0 && dot + 1 < topic.length()) return topic.substring(dot + 1);
+        }
+        return "";
+    }
+
+    private static boolean matchesBinding(WebSocketBinding binding, String externalSymbol, JsonNode root, int totalBindings) {
+        if (externalSymbol != null && !externalSymbol.isEmpty()) {
+            return externalSymbol.equalsIgnoreCase(binding.source().getExternalSymbol());
+        }
+        String topic = root.path("topic").asString("");
+        if (!topic.isEmpty()) {
+            return topic.toUpperCase(Locale.ROOT).contains(binding.source().getExternalSymbol().toUpperCase(Locale.ROOT));
+        }
+        return totalBindings == 1;
     }
 
     private static final class LiveBook {

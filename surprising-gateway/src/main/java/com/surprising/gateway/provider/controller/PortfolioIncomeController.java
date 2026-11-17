@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/v1/portfolio")
 public class PortfolioIncomeController {
     private final PortfolioIncomeService income;
+    @org.springframework.beans.factory.annotation.Autowired
     public PortfolioIncomeController(PortfolioIncomeService income) { this.income = income; }
     public PortfolioIncomeController(AuthService auth, PortfolioIncomeService income) { this(income); }
 

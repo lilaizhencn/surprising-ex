@@ -51,9 +51,7 @@ public class MarketMakerRealtimeReceiver implements AutoCloseable {
 
         AeronRealtimeReceiver activeReceiver = null;
         try {
-            activeReceiver = new AeronRealtimeReceiver(directoryPath, channel, streamId, this::receive, failure -> {
-                log.warn("做市商 UDP 传输故障: kind={} sequence={}", failure.kind(), failure.sequence());
-            });
+            activeReceiver = new AeronRealtimeReceiver(directoryPath, channel, streamId, this::receive);
             this.ready = true;
             log.info("做市商 UDP 行情接收器启动成功: channel={} streamId={}", channel, streamId);
         } catch (Exception ex) {
@@ -64,7 +62,7 @@ public class MarketMakerRealtimeReceiver implements AutoCloseable {
     }
 
     void receive(RealtimeFrame frame) {
-        if (frame.productLine() != properties.getProductLine()) return;
+        if (frame.productLine() == null) return;
 
         switch (frame.kind()) {
             case MARK -> handleMarkPrice(frame);

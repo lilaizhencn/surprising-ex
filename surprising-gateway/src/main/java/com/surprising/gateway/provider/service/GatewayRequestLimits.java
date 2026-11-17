@@ -110,19 +110,26 @@ public final class GatewayRequestLimits {
 
     public void checkIp(String ip, int cost, boolean login) {
         String actor = properties.getNamespace() + ":{ip:" + ip + "}:";
-        var charges = new ArrayList<Charge>();
-        charges.add(new Charge(actor + "requests", properties.getIp(), cost));
-        if (login) charges.add(new Charge(actor + "login", properties.getLoginIp(), 1));
-        consume(charges, "IP");
+        Charge requestCharge = new Charge(actor + "requests", properties.getIp(), cost);
+        if (!login) {
+            consume(List.of(requestCharge), "IP");
+            return;
+        }
+        consume(List.of(requestCharge, new Charge(actor + "login", properties.getLoginIp(), 1)), "IP");
     }
+
+    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    });
 
     public void checkLoginAccount(String identifier) {
         if (!properties.isEnabled()) return;
-        try {
-            String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(identifier.strip().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8)));
-            consume(List.of(new Charge(properties.getNamespace() + ":{login:" + digest + "}", properties.getLoginAccount(), 1)), "LOGIN");
-        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        String digest = digest(identifier.strip().toLowerCase(Locale.ROOT));
+        consume(List.of(new Charge(properties.getNamespace() + ":{login:" + digest + "}", properties.getLoginAccount(), 1)), "LOGIN");
     }
 
     public void checkPublicRequest(String ip, String path, boolean write, Group group) {
@@ -165,8 +172,9 @@ public final class GatewayRequestLimits {
     }
 
     private static String digest(String value) {
-        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
-        catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        MessageDigest md = SHA_256.get();
+        md.reset();
+        return HexFormat.of().formatHex(md.digest(value.getBytes(StandardCharsets.UTF_8)));
     }
 
     public void checkUser(long user, String apiKey, Group group, ProductLine product, int cost) {
@@ -179,18 +187,51 @@ public final class GatewayRequestLimits {
         consume(charges, group.name());
     }
 
+    private static final AutoCloseable NOOP_PERMIT = () -> {};
+
+    private static final class SemaphorePermit extends AtomicBoolean implements AutoCloseable {
+        private final Semaphore semaphore;
+        SemaphorePermit(Semaphore semaphore) { this.semaphore = semaphore; }
+        @Override public void close() {
+            if (compareAndSet(false, true)) semaphore.release();
+        }
+    }
+
     private void consume(List<Charge> charges, String group) {
         if (!properties.isEnabled()) return;
-        var keys = new ArrayList<String>(charges.size()); var args = new ArrayList<String>(charges.size() * 5);
-        for (var charge : charges) {
+        List<String> keys;
+        Object[] args;
+        if (charges.size() == 1) {
+            var charge = charges.get(0);
             if (charge.cost() < 1 || charge.cost() > charge.rule().burst())
                 throw new Rejection(Reason.REQUEST_EXCEEDS_RATE_BURST, group, 1000);
-            keys.add(charge.key() + (charge.fixedWindow() ? ":w" : ":p") + charge.rule().period().toMillis()); args.add(Integer.toString(charge.rule().rate()));
-            args.add(Integer.toString(charge.rule().burst())); args.add(Integer.toString(charge.cost()));
-            args.add(Long.toString(charge.rule().period().toMillis())); args.add(charge.fixedWindow() ? "1" : "0");
+            long periodMillis = charge.rule().period().toMillis();
+            keys = List.of(charge.key() + (charge.fixedWindow() ? ":w" : ":p") + periodMillis);
+            args = new Object[] {
+                    Integer.toString(charge.rule().rate()),
+                    Integer.toString(charge.rule().burst()),
+                    Integer.toString(charge.cost()),
+                    Long.toString(periodMillis),
+                    charge.fixedWindow() ? "1" : "0"
+            };
+        } else {
+            keys = new ArrayList<>(charges.size());
+            args = new Object[charges.size() * 5];
+            int argIndex = 0;
+            for (var charge : charges) {
+                if (charge.cost() < 1 || charge.cost() > charge.rule().burst())
+                    throw new Rejection(Reason.REQUEST_EXCEEDS_RATE_BURST, group, 1000);
+                long periodMillis = charge.rule().period().toMillis();
+                keys.add(charge.key() + (charge.fixedWindow() ? ":w" : ":p") + periodMillis);
+                args[argIndex++] = Integer.toString(charge.rule().rate());
+                args[argIndex++] = Integer.toString(charge.rule().burst());
+                args[argIndex++] = Integer.toString(charge.cost());
+                args[argIndex++] = Long.toString(periodMillis);
+                args[argIndex++] = charge.fixedWindow() ? "1" : "0";
+            }
         }
         try {
-            Long wait = redis.execute(CONSUME, keys, args.toArray());
+            Long wait = redis.execute(CONSUME, keys, args);
             if (wait == null) throw unavailable(group);
             if (wait > 0) {
                 metrics.counter("gateway.limits.rejected", "group", group).increment();
@@ -200,7 +241,7 @@ public final class GatewayRequestLimits {
     }
 
     public AutoCloseable admit(Group group) {
-        if (!properties.isEnabled()) return () -> {};
+        if (!properties.isEnabled()) return NOOP_PERMIT;
         Semaphore permits = switch (group) {
             case CANCEL, CANCEL_ALL -> cancels;
             case RECEIPT -> receipts;
@@ -208,15 +249,13 @@ public final class GatewayRequestLimits {
             default -> requests;
         };
         if (!permits.tryAcquire()) throw new Rejection(Reason.GATEWAY_BUSY, group.name(), 1000);
-        var released = new AtomicBoolean();
-        return () -> { if (released.compareAndSet(false, true)) permits.release(); };
+        return new SemaphorePermit(permits);
     }
 
     public AutoCloseable admitSocket() {
-        if (!properties.isEnabled()) return () -> {};
+        if (!properties.isEnabled()) return NOOP_PERMIT;
         if (!sockets.tryAcquire()) throw new Rejection(Reason.GATEWAY_BUSY, "WEBSOCKET", 1000);
-        var released = new AtomicBoolean();
-        return () -> { if (released.compareAndSet(false, true)) sockets.release(); };
+        return new SemaphorePermit(sockets);
     }
 
     public void checkNewSocket(String ip) {

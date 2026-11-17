@@ -8,11 +8,26 @@ public final class AssetConfiguration {
     private AssetConfiguration() {}
 
     public record Asset(int assetId, String asset, String displayName, String logoUrl, long scaleUnits,
-                        boolean listed, boolean tradingEnabled, long revision, Instant updatedAt) {}
+                        boolean listed, boolean tradingEnabled, boolean depositEnabled,
+                        boolean withdrawalEnabled, boolean transferEnabled, long revision, Instant updatedAt) {
+        public Asset(int assetId, String asset, String displayName, String logoUrl, long scaleUnits,
+                     boolean listed, boolean tradingEnabled, long revision, Instant updatedAt) {
+            this(assetId, asset, displayName, logoUrl, scaleUnits, listed, tradingEnabled,
+                    listed, listed, listed, revision, updatedAt);
+        }
+    }
 
     public record AssetRequest(Integer assetId, String asset, String displayName, String logoUrl,
-                               long scaleUnits, boolean listed, boolean tradingEnabled, long revision,
-                               String reason) {}
+                               long scaleUnits, boolean listed, boolean tradingEnabled,
+                               boolean depositEnabled, boolean withdrawalEnabled, boolean transferEnabled,
+                               long revision, String reason) {
+        public AssetRequest(Integer assetId, String asset, String displayName, String logoUrl,
+                            long scaleUnits, boolean listed, boolean tradingEnabled, long revision,
+                            String reason) {
+            this(assetId, asset, displayName, logoUrl, scaleUnits, listed, tradingEnabled,
+                    listed, listed, listed, revision, reason);
+        }
+    }
 
     public record Network(int networkId, int assetId, String networkCode, String displayName,
                           String contractAddress, boolean nativeAsset, int chainDecimals,

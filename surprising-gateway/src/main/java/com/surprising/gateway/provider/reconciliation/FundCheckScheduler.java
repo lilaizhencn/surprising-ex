@@ -7,31 +7,31 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 资金高频对账调度器
- * 默认每 5 分钟执行一次高频对账任务（满足 5~10 分钟对账的业务要求），
+ * 资金高频核查调度器
+ * 默认每 5 分钟执行一次高频核查任务（满足 5~10 分钟对账的业务要求），
  * 发现不一致立即熔断停机提现并发报警通知。
  */
 @Component
 @ConditionalOnProperty(prefix = "surprising.gateway.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)
-public class FinancialReconciliationScheduler {
+public class FundCheckScheduler {
 
-    private static final Logger log = LoggerFactory.getLogger(FinancialReconciliationScheduler.class);
+    private static final Logger log = LoggerFactory.getLogger(FundCheckScheduler.class);
 
-    private final FinancialReconciliationEngine engine;
+    private final FundCheckService service;
 
-    public FinancialReconciliationScheduler(FinancialReconciliationEngine engine) {
-        this.engine = engine;
+    public FundCheckScheduler(FundCheckService service) {
+        this.service = service;
     }
 
     /**
      * 默认每 5 分钟整点执行（00, 05, 10, 15, 20...）
      */
     @Scheduled(cron = "${surprising.gateway.reconciliation.cron:0 */5 * * * ?}")
-    public void executeScheduledReconciliation() {
+    public void executeScheduledFundCheck() {
         try {
-            engine.runReconciliation();
+            service.checkFunds();
         } catch (Exception ex) {
-            log.error("Scheduled financial reconciliation failed with unhandled exception: {}", ex.getMessage(), ex);
+            log.error("Scheduled fund check failed with unhandled exception: {}", ex.getMessage(), ex);
         }
     }
 }

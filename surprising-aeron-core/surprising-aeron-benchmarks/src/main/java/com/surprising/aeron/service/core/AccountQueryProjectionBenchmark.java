@@ -4,7 +4,7 @@ import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.account.AccountBalance;

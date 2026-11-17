@@ -46,8 +46,21 @@ public class InstrumentSnapshotInitializer extends AbstractInstrumentSnapshotIni
 
     @Override
     protected Set<ProductLine> productLines() {
-        return Set.of(com.surprising.product.api.ProductLineConfiguration.require(
-                properties.getProductLine(), "market-maker instrument snapshot"));
+        var lines = new java.util.LinkedHashSet<ProductLine>();
+        if (properties.getProductLine() != null) {
+            lines.add(properties.getProductLine());
+        }
+        for (var strategy : properties.getStrategies()) {
+            if (strategy.getProductLine() != null) {
+                lines.add(strategy.getProductLine());
+            }
+        }
+        for (var source : properties.getReferenceMarket().getSources()) {
+            if (source.isEnabled() && source.getProductLine() != null) {
+                lines.add(source.getProductLine());
+            }
+        }
+        return java.util.Collections.unmodifiableSet(lines);
     }
 
     @Override

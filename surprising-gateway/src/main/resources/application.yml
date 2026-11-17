@@ -52,6 +52,8 @@ spring:
 management:
   endpoint:
     health:
+      show-details: always
+      show-components: always
       probes:
         enabled: true
       group:
@@ -156,7 +158,7 @@ surprising:
       symbol-aliases: {}
       symbol-scales: {}
     security:
-      admin-browser-allowed-origins: http://localhost:5174,http://127.0.0.1:5174,https://ex-api.tokdou.com
+      admin-browser-allowed-origins: http://localhost:5174,http://127.0.0.1:5174,http://localhost:5176,http://127.0.0.1:5176,https://ex-api.tokdou.com
       phone-registration-enabled: false
       require-email-verification: false
       resend-api-key: ""
@@ -227,16 +229,16 @@ surprising:
   realtime:
     router:
       enabled: true
-      directory: /dev/shm/aeron-router
+      directory: ${SURPRISING_REALTIME_ROUTER_DIRECTORY:${SURPRISING_REALTIME_DIRECTORY:/dev/shm/aeron-router}}
       channel: "aeron:udp?endpoint=0.0.0.0:21010"
   trade-export:
-    enabled: false
-    cluster-directory: ""
-    aeron-directory: ""
-    archive-control-channel: ""
-    checkpoint: ""
-    cluster-id: ""
-    kafka-config: ""
+    enabled: ${TRADE_EXPORT_ENABLED:false}
+    cluster-directory: ${TRADE_EXPORT_CLUSTER_DIR:}
+    aeron-directory: ${TRADE_EXPORT_AERON_DIR:}
+    archive-control-channel: ${TRADE_EXPORT_ARCHIVE_CHANNEL:}
+    checkpoint: ${TRADE_EXPORT_CHECKPOINT:}
+    cluster-id: ${TRADE_EXPORT_CLUSTER_ID:0}
+    kafka-config: ${TRADE_EXPORT_KAFKA_CONFIG:}
 
 telegram:
   login:

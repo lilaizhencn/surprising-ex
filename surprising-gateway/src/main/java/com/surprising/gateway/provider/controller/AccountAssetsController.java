@@ -2,7 +2,6 @@ package com.surprising.gateway.provider.controller;
 
 import com.surprising.account.api.model.*;
 import com.surprising.account.provider.service.AccountService;
-import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.gateway.provider.product.GatewayProductServices;
@@ -22,14 +21,9 @@ public class AccountAssetsController {
     private final GatewayProductSelection selection;
     private final GatewayProductServices products;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public AccountAssetsController(GatewayProductSelection selection, GatewayProductServices products) {
         this.selection = selection;
         this.products = products;
-    }
-
-    public AccountAssetsController(AuthService auth, GatewayProductSelection selection, GatewayProductServices products) {
-        this(selection, products);
     }
 
     @GetMapping("/balances")

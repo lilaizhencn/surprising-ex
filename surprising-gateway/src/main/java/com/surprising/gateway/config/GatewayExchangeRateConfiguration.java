@@ -1,23 +1,27 @@
 package com.surprising.gateway.config;
 
 import com.surprising.price.index.client.ExternalSpotPriceClient;
+import com.surprising.price.index.client.ExternalSpotWebSocketManager;
 import com.surprising.price.index.client.FiatRateClient;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.controller.ExchangeRateController;
 import com.surprising.price.index.repository.ExchangeRateRepository;
 import com.surprising.price.index.service.ExchangeRateService;
 import com.surprising.price.index.service.ExchangeRateSnapshotCache;
+import com.surprising.price.index.service.LatestSourceQuoteStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
+import org.springframework.scheduling.TaskScheduler;
 import tools.jackson.databind.ObjectMapper;
 
 /** 汇率与外部现货行情客户端不区分产品线，留在根容器供资产估值与各产品线共享。 */
 @Configuration(proxyBeanMethods = false)
-@Import({ExchangeRateRepository.class, ExchangeRateSnapshotCache.class, ExchangeRateController.class})
+@Import({ExchangeRateRepository.class, ExchangeRateSnapshotCache.class, ExchangeRateController.class, LatestSourceQuoteStore.class})
 public class GatewayExchangeRateConfiguration {
 
     private static IndexPriceProperties bindHttpAndFiat(Environment environment) {
@@ -25,6 +29,7 @@ public class GatewayExchangeRateConfiguration {
         var binder = Binder.get(environment);
         binder.bind("surprising.price.index.http", Bindable.ofInstance(properties.getHttp()));
         binder.bind("surprising.price.index.fiat", Bindable.ofInstance(properties.getFiat()));
+        binder.bind("surprising.price.index.web-socket", Bindable.ofInstance(properties.getWebSocket()));
         return properties;
     }
 
@@ -36,6 +41,16 @@ public class GatewayExchangeRateConfiguration {
     @Bean
     public ExternalSpotPriceClient externalSpotPriceClient(Environment environment, ObjectMapper objectMapper) {
         return new ExternalSpotPriceClient(bindHttpAndFiat(environment), objectMapper);
+    }
+
+    @Bean
+    public ExternalSpotWebSocketManager externalSpotWebSocketManager(
+            Environment environment,
+            ExternalSpotPriceClient externalSpotPriceClient,
+            LatestSourceQuoteStore latestSourceQuoteStore,
+            @Qualifier("taskScheduler") TaskScheduler taskScheduler) {
+        return new ExternalSpotWebSocketManager(bindHttpAndFiat(environment), externalSpotPriceClient,
+                latestSourceQuoteStore, taskScheduler);
     }
 
     @Bean

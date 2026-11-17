@@ -30,7 +30,6 @@ public final class RealtimeWebSocketBridge
     private final Map<RealtimeRoute, Integer> memberships = new ConcurrentHashMap<>();
     private final Object heartbeatLock = new Object();
     private final AeronRealtimeReceiver receiver;
-    private final ObjectMapper mapper;
     private record BookKey(ProductLine productLine, String instrumentId) {}
     private record LastTicker(long bidPrice, long bidQty, long askPrice, long askQty) {}
     private record PendingDepth(SubscriptionTopic topic, CoreOrderBookView book,
@@ -66,7 +65,6 @@ public final class RealtimeWebSocketBridge
             ObjectMapper mapper,
             WebSocketProperties properties) {
         this.registry = registry;
-        this.mapper = mapper;
         Duration coalesce = properties == null ? Duration.ofMillis(50) : properties.getFanout().getDepthCoalesceWindow();
         this.depthCoalesceWindowNanos = coalesce == null || coalesce.isNegative() || coalesce.isZero()
                 ? 0L : coalesce.toNanos();
@@ -90,6 +88,7 @@ public final class RealtimeWebSocketBridge
                         env.getProperty("surprising.realtime.ws.stream", Integer.class, 2103),
                         this::receive, failure -> continuityLost.set(true));
         try {
+            memberships.put(new RealtimeRoute(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, 0, "MARK", "*"), 1);
             heartbeat();
             registry.routeLifecycle(this);
         } catch (RuntimeException | Error failure) {

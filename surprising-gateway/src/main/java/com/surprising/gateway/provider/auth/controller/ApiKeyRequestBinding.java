@@ -162,7 +162,7 @@ public final class ApiKeyRequestBinding {
     }
 
     public String requireApiKey(String value) {
-        if (value == null || !value.matches("sx_[A-Za-z0-9_-]{20,80}")) {
+        if (value == null || !API_KEY_PATTERN.matcher(value).matches()) {
             throw new IllegalArgumentException("api key is invalid");
         }
         return value;

@@ -10,6 +10,14 @@ import java.util.Set;
 
 /** 稳定游标格式转换；请求入口验证作用域，SQL只使用原生坐标。 */
 public final class TradeReadCursors {
+    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    });
+
     private TradeReadCursors() {}
 
     public static String fillScope(ProductLine product, long user, String instrument, Long order, Long start, Long end) {
@@ -68,10 +76,8 @@ public final class TradeReadCursors {
     }
 
     private static String digest(String value) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
+        MessageDigest md = SHA_256.get();
+        md.reset();
+        return HexFormat.of().formatHex(md.digest(value.getBytes(StandardCharsets.UTF_8)));
     }
 }

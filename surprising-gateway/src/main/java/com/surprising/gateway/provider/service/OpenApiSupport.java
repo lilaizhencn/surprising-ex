@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.controller;
+package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
@@ -9,7 +9,6 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.product.api.ProductLine;
 import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
@@ -88,7 +87,7 @@ public class OpenApiSupport {
 
     public Map<String, Object> parameters(HttpServletRequest request, byte[] body) {
         Map<String, Object> result = new LinkedHashMap<>();
-        if (body != null && body.length > 0 && new String(body, StandardCharsets.UTF_8).stripLeading().startsWith("{")) {
+        if (startsWithJsonObject(body)) {
             request.getParameterMap().forEach((key, values) -> {
                 if (values != null && values.length > 0) result.put(key, values[0]);
             });
@@ -99,6 +98,19 @@ public class OpenApiSupport {
             });
         }
         return result;
+    }
+
+    private static boolean startsWithJsonObject(byte[] body) {
+        if (body == null || body.length == 0) {
+            return false;
+        }
+        for (byte b : body) {
+            if (b == ' ' || b == '\t' || b == '\r' || b == '\n') {
+                continue;
+            }
+            return b == '{';
+        }
+        return false;
     }
 
     public ResponseEntity<byte[]> json(HttpStatus status, Object value) {

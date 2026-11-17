@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core.index;
 
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;

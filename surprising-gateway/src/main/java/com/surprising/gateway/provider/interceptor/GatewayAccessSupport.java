@@ -29,6 +29,14 @@ import org.springframework.web.server.ResponseStatusException;
  */
 public final class GatewayAccessSupport {
     private static final Pattern ADMIN_SERVICE_PATTERN = Pattern.compile("[a-z0-9][a-z0-9_-]{0,63}");
+    private static final byte[] EMPTY_BYTES = new byte[0];
+    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
+        }
+    });
 
     public record GatewayIdentity(String userId, String username, String status, List<String> roles, boolean admin) {
         public static GatewayIdentity user(String userId) {
@@ -55,19 +63,23 @@ public final class GatewayAccessSupport {
         }
     }
 
-    public static GatewayIdentity authenticateBearerUser(AuthService authService, String authorization) {
+    public static JwtPrincipal authenticateBearerPrincipal(AuthService authService, String authorization) {
         if (authService == null) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "user auth service is not configured");
         }
         try {
-            JwtPrincipal principal = resolveBearerPrincipal(authService, authorization);
-            return new GatewayIdentity(Long.toString(principal.userId()), principal.username(),
-                    principal.status(), principal.roles(), false);
+            return resolveBearerPrincipal(authService, authorization);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
         }
+    }
+
+    public static GatewayIdentity authenticateBearerUser(AuthService authService, String authorization) {
+        JwtPrincipal principal = authenticateBearerPrincipal(authService, authorization);
+        return new GatewayIdentity(Long.toString(principal.userId()), principal.username(),
+                principal.status(), principal.roles(), false);
     }
 
     public static GatewayIdentity authenticateAdmin(
@@ -211,12 +223,10 @@ public final class GatewayAccessSupport {
         if ((body == null || body.length == 0) && !hashEmptyWhenNull) {
             return null;
         }
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(body == null ? new byte[0] : body);
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
-        }
+        MessageDigest md = SHA_256.get();
+        md.reset();
+        byte[] digest = md.digest(body == null ? EMPTY_BYTES : body);
+        return HexFormat.of().formatHex(digest);
     }
 
     public static Long parseLong(String value) {

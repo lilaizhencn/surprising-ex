@@ -36,6 +36,8 @@ fi
 set -a
 source "$CONFIG"
 set +a
+export FRONTEND_PORT="${FRONTEND_PORT:-5174}"
+export FRONTEND_DIR="${FRONTEND_DIR:-$ROOT/../surprising-ex-web}"
 export JAVA_HOME="${JAVA_HOME:-$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/^    java.home = /{print $2; exit}')}"
 export PATH="$JAVA_HOME/bin:$PATH"
 # Homebrew keeps PostgreSQL keg-only. Other installations can supply PATH.
@@ -46,6 +48,7 @@ export ARTIFACT_ROOT="$LOCAL_DIR/artifacts"
 export RUNTIME_ROOT="$LOCAL_DIR/runtime" RUN_ID=local-perpetual POSTGRES_MODE=native
 export CORE_AERON_BASE_DIR="$LOCAL_DIR/core-driver" APP_AERON_DIR="$LOCAL_DIR/app-driver"
 [[ ! -f "$LOCAL_DIR/market-ids.env" ]] || source "$LOCAL_DIR/market-ids.env"
+export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-local}"
 export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS READINESS_INSTRUMENT_ID
 FRONTEND_DIR="${FRONTEND_DIR:-$ROOT/../surprising-ex-web}"
 backend() { "$ROOT/scripts/linear-perpetual-single-node.sh" "$@"; }
@@ -118,22 +121,24 @@ build() {
   java -version 2>&1 | grep -Eq 'OpenJDK.*Server VM|HotSpot' || fail 'HotSpot JDK 27 is required'
   mvn -version
   if [[ "${SKIP_BUILD:-false}" != true ]]; then
-    mvn -f "$ROOT/pom.xml" -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-price/surprising-price-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-realtime/surprising-realtime-provider,surprising-gateway -am package -DskipTests
+    mvn -f "$ROOT/pom.xml" -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-maker -am package -DskipTests
   fi
 }
 case "$ACTION" in
   build) build; exit ;;
   status)
     backend status
-    check_ports=(9094 9082 9095 9087)
+    check_ports=(9094)
     [[ "${MAKER_ENABLED:-true}" == true ]] && check_ports+=(9096)
     for port in "${check_ports[@]}"; do
-      curl --fail --silent --max-time 5 "http://127.0.0.1:$port/actuator/health" >/dev/null || fail "unhealthy service on port $port"
+      health_path="/actuator/health"
+      [[ "$port" == 9094 ]] && health_path="/actuator/health/liveness"
+      curl --fail --silent --max-time 5 "http://127.0.0.1:$port$health_path" >/dev/null || fail "unhealthy service on port $port"
     done
     # HTTP health alone does not prove the restarted Core has finished replay.
     if [[ -n "${READINESS_INSTRUMENT_ID:-}" ]]; then
     curl --fail --silent --max-time 5 -H 'X-Product-Line: LINEAR_PERPETUAL' \
-      "http://127.0.0.1:9094/api/v1/gateway/trading-market/orderbook?instrumentId=$READINESS_INSTRUMENT_ID&depth=1" \
+      "http://127.0.0.1:9094/api/v1/trading/market/orderbook?instrumentId=$READINESS_INSTRUMENT_ID&depth=1" \
       >/dev/null || fail 'Core query unavailable: process may still be recovering; inspect core-node0.log'
     fi
     for name in postgres redis kafka frontend checkpoints; do
@@ -268,7 +273,7 @@ if ! alive frontend; then
   mkdir -p "$LOCAL_DIR/web"
   rsync -a --delete --exclude .git --exclude .codegraph --exclude .wrangler --exclude /dist "$FRONTEND_DIR/" "$LOCAL_DIR/web/"
   # Live feeds must not pay React development instrumentation costs in the demo.
-  (cd "$LOCAL_DIR/web" && npm run build) > "$LOCAL_DIR/logs/frontend-build.log" 2>&1
+  (cd "$LOCAL_DIR/web" && VITE_API_BASE_URL="http://127.0.0.1:9094" VITE_WS_BASE_URL="ws://127.0.0.1:8081/ws/v1" npm run build) > "$LOCAL_DIR/logs/frontend-build.log" 2>&1
   start frontend /bin/bash -c 'cd "$1"; exec "$2" "$1/node_modules/vite/bin/vite.js" preview --host 127.0.0.1 --port "$3" --strictPort' "$LOCAL_DIR" "$LOCAL_DIR/web" "$(command -v node)" "$FRONTEND_PORT"
 fi
 wait_port 127.0.0.1 "$FRONTEND_PORT"

@@ -2,6 +2,7 @@ package com.surprising.gateway.provider.product;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.gateway.provider.exception.ProductUnavailableException;
+import com.surprising.gateway.provider.interceptor.ProductRequestBodyFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.*;
 import org.springframework.http.HttpStatus;
@@ -14,6 +15,8 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public final class GatewayProductSelection {
     public static final String RESOLVED_PRODUCT = GatewayProductSelection.class.getName() + ".product";
+    private static final String RESOLVED_BODY = GatewayProductSelection.class.getName() + ".body";
+    private static final List<String> HEADER_SELECTORS = List.of("X-Product-Line", "X-Account-Type", "X-Contract-Type");
     private static final List<String> SELECTORS = List.of("productLine", "product-line", "product_line",
             "accountType", "account-type", "account_type", "contractType", "contract-type", "contract_type");
     private final GatewayProductServices products;
@@ -23,8 +26,13 @@ public final class GatewayProductSelection {
         this.mapper = mapper;
     }
     public ProductLine resolve(HttpServletRequest request, byte[] body, boolean productRequired) {
+        if (request != null && request.getAttribute(RESOLVED_PRODUCT) instanceof ProductLine cached
+                && request.getAttribute(RESOLVED_BODY) == body) {
+            if (productRequired) requireEnabled(cached);
+            return cached;
+        }
         Set<ProductLine> selected = EnumSet.noneOf(ProductLine.class);
-        for (String name : List.of("X-Product-Line", "X-Account-Type", "X-Contract-Type")) {
+        for (String name : HEADER_SELECTORS) {
             var headers = request.getHeaders(name);
             if (headers != null) while (headers.hasMoreElements()) add(selected, headers.nextElement());
         }
@@ -38,7 +46,7 @@ public final class GatewayProductSelection {
         if (path.startsWith("/dapi/")) selected.add(ProductLine.INVERSE_PERPETUAL);
         if (path.startsWith("/eapi/")) selected.add(ProductLine.OPTION);
         if (body != null && body.length != 0) {
-            try { collect(selected, mapper.readTree(body)); }
+            try { collect(selected, ProductRequestBodyFilter.requestTree(request, body, mapper)); }
             catch (tools.jackson.core.JacksonException ex) { throw badRequest("invalid JSON body"); }
         }
         if (selected.size() > 1) throw badRequest("conflicting product selectors");
@@ -48,13 +56,19 @@ public final class GatewayProductSelection {
             product = products.enabled().getFirst();
         }
         if (product != null && productRequired) {
-            try { products.requireEnabled(product); }
-            catch (ProductUnavailableException unavailable) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, unavailable.getMessage(), unavailable);
-            }
+            requireEnabled(product);
         }
-        if (product != null) request.setAttribute(RESOLVED_PRODUCT, product);
+        if (product != null && request != null) {
+            request.setAttribute(RESOLVED_PRODUCT, product);
+            request.setAttribute(RESOLVED_BODY, body);
+        }
         return product;
+    }
+    private void requireEnabled(ProductLine product) {
+        try { products.requireEnabled(product); }
+        catch (ProductUnavailableException unavailable) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, unavailable.getMessage(), unavailable);
+        }
     }
     private void collect(Set<ProductLine> selected, JsonNode node) {
         if (node == null) return;

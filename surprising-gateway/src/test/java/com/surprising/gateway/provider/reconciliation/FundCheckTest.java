@@ -12,19 +12,19 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-class FinancialReconciliationTest {
+class FundCheckTest {
 
     private JdbcTemplate jdbc;
     private EmergencyWithdrawalCircuitBreaker circuitBreaker;
     private EmergencyAlertNotifier alertNotifier;
-    private FinancialReconciliationEngine engine;
+    private FundCheckService service;
 
     @BeforeEach
     void setUp() {
         jdbc = mock(JdbcTemplate.class);
         circuitBreaker = new EmergencyWithdrawalCircuitBreaker(null);
         alertNotifier = mock(EmergencyAlertNotifier.class);
-        engine = new FinancialReconciliationEngine(jdbc, circuitBreaker, alertNotifier, new SimpleMeterRegistry());
+        service = new FundCheckService(jdbc, circuitBreaker, alertNotifier, new SimpleMeterRegistry());
     }
 
     @Test
@@ -45,18 +45,18 @@ class FinancialReconciliationTest {
     }
 
     @Test
-    void runsHealthyReconciliationWhenNoNegativeBalances() {
+    void runsHealthyFundCheckWhenNoNegativeBalances() {
         when(jdbc.query(anyString(), any(RowMapper.class))).thenReturn(List.of());
         when(jdbc.queryForObject(contains("COUNT(DISTINCT user_id)"), eq(Long.class))).thenReturn(150L);
         when(jdbc.queryForObject(contains("status IN ('PENDING_APPROVAL'"), eq(Long.class))).thenReturn(3L);
         when(jdbc.queryForObject(contains("tx_hash IS NULL"), eq(Long.class))).thenReturn(0L);
 
-        ReconciliationResult result = engine.runReconciliation();
+        FundCheckResult result = service.checkFunds();
 
         assertTrue(result.healthy());
         assertEquals(0, result.negativeBalanceCount());
         assertTrue(circuitBreaker.isWithdrawalAllowed());
-        verify(alertNotifier, never()).broadcastReconciliationAlert(any());
+        verify(alertNotifier, never()).broadcastFundCheckAlert(any());
     }
 
     @Test
@@ -65,7 +65,7 @@ class FinancialReconciliationTest {
                 List.of("UID 10086 币种 USDT 出现负余额: -500 units (最新流水 entryId=99)")
         );
 
-        ReconciliationResult result = engine.runReconciliation();
+        FundCheckResult result = service.checkFunds();
 
         assertFalse(result.healthy());
         assertEquals(1, result.negativeBalanceCount());
@@ -75,6 +75,6 @@ class FinancialReconciliationTest {
         assertTrue(circuitBreaker.getStopReason().contains("负余额"));
 
         // 验证并发触发了紧急通知
-        verify(alertNotifier).broadcastReconciliationAlert(eq(result));
+        verify(alertNotifier).broadcastFundCheckAlert(eq(result));
     }
 }

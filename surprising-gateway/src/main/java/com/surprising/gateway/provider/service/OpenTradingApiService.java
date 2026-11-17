@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.controller;
+package com.surprising.gateway.provider.service;
 
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
@@ -36,7 +36,6 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * 公开 Open API 交易与账户端点处理（order、openOrders、allOrders、account、account/status）。
  */
-@Service
 public class OpenTradingApiService {
 
     private final GatewayProperties properties;

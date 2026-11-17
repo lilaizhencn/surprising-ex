@@ -2,7 +2,6 @@ package com.surprising.gateway.provider.product;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
-import tools.jackson.databind.JsonNode;
 
 public final class GatewayUserContext {
     private GatewayUserContext() {}
@@ -40,28 +39,6 @@ public final class GatewayUserContext {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin identity is required");
         }
         return adminUserId;
-    }
-
-    public static void verifyBodyUserId(JsonNode node, String headerUserId, String adminUserId) {
-        if (headerUserId == null || headerUserId.isBlank() || (adminUserId != null && !adminUserId.isBlank())) {
-            return;
-        }
-        verifyNodeUserId(node, headerUserId.trim());
-    }
-
-    private static void verifyNodeUserId(JsonNode node, String userId) {
-        if (node == null) return;
-        if (node.isObject()) {
-            var id = node.get("userId");
-            if (id != null && !userId.equals(id.asText())) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "userId does not match authenticated user");
-            }
-        }
-        if (node.isObject() || node.isArray()) {
-            for (var child : node) {
-                verifyNodeUserId(child, userId);
-            }
-        }
     }
 
     private static long parseUserId(String value) {

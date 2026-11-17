@@ -9,6 +9,10 @@ import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
+import com.surprising.gateway.provider.service.OpenApiSupport;
+import com.surprising.gateway.provider.service.OpenCapitalApiService;
+import com.surprising.gateway.provider.service.OpenMarketApiService;
+import com.surprising.gateway.provider.service.OpenTradingApiService;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
 import com.surprising.trading.order.service.OrderService;
@@ -62,18 +66,19 @@ public class OpenApiController {
                 withdrawalService, null, objectMapper);
     }
 
+    @Autowired
     public OpenApiController(GatewayProperties properties,
                              InstrumentService instrumentService,
-                             OrderService orderService,
-                             AccountService accountService,
-                             MatchingMarketDataService marketDataService,
+                             @Autowired(required = false) OrderService orderService,
+                             @Autowired(required = false) AccountService accountService,
+                             @Autowired(required = false) MatchingMarketDataService marketDataService,
                              GatewayApiKeyService apiKeyService,
                              SensitiveActionVerificationService verificationService,
                              AuthService authService,
                              ComplianceService complianceService,
                              CustodyWalletClient custodyWalletClient,
                              CustodyWithdrawalService withdrawalService,
-                             UserDepositAddressRepository depositAddressRepository,
+                             @Autowired(required = false) UserDepositAddressRepository depositAddressRepository,
                              ObjectMapper objectMapper) {
         this.properties = properties;
         this.support = new OpenApiSupport(properties, apiKeyService, authService, objectMapper);
@@ -83,7 +88,6 @@ public class OpenApiController {
                 custodyWalletClient, withdrawalService, depositAddressRepository, support);
     }
 
-    @Autowired
     public OpenApiController(GatewayProperties properties,
                              OpenApiSupport support,
                              OpenMarketApiService marketApi,

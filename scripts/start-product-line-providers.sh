@@ -71,9 +71,9 @@ JVM_IMPLEMENTATION=""
 JVM_FEATURE_VERSION=""
 JVM_TELEMETRY_MODE=""
 
-readonly SERVICES=(gateway price realtime derivatives-lifecycle maker)
-readonly HTTP_SERVICES=(gateway price realtime derivatives-lifecycle maker)
-readonly HTTP_PORTS=(9094 9082 "$REALTIME_ROUTER_PORT" 9087 9096)
+readonly SERVICES=(gateway maker)
+readonly HTTP_SERVICES=(gateway maker)
+readonly HTTP_PORTS=(9094 9096)
 
 fail() {
   printf 'ERROR=%s\n' "$*" >&2
@@ -171,7 +171,6 @@ service_enabled() {
   if [[ "$CORE_ONLY" == true && "$1" != core && "$1" != tools ]]; then return 1; fi
   case "$1" in
     maker) [[ "${MAKER_ENABLED:-true}" == true ]] ;;
-    derivatives-lifecycle) [[ "$PRODUCT_LINE" != SPOT ]] ;;
     *) return 0 ;;
   esac
 }
@@ -189,9 +188,6 @@ jar_path() {
     core) printf '%s/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar' "$artifact_root" ;;
     tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$artifact_root" ;;
     benchmarks) printf '%s/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar' "$artifact_root" ;;
-    realtime) printf '%s/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
-    price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
-    derivatives-lifecycle) printf '%s/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
     gateway) printf '%s/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
     maker) printf '%s/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar' "$artifact_root" ;;
     *) fail "unknown service=$1" ;;
@@ -295,7 +291,7 @@ java_args_for() {
   case "$service" in
     core-node*) service_xmx="$JVM_CORE_XMX" ;;
     gateway) service_xmx="$JVM_GATEWAY_XMX" ;;
-    price|realtime|derivatives-lifecycle|maker) service_xmx="$JVM_PROVIDER_XMX" ;;
+    maker) service_xmx="$JVM_PROVIDER_XMX" ;;
   esac
   JVM_ARGS=(
     "-Xms$JVM_XMS"
@@ -322,6 +318,17 @@ java_args_for() {
     JVM_ARGS+=(
       "-XX:FlightRecorderOptions=stackdepth=$JFR_STACK_DEPTH"
       "-XX:StartFlightRecording=name=surprising,filename=$JFR_DIR/$service-$(date -u +%Y%m%dT%H%M%SZ).jfr,settings=$JFR_SETTINGS,maxsize=$JFR_MAX_SIZE,maxage=$JFR_MAX_AGE,dumponexit=true"
+    )
+  fi
+  if [[ "${PRICE_HTTP_PROXY_ENABLED:-false}" == "true" && ( "$service" == "gateway" || "$service" == "maker" ) ]]; then
+    local proxy_host="${PRICE_HTTP_PROXY_HOST:-127.0.0.1}"
+    local proxy_port="${PRICE_HTTP_PROXY_PORT:-27890}"
+    JVM_ARGS+=(
+      "-Dhttp.proxyHost=$proxy_host"
+      "-Dhttp.proxyPort=$proxy_port"
+      "-Dhttps.proxyHost=$proxy_host"
+      "-Dhttps.proxyPort=$proxy_port"
+      "-Dhttp.nonProxyHosts=localhost|127.0.0.1"
     )
   fi
 }
@@ -462,6 +469,10 @@ if [[ -n "${TELEGRAM_BOT_USERNAME:-}" ]]; then
   COMMON_ENV+=(TELEGRAM_BOT_USERNAME="$TELEGRAM_BOT_USERNAME")
 fi
 
+if [[ -n "${SPRING_PROFILES_ACTIVE:-}" ]]; then
+  COMMON_ENV+=(SPRING_PROFILES_ACTIVE="$SPRING_PROFILES_ACTIVE")
+fi
+
 if [[ "$REALTIME_ENABLED" == true ]]; then
   COMMON_ENV+=(
     SURPRISING_REALTIME_ENABLED=true
@@ -478,8 +489,19 @@ start_http_service() {
   local service="$1" port
   port="$(service_port "$service")"
   java_args_for "$service"
+  local extra_env=()
+  if [[ "$service" == "maker" ]]; then
+    extra_env+=(
+      "AERON_DIR=$APP_AERON_DIR"
+      "SURPRISING_REALTIME_CHANNEL=$REALTIME_WS_CHANNEL"
+      "SURPRISING_REALTIME_STREAM=2103"
+    )
+    if [[ -n "${MAKER_SPRING_APPLICATION_JSON:-}" ]]; then
+      extra_env+=("SPRING_APPLICATION_JSON=$MAKER_SPRING_APPLICATION_JSON")
+    fi
+  fi
   start_owned_process "$service" "$port" "${COMMON_ENV[@]}" \
-    SERVER_PORT="$port" \
+    SERVER_PORT="$port" "${extra_env[@]}" \
     "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path "$service")"
 }
 
@@ -510,7 +532,11 @@ start_core() {
     if [[ -n "${SURPRISING_AERON_MATCHING_ENGINES:-}" ]]; then
       JVM_ARGS+=("-Dsurprising.aeron.matching-engines=$SURPRISING_AERON_MATCHING_ENGINES")
     fi
-    if [[ "$REALTIME_ENABLED" == true ]]; then
+    if [[ -n "${SPRING_PROFILES_ACTIVE:-}" ]]; then
+  COMMON_ENV+=(SPRING_PROFILES_ACTIVE="$SPRING_PROFILES_ACTIVE")
+fi
+
+if [[ "$REALTIME_ENABLED" == true ]]; then
       JVM_ARGS+=(
         "-Dsurprising.realtime.directory=$(core_aeron_directory)"
         "-Dsurprising.realtime.channel=$REALTIME_PUBLISH_CHANNEL"
@@ -551,7 +577,7 @@ start_core() {
   mark_ready core-cluster
 }
 
-start_realtime_service() {
+start_gateway_service() {
   local router_json
   if [[ -n "${REALTIME_ROUTER_SPRING_APPLICATION_JSON:-}" ]]; then
     router_json="$REALTIME_ROUTER_SPRING_APPLICATION_JSON"
@@ -559,16 +585,17 @@ start_realtime_service() {
     router_json="$(printf '{\"surprising\":{\"realtime\":{\"router\":{\"control-channels\":{\"%s\":\"aeron:udp?control-mode=manual\"},\"control-destinations\":{\"%s\":[\"aeron:udp?endpoint=%s\"]}}}}}' \
       "$PRODUCT_LINE" "$PRODUCT_LINE" "$REALTIME_CORE_CONTROL_DESTINATION")"
   fi
-  java_args_for realtime
-  start_owned_process "realtime" "$REALTIME_ROUTER_PORT" "${COMMON_ENV[@]}" \
+  java_args_for gateway
+  start_owned_process "gateway" "9094" "${COMMON_ENV[@]}" \
+    SERVER_PORT=9094 \
     REALTIME_ENABLED="$REALTIME_ENABLED" CANDLESTICK_STATE_DIR="$RUN_DIR/candlestick-state" \
     TRADE_EXPORT_ENABLED="$TRADE_EXPORT_ENABLED" TRADE_EXPORT_CHECKPOINT="$TRADE_EXPORT_CHECKPOINT" \
     TRADE_EXPORT_CLUSTER_DIR="$RUN_DIR/aeron/$(product_line_data_name)/node0/cluster" \
     TRADE_EXPORT_AERON_DIR="$(core_aeron_directory)" \
     TRADE_EXPORT_ARCHIVE_CHANNEL="$(archive_control_channel)" TRADE_EXPORT_CLUSTER_ID="$(cluster_id)" \
     AERON_DIR="$APP_AERON_DIR" REALTIME_ROUTER_CHANNEL="$REALTIME_ROUTER_CHANNEL" \
-    SERVER_PORT="$REALTIME_ROUTER_PORT" SPRING_APPLICATION_JSON="$router_json" \
-    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path realtime)"
+    SPRING_APPLICATION_JSON="$router_json" \
+    "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" -jar "$(jar_path gateway)"
 }
 
 start_stack() {
@@ -580,10 +607,7 @@ start_stack() {
   initialize_database
   start_core "$core_action"
   if [[ "$CORE_ONLY" != true ]]; then
-    start_http_service gateway
-    start_http_service price
-    start_realtime_service
-    service_enabled derivatives-lifecycle && start_http_service derivatives-lifecycle
+    start_gateway_service
     service_enabled maker && start_http_service maker
   fi
   trap - EXIT ERR INT TERM
@@ -594,8 +618,8 @@ stop_processes() {
   [[ -d "$PID_DIR" ]] || return 0
   local pid_file pid deadline launchctl_bin
   # Finish the embedded exporter while Core Archive and its MediaDriver are still available.
-  if [[ -f "$PID_DIR/realtime.pid" ]]; then
-    pid="$(<"$PID_DIR/realtime.pid")"
+  if [[ -f "$PID_DIR/gateway.pid" ]]; then
+    pid="$(<"$PID_DIR/gateway.pid")"
     kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null || true
     deadline=$((SECONDS + 120))
     while kill -0 "$pid" 2>/dev/null && (( SECONDS < deadline )); do sleep 1; done
@@ -647,7 +671,7 @@ run_test() {
   trap 'stop_stack' EXIT INT TERM
   local manifest="$RUN_DIR/product-line-test.manifest"
   java_args_for lifecycle-qa
-  "${COMMON_ENV[@]}" W4_LIFECYCLE_AUTHORITY=CORE W4_DERIVATIVES_LIFECYCLE_URL=http://127.0.0.1:9087 \
+  "${COMMON_ENV[@]}" W4_LIFECYCLE_AUTHORITY=CORE W4_DERIVATIVES_LIFECYCLE_URL=http://127.0.0.1:9094 \
     "$JAVA_HOME/bin/java" "${JVM_ARGS[@]}" \
     -Dsurprising.aeron.product-line="$PRODUCT_LINE" \
     -Dsurprising.aeron.hostnames="$AERON_CLUSTER_HOSTNAMES" \

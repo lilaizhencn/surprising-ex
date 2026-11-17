@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class MfaRecoveryService {
     private static final String PURPOSE = "MFA_RECOVERY";
+    private static final Pattern SIX_DIGIT_PATTERN = Pattern.compile("\\d{6}");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("[^\\s@]+@[^\\s@]+\\.[^\\s@]+");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("\\+[1-9][0-9]{6,14}");
+
     private final AuthPersistenceService users;
     private final GatewayAuthChallengeRepository challenges;
     private final LoginVerificationService loginVerification;
@@ -68,13 +73,13 @@ public class MfaRecoveryService {
         List<LoginVerificationModels.Setting> methods = loginVerification.settings(userId);
         boolean emailBound = methods.stream().anyMatch(setting -> setting.type().equals("EMAIL") && setting.bound());
         boolean phoneBound = methods.stream().anyMatch(setting -> setting.type().equals("PHONE") && setting.bound());
-        if (emailBound && emailAddress.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) {
+        if (emailBound && EMAIL_PATTERN.matcher(emailAddress).matches()) {
             channel = "EMAIL"; destination = emailAddress;
-        } else if (phoneBound && phoneNumber.matches("\\+[1-9][0-9]{6,14}")) {
+        } else if (phoneBound && PHONE_PATTERN.matcher(phoneNumber).matches()) {
             channel = "PHONE"; destination = phoneNumber;
-        } else if (emailAddress.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) {
+        } else if (EMAIL_PATTERN.matcher(emailAddress).matches()) {
             channel = "EMAIL"; destination = emailAddress;
-        } else if (phoneNumber.matches("\\+[1-9][0-9]{6,14}")) {
+        } else if (PHONE_PATTERN.matcher(phoneNumber).matches()) {
             channel = "PHONE"; destination = phoneNumber;
         } else throw new IllegalStateException("No verified email or phone is available for recovery");
         if (challenges.findActive(userId, PURPOSE, destination, now).isPresent()) {
@@ -115,7 +120,7 @@ public class MfaRecoveryService {
             throw new IllegalArgumentException("explain how you lost access to the authenticator");
         }
         String expected = digest(request.code(), userId, challenge.destination());
-        if (request.code() == null || !request.code().matches("\\d{6}")
+        if (request.code() == null || !SIX_DIGIT_PATTERN.matcher(request.code()).matches()
                 || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
                         challenge.codeHash().getBytes(StandardCharsets.UTF_8))) {
             challenges.incrementAttempts(challenge.challengeId(), userId, now);

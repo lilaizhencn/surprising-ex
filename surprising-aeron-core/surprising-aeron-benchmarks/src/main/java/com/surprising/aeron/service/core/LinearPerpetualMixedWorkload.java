@@ -10,7 +10,7 @@ import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;

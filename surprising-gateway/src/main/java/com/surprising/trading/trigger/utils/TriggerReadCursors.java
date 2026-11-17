@@ -10,16 +10,22 @@ import java.util.HexFormat;
 
 /** 条件单历史游标的稳定协议格式；无业务状态或SQL职责。 */
 public final class TriggerReadCursors {
+    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    });
+
     private TriggerReadCursors() {}
 
     public static String scope(ProductLine product, Long user, String instrument, CoreTriggerOrderStatus status,
             Long trigger, boolean ascending) {
         String text = product.name() + '|' + user + '|' + instrument + '|' + status + '|' + trigger + '|' + (ascending ? "createdAt.asc" : "createdAt.desc");
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
+        MessageDigest md = SHA_256.get();
+        md.reset();
+        return HexFormat.of().formatHex(md.digest(text.getBytes(StandardCharsets.UTF_8)));
     }
 
     public static TriggerReadCursor decode(String cursor, String scope) {

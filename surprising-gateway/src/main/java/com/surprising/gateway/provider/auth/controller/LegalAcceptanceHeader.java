@@ -11,6 +11,7 @@ import java.util.List;
 /** Compact auth wire field: revisionId:locale,revisionId:locale. IDs stay exact int64 values. */
 final class LegalAcceptanceHeader {
     static final String NAME="X-Legal-Acceptance";
+    private static final java.util.regex.Pattern REVISION_ID_PATTERN = java.util.regex.Pattern.compile("[1-9][0-9]{0,18}");
     private LegalAcceptanceHeader() { }
     static List<Acceptance> parse(String header) {
         if(header==null || header.isBlank())return List.of();
@@ -20,7 +21,7 @@ final class LegalAcceptanceHeader {
         var values=new ArrayList<Acceptance>();var ids=new HashSet<Long>();
         for(String part:parts) {
             String[] fields=part.trim().split(":",-1);
-            if(fields.length!=2 || !fields[0].matches("[1-9][0-9]{0,18}") || fields[1].isBlank())throw invalid();
+            if(fields.length!=2 || !REVISION_ID_PATTERN.matcher(fields[0]).matches() || fields[1].isBlank())throw invalid();
             try {
                 long id=Long.parseLong(fields[0]);
                 if(!ids.add(id))throw invalid();

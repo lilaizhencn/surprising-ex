@@ -81,8 +81,10 @@ public class AuthClientMetadataBinding implements CurrentAuthClient {
     }
 
     private static String deviceId(HttpServletRequest request) {
-        if (request == null || request.getHeader("X-Device-Id") == null) return null;
-        String value = request.getHeader("X-Device-Id").trim();
+        if (request == null) return null;
+        String raw = request.getHeader("X-Device-Id");
+        if (raw == null) return null;
+        String value = raw.trim();
         try {
             String canonical = UUID.fromString(value).toString();
             if (!canonical.equalsIgnoreCase(value)) throw new IllegalArgumentException("invalid device ID");

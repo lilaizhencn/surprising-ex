@@ -48,7 +48,7 @@ public class ExternalSpotWebSocketManager {
 
 
     private final IndexPriceProperties properties;
-    private final IndexInstrumentConfigService indexInstrumentConfigService;
+    private final java.util.Set<IndexInstrumentConfigService> configServices = ConcurrentHashMap.newKeySet();
     private final ExternalSpotPriceClient externalSpotPriceClient;
     private final LatestSourceQuoteStore latestSourceQuoteStore;
     private final TaskScheduler taskScheduler;
@@ -71,10 +71,25 @@ public class ExternalSpotWebSocketManager {
                                         LatestSourceQuoteStore latestSourceQuoteStore,
                                         @Qualifier("taskScheduler") TaskScheduler taskScheduler) {
         this.properties = properties;
-        this.indexInstrumentConfigService = indexInstrumentConfigService;
+        if (indexInstrumentConfigService != null) {
+            this.configServices.add(indexInstrumentConfigService);
+        }
         this.externalSpotPriceClient = externalSpotPriceClient;
         this.latestSourceQuoteStore = latestSourceQuoteStore;
         this.taskScheduler = taskScheduler;
+    }
+
+    public ExternalSpotWebSocketManager(IndexPriceProperties properties,
+                                        ExternalSpotPriceClient externalSpotPriceClient,
+                                        LatestSourceQuoteStore latestSourceQuoteStore,
+                                        TaskScheduler taskScheduler) {
+        this(properties, null, externalSpotPriceClient, latestSourceQuoteStore, taskScheduler);
+    }
+
+    public void registerConfigService(IndexInstrumentConfigService service) {
+        if (service != null) {
+            configServices.add(service);
+        }
     }
 
     @Order(Ordered.LOWEST_PRECEDENCE)
@@ -154,11 +169,13 @@ public class ExternalSpotWebSocketManager {
 
     private Map<String, List<TrackedSource>> groupedSources() {
         Map<String, List<TrackedSource>> grouped = new LinkedHashMap<>();
-        for (IndexPriceProperties.SymbolConfig instrumentId : indexInstrumentConfigService.symbols()) {
-            for (IndexPriceProperties.SourceConfig source : instrumentId.getSources()) {
-                if (source.isEnabled() && source.isWebsocketEnabled() && hasText(source.getWebsocketUrl())) {
-                    grouped.computeIfAbsent(source.getWebsocketUrl(), ignored -> new ArrayList<>())
-                            .add(new TrackedSource(instrumentId.getInstrumentId(), source));
+        for (IndexInstrumentConfigService configService : configServices) {
+            for (IndexPriceProperties.SymbolConfig instrumentId : configService.symbols()) {
+                for (IndexPriceProperties.SourceConfig source : instrumentId.getSources()) {
+                    if (source.isEnabled() && source.isWebsocketEnabled() && hasText(source.getWebsocketUrl())) {
+                        grouped.computeIfAbsent(source.getWebsocketUrl(), ignored -> new ArrayList<>())
+                                .add(new TrackedSource(instrumentId.getInstrumentId(), source));
+                    }
                 }
             }
         }

@@ -114,4 +114,42 @@ class BracketOrderDispatcherTest {
             assertEquals(5L, trigger.quantitySteps());
         }
     }
+
+    @Test
+    @DisplayName("64字符极限 clientOrderId 派生出的 ocoGroupId 与止盈止损 clientOrderId 不超过 64 字符")
+    void shouldBoundDerivedIdsWithin64CharsForMaxLengthClientOrderId() {
+        TriggerOrderService triggerService = mock(TriggerOrderService.class);
+        BracketOrderDispatcher dispatcher = new BracketOrderDispatcher(triggerService);
+
+        String maxClientId = "c".repeat(64);
+        PlaceOrderRequest request = new PlaceOrderRequest(
+                1003L, maxClientId, "BTC-USDT",
+                OrderSide.BUY, OrderType.MARKET, TimeInForce.IOC,
+                500000L, 2L, MarginMode.CROSS, PositionSide.NET,
+                false, false, null,
+                550000L, 480000L, TriggerPriceSource.MARK, SelfTradePreventionMode.EXPIRE_MAKER
+        );
+
+        OrderResponse response = new OrderResponse(
+                12347L, 1003L, maxClientId, "BTC-USDT",
+                OrderSide.BUY, OrderType.MARKET, TimeInForce.IOC,
+                500000L, 2L, 2L, 0L,
+                MarginMode.CROSS, PositionSide.NET,
+                100L, 200L, false, false,
+                OrderStatus.FILLED, null,
+                Instant.now(), Instant.now()
+        );
+
+        dispatcher.registerBracket(request, response);
+
+        ArgumentCaptor<PlaceTriggerOrderRequest> captor = ArgumentCaptor.forClass(PlaceTriggerOrderRequest.class);
+        verify(triggerService, times(2)).place(captor.capture());
+
+        for (PlaceTriggerOrderRequest trigger : captor.getAllValues()) {
+            assertTrue(trigger.clientTriggerOrderId().length() <= 64,
+                    "clientTriggerOrderId exceeded 64 chars: " + trigger.clientTriggerOrderId());
+            assertTrue(trigger.ocoGroupId().length() <= 64,
+                    "ocoGroupId exceeded 64 chars: " + trigger.ocoGroupId());
+        }
+    }
 }

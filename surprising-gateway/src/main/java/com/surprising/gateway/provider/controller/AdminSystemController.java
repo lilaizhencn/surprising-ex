@@ -40,6 +40,12 @@ public class AdminSystemController {
         return execute(() -> adminSystemService.health(authorization, includePublicRoutes));
     }
 
+    @GetMapping("/overview")
+    public java.util.Map<String, Object> overview(
+            @RequestHeader("Authorization") String authorization) {
+        return execute(() -> adminSystemService.overview(authorization));
+    }
+
     private <T> T execute(Supplier<T> action) {
         try {
             return action.get();

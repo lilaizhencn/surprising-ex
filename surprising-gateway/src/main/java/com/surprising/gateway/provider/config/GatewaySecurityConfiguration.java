@@ -80,7 +80,7 @@ public class GatewaySecurityConfiguration {
                         .requestMatchers("/api/v1/admin/**").hasAnyRole(properties.getSecurity().getAdminRoles().toArray(String[]::new))
                         .requestMatchers(HttpMethod.HEAD,"/api/v1/content/media/{mediaId}").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/csrf", "/api/v1/auth/google/config", "/api/v1/auth/telegram/config", "/api/v1/auth/telegram/callback",
-                                "/api/v1/time", "/api/v1/runtime", "/api/v1/help/articles", "/api/v1/compliance/countries",
+                                "/api/v1/time", "/api/v1/runtime", "/api/v1/help/articles", "/api/v1/compliance/countries", "/api/v1/compliance/por/latest",
                                 "/api/v1/legal/current", "/api/v1/legal/documents/{slug}", "/api/v1/legal/revisions/{revisionId}",
                                 "/api/v1/c2c/status", "/api/v1/c2c/markets", "/api/v1/c2c/ads", "/api/v1/c2c/ads/{id}",
                                 "/api/v1/c2c/merchants/{id}", "/api/v1/c2c/help", "/api/v1/affiliate/preview", "/api/v1/announcements/**", "/api/v1/content/media/{mediaId}").permitAll()
@@ -94,7 +94,8 @@ public class GatewaySecurityConfiguration {
                         // These adapters validate HMAC and scope against the exact wire body/query, or bearer for private operations.
                         .requestMatchers("/api/v1/gateway/**", "/api/v3/**", "/sapi/v1/**", "/fapi/v1/**", "/dapi/v1/**", "/eapi/v1/**",
                                 "/api/v1/price/**", "/api/v1/candlestick/**", "/api/v1/funding/**",
-                                "/api/v1/risk/**", "/api/v1/liquidations/**", "/api/v1/insurance/**", "/api/v1/adl/**").permitAll()
+                                "/api/v1/risk/**", "/api/v1/liquidations/**", "/api/v1/insurance/**", "/api/v1/adl/**",
+                                "/api/v1/instruments/**").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/session", "/api/v1/auth/verify-email", "/api/v1/auth/resend-email-verification",
                                 "/api/v1/legal/status", "/api/v1/legal/consents",
                                 "/api/v1/security/**", "/api/v1/users/scan", "/api/v1/notifications/**", "/api/v1/wallet/**",

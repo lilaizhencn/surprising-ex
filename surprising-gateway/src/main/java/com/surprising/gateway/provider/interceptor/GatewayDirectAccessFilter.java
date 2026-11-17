@@ -16,10 +16,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Enumeration;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpHeaders;
@@ -36,6 +33,41 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     private static final String MATCHED_ROUTE_ATTR = GatewayDirectAccessFilter.class.getName() + ".route";
 
     private record DirectRoute(String service, boolean privateRoute, boolean admin, boolean shared) {}
+
+    private static final DirectRoute ROUTE_PRICE_INDEX_PUBLIC = new DirectRoute("price-index", false, false, false);
+    private static final DirectRoute ROUTE_PRICE_INDEX_ADMIN = new DirectRoute("price-index", true, true, false);
+    private static final DirectRoute ROUTE_PRICE_FX_PUBLIC = new DirectRoute("price-fx", false, false, true);
+    private static final DirectRoute ROUTE_PRICE_FX_ADMIN = new DirectRoute("price-fx", true, true, true);
+    private static final DirectRoute ROUTE_PRICE_MARK_PUBLIC = new DirectRoute("price-mark", false, false, false);
+    private static final DirectRoute ROUTE_PRICE_MARK_ADMIN = new DirectRoute("price-mark", true, true, false);
+    private static final DirectRoute ROUTE_CANDLESTICK_PUBLIC = new DirectRoute("candlestick", false, false, false);
+    private static final DirectRoute ROUTE_CANDLESTICK_ADMIN = new DirectRoute("candlestick", true, true, false);
+    private static final DirectRoute ROUTE_FUNDING_PUBLIC = new DirectRoute("funding", false, false, false);
+    private static final DirectRoute ROUTE_FUNDING_ADMIN = new DirectRoute("funding", true, true, false);
+    private static final DirectRoute ROUTE_RISK_PRIVATE = new DirectRoute("risk", true, false, false);
+    private static final DirectRoute ROUTE_RISK_ADMIN = new DirectRoute("risk-admin", true, true, false);
+    private static final DirectRoute ROUTE_LIQUIDATION_PRIVATE = new DirectRoute("liquidation", true, false, false);
+    private static final DirectRoute ROUTE_LIQUIDATION_ADMIN = new DirectRoute("liquidation-admin", true, true, false);
+    private static final DirectRoute ROUTE_INSURANCE_PRIVATE = new DirectRoute("insurance", true, false, false);
+    private static final DirectRoute ROUTE_INSURANCE_ADMIN = new DirectRoute("insurance-admin", true, true, false);
+    private static final DirectRoute ROUTE_ADL_PRIVATE = new DirectRoute("adl", true, false, false);
+    private static final DirectRoute ROUTE_ADL_ADMIN = new DirectRoute("adl", true, true, false);
+    private static final DirectRoute ROUTE_WEBSOCKET_ADMIN = new DirectRoute("websocket-admin", true, true, true);
+    private static final DirectRoute ROUTE_ACCOUNT_PRIVATE = new DirectRoute("account", true, false, false);
+    private static final DirectRoute ROUTE_ACCOUNT_ADMIN = new DirectRoute("account", true, true, false);
+    private static final DirectRoute ROUTE_TRADING_MARKET = new DirectRoute("trading-market", false, false, false);
+    private static final DirectRoute ROUTE_TRADING_TRIGGER_PRIVATE = new DirectRoute("trading-trigger", true, false, false);
+    private static final DirectRoute ROUTE_TRADING_TRIGGER_ADMIN = new DirectRoute("trading-trigger", true, true, false);
+    private static final DirectRoute ROUTE_TRADING_FEES_PRIVATE = new DirectRoute("trading-fees", true, false, false);
+    private static final DirectRoute ROUTE_TRADING_FEES_PUBLIC = new DirectRoute("trading-fees", false, false, true);
+    private static final DirectRoute ROUTE_TRADING_FEES_ADMIN = new DirectRoute("trading-fees", true, true, false);
+    private static final DirectRoute ROUTE_TRADING_LEVERAGE_PRIVATE = new DirectRoute("trading-leverage", true, false, false);
+    private static final DirectRoute ROUTE_TRADING_LEVERAGE_ADMIN = new DirectRoute("trading-leverage", true, true, false);
+    private static final DirectRoute ROUTE_TRADING_PRIVATE = new DirectRoute("trading", true, false, false);
+    private static final DirectRoute ROUTE_TRADING_ADMIN = new DirectRoute("trading", true, true, false);
+    private static final DirectRoute ROUTE_INSTRUMENT_ADMIN_PRODUCT = new DirectRoute("instrument-admin", true, true, false);
+    private static final DirectRoute ROUTE_INSTRUMENT_ADMIN_SHARED = new DirectRoute("instrument-admin", true, true, true);
+    private static final DirectRoute ROUTE_INSTRUMENT_PUBLIC = new DirectRoute("instrument", false, false, true);
 
     private final GatewayProperties properties;
     private final AuthService authService;
@@ -117,91 +149,105 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     }
 
     private DirectRoute matchRoute(String uri) {
-        if (uri == null) return null;
+        if (uri == null || !uri.startsWith("/api/v1/")) return null;
         boolean hasAdminSegment = uri.contains("/admin/");
         if (uri.startsWith("/api/v1/price/index")) {
-            return new DirectRoute("price-index", hasAdminSegment, hasAdminSegment, false);
+            return hasAdminSegment ? ROUTE_PRICE_INDEX_ADMIN : ROUTE_PRICE_INDEX_PUBLIC;
         }
         if (uri.startsWith("/api/v1/price/fx")) {
-            return new DirectRoute("price-fx", hasAdminSegment, hasAdminSegment, true);
+            return hasAdminSegment ? ROUTE_PRICE_FX_ADMIN : ROUTE_PRICE_FX_PUBLIC;
         }
         if (uri.startsWith("/api/v1/price/mark")) {
-            return new DirectRoute("price-mark", hasAdminSegment, hasAdminSegment, false);
+            return hasAdminSegment ? ROUTE_PRICE_MARK_ADMIN : ROUTE_PRICE_MARK_PUBLIC;
         }
         if (uri.startsWith("/api/v1/candlestick")) {
-            return new DirectRoute("candlestick", hasAdminSegment, hasAdminSegment, false);
+            return hasAdminSegment ? ROUTE_CANDLESTICK_ADMIN : ROUTE_CANDLESTICK_PUBLIC;
         }
         if (uri.startsWith("/api/v1/funding")) {
-            return new DirectRoute("funding", hasAdminSegment, hasAdminSegment, false);
+            return hasAdminSegment ? ROUTE_FUNDING_ADMIN : ROUTE_FUNDING_PUBLIC;
         }
         if (uri.startsWith("/api/v1/admin/risk")) {
-            return new DirectRoute("risk-admin", true, true, false);
+            return ROUTE_RISK_ADMIN;
         }
         if (uri.startsWith("/api/v1/risk")) {
-            return new DirectRoute(hasAdminSegment ? "risk-admin" : "risk", true, hasAdminSegment, false);
+            return hasAdminSegment ? ROUTE_RISK_ADMIN : ROUTE_RISK_PRIVATE;
         }
         if (uri.startsWith("/api/v1/admin/liquidations")) {
-            return new DirectRoute("liquidation-admin", true, true, false);
+            return ROUTE_LIQUIDATION_ADMIN;
         }
         if (uri.startsWith("/api/v1/liquidations")) {
-            return new DirectRoute(hasAdminSegment ? "liquidation-admin" : "liquidation", true, hasAdminSegment, false);
+            return hasAdminSegment ? ROUTE_LIQUIDATION_ADMIN : ROUTE_LIQUIDATION_PRIVATE;
         }
         if (uri.startsWith("/api/v1/insurance")) {
-            return new DirectRoute(hasAdminSegment ? "insurance-admin" : "insurance", true, hasAdminSegment, false);
+            return hasAdminSegment ? ROUTE_INSURANCE_ADMIN : ROUTE_INSURANCE_PRIVATE;
         }
         if (uri.startsWith("/api/v1/adl")) {
-            return new DirectRoute("adl", true, hasAdminSegment, false);
+            return hasAdminSegment ? ROUTE_ADL_ADMIN : ROUTE_ADL_PRIVATE;
         }
         if (uri.startsWith("/api/v1/admin/websocket")) {
-            return new DirectRoute("websocket-admin", true, true, true);
+            return ROUTE_WEBSOCKET_ADMIN;
         }
         if (uri.startsWith("/api/v1/accounts/admin/") || uri.startsWith("/api/v1/admin/accounts/")) {
-            return new DirectRoute("account", true, true, false);
+            return ROUTE_ACCOUNT_ADMIN;
         }
         if (uri.startsWith("/api/v1/accounts/")) {
-            return new DirectRoute("account", true, false, false);
+            return ROUTE_ACCOUNT_PRIVATE;
         }
         if (uri.startsWith("/api/v1/trading/market/")) {
-            return new DirectRoute("trading-market", false, false, false);
+            return ROUTE_TRADING_MARKET;
         }
         if (uri.startsWith("/api/v1/admin/trading/trigger-orders")) {
-            return new DirectRoute("trading-trigger", true, true, false);
+            return ROUTE_TRADING_TRIGGER_ADMIN;
         }
         if (uri.startsWith("/api/v1/admin/trading/fees")) {
-            return new DirectRoute("trading-fees", true, true, false);
+            return ROUTE_TRADING_FEES_ADMIN;
         }
         if (uri.startsWith("/api/v1/admin/trading/leverage")) {
-            return new DirectRoute("trading-leverage", true, true, false);
+            return ROUTE_TRADING_LEVERAGE_ADMIN;
         }
         if (uri.startsWith("/api/v1/admin/trading/")) {
-            return new DirectRoute("trading", true, true, false);
+            return ROUTE_TRADING_ADMIN;
         }
         if (uri.startsWith("/api/v1/trading/trigger-orders")) {
-            return new DirectRoute("trading-trigger", true, false, false);
+            return ROUTE_TRADING_TRIGGER_PRIVATE;
+        }
+        if (uri.equals("/api/v1/trading/fees/vip/levels")) {
+            return ROUTE_TRADING_FEES_PUBLIC;
         }
         if (uri.startsWith("/api/v1/trading/fees")) {
-            return new DirectRoute("trading-fees", true, false, false);
+            return ROUTE_TRADING_FEES_PRIVATE;
         }
         if (uri.startsWith("/api/v1/trading/leverage")) {
-            return new DirectRoute("trading-leverage", true, false, false);
+            return ROUTE_TRADING_LEVERAGE_PRIVATE;
         }
         if (uri.startsWith("/api/v1/trading/")) {
-            return new DirectRoute("trading", true, false, false);
+            return ROUTE_TRADING_PRIVATE;
         }
         if (uri.equals("/api/v1/instruments/admin/order-settings")) {
-            return new DirectRoute("instrument-admin", true, true, false);
+            return ROUTE_INSTRUMENT_ADMIN_PRODUCT;
         }
         if (uri.startsWith("/api/v1/instruments/admin/")) {
-            return new DirectRoute("instrument-admin", true, true, true);
+            return ROUTE_INSTRUMENT_ADMIN_SHARED;
         }
         if (uri.startsWith("/api/v1/instruments/")) {
-            return new DirectRoute("instrument", false, false, true);
+            return ROUTE_INSTRUMENT_PUBLIC;
         }
         return null;
     }
 
     private GatewayIdentity enforceIdentity(DirectRoute route, HttpServletRequest request, byte[] body) {
         if (!route.privateRoute() || !properties.getSecurity().isRequireIdentityForPrivateRoutes()) {
+            return null;
+        }
+        String internalToken = request.getHeader("X-Internal-Service-Token");
+        String expectedSecret = System.getenv("GATEWAY_JWT_SECRET");
+        if (("trading".equals(route.service()) || "account".equals(route.service()))
+                && !route.admin()
+                && internalToken != null && !internalToken.isBlank()
+                && expectedSecret != null && !expectedSecret.isBlank()
+                && java.security.MessageDigest.isEqual(
+                        internalToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        expectedSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
             return null;
         }
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
@@ -242,6 +288,10 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     }
 
     private static void enforceQueryUserIdOwnership(HttpServletRequest request, GatewayIdentity identity) {
+        String query = request.getQueryString();
+        if (query == null || !query.contains("userId")) {
+            return;
+        }
         String requestedUserId = request.getParameter("userId");
         if (requestedUserId != null && !requestedUserId.isBlank() && !identity.userId().equals(requestedUserId.trim())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "userId does not match authenticated user");
@@ -249,26 +299,23 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     }
 
     private HttpServletRequest wrapHeaders(HttpServletRequest request, ProductLine product, GatewayIdentity identity) {
-        Map<String, String> injected = new java.util.HashMap<>(8);
-        String userIdHeader = properties.getSecurity().getUserIdHeader().toLowerCase(Locale.ROOT);
-        injected.put(userIdHeader, null);
-        injected.put("x-user-id", null);
-        injected.put("x-admin-user-id", null);
-        injected.put("x-admin-username", null);
-        injected.put("x-admin-roles", null);
-        if (product != null) {
-            injected.put("x-product-line", product.name());
-        }
+        String userIdHeader = properties.getSecurity().getUserIdHeader();
+        String productLine = product != null ? product.name() : null;
+        String userId = null;
+        String adminUserId = null;
+        String adminUsername = null;
+        String adminRoles = null;
         if (identity != null) {
             if (identity.admin()) {
-                injected.put("x-admin-user-id", identity.userId());
-                if (identity.username() != null) injected.put("x-admin-username", identity.username());
-                injected.put("x-admin-roles", String.join(",", identity.roles()));
+                adminUserId = identity.userId();
+                adminUsername = identity.username();
+                adminRoles = String.join(",", identity.roles());
             } else {
-                injected.put(userIdHeader, identity.userId());
+                userId = identity.userId();
             }
         }
-        return new InjectedHeadersRequestWrapper(request, injected);
+        return new InjectedHeadersRequestWrapper(
+                request, userIdHeader, userId, adminUserId, adminUsername, adminRoles, productLine);
     }
 
     private static byte[] cachedBody(HttpServletRequest request) {
@@ -284,30 +331,68 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     }
 
     private static final class InjectedHeadersRequestWrapper extends HttpServletRequestWrapper {
-        private final Map<String, String> overrides;
+        private static final String UNMATCHED = "\u0000UNMATCHED";
 
-        InjectedHeadersRequestWrapper(HttpServletRequest request, Map<String, String> lowercaseOverrides) {
+        private final String userIdHeader;
+        private final String userId;
+        private final String adminUserId;
+        private final String adminUsername;
+        private final String adminRoles;
+        private final String productLine;
+
+        InjectedHeadersRequestWrapper(
+                HttpServletRequest request,
+                String userIdHeader,
+                String userId,
+                String adminUserId,
+                String adminUsername,
+                String adminRoles,
+                String productLine) {
             super(request);
-            this.overrides = lowercaseOverrides;
+            this.userIdHeader = userIdHeader;
+            this.userId = userId;
+            this.adminUserId = adminUserId;
+            this.adminUsername = adminUsername;
+            this.adminRoles = adminRoles;
+            this.productLine = productLine;
+        }
+
+        private String resolveOverride(String name) {
+            if (name == null) {
+                return UNMATCHED;
+            }
+            if (name.equalsIgnoreCase(userIdHeader)) {
+                return userId;
+            }
+            if (name.equalsIgnoreCase("x-user-id")) {
+                return null;
+            }
+            if (name.equalsIgnoreCase("x-admin-user-id")) {
+                return adminUserId;
+            }
+            if (name.equalsIgnoreCase("x-admin-username")) {
+                return adminUsername;
+            }
+            if (name.equalsIgnoreCase("x-admin-roles")) {
+                return adminRoles;
+            }
+            if (productLine != null && name.equalsIgnoreCase("x-product-line")) {
+                return productLine;
+            }
+            return UNMATCHED;
         }
 
         @Override
         public String getHeader(String name) {
-            if (name != null) {
-                String key = name.toLowerCase(Locale.ROOT);
-                if (overrides.containsKey(key)) return overrides.get(key);
-            }
-            return super.getHeader(name);
+            String resolved = resolveOverride(name);
+            return resolved != UNMATCHED ? resolved : super.getHeader(name);
         }
 
         @Override
         public Enumeration<String> getHeaders(String name) {
-            if (name != null) {
-                String key = name.toLowerCase(Locale.ROOT);
-                if (overrides.containsKey(key)) {
-                    String overridden = overrides.get(key);
-                    return overridden == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(overridden));
-                }
+            String resolved = resolveOverride(name);
+            if (resolved != UNMATCHED) {
+                return resolved == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(resolved));
             }
             return super.getHeaders(name);
         }

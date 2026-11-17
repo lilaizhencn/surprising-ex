@@ -54,23 +54,16 @@ public class MarketMakerProperties {
     @Valid
     private Risk risk = new Risk();
 
-    /** 启动时校验所有启用的行情源和策略都显式声明同一产品线。 */
+    /** 启动时校验所有启用的行情源和策略配置。 */
     public void validateBusinessSettings() {
         var engine = getEngine();
         var referenceMarket = getReferenceMarket();
         if (engine.quoteWatchdogInterval == null || engine.tradeInterval == null
                 || (engine.quoteWatchdogInterval.isNegative() || engine.quoteWatchdogInterval.toMillis() < 100) || engine.tradeInterval.isNegative())
             throw new IllegalArgumentException("maker trade interval must be non-negative and quote watchdog at least 100ms");
-        for (ReferenceMarket.Source source : referenceMarket.sources) {
-            if (source.enabled) {
-                ProductLineConfiguration.requireSame(productLine, source.productLine,
-                        "market-maker.source." + source.name);
-            }
-        }
         var identities = new java.util.HashSet<String>();
         for (Strategy strategy : strategies) {
-            ProductLineConfiguration.requireSame(productLine, strategy.getProductLine(), "market-maker.strategy");
-            if (!identities.add(strategy.getStrategyId().toLowerCase(java.util.Locale.ROOT)))
+            if (!identities.add(strategy.getProductLine() + ":" + strategy.getStrategyId().toLowerCase(java.util.Locale.ROOT)))
                 throw new IllegalArgumentException("duplicate maker strategy ID");
         }
     }

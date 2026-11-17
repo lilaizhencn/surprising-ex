@@ -90,6 +90,47 @@ class StableOrderIdentityTest {
                 .isEqualTo(TradingCommandCodec.decodePlaceOrder(payloads.getAllValues().get(1)).orderId());
     }
 
+    @Test
+    void normalizedPlaceCommandPreservesStpAndRegistersBracketOrders() {
+        OrderAeronGateway aeron = Mockito.mock(OrderAeronGateway.class);
+        BracketOrderDispatcher bracketDispatcher = Mockito.mock(BracketOrderDispatcher.class);
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        properties.getAeron().setNodeId(3);
+        when(aeron.preflight(eq(1001L), any(PlaceOrderCommand.class)))
+                .thenReturn(new OrderAeronGateway.PreflightResult(CoreResultCode.NONE,
+                        new CoreOrderPreflightView("USDT", 1L)));
+        when(aeron.commandOutcome(eq(CoreMessageType.PLACE_ORDER), any(UUID.class), eq(1001L), any(byte[].class)))
+                .thenAnswer(invocation -> {
+                    PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(invocation.getArgument(3));
+                    return new CoreCommandOutcome.Terminal(commandResponse(command, "trimmed-client"));
+                });
+
+        OrderService orderService = new OrderService(properties, null, aeron, null,
+                Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class),
+                null, null, null, bracketDispatcher);
+
+        // Leading/trailing spaces on clientOrderId force normalize() to construct a new PlaceOrderRequest
+        PlaceOrderRequest rawRequest = new PlaceOrderRequest(
+                1001L, "  trimmed-client  ", "1",
+                OrderSide.BUY, OrderType.LIMIT, TimeInForce.GTC,
+                60_000L, 2L, null, null, false, false, null,
+                65_000L, 58_000L,
+                com.surprising.trading.api.model.TriggerPriceSource.MARK,
+                com.surprising.trading.api.model.SelfTradePreventionMode.EXPIRE_MAKER);
+
+        orderService.placeCommand(rawRequest);
+
+        ArgumentCaptor<PlaceOrderRequest> preparedCaptor = ArgumentCaptor.forClass(PlaceOrderRequest.class);
+        verify(bracketDispatcher).registerBracket(preparedCaptor.capture(), any());
+        assertThat(preparedCaptor.getValue().takeProfitPriceTicks()).isEqualTo(65_000L);
+        assertThat(preparedCaptor.getValue().stopLossPriceTicks()).isEqualTo(58_000L);
+        assertThat(preparedCaptor.getValue().tpSlPriceSource())
+                .isEqualTo(com.surprising.trading.api.model.TriggerPriceSource.MARK);
+        assertThat(preparedCaptor.getValue().stpMode())
+                .isEqualTo(com.surprising.trading.api.model.SelfTradePreventionMode.EXPIRE_MAKER);
+    }
+
     private static OrderService service(OrderAeronGateway aeron, TradingOrderProperties properties) {
         return new OrderService(properties, null, aeron, null,
                 org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class),

@@ -37,8 +37,11 @@ public class UserCardController {
         return new PublicProfile(userId, name);
     }
 
+    private static final java.util.regex.Pattern USER_QR_PATTERN =
+            java.util.regex.Pattern.compile("surprising://user/[1-9][0-9]{0,18}");
+
     public static long parseUserId(String code) {
-        if (code == null || !code.matches("surprising://user/[1-9][0-9]{0,18}"))
+        if (code == null || !USER_QR_PATTERN.matcher(code).matches())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid user QR code");
         try { return Long.parseLong(code.substring("surprising://user/".length())); }
         catch (NumberFormatException ex) {

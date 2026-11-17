@@ -166,7 +166,7 @@ public class LifecyclePaginationBenchmark {
         } finally { harness.close(); }
     }
 
-    private long totalFunds(com.surprising.aeron.model.TradingCoreState state) {
+    private long totalFunds(com.surprising.aeron.service.snapshot.state.TradingCoreState state) {
         long total = 0;
         for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
         var systemFunds = state.treasuryState();

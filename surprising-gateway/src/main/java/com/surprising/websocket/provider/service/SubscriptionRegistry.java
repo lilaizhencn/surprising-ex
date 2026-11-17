@@ -327,8 +327,7 @@ public class SubscriptionRegistry {
     public void publishUserSnapshot(com.surprising.product.api.ProductLine product, long userId, Object payload) {
         Set<ClientConnection> candidates = userConnections.get(userId);
         if (candidates == null || candidates.isEmpty()) return;
-        String encoded = encode(new WsServerMessage("snapshot", null, null, null, null,
-                userId, product, payload, null, Instant.now()));
+        String encoded = null;
         for (ClientConnection connection : candidates) {
             Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
             if (topics == null) continue;
@@ -339,7 +338,12 @@ public class SubscriptionRegistry {
                     break;
                 }
             }
-            if (subscribed && !connection.send(encoded)) {
+            if (!subscribed) continue;
+            if (encoded == null) {
+                encoded = encode(new WsServerMessage("snapshot", null, null, null, null,
+                        userId, product, payload, null, Instant.now()));
+            }
+            if (!connection.send(encoded)) {
                 disconnect(connection);
             }
         }

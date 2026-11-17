@@ -7,7 +7,7 @@ import com.surprising.aeron.service.account.UserAccount;
 import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.result.ResponseArena;
+import com.surprising.aeron.service.result.ResponseSlotPool;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -87,7 +87,7 @@ public class AccountLaneCommitBenchmark {
             responses = new OrderBatchProcessor.PendingBatch[maxInFlight];
             identities = new com.surprising.aeron.service.core.identity.IdIndex();
             int symbolId = identities.symbolId("1");
-            var responseArena = new ResponseArena(maxInFlight, 4096);
+            var responseArena = new ResponseSlotPool(maxInFlight, 4096);
             for (int index = 0; index < responses.length; index++) {
                 var response = new OrderBatchProcessor.PendingBatch(1, responseArena);
                 response.kind = com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND;

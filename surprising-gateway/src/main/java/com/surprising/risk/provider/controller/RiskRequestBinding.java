@@ -8,6 +8,8 @@ import java.util.Locale;
 
 /** 风控两个HTTP入口共同的输入格式绑定；策略所有权、Core版本冲突和默认值归Service。 */
 public final class RiskRequestBinding {
+    private static final java.util.regex.Pattern ASSET_PATTERN = java.util.regex.Pattern.compile("[A-Z0-9]{2,20}");
+    private static final java.util.regex.Pattern RULE_CODE_PATTERN = java.util.regex.Pattern.compile("[A-Z0-9_.:-]{2,96}");
     private RiskRequestBinding() { }
 
     public static long userId(long value) {
@@ -49,13 +51,13 @@ public final class RiskRequestBinding {
 
     public static String asset(String value) {
         String normalized = requireText(value, "settleAsset").toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9]{2,20}")) throw new IllegalArgumentException("invalid settleAsset");
+        if (!ASSET_PATTERN.matcher(normalized).matches()) throw new IllegalArgumentException("invalid settleAsset");
         return normalized;
     }
 
     public static String ruleCode(String value) {
         String normalized = requireText(value, "ruleCode").toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9_.:-]{2,96}")) throw new IllegalArgumentException("invalid ruleCode");
+        if (!RULE_CODE_PATTERN.matcher(normalized).matches()) throw new IllegalArgumentException("invalid ruleCode");
         return normalized;
     }
 
