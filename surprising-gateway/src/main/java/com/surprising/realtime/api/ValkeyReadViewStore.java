@@ -200,13 +200,13 @@ public final class ValkeyReadViewStore {
                                 args.toArray()));
     }
 
-    public ReadView read(ProductLine product, long user, long now, long maxAgeMillis) {
+    public ReadView read(ProductLine product, long user) {
         Map<Object, Object> values = redis.opsForHash().entries(keys(product, user).getFirst());
-        return materialize(product, values, now, maxAgeMillis);
+        return materialize(product, values);
     }
 
     /** One atomic HMGET of requested entities and validation metadata; account reads explicitly request their baseline. */
-    public ReadView readFields(ProductLine product, long user, long now, long maxAgeMillis,
+    public ReadView readFields(ProductLine product, long user,
                                List<String> entityFields) {
         var fields = new ArrayList<Object>(List.of("@fence", "@epoch", "@snapshotAt", "@invalid",
                 "@exportSequence"));
@@ -215,10 +215,10 @@ public final class ValkeyReadViewStore {
         var values = new HashMap<Object, Object>();
         for (int i = 0; i < fields.size(); i++)
             if (selected.get(i) != null) values.put(fields.get(i), selected.get(i));
-        return materialize(product, values, now, maxAgeMillis);
+        return materialize(product, values);
     }
 
-    private ReadView materialize(ProductLine product, Map<Object, Object> values, long now, long maxAgeMillis) {
+    private ReadView materialize(ProductLine product, Map<Object, Object> values) {
         if (!values.containsKey("@fence")) return new ReadView("INITIALIZING", "", 0, List.of());
         String epoch = redis.opsForValue().get("rt:source:" + product.name());
         boolean gap =
@@ -236,7 +236,7 @@ public final class ValkeyReadViewStore {
                 Comparator.comparingLong(RealtimeFrame::sequence)
                         .thenComparingInt(RealtimeFrame::ordinal));
         return new ReadView(
-                gap || values.containsKey("@invalid") || now - snapshotAt > maxAgeMillis
+                gap || values.containsKey("@invalid")
                         ? "STALE"
                         : "READY",
                 values.get("@fence").toString(),

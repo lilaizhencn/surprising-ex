@@ -238,7 +238,7 @@ public final class RealtimeWebSocketBridge
         if (!ready()) return UserReadView.from(new ValkeyReadViewStore.ReadView("UNAVAILABLE", "", 0, List.of()));
         long now = System.currentTimeMillis();
         refresh.renew(product, user, now + 30000);
-        return UserReadView.from(views.read(product, user, now, 15000));
+        return UserReadView.from(views.read(product, user));
     }
 
     private void receive(RealtimeFrame f) {

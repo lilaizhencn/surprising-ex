@@ -170,14 +170,14 @@ class RealtimeRouterIntegrationTest {
                 snapshot(publication, request.snapshotId(), 100, 1, 7);
                 await(
                         () ->
-                                views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000)
+                                views.read(ProductLine.SPOT, 42)
                                         .status()
                                         .equals("READY"));
                 // An absent callback (export 1 -> 2) must invalidate a previously READY user view.
                 commit(publication, 300, 2, 3, 9);
                 await(
                         () ->
-                                views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000)
+                                views.read(ProductLine.SPOT, 42)
                                         .status()
                                         .equals("STALE"));
                 RealtimeFrame replacement = control.poll(10, TimeUnit.SECONDS);
@@ -185,16 +185,12 @@ class RealtimeRouterIntegrationTest {
                 snapshot(publication, replacement.snapshotId(), 300, 3, 9);
                 await(
                         () ->
-                                views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000)
+                                views.read(ProductLine.SPOT, 42)
                                         .status()
                                         .equals("READY"));
                 assertThat(
                                 UserReadView.from(
-                                                views.read(
-                                                        ProductLine.SPOT,
-                                                        42,
-                                                        System.currentTimeMillis(),
-                                                        15000))
+                                                views.read(ProductLine.SPOT, 42))
                                         .account()
                                         .balances()
                                         .getFirst()
@@ -207,8 +203,7 @@ class RealtimeRouterIntegrationTest {
                         .count() == 1024);
                 assertThat(receivedA.stream().filter(f -> f.userId() == 42 && f.sequence() >= 1000)
                         .map(RealtimeFrame::sequence).toList()).isSorted().doesNotHaveDuplicates();
-                assertThat(UserReadView.from(views.read(ProductLine.SPOT, 42,
-                        System.currentTimeMillis(), 15000)).account().balances().getFirst().availableUnits())
+                assertThat(UserReadView.from(views.read(ProductLine.SPOT, 42)).account().balances().getFirst().availableUnits())
                         .isEqualTo(1043);
                 routes.unregister(userRoute, nodeA);
                 receivedA.clear();
@@ -364,12 +359,12 @@ class RealtimeRouterIntegrationTest {
                         frame(RealtimeFrame.Kind.USER, 42, 100, 1, 1, "", "user", user(7)),
                         frame(RealtimeFrame.Kind.SNAPSHOT_END, 42, 100, 2, 1, "", "", number(1)));
                 assertThat(views.install(snapshot, System.currentTimeMillis(), epoch)).isTrue();
-                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status()).isEqualTo("READY");
+                assertThat(views.read(ProductLine.SPOT, 42).status()).isEqualTo("READY");
                 var corrupt = new UnsafeBuffer(new byte[16]);
                 await(() -> publication.offer(corrupt) > 0);
                 await(() -> !Objects.equals(epoch, redis.opsForValue().get("rt:source:SPOT")));
                 assertThat(router.failures()).isPositive();
-                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status()).isNotEqualTo("READY");
+                assertThat(views.read(ProductLine.SPOT, 42).status()).isNotEqualTo("READY");
             }
         } finally {
             factory.destroy();
@@ -419,7 +414,7 @@ class RealtimeRouterIntegrationTest {
                         frame(RealtimeFrame.Kind.USER, 42, 100, 1, 1, "", "user", user(7)),
                         frame(RealtimeFrame.Kind.SNAPSHOT_END, 42, 100, 2, 1, "", "", number(1))),
                         System.currentTimeMillis(), epoch)).isTrue();
-                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status()).isEqualTo("READY");
+                assertThat(views.read(ProductLine.SPOT, 42).status()).isEqualTo("READY");
                 offer(publication, frame(RealtimeFrame.Kind.MARK, 0, 1, 0, 0, "1", "", new byte[] {'{','}'}));
                 assertThat(ownerBlocked.await(2, TimeUnit.SECONDS)).isTrue();
                 // The owner is deterministically paused: 8192 slots fill before the next frame.
@@ -428,13 +423,13 @@ class RealtimeRouterIntegrationTest {
                 await(() -> router.dropped() > 0 && router.failures() > 0);
                 releaseOwner.countDown();
                 await(() -> !Objects.equals(epoch, redis.opsForValue().get("rt:source:SPOT")));
-                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status()).isNotEqualTo("READY");
+                assertThat(views.read(ProductLine.SPOT, 42).status()).isNotEqualTo("READY");
                 new ValkeySnapshotRequests(redis).renew(ProductLine.SPOT, 42, System.currentTimeMillis() + 30000);
                 var request = control.poll(10, TimeUnit.SECONDS);
                 assertThat(request).isNotNull();
                 snapshot(publication, request.snapshotId(), 200, 2, 9);
-                await(() -> views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status().equals("READY"));
-                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).snapshotVersion())
+                await(() -> views.read(ProductLine.SPOT, 42).status().equals("READY"));
+                assertThat(views.read(ProductLine.SPOT, 42).snapshotVersion())
                         .isEqualTo(RealtimeVersion.fence(200));
             }
         } finally {

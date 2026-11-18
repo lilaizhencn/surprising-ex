@@ -196,13 +196,13 @@ class ValkeyReadViewIntegrationTest {
     void sourceEpochChangeAndUnavailableSnapshotCannotReturnReady() {
         store.sourceEpoch(ProductLine.SPOT, "first");
         store.install(snapshot(100, 1, 10), 1000, "first");
-        assertThat(store.read(ProductLine.SPOT, 42, 1001, 100).status()).isEqualTo("READY");
+        assertThat(store.read(ProductLine.SPOT, 42).status()).isEqualTo("READY");
         store.sourceEpoch(ProductLine.SPOT, "second");
-        assertThat(store.read(ProductLine.SPOT, 42, 1001, 100).status()).isEqualTo("STALE");
+        assertThat(store.read(ProductLine.SPOT, 42).status()).isEqualTo("STALE");
         store.install(snapshot(101, 2, 11), 1001, "second");
-        assertThat(store.read(ProductLine.SPOT, 42, 1002, 100).status()).isEqualTo("READY");
+        assertThat(store.read(ProductLine.SPOT, 42).status()).isEqualTo("READY");
         store.unavailable(ProductLine.SPOT, 42);
-        assertThat(store.read(ProductLine.SPOT, 42, 1002, 100).status()).isEqualTo("STALE");
+        assertThat(store.read(ProductLine.SPOT, 42).status()).isEqualTo("STALE");
     }
 
     @Test
@@ -250,19 +250,19 @@ class ValkeyReadViewIntegrationTest {
     }
 
     @Test
-    void initializationAndFreshnessAreExplicitAndDeltasCannotInitializeIncompleteViews() {
-        assertThat(store.read(ProductLine.SPOT, 42, 100, 100).status()).isEqualTo("INITIALIZING");
+    void initializationIsExplicitAndDeltasCannotInitializeIncompleteViews() {
+        assertThat(store.read(ProductLine.SPOT, 42).status()).isEqualTo("INITIALIZING");
         store.apply(balance(101, 1, 7));
-        assertThat(store.read(ProductLine.SPOT, 42, 100, 100).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(ProductLine.SPOT, 42).status()).isEqualTo("INITIALIZING");
         store.install(snapshot(100, 9, 5), 1000);
         assertThat(
-                        UserReadView.from(store.read(ProductLine.SPOT, 42, 1050, 100))
+                        UserReadView.from(store.read(ProductLine.SPOT, 42))
                                 .account()
                                 .balances()
                                 .getFirst()
                                 .availableUnits())
                 .isEqualTo(7);
-        assertThat(store.read(ProductLine.SPOT, 42, 1101, 100).status()).isEqualTo("STALE");
+        assertThat(store.read(ProductLine.SPOT, 42).status()).isEqualTo("READY");
     }
 
     @Test
@@ -270,17 +270,17 @@ class ValkeyReadViewIntegrationTest {
         store.install(snapshot(100, 1, 10), 1000);
         store.applyCommits(List.of(commit(99, 1, 999), commit(101, 2, 11), commit(102, 3, 12),
                 commit(101, 2, 999)));
-        var view = store.read(ProductLine.SPOT, 42, 1001, 100);
+        var view = store.read(ProductLine.SPOT, 42);
         assertThat(view.status()).isEqualTo("READY");
         assertThat(UserReadView.from(view).account().balances().getFirst().availableUnits()).isEqualTo(12);
         assertThat(redis.opsForHash().get("rt:view:{SPOT:42}", "@exportSequence"))
                 .isEqualTo(RealtimeVersion.of(3, 0));
         store.install(snapshot(103, 2, 13), 1002);
         store.applyCommits(List.of(commit(102, 3, 999)));
-        assertThat(UserReadView.from(store.read(ProductLine.SPOT, 42, 1003, 100))
+        assertThat(UserReadView.from(store.read(ProductLine.SPOT, 42))
                 .account().balances().getFirst().availableUnits()).isEqualTo(13);
-        assertThat(store.read(ProductLine.SPOT, 43, 1003, 100).status()).isEqualTo("INITIALIZING");
-        assertThat(store.read(ProductLine.LINEAR_PERPETUAL, 42, 1003, 100).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(ProductLine.SPOT, 43).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(ProductLine.LINEAR_PERPETUAL, 42).status()).isEqualTo("INITIALIZING");
     }
 
     @Test
@@ -289,14 +289,14 @@ class ValkeyReadViewIntegrationTest {
         store.applyCommits(List.of(commit(101, 2, 11)));
         try (var connection = factory.getConnection()) { connection.scriptingCommands().scriptFlush(); }
         store.applyCommits(List.of(commit(102, 3, 12), commit(103, 4, 13), commit(102, 3, 999)));
-        var view = store.read(ProductLine.SPOT, 42, 1001, 100);
+        var view = store.read(ProductLine.SPOT, 42);
         assertThat(UserReadView.from(view).account().balances().getFirst().availableUnits()).isEqualTo(13);
         assertThat(view.exportSequence()).isEqualTo(4);
-        assertThat(store.read(ProductLine.SPOT, 43, 1001, 100).status()).isEqualTo("INITIALIZING");
-        assertThat(store.read(ProductLine.LINEAR_PERPETUAL, 42, 1001, 100).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(ProductLine.SPOT, 43).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(ProductLine.LINEAR_PERPETUAL, 42).status()).isEqualTo("INITIALIZING");
         // The recovered cache supports the next SHA-only pipeline as well.
         store.applyCommits(List.of(commit(104, 5, 14)));
-        assertThat(UserReadView.from(store.read(ProductLine.SPOT, 42, 1001, 100))
+        assertThat(UserReadView.from(store.read(ProductLine.SPOT, 42))
                 .account().balances().getFirst().availableUnits()).isEqualTo(14);
     }
 
@@ -317,7 +317,7 @@ class ValkeyReadViewIntegrationTest {
         assertThat(store.apply(balance(seq + 1, 0, 98))).isFalse();
         store.install(snapshot(seq, 2, 3), 1001);
         assertThat(
-                        UserReadView.from(store.read(ProductLine.SPOT, 42, 1002, 100))
+                        UserReadView.from(store.read(ProductLine.SPOT, 42))
                                 .account()
                                 .balances()
                                 .getFirst()
@@ -326,7 +326,7 @@ class ValkeyReadViewIntegrationTest {
         store.install(snapshot(seq + 2, 3, 12), 1003);
         assertThat(store.apply(balance(seq + 1, 3, 0))).isFalse();
         assertThat(
-                        UserReadView.from(store.read(ProductLine.SPOT, 42, 1004, 100))
+                        UserReadView.from(store.read(ProductLine.SPOT, 42))
                                 .account()
                                 .balances()
                                 .getFirst()
@@ -341,13 +341,13 @@ class ValkeyReadViewIntegrationTest {
         assertThatThrownBy(() -> store.install(invalid, 1))
                 .isInstanceOf(IllegalArgumentException.class);
         store.install(snapshot(3, 1, 10), 1);
-        assertThat(store.read(ProductLine.SPOT, 43, 1, 100).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(ProductLine.SPOT, 43).status()).isEqualTo("INITIALIZING");
         var other =
                 Arrays.stream(ProductLine.values())
                         .filter(p -> p != ProductLine.SPOT)
                         .findFirst()
                         .orElseThrow();
-        assertThat(store.read(other, 42, 1, 100).status()).isEqualTo("INITIALIZING");
+        assertThat(store.read(other, 42).status()).isEqualTo("INITIALIZING");
     }
 
     @Test

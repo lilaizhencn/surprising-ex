@@ -78,4 +78,44 @@ class RealtimeWebSocketBridgeLifecycleTest {
                     any(), any(), any());
         }
     }
+
+    @Test void oldSnapshotAgeDoesNotRejectWebSocketSnapshotButValidityStillDoes() throws Exception {
+        String directory = System.getProperty("java.io.tmpdir") + "/bridge-snapshot-" + UUID.randomUUID();
+        var environment = new MockEnvironment().withProperty("surprising.realtime.directory", directory)
+                .withProperty("surprising.realtime.ws.channel", "aeron:udp?endpoint=localhost:0");
+        var redis = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked") ValueOperations<String, String> values = mock(ValueOperations.class);
+        @SuppressWarnings("unchecked") org.springframework.data.redis.core.HashOperations<String, Object, Object> hashes =
+                mock(org.springframework.data.redis.core.HashOperations.class);
+        @SuppressWarnings("unchecked") org.springframework.data.redis.core.ZSetOperations<String, String> requests =
+                mock(org.springframework.data.redis.core.ZSetOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(redis.opsForHash()).thenReturn(hashes);
+        when(redis.opsForZSet()).thenReturn(requests);
+        when(values.get("rt:source:SPOT")).thenReturn("source");
+        var fields = new java.util.HashMap<Object, Object>();
+        fields.put("@fence", "100");
+        fields.put("@epoch", "source");
+        fields.put("@snapshotAt", "1");
+        when(hashes.entries("rt:view:{SPOT:42}")).thenAnswer(ignored -> new java.util.HashMap<>(fields));
+        var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
+                .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
+             var bridge = new RealtimeWebSocketBridge(registry, redis, environment, new ObjectMapper())) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (!bridge.ready() && System.nanoTime() < deadline) Thread.sleep(10);
+            assertThat(bridge.ready()).isTrue();
+            assertThat(bridge.snapshot(ProductLine.SPOT, 42).status()).isEqualTo("READY");
+            assertThat(bridge.snapshot(ProductLine.SPOT, 42).snapshotAt()).isEqualTo(1);
+            when(values.get("rt:source:SPOT")).thenReturn("replacement");
+            assertThat(bridge.snapshot(ProductLine.SPOT, 42).status()).isEqualTo("STALE");
+            when(values.get("rt:source:SPOT")).thenReturn("source");
+            fields.put("@invalid", "snapshot_unavailable");
+            assertThat(bridge.snapshot(ProductLine.SPOT, 42).status()).isEqualTo("STALE");
+            fields.remove("@invalid");
+            fields.remove("@fence");
+            assertThat(bridge.snapshot(ProductLine.SPOT, 42).status()).isEqualTo("INITIALIZING");
+        }
+    }
+
 }

@@ -71,8 +71,8 @@ public final class ValkeyUserQueries {
         long now = System.currentTimeMillis();
         try {
             requests.renew(product, user, now + 30000);
-            var source = fields == null ? views.read(product, user, now, 15000)
-                    : views.readFields(product, user, now, 15000, fields);
+            var source = fields == null ? views.read(product, user)
+                    : views.readFields(product, user, fields);
             if (!source.status().equals("READY"))
                 throw new ReadViewUnavailableException("READ_VIEW_" + source.status());
             if (minExportSequence != null && source.exportSequence() < minExportSequence)
