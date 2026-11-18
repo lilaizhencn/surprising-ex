@@ -112,7 +112,7 @@ class ApiKeyHttpBoundaryTest {
 
     private GatewayApiKeyRepository.ApiKeyRecord record() {
         return new GatewayApiKeyRepository.ApiKeyRecord(UUID.randomUUID(),42L,apiKey,totp.encryptSecret("secret"),
-                "test","READ","","ACTIVE",Instant.now(),null,null);
+                "test","READ","","ACTIVE",Instant.now(),null);
     }
     private MockHttpServletRequest request() {
         var request=new MockHttpServletRequest("GET","/api/v3/account/status");request.setRemoteAddr("203.0.113.7");

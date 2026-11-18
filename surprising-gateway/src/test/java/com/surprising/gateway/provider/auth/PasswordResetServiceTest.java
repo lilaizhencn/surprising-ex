@@ -65,6 +65,6 @@ class PasswordResetServiceTest {
                 .isTrue();
 
         verify(persistence).updatePasswordHash(eq(42L), eq("new-hash"), eq(now));
-        verify(persistence).revokeUserRefreshSessions(eq(42L), eq(now));
+        verify(persistence).revokeUserSessions(eq(42L), eq(now));
     }
 }

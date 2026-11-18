@@ -28,6 +28,27 @@ class AuthStateTest {
     }
 
     @Test
+    void 残缺会话或用户记录不能误放行() {
+        fixture.backend.hashPut("auth:session:999",java.util.Map.of("uid","7"),Duration.ofDays(7));
+        assertThatThrownBy(()->fixture.state.session(999)).isInstanceOf(IllegalArgumentException.class);
+        fixture.backend.hashPut("auth:user:999",java.util.Map.of("roles","SUPER_ADMIN"),Duration.ofDays(7));
+        assertThatThrownBy(()->fixture.state.user(999)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void Valkey故障短暂退避不延长六十秒宽限() {
+        var backend=org.mockito.Mockito.spy(fixture.backend);
+        var state=new AuthState(backend,fixture.properties,fixture.backend.clock::get);
+        state.user(用户);
+        org.mockito.Mockito.clearInvocations(backend);
+        过去(Duration.ofSeconds(5));backend.down=true;
+        for(int i=0;i<100;i++) assertThat(state.user(用户)).isNotNull();
+        org.mockito.Mockito.verify(backend,org.mockito.Mockito.times(1)).hashGet(用户键);
+        过去(Duration.ofSeconds(56));
+        assertThatThrownBy(()->state.user(用户)).isInstanceOf(AuthStateUnavailableException.class);
+    }
+
+    @Test
     void 会话滑动续期_十分钟内的请求不写Valkey() {
         var state = fixture.state;
         assertThat(state.session(会话)).isNotNull();
@@ -120,9 +141,9 @@ class AuthStateTest {
     }
 
     @Test
-    void Valkey宕机时Telegram映射回源而不是失败() {
+    void Valkey宕机时未知Telegram身份拒绝而不是回源() {
         fixture.backend.down = true;
-        assertThat(fixture.state.telegramUserId("123")).isNull();
+        assertThatThrownBy(()->fixture.state.telegramUserId("123")).isInstanceOf(AuthStateUnavailableException.class);
     }
 
     @Test

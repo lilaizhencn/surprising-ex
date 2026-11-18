@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 
 import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayPermissionRepository;
-import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayRolePermissionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayRoleRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
@@ -40,8 +40,8 @@ class AuthPersistenceServiceTest {
             mock(GatewayRolePermissionRepository.class);
     private final GatewayLoginLogRepository loginLogRepository = mock(GatewayLoginLogRepository.class);
     private final GatewayUserMfaRepository mfaRepository = mock(GatewayUserMfaRepository.class);
-    private final GatewayRefreshSessionRepository refreshSessionRepository =
-            mock(GatewayRefreshSessionRepository.class);
+    private final LoginSessionRepository sessions =
+            mock(LoginSessionRepository.class);
 
     private AuthPersistenceService service;
 
@@ -55,7 +55,7 @@ class AuthPersistenceServiceTest {
                 rolePermissionRepository,
                 loginLogRepository,
                 mfaRepository,
-                refreshSessionRepository);
+                sessions);
     }
 
     @Test

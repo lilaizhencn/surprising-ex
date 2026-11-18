@@ -64,13 +64,13 @@ class TelegramLoginDatabaseTest {
                     created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL
                 )
                 """);
-        String migration = Files.readString(Path.of("../deployment/migrations/20261020-telegram-login.sql"));
-        jdbc.execute(migration);
-        // Re-running migrations must preserve existing identities and flows.
-        jdbc.execute(migration);
-        String mobileMigration = Files.readString(Path.of("../deployment/migrations/20261021-telegram-mobile-return.sql"));
-        jdbc.execute(mobileMigration);
-        jdbc.execute(mobileMigration);
+        jdbc.execute("ALTER TABLE gateway_users ALTER COLUMN password_hash DROP NOT NULL");
+        jdbc.execute("ALTER TABLE gateway_users ADD COLUMN display_name TEXT");
+        String init=Files.readString(Path.of("../init.sql"));
+        for(String table:java.util.List.of("gateway_telegram_identities","gateway_telegram_login_flows")) {
+            int start=init.indexOf("CREATE TABLE IF NOT EXISTS "+table+" (");
+            jdbc.execute(init.substring(start,init.indexOf("\n);",start)+3));
+        }
         repository = new TelegramLoginFlowRepository(jdbc) {
             @Override public int activeCount(String deviceId) {
                 int count=super.activeCount(deviceId);
@@ -98,8 +98,16 @@ class TelegramLoginDatabaseTest {
         manager = new DataSourceTransactionManager(ds);
         var identities = new TelegramIdentityRepository(jdbc);
         var authState = new AuthStateFixture().state;
-        var identityService = new TelegramIdentityService(identities, authState,
-                new TelegramIdentityBinder(identities, users, userRepository, authState));
+        var sync=mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class);
+        doAnswer(call->{
+            long uid=call.getArgument(0);
+            var storedUser=userRepository.find(uid).orElseThrow();
+            authState.putUser(new com.surprising.gateway.provider.auth.state.UserState(uid,storedUser.username(),storedUser.email(),storedUser.displayName(),
+                    storedUser.createdAt(),storedUser.status(),List.of("USER"),List.of(),java.util.Set.of(),java.util.Set.of(),false,true));
+            return null;
+        }).when(sync).reloadCommittedUser(anyLong());
+        var binder=new TelegramIdentityBinder(identities,users,userRepository,authState,sync);
+        var identityService=new TelegramIdentityService(authState,binder);
         var proxy = new ProxyFactory(new TelegramLoginService(repository, identityService, userRepository, oidc, auth));
         proxy.setProxyTargetClass(true);
         proxy.addAdvice(new TransactionInterceptor(manager, new AnnotationTransactionAttributeSource()));

@@ -23,6 +23,7 @@ public class TelegramAuthHandler {
     private final TelegramBotProperties properties;
     private final TelegramI18nService i18n;
     private final TelegramBotSecurityService securityService;
+    private final java.util.concurrent.ConcurrentHashMap<Long,Long> languageLoadedAt=new java.util.concurrent.ConcurrentHashMap<>();
 
     public TelegramAuthHandler(TelegramIdentityService identities,
                                TelegramBotClient botClient,
@@ -36,19 +37,27 @@ public class TelegramAuthHandler {
         this.securityService = securityService;
     }
 
+    public long registerUser(TelegramUser user) {
+        return identities.registerOrLogin(String.valueOf(user.id()), user.getDisplayName());
+    }
+
     public long resolveUserId(TelegramUser tgUser) {
         long userId = identities.resolve(String.valueOf(tgUser.id()), tgUser.getDisplayName());
 
-        // 尝试加载用户保存的偏好语言以热身 i18n 缓存
-        try {
-            if (securityService != null) {
-                TelegramSecuritySettings settings = securityService.getSettings(userId);
-                if (settings != null && settings.preferredLanguage() != null) {
-                    i18n.primeUserLocale(tgUser.id(), settings.preferredLanguage());
+        long now=System.nanoTime();
+        languageLoadedAt.compute(tgUser.id(),(id,loadedAt)->{
+            if(loadedAt!=null && now-loadedAt<60_000_000_000L) return loadedAt;
+            try {
+                if(securityService!=null) {
+                    var settings=securityService.getSettings(userId);
+                    if(settings!=null) i18n.primeUserLocale(id,settings.preferredLanguage());
                 }
+            } catch(RuntimeException unavailable) {
+                // 语言偏好属于业务设置，失败不改变已验证的身份。
             }
-        } catch (Exception ignored) {}
-
+            return now;
+        });
+        if(languageLoadedAt.size()>100_000) languageLoadedAt.clear();
         return userId;
     }
 

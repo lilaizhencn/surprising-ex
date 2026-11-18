@@ -54,6 +54,8 @@ class GatewaySecurityBoundaryTest {
         when(rows.user(1)).thenReturn(Optional.of(new AuthenticatedUser(1, "reviewer", "reviewer@example.test", "NORMAL", List.of("SUPPORT"), Instant.now())));
         when(rows.user(2)).thenReturn(Optional.of(new AuthenticatedUser(2, "target", "target@example.test", "NORMAL", List.of("USER"), Instant.now())));
         fixture = context.getBean(com.surprising.gateway.provider.auth.state.AuthStateFixture.class);
+        doAnswer(call->{fixture.state.endSessions(List.of(call.getArgument(0,Long.class)));return null;})
+                .when(rows).revokeSession(anyLong(),any());
         loginReviewer(List.of());
         token = context.getBean(JwtTokenService.class).createSessionToken(1, "reviewer", List.of("SUPPORT"), 1088L, Instant.now());
     }
@@ -95,7 +97,7 @@ class GatewaySecurityBoundaryTest {
         assertThat(get("/api/v1/admin/users/2").statusCode()).isEqualTo(200);
         // 登录后的校验只读 Valkey，用户目录本身的查询只发生在管理接口读取目标用户时
         verify(rows, never()).permissionsForUser(anyLong());
-        verify(rows, never()).activeRefreshSession(anyLong(), anyLong(), any());
+        verify(rows, never()).createSession(anyLong(), any(), any(), any(), any(), any());
         verify(rows, never()).roles(anyLong());
         verify(rows, times(1)).user(2);
         assertThat(get("/api/v1/new-unlisted-endpoint").statusCode()).isEqualTo(403);

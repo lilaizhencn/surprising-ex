@@ -26,7 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import java.time.Instant;
 import java.util.List;
@@ -138,9 +138,9 @@ class UserSecurityControllerTest {
         Instant now = Instant.parse("2026-08-01T00:00:00Z");
         when(authService.authenticateBearer("Bearer token"))
                 .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60)));
-        AdminRefreshSessionResponse session = new AdminRefreshSessionResponse(
+        AdminSessionResponse session = new AdminSessionResponse(
                 7L, 42L, true, now.plusSeconds(3600), null, "browser", "127.0.0.1", now, now);
-        when(persistence.refreshSessionsPage(42L, true, new AuthPageQuery(25,null,AuthPageQuery.Order.CREATED_DESC)))
+        when(persistence.sessionsPage(42L, true, new AuthPageQuery(25,null,AuthPageQuery.Order.CREATED_DESC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(session), null, false,
                         "createdAt.desc", 25));
 
@@ -155,7 +155,7 @@ class UserSecurityControllerTest {
         Instant now = Instant.parse("2026-08-01T00:00:00Z");
         when(authService.authenticateBearer("Bearer token"))
                 .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60)));
-        when(persistence.revokeRefreshSessionForUser(org.mockito.ArgumentMatchers.eq(42L),
+        when(persistence.revokeSessionForUser(org.mockito.ArgumentMatchers.eq(42L),
                 org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.any(Instant.class)))
                 .thenReturn(0);
 

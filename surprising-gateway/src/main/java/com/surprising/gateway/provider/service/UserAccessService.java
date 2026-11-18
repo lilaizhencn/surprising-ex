@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.service;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionRevokeResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
-import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.auth.service.UserSecurityService;
@@ -19,13 +19,13 @@ import org.springframework.transaction.annotation.Transactional;
 /** 聚合本人安全验证、访问限制和会话撤销；本页封禁集合仅为响应派生值，不保存第二份账户状态。 */
 @Service
 public class UserAccessService {
-    private final GatewayRefreshSessionRepository sessions;
+    private final LoginSessionRepository sessions;
     private final GatewayLoginLogRepository logins;
     private final GatewayUserAccessBlockRepository blocks;
     private final SensitiveActionVerificationService verification;
     private final UserSecurityService security;
 
-    public UserAccessService(GatewayRefreshSessionRepository sessions, GatewayLoginLogRepository logins,
+    public UserAccessService(LoginSessionRepository sessions, GatewayLoginLogRepository logins,
                              GatewayUserAccessBlockRepository blocks, SensitiveActionVerificationService verification,
                              UserSecurityService security) {
         this.sessions = sessions;
@@ -40,7 +40,7 @@ public class UserAccessService {
         String currentDevice = sessions.deviceIdForSession(actor.userId(), actor.sessionId()).orElse(null);
         var devices = sessions.devices(actor.userId(), limit, offset);
         var blocked = blocks.activeValues(actor.userId(), "DEVICE", devices.stream()
-                .map(GatewayRefreshSessionRepository.DeviceView::deviceId).filter(java.util.Objects::nonNull).toList());
+                .map(LoginSessionRepository.DeviceView::deviceId).filter(java.util.Objects::nonNull).toList());
         return devices.stream().map(device -> new UserDeviceStatus(device.sessionId(), device.deviceId(),
                 device.userAgent(), device.ipAddress(), device.lastSeen(), device.active(),
                 device.deviceId() == null ? device.sessionId() == actor.sessionId() : device.deviceId().equals(currentDevice),

@@ -176,7 +176,7 @@ public final class AuthModels {
             List<@NotBlank String> permissions) {
     }
 
-    public record AdminRefreshSessionResponse(
+    public record AdminSessionResponse(
             long sessionId,
             long userId,
             boolean active,
@@ -187,7 +187,7 @@ public final class AuthModels {
             String deviceId,
             Instant createdAt,
             Instant updatedAt) {
-        public AdminRefreshSessionResponse(long sessionId, long userId, boolean active, Instant expiresAt,
+        public AdminSessionResponse(long sessionId, long userId, boolean active, Instant expiresAt,
                                            Instant revokedAt, String userAgent, String ipAddress,
                                            Instant createdAt, Instant updatedAt) {
             this(sessionId, userId, active, expiresAt, revokedAt, userAgent, ipAddress, null,
@@ -195,15 +195,15 @@ public final class AuthModels {
         }
     }
 
-    public record AdminRefreshSessionQueryResponse(
+    public record AdminSessionQueryResponse(
             int count,
-            List<AdminRefreshSessionResponse> sessions,
+            List<AdminSessionResponse> sessions,
             String nextCursor,
             boolean hasMore,
             String sort,
             int limit) {
 
-        public AdminRefreshSessionQueryResponse(int count, List<AdminRefreshSessionResponse> sessions) {
+        public AdminSessionQueryResponse(int count, List<AdminSessionResponse> sessions) {
             this(count, sessions, null, false, null, count);
         }
     }

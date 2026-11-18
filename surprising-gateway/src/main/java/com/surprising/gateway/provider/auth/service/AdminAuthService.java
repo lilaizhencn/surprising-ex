@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.auth.service;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminMfaStatusResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionQueryResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRolePermissionsRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRolePermissionsResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRoleQueryResponse;
@@ -51,30 +51,30 @@ public class AdminAuthService {
         return repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
     }
 
-    public AdminRefreshSessionQueryResponse adminRefreshSessions(String authorizationHeader,
+    public AdminSessionQueryResponse adminSessions(String authorizationHeader,
                                                                  Long userId,
                                                                  Boolean active,
                                                                  AuthPageQuery pageQuery) {
         authService.authenticateAdminBearer(authorizationHeader);
-        var page = repository.refreshSessionsPage(userId, active, pageQuery);
-        return new AdminRefreshSessionQueryResponse(page.items().size(), page.items(), page.nextCursor(),
+        var page = repository.sessionsPage(userId, active, pageQuery);
+        return new AdminSessionQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
 
     @Transactional
-    public AdminSessionRevokeResponse revokeRefreshSession(String authorizationHeader, long sessionId) {
+    public AdminSessionRevokeResponse revokeSession(String authorizationHeader, long sessionId) {
         authService.authenticateAdminBearer(authorizationHeader);
         Instant now = Instant.now();
-        int revoked = repository.revokeRefreshSessionForAdmin(sessionId, now);
+        int revoked = repository.revokeSessionForAdmin(sessionId, now);
         return new AdminSessionRevokeResponse(revoked, now);
     }
 
     @Transactional
-    public AdminSessionRevokeResponse revokeUserRefreshSessions(String authorizationHeader, long userId) {
+    public AdminSessionRevokeResponse revokeUserSessions(String authorizationHeader, long userId) {
         authService.authenticateAdminBearer(authorizationHeader);
         repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
         Instant now = Instant.now();
-        int revoked = repository.revokeUserRefreshSessions(userId, now);
+        int revoked = repository.revokeUserSessions(userId, now);
         return new AdminSessionRevokeResponse(revoked, now);
     }
 
@@ -97,7 +97,7 @@ public class AdminAuthService {
         }
         Instant now = Instant.now();
         repository.replaceRoles(userId, roles, now);
-        repository.revokeUserRefreshSessions(userId, now);
+        repository.revokeUserSessions(userId, now);
         return repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
     }
 

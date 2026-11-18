@@ -61,6 +61,22 @@ class TelegramUpdateDispatcherTest {
     }
 
     @Test
+    void frozenOrUnboundIdentityCannotReachTradingCallbacks() {
+        when(authHandler.resolveUserId(testUser)).thenThrow(new IllegalStateException("frozen"));
+        var message=new TelegramMessage(12L,null,testChat,123456L,"original");
+        var query=new TelegramCallbackQuery("blocked",testUser,message,"orders:cancel_all");
+        dispatcher.dispatch(new TelegramUpdate(400L,null,query));
+        verifyNoInteractions(orderHandler,tradeHandler,withdrawHandler,transferHandler);
+    }
+
+    @Test
+    void frozenIdentityCannotReachMultiStepWithdrawalState() {
+        when(authHandler.resolveUserId(testUser)).thenThrow(new IllegalStateException("frozen"));
+        dispatcher.dispatch(new TelegramUpdate(401L,new TelegramMessage(1L,testUser,testChat,123456L,"confirm"),null));
+        verifyNoInteractions(orderHandler,tradeHandler,withdrawHandler,transferHandler);
+    }
+
+    @Test
     void dispatchesStartCommandToAuthHandler() {
         TelegramMessage msg = new TelegramMessage(1L, testUser, testChat, 123456L, "/start");
         dispatcher.dispatch(new TelegramUpdate(1L, msg, null));

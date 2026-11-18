@@ -99,6 +99,7 @@ public class TelegramUpdateDispatcher {
         long chatId = cq.message().chat().id();
         long messageId = cq.message().messageId();
         TelegramUser tgUser = cq.from();
+        authHandler.resolveUserId(tgUser);
         rememberChat(tgUser, chatId);
 
         log.info("Telegram callback data: {} from userId={}", data, tgUser.id());
@@ -197,13 +198,16 @@ public class TelegramUpdateDispatcher {
     }
 
     private void handleMessage(TelegramMessage msg) {
-        if (msg.chat() != null) rememberChat(msg.from(), msg.chat().id());
         String text = msg.text();
         if (text == null || msg.from() == null || msg.chat() == null) return;
         text = text.trim();
 
         long chatId = msg.chat().id();
         TelegramUser tgUser = msg.from();
+
+        if (text.startsWith("/start")) authHandler.registerUser(tgUser);
+        else authHandler.resolveUserId(tgUser);
+        rememberChat(tgUser,chatId);
 
         // 1. 先检查是否处于多步会话状态机中
         Optional<TelegramSessionState> optState = sessionService.getState(tgUser.id());

@@ -10,11 +10,17 @@ import java.util.Set;
 
 /**
  * Valkey 中的用户访问状态（auth:user:{用户ID}）：请求校验需要的状态、角色、权限和被封的 IP/设备。
- * hasApiKey=true 的用户有有效 API Key，状态常驻不过期；其余用户跟着会话一起滑动过期。
+ * 有有效 API Key 或永久 Telegram 绑定的用户常驻；其余用户跟会话滑动过期。
  */
 public record UserState(long userId, String username, String email, String displayName, Instant createdAt,
                         String status, List<String> roles, List<String> permissions,
-                        Set<String> blockedIps, Set<String> blockedDevices, boolean hasApiKey) {
+                        Set<String> blockedIps, Set<String> blockedDevices, boolean hasApiKey, boolean telegramBound) {
+
+    public UserState(long userId, String username, String email, String displayName, Instant createdAt,
+                     String status, List<String> roles, List<String> permissions,
+                     Set<String> blockedIps, Set<String> blockedDevices, boolean hasApiKey) {
+        this(userId, username, email, displayName, createdAt, status, roles, permissions, blockedIps, blockedDevices, hasApiKey, false);
+    }
 
     Map<String, String> toFields() {
         var fields = new HashMap<String, String>();
@@ -27,17 +33,22 @@ public record UserState(long userId, String username, String email, String displ
         fields.put("permissions", String.join(",", permissions));
         fields.put("blockedIps", String.join(",", blockedIps));
         fields.put("blockedDevices", String.join(",", blockedDevices));
-        fields.put("persistent", hasApiKey ? "1" : "0");
+        fields.put("hasApiKey", hasApiKey ? "1" : "0");
+        fields.put("telegramBound", telegramBound ? "1" : "0");
+        fields.put("persistent", hasApiKey || telegramBound ? "1" : "0");
         return fields;
     }
 
     static UserState fromFields(long userId, Map<String, String> fields) {
+        String status=fields.get("status");
+        if(status==null || !Set.of("NORMAL","FROZEN","TRADE_DISABLED","WITHDRAW_DISABLED").contains(status))
+            throw new IllegalArgumentException("invalid user auth state");
         String createdAt = fields.get("createdAt");
         return new UserState(userId, fields.get("username"), fields.get("email"), fields.get("displayName"),
                 createdAt == null ? null : Instant.ofEpochMilli(Long.parseLong(createdAt)),
                 fields.get("status"), split(fields.get("roles")), split(fields.get("permissions")),
                 new LinkedHashSet<>(split(fields.get("blockedIps"))),
-                new LinkedHashSet<>(split(fields.get("blockedDevices"))), "1".equals(fields.get("persistent")));
+                new LinkedHashSet<>(split(fields.get("blockedDevices"))), "1".equals(fields.get("hasApiKey")), "1".equals(fields.get("telegramBound")));
     }
 
     private static List<String> split(String value) {

@@ -239,7 +239,7 @@ class GatewayLimitHttpTest {
 
     private void stored(String key, String permissions) {
         fixture.putApiKey(new GatewayApiKeyRepository.ApiKeyRecord(UUID.randomUUID(), 42,
-                key, totp.encryptSecret("secret"), "bot", permissions, "192.0.2.7", "ACTIVE", Instant.now(), null, null));
+                key, totp.encryptSecret("secret"), "bot", permissions, "192.0.2.7", "ACTIVE", Instant.now(), null));
     }
 
     private MockHttpServletRequestBuilder nativeRequest(String method, String path, String body, String key) throws Exception {

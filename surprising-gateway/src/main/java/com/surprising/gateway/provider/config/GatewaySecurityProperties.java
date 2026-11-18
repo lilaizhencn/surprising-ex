@@ -69,9 +69,9 @@ public class GatewaySecurityProperties {
     /** Valkey 不可用时，进程内已有的登录态还能继续使用多久。 */
     @Setter
     private Duration authLocalStaleTtl = Duration.ofSeconds(60);
-    /** 网关启动时，把 Postgres 里仍有效的会话、用户和 API Key 补进 Valkey 中缺失的部分。 */
+    /** 网关启动时同步持久的 API Key、Telegram 绑定和关联用户；绝不恢复登录会话。 */
     @Setter
-    private boolean authStateRebuildOnStart = true;
+    private boolean authPersistentSyncOnStart = true;
 
     public void setAdminRoles(List<String> adminRoles) {
         this.adminRoles = adminRoles == null || adminRoles.isEmpty()

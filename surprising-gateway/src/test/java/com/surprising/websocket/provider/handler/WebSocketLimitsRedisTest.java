@@ -51,7 +51,7 @@ class WebSocketLimitsRedisTest {
         var properties = new GatewayProperties(); var totp = new TotpService(properties);
         keys = new GatewayApiKeyService(rows, auth, totp, null, properties, mock(CurrentAuthClient.class), fixture.state);
         fixture.putApiKey(new GatewayApiKeyRepository.ApiKeyRecord(UUID.randomUUID(), 42, key,
-                totp.encryptSecret("secret"), "bot", "READ", "192.0.2.0/24", "ACTIVE", Instant.now(), null, null));
+                totp.encryptSecret("secret"), "bot", "READ", "192.0.2.0/24", "ACTIVE", Instant.now(), null));
     }
 
     @AfterEach void cleanup() throws Exception {

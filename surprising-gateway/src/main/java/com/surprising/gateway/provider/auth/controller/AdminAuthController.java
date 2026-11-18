@@ -11,7 +11,7 @@ import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalDecisi
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionQueryResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRolePermissionsRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRolePermissionsResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRoleQueryResponse;
@@ -100,7 +100,7 @@ public class AdminAuthController {
     }
 
     @GetMapping("/sessions")
-    public AdminRefreshSessionQueryResponse sessions(
+    public AdminSessionQueryResponse sessions(
             @RequestHeader("Authorization") String authorization,
             @RequestParam(value = "userId", required = false) Long userId,
             @RequestParam(value = "active", required = false) Boolean active,
@@ -109,7 +109,7 @@ public class AdminAuthController {
             @RequestParam(value = "sort", required = false) String sort) {
         try {
             AuthPageRequestBinding.sessionUser(userId);
-            return adminAuthService.adminRefreshSessions(authorization, userId, active,
+            return adminAuthService.adminSessions(authorization, userId, active,
                     AuthPageRequestBinding.created(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -119,7 +119,7 @@ public class AdminAuthController {
     }
 
     @GetMapping("/users/{userId}/sessions")
-    public AdminRefreshSessionQueryResponse userSessions(
+    public AdminSessionQueryResponse userSessions(
             @RequestHeader("Authorization") String authorization,
             @PathVariable("userId") long userId,
             @RequestParam(value = "active", required = false) Boolean active,
@@ -129,7 +129,7 @@ public class AdminAuthController {
         try {
             adminAuthService.adminUser(authorization, userId);
             AuthPageRequestBinding.sessionUser(userId);
-            return adminAuthService.adminRefreshSessions(authorization, userId, active,
+            return adminAuthService.adminSessions(authorization, userId, active,
                     AuthPageRequestBinding.created(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -145,7 +145,7 @@ public class AdminAuthController {
                                                     HttpServletRequest httpRequest) {
         try {
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return adminAuthService.revokeRefreshSession(authorization, sessionId);
+            return adminAuthService.revokeSession(authorization, sessionId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -160,7 +160,7 @@ public class AdminAuthController {
                                                          HttpServletRequest httpRequest) {
         try {
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return adminAuthService.revokeUserRefreshSessions(authorization, userId);
+            return adminAuthService.revokeUserSessions(authorization, userId);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

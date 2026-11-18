@@ -79,7 +79,7 @@ public class PasswordResetService {
             return new ResetResult(false);
         }
         persistence.updatePasswordHash(credential.userId(), passwordHasher.hash(newPassword), now);
-        persistence.revokeUserRefreshSessions(credential.userId(), now);
+        persistence.revokeUserSessions(credential.userId(), now);
         return new ResetResult(true);
     }
 

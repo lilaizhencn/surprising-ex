@@ -12,7 +12,7 @@ import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.UserMfaVerificationRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.ChangePasswordRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionQueryResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionRevokeResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.SensitiveChallengeRequest;
@@ -158,7 +158,7 @@ public class UserSecurityController {
     }
 
     @GetMapping("/sessions")
-    public AdminRefreshSessionQueryResponse sessions(
+    public AdminSessionQueryResponse sessions(
             @RequestHeader("Authorization") String authorization,
             @RequestParam(value = "active", defaultValue = "true") Boolean active,
             @RequestParam(value = "limit", defaultValue = "100") int limit,
@@ -236,7 +236,7 @@ public class UserSecurityController {
         try {
             long userId = principal(authorization).userId();
             java.time.Instant revokedAt = java.time.Instant.now();
-            int revoked = persistence.revokeRefreshSessionForUser(userId, sessionId, revokedAt);
+            int revoked = persistence.revokeSessionForUser(userId, sessionId, revokedAt);
             if (revoked == 0) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found");
             }
@@ -276,14 +276,14 @@ public class UserSecurityController {
         }
     }
 
-    private AdminRefreshSessionQueryResponse pageSessions(long userId,
+    private AdminSessionQueryResponse pageSessions(long userId,
                                                           Boolean active,
                                                           int limit,
                                                           String cursor,
                                                           String sort) {
         AuthPageRequestBinding.sessionUser(userId);
-        var page = persistence.refreshSessionsPage(userId, active, AuthPageRequestBinding.created(limit, cursor, sort));
-        return new AdminRefreshSessionQueryResponse(page.items().size(), page.items(), page.nextCursor(),
+        var page = persistence.sessionsPage(userId, active, AuthPageRequestBinding.created(limit, cursor, sort));
+        return new AdminSessionQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
 

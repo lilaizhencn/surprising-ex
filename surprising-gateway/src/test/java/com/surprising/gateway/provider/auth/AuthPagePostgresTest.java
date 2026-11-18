@@ -42,7 +42,8 @@ class AuthPagePostgresTest {
     private JdbcTemplate admin, jdbc;
     private String schema;
     private GatewayUserRepository users;
-    private GatewayRefreshSessionRepository sessions;
+    private LoginSessionRepository sessions;
+    private com.surprising.gateway.provider.auth.state.ValkeySessionFixture sessionFixture;
     private AdminApprovalRepository approvals;
     private ComplianceRiskTagRepository tags;
     private ComplianceAmlCaseRepository cases;
@@ -63,7 +64,7 @@ class AuthPagePostgresTest {
                 url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema, user, password));
         String init = Files.readString(Path.of("../init.sql"));
         for (String table : List.of("gateway_users", "gateway_roles", "gateway_user_roles",
-                "gateway_refresh_sessions", "gateway_user_kyc_profiles", "gateway_user_risk_tags",
+                "gateway_user_kyc_profiles", "gateway_user_risk_tags",
                 "gateway_user_aml_cases", "gateway_admin_approval_requests")) {
             int start = init.indexOf("CREATE TABLE IF NOT EXISTS " + table + " (");
             jdbc.execute(init.substring(start, init.indexOf("\n);", start) + 3));
@@ -75,14 +76,14 @@ class AuthPagePostgresTest {
                 Timestamp.from(TIME.minusSeconds(1)), Timestamp.from(TIME.minusSeconds(1)),
                 Timestamp.from(TIME.minusSeconds(1)), Timestamp.from(TIME.minusSeconds(1)));
         jdbc.execute("INSERT INTO gateway_roles(role_id,role_code,role_name) VALUES(1,'USER','User'),(2,'SUPPORT','Support')");
+        sessionFixture=new com.surprising.gateway.provider.auth.state.ValkeySessionFixture();
         for (int i = 0; i < 2; i++) {
             long id = FIRST + i;
             jdbc.update("INSERT INTO gateway_users(user_id,username,email,password_hash,created_at,updated_at) VALUES(?,?,?,'hash',?,?)",
                     id, "page_user_" + i, i == 0 ? "literal%_@example.test" : "literalab@example.test",
                     Timestamp.from(TIME), Timestamp.from(TIME));
             jdbc.update("INSERT INTO gateway_user_roles(user_id,role_id) VALUES(?,1),(?,2)", id, id);
-            jdbc.update("INSERT INTO gateway_refresh_sessions(session_id,user_id,token_hash,expires_at,created_at,updated_at) VALUES(?,7,?,?,?,?)",
-                    id, "hash_" + i, Timestamp.from(TIME.plusSeconds(315360000)), Timestamp.from(TIME), Timestamp.from(TIME));
+            sessionFixture.seed(301+i,7,null,"127.0.0.1",TIME);
             jdbc.update("INSERT INTO gateway_user_kyc_profiles(user_id,kyc_level,status,updated_at) VALUES(?,'STANDARD','VERIFIED',?)", id, Timestamp.from(TIME));
             jdbc.update("INSERT INTO gateway_user_risk_tags(tag_id,user_id,tag_code,severity,reason,created_at,updated_at) VALUES(?,?,'HIGH_RISK','HIGH','review',?,?)",
                     id, id, Timestamp.from(TIME), Timestamp.from(TIME));
@@ -92,9 +93,8 @@ class AuthPagePostgresTest {
                     + "VALUES(?,7,'account','POST','/api/v1/admin/accounts/adjustments','review',?,?)",
                     id, Timestamp.from(TIME), Timestamp.from(TIME.plusSeconds(3600)));
         }
-        jdbc.update("INSERT INTO gateway_refresh_sessions(session_id,user_id,token_hash,expires_at,created_at) VALUES(?,8,'other',?,?)",
-                FIRST + 1000, Timestamp.from(TIME.plusSeconds(315360000)), Timestamp.from(TIME));
-        users = spy(new GatewayUserRepository(jdbc)); sessions = spy(new GatewayRefreshSessionRepository(jdbc));
+        sessionFixture.seed(303,8,null,"127.0.0.2",TIME);
+        users = spy(new GatewayUserRepository(jdbc)); sessions = spy(sessionFixture.sessions);
         approvals = spy(new AdminApprovalRepository(jdbc)); tags = spy(new ComplianceRiskTagRepository(jdbc));
         cases = spy(new ComplianceAmlCaseRepository(jdbc)); complianceUsers = spy(new ComplianceUserProjectionRepository(jdbc));
         userRoles = spy(new GatewayUserRoleRepository(jdbc)); roles = spy(new GatewayRoleRepository(jdbc));
@@ -120,12 +120,12 @@ class AuthPagePostgresTest {
     }
 
     @AfterEach void cleanup() {
+        if(sessionFixture!=null) sessionFixture.close();
         if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE");
     }
 
     static Stream<Arguments> pageOrders() {
         return Stream.of(new String[]{"users", "users", "userId", "createdAt"},
-                new String[]{"sessions", "sessions", "sessionId", "createdAt"},
                 new String[]{"approvals", "approvals", "approvalId", "requestedAt"},
                 new String[]{"compliance/users", "users", "userId", "updatedAt"},
                 new String[]{"compliance/risk-tags", "tags", "tagId", "createdAt"},

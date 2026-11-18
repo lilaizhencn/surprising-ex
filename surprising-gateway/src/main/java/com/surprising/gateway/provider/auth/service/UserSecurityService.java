@@ -91,7 +91,7 @@ public class UserSecurityService {
         if (persistence.updatePasswordHash(userId, passwordHasher.hash(newPassword), now) != 1) {
             throw new IllegalArgumentException("user not found");
         }
-        persistence.revokeUserRefreshSessions(userId, now);
+        persistence.revokeUserSessions(userId, now);
     }
 
     @Transactional

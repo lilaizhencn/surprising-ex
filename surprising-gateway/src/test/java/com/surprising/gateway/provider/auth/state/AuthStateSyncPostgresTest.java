@@ -13,14 +13,13 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-/** Postgres 的写入点（用户、角色、封禁、会话、API Key）同步到 Valkey 状态，以及启动时补齐缺失状态。 */
+/** Postgres 持久配置（用户、角色、封禁、API Key、Telegram）同步到 Valkey；不恢复登录会话。 */
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")
 class AuthStateSyncPostgresTest {
 
     JdbcTemplate jdbc;
     AuthStateFixture fixture;
     AuthStateSync sync;
-    GatewayRefreshSessionRepository sessions;
     GatewayUserRepository users;
     GatewayUserRoleRepository userRoles;
     GatewayRolePermissionRepository rolePermissions;
@@ -36,17 +35,12 @@ class AuthStateSyncPostgresTest {
         jdbc.execute("TRUNCATE gateway_users CASCADE");
         fixture = new AuthStateFixture();
         sync = new AuthStateSync(jdbc, fixture.state, fixture.properties);
-        sessions = new GatewayRefreshSessionRepository(jdbc); sessions.setAuthState(sync);
         users = new GatewayUserRepository(jdbc); users.setAuthState(sync);
         userRoles = new GatewayUserRoleRepository(jdbc); userRoles.setAuthState(sync);
         rolePermissions = new GatewayRolePermissionRepository(jdbc); rolePermissions.setAuthState(sync);
         blocks = new GatewayUserAccessBlockRepository(jdbc); blocks.setAuthState(sync);
         apiKeys = new GatewayApiKeyRepository(jdbc); apiKeys.setAuthState(sync);
         userId = users.create("sync_user", "sync@example.test", "hash", now).userId();
-    }
-
-    private long session(String hash) {
-        return sessions.save(userId, hash, now.plus(Duration.ofDays(7)), "ua", "203.0.113.7", null, now);
     }
 
     @Test
@@ -75,19 +69,6 @@ class AuthStateSyncPostgresTest {
     }
 
     @Test
-    void 撤销会话同时删除Valkey会话() {
-        long a = session("a"), b = session("b"), c = session("c");
-        for (long id : List.of(a, b, c)) fixture.startSession(userId, id);
-        assertThat(sessions.revokeActiveForUserExcept(userId, b, now)).isEqualTo(2);
-        assertThat(fixture.state.sessionExists(a)).isFalse();
-        assertThat(fixture.state.sessionExists(b)).isTrue();
-        assertThat(fixture.state.sessionExists(c)).isFalse();
-        assertThat(sessions.revokeActive(b, now)).isEqualTo(1);
-        assertThat(fixture.state.sessionExists(b)).isFalse();
-        assertThat(fixture.state.session(b)).isNull();
-    }
-
-    @Test
     void API_Key创建撤销同步_并且用户成为常驻状态() {
         apiKeys.create(java.util.UUID.randomUUID(), userId, "sx_sync_key", "cipher", "bot", "READ", "", now);
         assertThat(fixture.state.apiKey("sx_sync_key").permissions()).isEqualTo("READ");
@@ -99,21 +80,14 @@ class AuthStateSyncPostgresTest {
     }
 
     @Test
-    void 启动补齐只恢复有效会话和有效API_Key且不覆盖已有状态() {
-        long live = session("live"), revoked = session("revoked");
-        sessions.revokeActive(revoked, now);
+    void 启动同步只处理持久配置而不恢复登录会话() {
+        fixture.startSession(userId, 123);
+        fixture.backend.delete("auth:session:123");
         apiKeys.create(java.util.UUID.randomUUID(), userId, "sx_rebuild", "cipher", "bot", "READ", "", now);
-        fixture.backend.delete("auth:apikey:sx_rebuild", "auth:user:" + userId);
-        fixture.backend.writes = 0;
-        sync.rebuildMissing();
-        assertThat(fixture.state.sessionExists(live)).isTrue();
-        assertThat(fixture.state.sessionExists(revoked)).isFalse();
+        fixture.backend.delete("auth:apikey:sx_rebuild", "auth:user:"+userId);
+        sync.syncPersistentState();
+        assertThat(fixture.state.sessionExists(123)).isFalse();
         assertThat(fixture.state.apiKeyExists("sx_rebuild")).isTrue();
         assertThat(fixture.state.user(userId).username()).isEqualTo("sync_user");
-        assertThat(fixture.backend.ttlMillis("auth:session:" + live)).isBetween(Duration.ofDays(6).toMillis(), Duration.ofDays(7).toMillis());
-        // 第二次补齐不改动已有的键
-        int writes = fixture.backend.writes;
-        sync.rebuildMissing();
-        assertThat(fixture.backend.writes).isEqualTo(writes);
     }
 }

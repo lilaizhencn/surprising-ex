@@ -71,7 +71,7 @@ class UserSecurityServiceTest {
         service.updatePassword(42L, "new-password");
 
         verify(persistence).updatePasswordHash(eq(42L), eq("new-hash"), any());
-        verify(persistence).revokeUserRefreshSessions(eq(42L), any());
+        verify(persistence).revokeUserSessions(eq(42L), any());
     }
 
     private AuthenticatedUser user(Instant now) {

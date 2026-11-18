@@ -50,6 +50,12 @@ public final class InMemoryAuthStateBackend implements AuthStateBackend {
         check();
         writes++;
         entries.put(key, new Entry(new HashMap<>(fields), ttl == null ? Long.MAX_VALUE : clock.get() + ttl.toMillis()));
+        if(key.startsWith("auth:session:") && ttl!=null) {
+            String userKey="auth:user:"+fields.get("uid");
+            Entry user=live(userKey);
+            if(user!=null && !"1".equals(user.fields().get("persistent")))
+                entries.put(userKey,new Entry(user.fields(),clock.get()+ttl.toMillis()));
+        }
     }
 
     @Override public synchronized boolean exists(String key) {

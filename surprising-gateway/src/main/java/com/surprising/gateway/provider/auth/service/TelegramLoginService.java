@@ -96,7 +96,7 @@ public class TelegramLoginService {
         if (result.subject() == null) return null;
         Instant now = Instant.now();
         // No password, email, phone or nickname is used to identify or auto-link an account.
-        long userId = identities.resolve(result.subject());
+        long userId = identities.registerOrLogin(result.subject(), null);
         userRows.updateNickname(userId, result.displayName(), now);
         var login = auth.loginTelegram(userId, request);
         flows.consume(key);
@@ -138,7 +138,7 @@ public class TelegramLoginService {
         var user = verifiedOpt.get();
         String subject = String.valueOf(user.telegramId());
         Instant now = Instant.now();
-        long userId = identities.resolve(subject);
+        long userId = identities.registerOrLogin(subject, null);
         userRows.updateNickname(userId, user.getDisplayName(), now);
         return auth.loginTelegram(userId, request);
     }

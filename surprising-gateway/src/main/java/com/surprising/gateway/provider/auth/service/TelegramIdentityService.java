@@ -1,40 +1,34 @@
 package com.surprising.gateway.provider.auth.service;
 
-import com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository;
 import com.surprising.gateway.provider.auth.state.AuthState;
 import org.springframework.stereotype.Service;
 
-/**
- * Telegram subject 到站内用户的解析。已绑定账号走本机缓存和 Valkey，不访问数据库；
- * 只有从未绑定过的 subject 才进入 {@link TelegramIdentityBinder}。
- */
+/** 永久 Telegram 身份和短期网页会话分开；普通身份校验绝不读取 Postgres。 */
 @Service
 public class TelegramIdentityService {
-
-    private final TelegramIdentityRepository identities;
-    private final AuthState authState;
+    private final AuthState state;
     private final TelegramIdentityBinder binder;
 
-    public TelegramIdentityService(TelegramIdentityRepository identities, AuthState authState,
-                                   TelegramIdentityBinder binder) {
-        this.identities = identities;
-        this.authState = authState;
+    public TelegramIdentityService(AuthState state, TelegramIdentityBinder binder) {
+        this.state = state;
         this.binder = binder;
     }
 
-    public long resolve(String subject) {
-        return resolve(subject, null);
+    public long resolve(String subject) { return resolve(subject, null); }
+
+    public long resolve(String subject, String nicknameIfNew) {
+        Long userId = state.telegramUserId(subject);
+        if (userId == null) throw new IllegalArgumentException("telegram identity is unavailable");
+        var user = state.user(userId);
+        if (user == null || !user.telegramBound()) throw new IllegalArgumentException("telegram identity is unavailable");
+        if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
+        return userId;
     }
 
-    /** {@code nicknameIfNew} 只在本次新建账号时写入，已绑定账号的资料仍由原更新路径维护。 */
-    public long resolve(String subject, String nicknameIfNew) {
-        Long cached = authState.telegramUserId(subject);
-        if (cached != null) return cached;
-        var existing = identities.find(subject);
-        if (existing.isPresent()) {
-            authState.putTelegramIdentity(subject, existing.get());
-            return existing.get();
-        }
-        return binder.bind(subject, nicknameIfNew);
+    /** 仅限已验证的登录/明确的 /start 注册；不是身份缓存缺失时的自动回源。 */
+    public long registerOrLogin(String subject, String nicknameIfNew) {
+        Long userId = state.telegramUserId(subject); // 存储故障抛出，不能据此创建账号
+        if (userId == null) return binder.bind(subject, nicknameIfNew);
+        return resolve(subject);
     }
 }

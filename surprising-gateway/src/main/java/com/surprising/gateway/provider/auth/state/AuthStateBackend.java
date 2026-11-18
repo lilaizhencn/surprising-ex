@@ -26,6 +26,10 @@ public interface AuthStateBackend {
      */
     boolean renewSession(String sessionKey, String userKey, Duration ttl, long nowMillis);
 
+    default boolean renewSession(String sessionKey, String userKey, Duration ttl, long nowMillis, Duration interval) {
+        return renewSession(sessionKey, userKey, ttl, nowMillis);
+    }
+
     void publish(String channel, String message);
 
     void subscribe(String channel, Consumer<String> listener);

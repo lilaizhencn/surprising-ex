@@ -150,8 +150,6 @@ VALUES
 ('SOL', 100000000, now(), now())
 ON CONFLICT (asset) DO NOTHING;
 
-
-
 UPDATE assets SET
   display_name = CASE asset WHEN 'USDT' THEN 'Tether USD' WHEN 'BTC' THEN 'Bitcoin' WHEN 'ETH' THEN 'Ethereum' WHEN 'SOL' THEN 'Solana' ELSE asset END,
   alias_name = CASE asset WHEN 'USDT' THEN '泰达币' WHEN 'BTC' THEN '比特币' WHEN 'ETH' THEN '以太坊' WHEN 'SOL' THEN '索拉纳' ELSE '' END,
@@ -1170,8 +1168,6 @@ BEGIN
 
 END $$;
 
-
-
 -- 06. Insurance fund and ADL audit history.
 
 
@@ -1864,7 +1860,6 @@ CREATE TABLE IF NOT EXISTS gateway_api_keys (
     ip_allowlist        TEXT NOT NULL DEFAULT '',
     status              TEXT NOT NULL DEFAULT 'ACTIVE',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_used_at        TIMESTAMPTZ,
     revoked_at          TIMESTAMPTZ,
     CONSTRAINT gateway_api_key_status_check CHECK (status IN ('ACTIVE', 'REVOKED')),
     CONSTRAINT gateway_api_key_label_check CHECK (length(label) BETWEEN 1 AND 80),
@@ -2316,28 +2311,6 @@ CREATE INDEX IF NOT EXISTS gateway_support_ticket_notes_ticket_time_idx
 CREATE INDEX IF NOT EXISTS gateway_support_ticket_notes_page_idx
     ON gateway_support_ticket_notes (ticket_id, created_at ASC, note_id ASC);
 
-CREATE TABLE IF NOT EXISTS gateway_refresh_sessions (
-    session_id          BIGSERIAL PRIMARY KEY,
-    user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
-    token_hash          TEXT NOT NULL,
-    expires_at          TIMESTAMPTZ NOT NULL,
-    revoked_at          TIMESTAMPTZ,
-    user_agent          TEXT,
-    ip_address          TEXT,
-    device_id           UUID,
-    authenticated_at    TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT gateway_refresh_sessions_hash_present CHECK (length(token_hash) > 0)
-);
-
-ALTER TABLE gateway_refresh_sessions ADD COLUMN IF NOT EXISTS device_id UUID;
-ALTER TABLE gateway_refresh_sessions ADD COLUMN IF NOT EXISTS authenticated_at TIMESTAMPTZ;
-
-CREATE INDEX IF NOT EXISTS gateway_refresh_sessions_user_device_idx
-    ON gateway_refresh_sessions (user_id, device_id, created_at DESC)
-    WHERE device_id IS NOT NULL;
-
 CREATE TABLE IF NOT EXISTS gateway_user_access_blocks (
     block_id            BIGSERIAL PRIMARY KEY,
     user_id             BIGINT NOT NULL REFERENCES gateway_users(user_id),
@@ -2355,16 +2328,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS gateway_user_access_blocks_active_uidx
     ON gateway_user_access_blocks (user_id, block_type, block_value)
     WHERE revoked_at IS NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS gateway_refresh_sessions_hash_uidx
-    ON gateway_refresh_sessions (token_hash);
-
-CREATE INDEX IF NOT EXISTS gateway_refresh_sessions_user_time_idx
-    ON gateway_refresh_sessions (user_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_refresh_sessions_expiry_idx
-    ON gateway_refresh_sessions (expires_at ASC)
-    WHERE revoked_at IS NULL;
-
 CREATE TABLE IF NOT EXISTS gateway_login_logs (
     login_id            BIGSERIAL PRIMARY KEY,
     user_id             BIGINT REFERENCES gateway_users(user_id),
@@ -2375,6 +2338,18 @@ CREATE TABLE IF NOT EXISTS gateway_login_logs (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT gateway_login_logs_result_check CHECK (result IN ('SUCCESS', 'FAILED'))
 );
+
+-- 注销/踢人审计，不存储可恢复的登录态，不混入登录成功统计。
+CREATE TABLE IF NOT EXISTS gateway_session_operation_logs (
+    operation_id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES gateway_users(user_id),
+    operation TEXT NOT NULL,
+    session_ids TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_gateway_session_operation_logs_user_created
+    ON gateway_session_operation_logs(user_id, created_at DESC, operation_id DESC);
+
 
 CREATE INDEX IF NOT EXISTS gateway_login_logs_user_time_idx
     ON gateway_login_logs (user_id, created_at DESC);
@@ -4408,6 +4383,7 @@ ALTER TABLE gateway_users ALTER COLUMN password_hash DROP NOT NULL;
 CREATE TABLE IF NOT EXISTS gateway_telegram_identities (
     subject TEXT PRIMARY KEY,
     user_id BIGINT NOT NULL UNIQUE REFERENCES gateway_users(user_id),
+    revoked_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS gateway_telegram_chats (

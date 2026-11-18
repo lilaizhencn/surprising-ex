@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Actual HTTP -> transactional service -> one-table repositories, using the goal-owned PostgreSQL. */
 @EnabledIfEnvironmentVariable(named="INSTRUMENT_TEST_JDBC_URL",matches=".+")
 class AuthInputBoundaryPostgresTest {
-    final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
+    com.surprising.gateway.provider.auth.state.ValkeySessionFixture fixture;
     @Configuration @EnableTransactionManagement static class Transactions { }
     AnnotationConfigApplicationContext context;
     JdbcTemplate jdbc;
@@ -48,13 +48,14 @@ class AuthInputBoundaryPostgresTest {
     GatewayRolePermissionRepository withSync(GatewayRolePermissionRepository repository){repository.setAuthState(sync);return repository;}
 
     @BeforeEach void setup() {
+        fixture=new com.surprising.gateway.provider.auth.state.ValkeySessionFixture();
         var source=new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
         jdbc=new JdbcTemplate(source);jdbc.execute("TRUNCATE gateway_users CASCADE");
         properties=new GatewayProperties();properties.getSecurity().setRequireEmailVerification(false);
         sync=new AuthStateSync(jdbc,fixture.state,properties);userRows=new GatewayUserRepository(jdbc);passwords=new PasswordHasher(new com.surprising.gateway.provider.config.GatewayLimitProperties());
         context=new AnnotationConfigApplicationContext();context.register(Transactions.class);
         context.registerBean(DataSourceTransactionManager.class,()->new DataSourceTransactionManager(source));
-        context.registerBean(AuthPersistenceService.class,()->new AuthPersistenceService(userRows,new GatewayRoleRepository(jdbc),new GatewayPermissionRepository(jdbc),withSync(new GatewayUserRoleRepository(jdbc)),withSync(new GatewayRolePermissionRepository(jdbc)),new GatewayLoginLogRepository(jdbc),new GatewayUserMfaRepository(jdbc),new GatewayRefreshSessionRepository(jdbc)));
+        context.registerBean(AuthPersistenceService.class,()->new AuthPersistenceService(userRows,new GatewayRoleRepository(jdbc),new GatewayPermissionRepository(jdbc),withSync(new GatewayUserRoleRepository(jdbc)),withSync(new GatewayRolePermissionRepository(jdbc)),new GatewayLoginLogRepository(jdbc),new GatewayUserMfaRepository(jdbc),fixture.sessions));
         context.refresh();users=context.getBean(AuthPersistenceService.class);
         adminId=users.createUser("mvc_admin","admin@input.test","unused",Instant.now()).userId();users.replaceRoles(adminId,List.of("ADMIN"),Instant.now());
         var tokens=mock(JwtTokenService.class);when(tokens.verifySessionToken("admin-token")).thenReturn(new JwtPrincipal(adminId,"mvc_admin","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(3600),9001L));fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.user(adminId,"NORMAL",List.of("ADMIN"),users.permissionsForUser(adminId)));fixture.startSession(adminId,9001L);
@@ -65,7 +66,7 @@ class AuthInputBoundaryPostgresTest {
         // Permission checks still use real persisted grants.
         jdbc.update("INSERT INTO gateway_role_permissions(role_id,permission_id) SELECT r.role_id,p.permission_id FROM gateway_roles r CROSS JOIN gateway_permissions p WHERE r.role_code='ADMIN' AND p.permission_code IN ('admin.permissions.read','admin.permissions.write') ON CONFLICT DO NOTHING");
     }
-    @AfterEach void close() {if(context!=null)context.close();}
+    @AfterEach void close() {if(context!=null)context.close();if(fixture!=null)fixture.close();}
     byte[] body(Object value) {return json.writeValueAsBytes(value);}
 
     @Test void registerAndLoginPreservePasswordBytesAndCanonicalEmail() throws Exception {
@@ -76,7 +77,8 @@ class AuthInputBoundaryPostgresTest {
         assertThat(passwords.matches(secret,credential.passwordHash())).isTrue();assertThat(passwords.matches(secret.trim(),credential.passwordHash())).isFalse();
         mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body(Map.of("identifier"," MIXED@INPUT.TEST ","password",secret)))).andExpect(status().isOk());
         mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(body(Map.of("identifier","mixed@input.test","password",secret.trim())))).andExpect(status().isUnauthorized());
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE user_id=?",Integer.class,credential.userId())).isEqualTo(2);
+        assertThat(fixture.sessions.findPage(credential.userId(),true,new com.surprising.gateway.provider.auth.model.AuthPageQuery(10,null,
+                com.surprising.gateway.provider.auth.model.AuthPageQuery.Order.CREATED_DESC)).items()).hasSize(2);
     }
     @Test void phoneFormattingDoesNotBypassRegistrationSwitch() throws Exception {
         byte[] input=body(Map.of("phone","+86 138-0013-8000","password","Password1!"));

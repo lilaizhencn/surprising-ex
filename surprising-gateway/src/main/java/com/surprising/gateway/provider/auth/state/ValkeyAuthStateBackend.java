@@ -21,16 +21,46 @@ public class ValkeyAuthStateBackend implements AuthStateBackend {
     private static final Logger log = LoggerFactory.getLogger(ValkeyAuthStateBackend.class);
 
     private static final DefaultRedisScript<Long> HASH_PUT = new DefaultRedisScript<>("""
+            if string.sub(KEYS[1],1,13)=='auth:session:' then
+              local uid=nil
+              for i=2,#ARGV,2 do if ARGV[i]=='uid' then uid=ARGV[i+1] end end
+              local userIndex='auth:sessions:user:'..uid
+              for _,member in ipairs(redis.call('ZRANGE',userIndex,0,99)) do
+                local sid=string.sub(member,string.find(member,':')+1)
+                if redis.call('EXISTS','auth:session:'..sid)==0 then
+                  redis.call('ZREM',userIndex,member)
+                  redis.call('ZREM','auth:sessions',member)
+                  redis.call('ZREM','auth:sessions:expiry',member)
+                end
+              end
+              if redis.call('ZCARD',userIndex)>=100 then return redis.error_reply('too many active sessions') end
+            end
             redis.call('DEL',KEYS[1])
             for i=2,#ARGV,2 do redis.call('HSET',KEYS[1],ARGV[i],ARGV[i+1]) end
             local ttl=tonumber(ARGV[1])
+            if string.sub(KEYS[1],1,13)=='auth:session:' then
+              local sid=string.sub(KEYS[1],14)
+              local uid=redis.call('HGET',KEYS[1],'uid')
+              local member=uid..':'..sid
+              redis.call('ZADD','auth:sessions',tonumber(sid),member)
+              redis.call('ZADD','auth:sessions:user:'..uid,tonumber(sid),member)
+              local t=redis.call('TIME')
+              redis.call('ZADD','auth:sessions:expiry',tonumber(t[1])*1000+math.floor(tonumber(t[2])/1000)+ttl,member)
+              if redis.call('HGET','auth:user:'..uid,'persistent')~='1' then redis.call('PEXPIRE','auth:user:'..uid,ttl) end
+            end
             if ttl>0 then redis.call('PEXPIRE',KEYS[1],ttl) end
             return 1
             """, Long.class);
 
     private static final DefaultRedisScript<Long> RENEW_SESSION = new DefaultRedisScript<>("""
             if redis.call('EXISTS',KEYS[1])==0 then return 0 end
+            local previous=tonumber(redis.call('HGET',KEYS[1],'renewedAt') or '0')
+            if tonumber(ARGV[2])-previous<tonumber(ARGV[3]) then return 1 end
             redis.call('HSET',KEYS[1],'renewedAt',ARGV[2])
+            local sid=string.sub(KEYS[1],14)
+            local uid=redis.call('HGET',KEYS[1],'uid')
+            local t=redis.call('TIME')
+            redis.call('ZADD','auth:sessions:expiry',tonumber(t[1])*1000+math.floor(tonumber(t[2])/1000)+tonumber(ARGV[1]),uid..':'..sid)
             redis.call('PEXPIRE',KEYS[1],ARGV[1])
             if redis.call('HGET',KEYS[2],'persistent')~='1' then redis.call('PEXPIRE',KEYS[2],ARGV[1]) end
             return 1
@@ -78,8 +108,13 @@ public class ValkeyAuthStateBackend implements AuthStateBackend {
 
     @Override
     public boolean renewSession(String sessionKey, String userKey, Duration ttl, long nowMillis) {
+        return renewSession(sessionKey, userKey, ttl, nowMillis, Duration.ZERO);
+    }
+
+    @Override
+    public boolean renewSession(String sessionKey, String userKey, Duration ttl, long nowMillis, Duration interval) {
         Long renewed = call(() -> redis.execute(RENEW_SESSION, List.of(sessionKey, userKey),
-                Long.toString(ttl.toMillis()), Long.toString(nowMillis)));
+                Long.toString(ttl.toMillis()), Long.toString(nowMillis), Long.toString(interval.toMillis())));
         return renewed != null && renewed == 1L;
     }
 

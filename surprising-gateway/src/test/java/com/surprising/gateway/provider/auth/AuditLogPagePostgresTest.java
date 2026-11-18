@@ -60,7 +60,7 @@ class AuditLogPagePostgresTest {
         clearInvocations(audits,logins);
         var persistence=new AuthPersistenceService(mock(GatewayUserRepository.class),mock(GatewayRoleRepository.class),
                 mock(GatewayPermissionRepository.class),mock(GatewayUserRoleRepository.class),mock(GatewayRolePermissionRepository.class),
-                logins,mock(GatewayUserMfaRepository.class),mock(GatewayRefreshSessionRepository.class));
+                logins,mock(GatewayUserMfaRepository.class),mock(LoginSessionRepository.class));
         var properties=new GatewayProperties();
         var auth=spy(new AuthService(properties,persistence,mock(PasswordHasher.class),mock(JwtTokenService.class),
                 mock(EmailVerificationService.class),mock(LoginVerificationService.class),mock(GatewayUserAccessBlockRepository.class),mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));

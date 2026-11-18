@@ -9,7 +9,7 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.model.AuthModels;
-import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
@@ -35,7 +35,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
@@ -82,7 +82,7 @@ class AuthServiceTest {
                 .when(legal).recordAndRequire(eq(42L),any(),any());
         var metadata=new com.surprising.gateway.provider.auth.model.AuthClientMetadata(null,"127.0.0.1",null,List.of(),administrativeClient);
         assertThatThrownBy(()->service.loginTelegram(42,metadata)).isInstanceOf(com.surprising.gateway.provider.legal.exception.LegalProblem.class);
-        verify(repository,org.mockito.Mockito.never()).saveRefreshSession(anyLong(),anyString(),any(),any(),any(),any(),any(),any());
+        verify(repository,org.mockito.Mockito.never()).createSession(anyLong(),any(),any(),any(),any(),any());
         verifyNoInteractions(jwtTokenService);
     }
 
@@ -93,7 +93,7 @@ class AuthServiceTest {
         var metadata=new com.surprising.gateway.provider.auth.model.AuthClientMetadata(null,"127.0.0.1",null,List.of(),true);
         service.loginTelegram(42,metadata);
         verifyNoInteractions(legal);
-        verify(repository).saveRefreshSession(eq(42L),anyString(),any(),any(),any(),any(),any(),any());
+        verify(repository).createSession(eq(42L),any(),any(),any(),any(),any());
     }
 
     @Test
@@ -136,44 +136,44 @@ class AuthServiceTest {
     }
 
     @Test
-    void adminRefreshSessionsReturnsRepositoryRows() {
+    void adminSessionsReturnsRepositoryRows() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         when(jwtTokenService.verifySessionToken("admin-token"))
                 .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
-        AdminRefreshSessionResponse session = new AdminRefreshSessionResponse(
+        AdminSessionResponse session = new AdminSessionResponse(
                 88L, 42L, true, now.plusSeconds(3600), null, "ua", "127.0.0.1", now, now);
-        when(repository.refreshSessionsPage(42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC)))
+        when(repository.sessionsPage(42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(session),null,false,"createdAt.desc",100));
 
         var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
-        var response = adminService.adminRefreshSessions("Bearer admin-token", 42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC));
+        var response = adminService.adminSessions("Bearer admin-token", 42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC));
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.sessions()).containsExactly(session);
     }
 
     @Test
-    void adminRefreshSessionsWithCursorReturnsRepositoryPage() {
+    void adminSessionsWithCursorReturnsRepositoryPage() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         when(jwtTokenService.verifySessionToken("admin-token"))
                 .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
-        AdminRefreshSessionResponse session = new AdminRefreshSessionResponse(
+        AdminSessionResponse session = new AdminSessionResponse(
                 88L, 42L, true, now.plusSeconds(3600), null, "ua", "127.0.0.1", now, now);
-        when(repository.refreshSessionsPage(42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC)))
+        when(repository.sessionsPage(42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(session), "next", true,
                         "createdAt.asc", 25));
 
         var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
-        var response = adminService.adminRefreshSessions("Bearer admin-token", 42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
+        var response = adminService.adminSessions("Bearer admin-token", 42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
 
         assertThat(response.sessions()).containsExactly(session);
         assertThat(response.nextCursor()).isEqualTo("next");
         assertThat(response.hasMore()).isTrue();
         assertThat(response.sort()).isEqualTo("createdAt.asc");
         assertThat(response.limit()).isEqualTo(25);
-        verify(repository).refreshSessionsPage(42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
+        verify(repository).sessionsPage(42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
     }
 
     @Test
@@ -199,36 +199,36 @@ class AuthServiceTest {
     }
 
     @Test
-    void revokeUserRefreshSessionsRequiresTargetUserAndReturnsCount() {
+    void revokeUserSessionsRequiresTargetUserAndReturnsCount() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         when(jwtTokenService.verifySessionToken("admin-token"))
                 .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
                 42L, "user", null, "NORMAL", List.of("USER"), now)));
-        when(repository.revokeUserRefreshSessions(eq(42L), any())).thenReturn(3);
+        when(repository.revokeUserSessions(eq(42L), any())).thenReturn(3);
 
         var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
-        var response = adminService.revokeUserRefreshSessions("Bearer admin-token", 42L);
+        var response = adminService.revokeUserSessions("Bearer admin-token", 42L);
 
         assertThat(response.revoked()).isEqualTo(3);
         assertThat(response.revokedAt()).isNotNull();
-        verify(repository).revokeUserRefreshSessions(eq(42L), any());
+        verify(repository).revokeUserSessions(eq(42L), any());
     }
 
     @Test
-    void revokeRefreshSessionReturnsRevokedCount() {
+    void revokeSessionReturnsRevokedCount() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         when(jwtTokenService.verifySessionToken("admin-token"))
                 .thenReturn(loggedIn(7L, "admin", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
-        when(repository.revokeRefreshSessionForAdmin(eq(88L), any())).thenReturn(1);
+        when(repository.revokeSessionForAdmin(eq(88L), any())).thenReturn(1);
 
         var adminService = new com.surprising.gateway.provider.auth.service.AdminAuthService(service.properties(), repository, service);
-        var response = adminService.revokeRefreshSession("Bearer admin-token", 88L);
+        var response = adminService.revokeSession("Bearer admin-token", 88L);
 
         assertThat(response.revoked()).isEqualTo(1);
-        verify(repository).revokeRefreshSessionForAdmin(eq(88L), any());
+        verify(repository).revokeSessionForAdmin(eq(88L), any());
     }
 
     @Test
@@ -293,7 +293,7 @@ class AuthServiceTest {
         when(loginVerification.begin(eq(7L),eq("hash"),any())).thenReturn(challenge);
         assertThat(service.login(new LoginRequest("admin","password"),new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()))).isSameAs(challenge);
         verifyNoInteractions(jwtTokenService);
-        verify(repository,org.mockito.Mockito.never()).saveRefreshSession(any(Long.class),any(),any(),any(),any(),any(),any());
+        verify(repository,org.mockito.Mockito.never()).createSession(anyLong(),any(),any(),any(),any(),any());
     }
 
     @Test
@@ -315,9 +315,12 @@ class AuthServiceTest {
 
     @Test
     void logoutRevokesOnlyTheCurrentSession() {
+        org.mockito.Mockito.doAnswer(call->{ fixture.state.endSessions(java.util.List.of(call.getArgument(0,Long.class)));return null; })
+                .when(repository).revokeSession(anyLong(),any());
+
         fixture.login(42L, 88L);
         service.logout(new JwtPrincipal(42L, "user", "NORMAL", List.of("USER"), Instant.now().plusSeconds(60), 88L));
-        verify(repository).revokeRefreshSession(eq(88L), any());
+        verify(repository).revokeSession(eq(88L), any());
         assertThat(fixture.state.sessionExists(88L)).isFalse();
     }
 

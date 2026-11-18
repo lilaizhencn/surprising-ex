@@ -10,7 +10,7 @@ import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
-import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.auth.service.TotpService;
@@ -46,6 +46,9 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 @EnabledIfEnvironmentVariable(named = "LOGIN_TEST_JDBC_URL", matches = ".+")
 class UserAccessPostgresTest {
+    com.surprising.gateway.provider.auth.state.ValkeySessionFixture sessionFixture;
+    LoginSessionRepository sessionStore;
+
     private static final String CURRENT_DEVICE = "153a20c8-d24f-4952-b378-5409de885ab5";
     private static final String OTHER_DEVICE = "fe7b9fee-479b-4986-a1da-4fa0db57aa8b";
     private JdbcTemplate admin;
@@ -71,12 +74,6 @@ class UserAccessPostgresTest {
         jdbc.execute("CREATE TABLE gateway_users(user_id BIGINT PRIMARY KEY)");
         jdbc.update("INSERT INTO gateway_users VALUES (42),(99)");
         jdbc.execute("""
-                CREATE TABLE gateway_refresh_sessions (
-                    session_id BIGINT PRIMARY KEY,user_id BIGINT NOT NULL,device_id UUID,
-                    user_agent TEXT,ip_address TEXT,created_at TIMESTAMPTZ,updated_at TIMESTAMPTZ,
-                    expires_at TIMESTAMPTZ,revoked_at TIMESTAMPTZ)
-                """);
-        jdbc.execute("""
                 CREATE TABLE gateway_login_logs (
                     login_id BIGSERIAL PRIMARY KEY,user_id BIGINT,result TEXT,reason TEXT,
                     user_agent TEXT,ip_address TEXT,created_at TIMESTAMPTZ)
@@ -89,13 +86,15 @@ class UserAccessPostgresTest {
         String init = Files.readString(Path.of("../init.sql"));
         int start = init.indexOf("CREATE TABLE IF NOT EXISTS gateway_auth_challenges (");
         jdbc.execute(init.substring(start, init.indexOf("\n);", start) + 3));
+        sessionFixture=new com.surprising.gateway.provider.auth.state.ValkeySessionFixture();
         Instant now = Instant.now();
         addSession(77, 42, CURRENT_DEVICE, "127.0.0.1", now);
         addSession(88, 42, OTHER_DEVICE, "127.0.0.2", now.minusSeconds(1));
         addSession(89, 42, OTHER_DEVICE, "127.0.0.2", now.minusSeconds(2));
         addSession(91, 42, null, "127.0.0.3", now.minusSeconds(3));
         addSession(90, 99, OTHER_DEVICE, "127.0.0.2", now);
-        var sessions = new GatewayRefreshSessionRepository(jdbc);
+        var sessions = org.mockito.Mockito.spy(sessionFixture.sessions);
+        sessionStore=sessions;
         var logins = new GatewayLoginLogRepository(jdbc);
         blocks = new GatewayUserAccessBlockRepository(jdbc);
         logins.append(42, "SUCCESS", null, "browser", "127.0.0.1", now);
@@ -126,6 +125,7 @@ class UserAccessPostgresTest {
     @AfterEach
     void cleanUp() {
         if (context != null) context.close();
+        if(sessionFixture!=null) sessionFixture.close();
         if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE");
     }
 
@@ -137,7 +137,7 @@ class UserAccessPostgresTest {
 
         var first = service.devices(actor(), 2, 0);
 
-        assertThat(statements.get()).isEqualTo(3);
+        assertThat(statements.get()).isEqualTo(1);
         assertThat(first).hasSize(2);
         assertThat(first.get(0).deviceId()).isEqualTo(CURRENT_DEVICE);
         assertThat(first.get(0).current()).isTrue();
@@ -148,7 +148,7 @@ class UserAccessPostgresTest {
         assertThat(last).hasSize(1);
         assertThat(last.getFirst().deviceId()).isNull();
         assertThat(last.getFirst().blocked()).isFalse();
-        assertThat(statements.get()).isEqualTo(2);
+        assertThat(statements.get()).isEqualTo(1);
     }
 
     @Test
@@ -172,25 +172,24 @@ class UserAccessPostgresTest {
         service.blockDevice(actor(), OTHER_DEVICE, "123456", "");
 
         assertThat(blocks.blocked(42, "DEVICE", OTHER_DEVICE)).isTrue();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE user_id=42 AND revoked_at IS NOT NULL", Integer.class))
-                .isEqualTo(2);
-        assertThat(jdbc.queryForObject("SELECT revoked_at FROM gateway_refresh_sessions WHERE session_id=90", Timestamp.class)).isNull();
-        assertThat(jdbc.queryForObject("SELECT revoked_at FROM gateway_refresh_sessions WHERE session_id=77", Timestamp.class)).isNull();
+        assertThat(sessionFixture.state.sessionExists(88)).isFalse();
+        assertThat(sessionFixture.state.sessionExists(89)).isFalse();
+        assertThat(sessionFixture.state.sessionExists(90)).isTrue();
+        assertThat(sessionFixture.state.sessionExists(77)).isTrue();
     }
 
     @Test
-    void revokeFailureRollsBackBlockAndChallengeConsumptionSoTheOriginalProofCanBeRetried() {
-        var challenge = verification.issue(42, "SECURITY_SETTINGS", "127.0.0.1", Instant.now());
-        jdbc.execute("ALTER TABLE gateway_refresh_sessions ADD CONSTRAINT reject_revoke CHECK (revoked_at IS NULL)");
-
-        assertThatThrownBy(() -> service.blockDevice(actor(), OTHER_DEVICE, "123456", ""))
-                .isInstanceOf(DataIntegrityViolationException.class);
-        assertThat(blocks.blocked(42, "DEVICE", OTHER_DEVICE)).isFalse();
-        assertThat(jdbc.queryForObject("SELECT consumed_at FROM gateway_auth_challenges WHERE challenge_id=?", Timestamp.class, challenge.challengeId()))
-                .isNull();
-        jdbc.execute("ALTER TABLE gateway_refresh_sessions DROP CONSTRAINT reject_revoke");
-        service.blockDevice(actor(), OTHER_DEVICE, "123456", "");
-        assertThat(blocks.blocked(42, "DEVICE", OTHER_DEVICE)).isTrue();
+    void valkeyFailureRollsBackBlockAndChallengeConsumption() {
+        var challenge=verification.issue(42,"SECURITY_SETTINGS","127.0.0.1",Instant.now());
+        org.mockito.Mockito.doThrow(new com.surprising.gateway.provider.auth.state.AuthStateUnavailableException("offline",null))
+                .when(sessionStore).revokeActiveForDevice(org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.any());
+        assertThatThrownBy(()->service.blockDevice(actor(),OTHER_DEVICE,"123456",""))
+                .isInstanceOf(com.surprising.gateway.provider.auth.state.AuthStateUnavailableException.class);
+        assertThat(blocks.blocked(42,"DEVICE",OTHER_DEVICE)).isFalse();
+        assertThat(jdbc.queryForObject("SELECT consumed_at FROM gateway_auth_challenges WHERE challenge_id=?",Timestamp.class,challenge.challengeId())).isNull();
+        org.mockito.Mockito.doCallRealMethod().when(sessionStore).revokeActiveForDevice(org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.any());
+        service.blockDevice(actor(),OTHER_DEVICE,"123456","");
+        assertThat(blocks.blocked(42,"DEVICE",OTHER_DEVICE)).isTrue();
     }
 
     @Test
@@ -203,7 +202,7 @@ class UserAccessPostgresTest {
                     .isEqualTo(attempt);
         }
         assertThat(blocks.blocked(42, "DEVICE", OTHER_DEVICE)).isFalse();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE revoked_at IS NOT NULL", Integer.class)).isZero();
+        assertThat(sessionFixture.state.sessionExists(88)).isTrue();
     }
 
     @Test
@@ -211,15 +210,15 @@ class UserAccessPostgresTest {
         verification.issue(42, "SECURITY_SETTINGS", "127.0.0.1", Instant.now());
         service.blockIp(42, "127.0.0.2", "127.0.0.1", "123456", "");
         assertThat(blocks.blocked(42, "IP", "127.0.0.2")).isTrue();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE user_id=42 AND revoked_at IS NOT NULL", Integer.class))
-                .isEqualTo(2);
-        assertThat(jdbc.queryForObject("SELECT revoked_at FROM gateway_refresh_sessions WHERE session_id=90", Timestamp.class)).isNull();
+        assertThat(sessionFixture.state.sessionExists(88)).isFalse();
+        assertThat(sessionFixture.state.sessionExists(89)).isFalse();
+        assertThat(sessionFixture.state.sessionExists(90)).isTrue();
 
         verification.issue(42, "SECURITY_SETTINGS", "127.0.0.1", Instant.now());
         service.unblockIp(42, "127.0.0.2", "123456", "");
         assertThat(blocks.blocked(42, "IP", "127.0.0.2")).isFalse();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE user_id=42 AND revoked_at IS NOT NULL", Integer.class))
-                .isEqualTo(2);
+        assertThat(sessionFixture.state.sessionExists(88)).isFalse();
+        assertThat(sessionFixture.state.sessionExists(89)).isFalse();
     }
 
     @Test
@@ -254,10 +253,7 @@ class UserAccessPostgresTest {
     }
 
     private void addSession(long id, long user, String device, String ip, Instant created) {
-        jdbc.update("""
-                INSERT INTO gateway_refresh_sessions(session_id,user_id,device_id,ip_address,created_at,updated_at,expires_at)
-                VALUES (?,?,CAST(? AS uuid),?,?,?,?)
-                """, id, user, device, ip, Timestamp.from(created), Timestamp.from(created), Timestamp.from(Instant.now().plusSeconds(3600)));
+        sessionFixture.seed(id,user,device,ip,created);
     }
 
     @Configuration(proxyBeanMethods = false)

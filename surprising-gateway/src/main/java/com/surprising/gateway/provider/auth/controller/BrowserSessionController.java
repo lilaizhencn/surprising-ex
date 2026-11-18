@@ -35,11 +35,15 @@ public class BrowserSessionController {
     public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String authorization,
                                        HttpServletRequest request) {
         if (authorization != null) {
+            com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal = null;
             try {
-                auth.logout(auth.verifyBearer(authorization));
+                principal = auth.verifyBearer(authorization);
+            } catch (com.surprising.gateway.provider.auth.state.AuthStateUnavailableException unavailable) {
+                throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "session revocation unavailable");
             } catch (IllegalArgumentException | IllegalStateException invalid) {
-                // 令牌已无效，视为已登出
+                // 令牌已无效，视为已登出；存储故障不能伪装成注销成功。
             }
+            if (principal != null) auth.logout(principal);
         }
         var response = ResponseEntity.noContent();
         String client = BrowserSessionCookies.client(request);

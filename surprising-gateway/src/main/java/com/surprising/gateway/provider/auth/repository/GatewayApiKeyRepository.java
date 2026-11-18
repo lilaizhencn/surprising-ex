@@ -31,7 +31,7 @@ public class GatewayApiKeyRepository {
                     api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist,
-                          status, created_at, last_used_at, revoked_at
+                          status, created_at, revoked_at
                 """, (rs, rowNum) -> toRecord(rs), apiKeyId, userId, apiKey, secretCiphertext,
                 label, permissions, ipAllowlist, Timestamp.from(now));
         if (authState != null) authState.apiKeyChanged(apiKey);
@@ -41,7 +41,7 @@ public class GatewayApiKeyRepository {
     public Optional<ApiKeyRecord> active(String apiKey) {
         return jdbcTemplate.query("""
                 SELECT api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist,
-                       status, created_at, last_used_at, revoked_at
+                       status, created_at, revoked_at
                   FROM gateway_api_keys
                  WHERE api_key = ? AND status = 'ACTIVE'
                 """, (rs, rowNum) -> toRecord(rs), apiKey).stream().findFirst();
@@ -50,7 +50,7 @@ public class GatewayApiKeyRepository {
     public List<ApiKeyRecord> list(long userId) {
         return jdbcTemplate.query("""
                 SELECT api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist,
-                       status, created_at, last_used_at, revoked_at
+                       status, created_at, revoked_at
                   FROM gateway_api_keys
                  WHERE user_id = ?
                  ORDER BY created_at DESC, api_key_id DESC
@@ -78,7 +78,6 @@ public class GatewayApiKeyRepository {
     }
 
     private ApiKeyRecord toRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
-        Timestamp lastUsedAt = rs.getTimestamp("last_used_at");
         Timestamp revokedAt = rs.getTimestamp("revoked_at");
         return new ApiKeyRecord(
                 rs.getObject("api_key_id", UUID.class),
@@ -90,12 +89,11 @@ public class GatewayApiKeyRepository {
                 rs.getString("ip_allowlist"),
                 rs.getString("status"),
                 rs.getTimestamp("created_at").toInstant(),
-                lastUsedAt == null ? null : lastUsedAt.toInstant(),
                 revokedAt == null ? null : revokedAt.toInstant());
     }
 
     public record ApiKeyRecord(UUID apiKeyId, long userId, String apiKey, String secretCiphertext,
                                String label, String permissions, String ipAllowlist, String status, Instant createdAt,
-                               Instant lastUsedAt, Instant revokedAt) {
+                               Instant revokedAt) {
     }
 }

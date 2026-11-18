@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.model.AuthModels;
-import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
@@ -16,7 +16,7 @@ import com.surprising.gateway.provider.auth.model.AuthModels.AuthResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminMfaStatusResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionQueryResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRolePermissionsRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRolePermissionsResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRoleQueryResponse;
@@ -176,12 +176,12 @@ public class AuthService {
                 user.roles(), user.createdAt(), user.displayName()), null, null);
     }
 
-    /** 登出：作废当前登录会话；Postgres 会话记录置为已撤销，Valkey 会话立即删除。 */
+    /** 登出：作废当前登录会话；Valkey 会话立即删除，Postgres 仅追加操作记录。 */
     @Transactional
     public void logout(JwtPrincipal principal) {
         if (principal == null || principal.sessionId() <= 0) return;
-        repository.revokeRefreshSession(principal.sessionId(), Instant.now());
-        authState.endSessions(List.of(principal.sessionId()));
+        repository.revokeSession(principal.sessionId(), Instant.now());
+
     }
 
     @Transactional
@@ -243,7 +243,7 @@ public class AuthService {
             throw new IllegalStateException("user is not active");
         }
         AuthClientMetadata client = currentClient.current();
-        if (client != null) requireStateAccessAllowed(user, null, client.ipAddress());
+        requireStateAccessAllowed(user, session.deviceId(), client == null ? null : client.ipAddress());
         JwtPrincipal verified = new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(),
                 principal.expiresAt(), principal.sessionId());
         currentClient.cacheBearer(authorizationHeader, verified);
@@ -376,7 +376,7 @@ public class AuthService {
         return authResponse(user, request, now, false);
     }
 
-    /** 创建登录会话：Postgres 记会话行（设备列表/后台展示用），Valkey 写会话和用户状态，签发登录令牌。 */
+    /** 创建登录会话：Valkey 写会话、设备资料及用户状态，签发登录令牌。 */
     private AuthResponse authResponse(AuthenticatedUser user, AuthClientMetadata request, Instant now,
                                       boolean requiresEmailVerification) {
         boolean admin = user.roles().stream().anyMatch(properties.getSecurity().getAdminRoles()::contains);
@@ -386,11 +386,8 @@ public class AuthService {
         requireAccessAllowed(user.userId(), deviceId, ipAddress(request));
         if(!admin || request==null || !request.administrativeClient())
             legal.recordAndRequire(user.userId(),request==null?List.of():request.acknowledgements(),now);
-        long sessionId = repository.saveRefreshSession(user.userId(), randomSessionHash(), sessionExpiresAt,
-                userAgent(request), ipAddress(request), deviceId, now, now);
         authStateSync.reloadUser(user.userId());
-        authState.startSession(new SessionState(sessionId, user.userId(), deviceId, now.toEpochMilli(),
-                ttl.toSeconds(), now.toEpochMilli()), ttl);
+        long sessionId = repository.createSession(user.userId(), ttl, userAgent(request), ipAddress(request), deviceId, now);
         String token = jwtTokenService.createSessionToken(user.userId(), user.username(), user.roles(), sessionId, now);
         return new AuthResponse(user, token, sessionExpiresAt, requiresEmailVerification);
     }
@@ -410,18 +407,6 @@ public class AuthService {
 
 
 
-
-    /** 会话行的 token_hash 列必须有值且唯一；登录令牌不落库，这里存一个随机值的摘要。 */
-    private String randomSessionHash() {
-        byte[] bytes = new byte[32];
-        AuthCodeFormats.SECURE_RANDOM.nextBytes(bytes);
-        try {
-            return Base64.getUrlEncoder().withoutPadding()
-                    .encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (java.security.NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is unavailable", ex);
-        }
-    }
 
     private String bearerToken(String authorizationHeader) {
         if (authorizationHeader == null || !authorizationHeader.regionMatches(true, 0, "Bearer ", 0, 7)) {

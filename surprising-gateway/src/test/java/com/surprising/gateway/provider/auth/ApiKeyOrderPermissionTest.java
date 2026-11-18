@@ -65,7 +65,7 @@ class ApiKeyOrderPermissionTest {
         properties.getBinanceApi().setSymbolAliases(Map.of("SPOT:BTCUSDT", "1"));
         fixture.putApiKey(new GatewayApiKeyRepository.ApiKeyRecord(
                 UUID.randomUUID(), 42L, key, totp.encryptSecret("secret"), "bot", permissions,
-                "203.0.113.7", "ACTIVE", Instant.now(), null, null));
+                "203.0.113.7", "ACTIVE", Instant.now(), null));
     }
 
     private MockHttpServletRequest request() {

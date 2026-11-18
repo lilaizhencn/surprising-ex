@@ -49,7 +49,7 @@ class ApiKeyManagementPostgresTest {
         admin.execute("CREATE SCHEMA " + schema);
         jdbc = new JdbcTemplate(new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema, user, password));
         String init = Files.readString(Path.of("../init.sql"));
-        for (String table : List.of("gateway_users", "gateway_roles", "gateway_user_roles", "gateway_permissions", "gateway_role_permissions", "gateway_user_access_blocks", "gateway_api_keys")) {
+        for (String table : List.of("gateway_users", "gateway_roles", "gateway_user_roles", "gateway_permissions", "gateway_role_permissions", "gateway_user_access_blocks", "gateway_api_keys", "gateway_telegram_identities")) {
             int start = init.indexOf("CREATE TABLE IF NOT EXISTS " + table + " (");
             jdbc.execute(init.substring(start, init.indexOf("\n);", start) + 3));
         }
@@ -87,8 +87,7 @@ class ApiKeyManagementPostgresTest {
         long timestamp = Long.parseLong(canonical.substring("timestamp=".length()));
         assertThat(service.authenticate(new ApiKeyAuthenticationRequest(key, "203.0.113.9", timestamp, 5000,
                 service.sign(secret, canonical), canonical), "TRADE")).isEqualTo(7L);
-        assertThat(jdbc.queryForObject("SELECT last_used_at IS NULL FROM gateway_api_keys WHERE api_key=?", Boolean.class, key))
-                .as("请求路径不再写 last_used_at").isTrue();
+        assertThat(jdbc.queryForMap("SELECT * FROM gateway_api_keys WHERE api_key=?",key)).isEqualTo(stored);
     }
 
     @Test void missingPermissionsStillReceiveReadAndEmptyAllowlistStaysUnrestricted() throws Exception {

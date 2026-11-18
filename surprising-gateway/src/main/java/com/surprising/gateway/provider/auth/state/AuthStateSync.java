@@ -1,8 +1,6 @@
 package com.surprising.gateway.provider.auth.state;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
-import java.sql.Timestamp;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -19,7 +17,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Postgres → Valkey 的低频同步：登录、管理员改状态/角色/权限、封禁 IP/设备、API Key 增删改时，
- * 从 Postgres 读出最新数据写入 Valkey；撤销会话时删除对应键。请求路径不会调用这里。
+ * 从 Postgres 读出最新持久配置写入 Valkey。普通身份校验不会调用这里；不存储或恢复登录会话。
  * 只用 JdbcTemplate 直接查询，避免和各个仓储互相依赖。
  */
 @Component
@@ -37,8 +35,25 @@ public class AuthStateSync {
         this.properties = properties;
     }
 
-    /** 读取用户最新状态写入 Valkey；用户不存在则删除。 */
+    private void afterCommit(Runnable action) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override public void afterCommit() { action.run(); }
+                    });
+        } else action.run();
+    }
+
+    /** 读取用户最新状态；事务提交后才发布到 Valkey。 */
     public Optional<UserState> reloadUser(long userId) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            afterCommit(() -> loadUser(userId));
+            return Optional.empty();
+        }
+        return loadUser(userId);
+    }
+
+    private Optional<UserState> loadUser(long userId) {
         var rows = jdbc.query("""
                 SELECT username, email, display_name, created_at, status FROM gateway_users WHERE user_id = ?
                 """, (rs, row) -> new Object[]{rs.getString(1), rs.getString(2), rs.getString(3),
@@ -72,11 +87,18 @@ public class AuthStateSync {
         boolean hasApiKey = Boolean.TRUE.equals(jdbc.queryForObject(
                 "SELECT EXISTS(SELECT 1 FROM gateway_api_keys WHERE user_id = ? AND status = 'ACTIVE')",
                 Boolean.class, userId));
+        boolean telegramBound = Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM gateway_telegram_identities WHERE user_id = ? AND revoked_at IS NULL)",
+                Boolean.class, userId));
         var loaded = new UserState(userId, (String) user[0], (String) user[1], (String) user[2], (Instant) user[3],
-                (String) user[4], roles, permissions, blockedIps, blockedDevices, hasApiKey);
+                (String) user[4], roles, permissions, blockedIps, blockedDevices, hasApiKey, telegramBound);
         state.putUser(loaded);
         return Optional.of(loaded);
     }
+
+    /** 仅用于已经提交的绑定回调；独立只读事务结束后立即发布用户配置。 */
+    @org.springframework.transaction.annotation.Transactional(propagation=org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,readOnly=true)
+    public void reloadCommittedUser(long userId) { loadUser(userId); }
 
     /** 角色权限变更：拥有该角色的用户批量读取后写入 Valkey，避免按用户 N+1 查询。 */
     public void roleChanged(long roleId) {
@@ -85,7 +107,7 @@ public class AuthStateSync {
         if (userIds.isEmpty()) {
             return;
         }
-        reloadUsers(userIds);
+        afterCommit(() -> reloadUsers(userIds));
     }
 
     private void reloadUsers(List<Long> userIds) {
@@ -142,6 +164,10 @@ public class AuthStateSync {
             activeApiKeyUsers.add(rs.getLong(1));
         }, args);
 
+        var telegramUsers = new java.util.HashSet<Long>();
+        jdbc.query("SELECT DISTINCT user_id FROM gateway_telegram_identities WHERE user_id IN (%s) AND revoked_at IS NULL".formatted(placeholders),
+                rs -> { telegramUsers.add(rs.getLong(1)); }, args);
+
         for (Long userId : userIds) {
             Object[] user = users.get(userId);
             if (user == null) {
@@ -152,14 +178,19 @@ public class AuthStateSync {
             List<String> perms = permsByUser.getOrDefault(userId, List.of());
             Set<String> blockedIps = blockedIpsByUser.getOrDefault(userId, Set.of());
             Set<String> blockedDevices = blockedDevicesByUser.getOrDefault(userId, Set.of());
-            state.putUser(new UserState(userId, (String) user[0], (String) user[1], (String) user[2],
+            UserState loaded = new UserState(userId, (String) user[0], (String) user[1], (String) user[2],
                     (Instant) user[3], (String) user[4], roles, perms, blockedIps, blockedDevices,
-                    activeApiKeyUsers.contains(userId)));
+                    activeApiKeyUsers.contains(userId), telegramUsers.contains(userId));
+            state.putUser(loaded);
         }
     }
 
     /** API Key 创建、修改或撤销：有效就写入，否则删除；同时刷新所属用户。 */
     public void apiKeyChanged(String apiKey) {
+        afterCommit(() -> loadApiKey(apiKey));
+    }
+
+    private void loadApiKey(String apiKey) {
         var rows = jdbc.query("""
                 SELECT api_key_id, user_id, permissions, ip_allowlist, secret_ciphertext, status
                   FROM gateway_api_keys WHERE api_key = ?
@@ -176,66 +207,46 @@ public class AuthStateSync {
         } else {
             state.deleteApiKey(apiKey);
         }
-        reloadUser((Long) row[1]);
+        loadUser((Long) row[1]);
     }
 
-    public void sessionsRevoked(List<Long> sessionIds) {
-        state.endSessions(sessionIds);
-    }
-
-    /**
-     * 网关启动时只补缺失的部分：Postgres 里仍有效的 API Key、会话和对应用户。
-     * 不覆盖 Valkey 里已有的数据，不在请求路径上。
-     */
+    /** 只同步持久配置，不读取或恢复任何浏览器/App 登录会话。 */
     @EventListener(ApplicationReadyEvent.class)
-    public void rebuildMissingOnStart() {
-        if (!properties.getSecurity().isAuthStateRebuildOnStart()) return;
-        try {
-            rebuildMissing();
-        } catch (RuntimeException ex) {
-            log.warn("auth state rebuild skipped: {}", ex.getMessage());
-        }
+    public void syncPersistentOnStart() {
+        if (!properties.getSecurity().isAuthPersistentSyncOnStart()) return;
+        syncPersistentState();
     }
 
-    public void rebuildMissing() {
-        Set<Long> userIds = new LinkedHashSet<>();
-        var keys = jdbc.query("SELECT api_key, user_id FROM gateway_api_keys WHERE status = 'ACTIVE'",
-                (rs, row) -> new Object[]{rs.getString(1), rs.getLong(2)});
-        for (Object[] key : keys) {
-            userIds.add((Long) key[1]);
-            if (!state.apiKeyExists((String) key[0])) apiKeyChanged((String) key[0]);
+    public void syncPersistentState() {
+        record KeyConfig(String key, UUID id, long userId, String permissions, String ips, String secret, String status) {}
+        String after = "";
+        while (true) {
+            var keys = jdbc.query("""
+                    SELECT api_key,api_key_id,user_id,permissions,ip_allowlist,secret_ciphertext,status
+                    FROM gateway_api_keys WHERE api_key > ? ORDER BY api_key LIMIT 500
+                    """, (rs,row)->new KeyConfig(rs.getString(1),rs.getObject(2,UUID.class),rs.getLong(3),
+                    rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7)),after);
+            if (keys.isEmpty()) break;
+            reloadUsers(keys.stream().map(KeyConfig::userId).distinct().toList());
+            for (KeyConfig key:keys) {
+                if ("ACTIVE".equals(key.status())) state.putApiKey(new ApiKeyState(key.key(),key.id(),key.userId(),key.permissions(),key.ips(),key.secret()));
+                else state.deleteApiKey(key.key());
+            }
+            after = keys.get(keys.size() - 1).key();
         }
-        record SessionRow(long sessionId, long userId, Instant expiresAt, String deviceId,
-                          Instant authenticatedAt) {}
-        List<SessionRow> sessions = jdbc.query("""
-                SELECT session_id, user_id, expires_at, device_id::text, authenticated_at
-                  FROM gateway_refresh_sessions WHERE revoked_at IS NULL AND expires_at > now()
-                """, (rs, row) -> {
-            Timestamp authenticatedAt = rs.getTimestamp(5);
-            return new SessionRow(rs.getLong(1), rs.getLong(2), rs.getTimestamp(3).toInstant(),
-                    rs.getString(4), authenticatedAt == null ? null : authenticatedAt.toInstant());
-        });
-        sessions.forEach(session -> userIds.add(session.userId()));
-        var loaded = new java.util.HashMap<Long, UserState>();
-        for (Long userId : userIds) {
-            UserState user = state.userExists(userId) ? state.user(userId) : reloadUser(userId).orElse(null);
-            if (user != null) loaded.put(userId, user);
+        after = "";
+        while (true) {
+            record Binding(String subject, long userId, boolean revoked) {}
+            var bindings = jdbc.query("SELECT subject, user_id, revoked_at IS NOT NULL FROM gateway_telegram_identities WHERE subject > ? ORDER BY subject LIMIT 500",
+                    (rs, row) -> new Binding(rs.getString(1), rs.getLong(2), rs.getBoolean(3)), after);
+            if (bindings.isEmpty()) break;
+            reloadUsers(bindings.stream().map(Binding::userId).distinct().toList());
+            for (Binding binding : bindings) {
+                if (binding.revoked()) state.deleteTelegramIdentity(binding.subject());
+                else state.putTelegramIdentity(binding.subject(), binding.userId());
+            }
+            after = bindings.get(bindings.size() - 1).subject();
         }
-        int restored = 0;
-        Instant now = Instant.now();
-        for (SessionRow session : sessions) {
-            UserState user = loaded.get(session.userId());
-            if (user == null || state.sessionExists(session.sessionId())) continue;
-            boolean admin = user.roles().stream().anyMatch(properties.getSecurity().getAdminRoles()::contains);
-            Duration window = admin ? properties.getSecurity().getAdminSessionTtl() : properties.getSecurity().getSessionTtl();
-            Duration remaining = Duration.between(now, session.expiresAt());
-            if (remaining.isNegative() || remaining.isZero()) continue;
-            state.startSession(new SessionState(session.sessionId(), session.userId(),
-                    session.deviceId(), session.authenticatedAt() == null ? 0 : session.authenticatedAt().toEpochMilli(),
-                    window.toSeconds(), now.toEpochMilli()), remaining);
-            restored++;
-        }
-        log.info("auth state rebuild: {} api keys scanned, {} users, {} sessions restored",
-                keys.size(), loaded.size(), restored);
+        log.info("persistent auth configuration synchronized; login sessions are never restored");
     }
 }

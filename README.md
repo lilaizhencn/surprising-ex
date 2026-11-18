@@ -47,6 +47,8 @@ Gateway is the unified application for authentication, trading, accounts, instru
 
 Aeron Archive records the cluster log. Archive participation does not by itself establish a per-response filesystem `fsync` guarantee. Lossy realtime delivery and reliable committed-log export are separate paths.
 
+网关登录态与 Telegram 长期绑定的当前行为见 [鉴权与登录状态](surprising-gateway/README.md#鉴权与登录状态)。
+
 ## Maven modules and processes
 
 | Directory | Type | Responsibility |

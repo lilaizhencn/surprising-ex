@@ -148,7 +148,7 @@ public class GatewayApiKeyService {
 
     private ApiKeyView view(GatewayApiKeyRepository.ApiKeyRecord record) {
         return new ApiKeyView(record.apiKey(), record.label(), record.permissions(), record.status(),
-                splitIpAllowlist(record.ipAllowlist()), record.createdAt(), record.lastUsedAt(), record.revokedAt());
+                splitIpAllowlist(record.ipAllowlist()), record.createdAt(), null, record.revokedAt());
     }
 
     private List<String> splitIpAllowlist(String value) {

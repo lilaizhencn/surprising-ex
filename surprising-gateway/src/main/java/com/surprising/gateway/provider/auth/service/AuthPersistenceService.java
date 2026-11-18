@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.auth.service;
 
 import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayPermissionRepository;
-import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayRolePermissionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayRoleRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
@@ -15,7 +15,7 @@ import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRoleResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogResponse;
@@ -47,7 +47,7 @@ public class AuthPersistenceService {
     private final GatewayRolePermissionRepository rolePermissionRepository;
     private final GatewayLoginLogRepository loginLogRepository;
     private final GatewayUserMfaRepository mfaRepository;
-    private final GatewayRefreshSessionRepository refreshSessionRepository;
+    private final LoginSessionRepository sessions;
     private final org.springframework.beans.factory.ObjectProvider<com.surprising.gateway.provider.notification.service.DeviceLoginAlertService> deviceLoginAlertProvider;
 
     public AuthPersistenceService(GatewayUserRepository userRepository,
@@ -57,9 +57,9 @@ public class AuthPersistenceService {
                                   GatewayRolePermissionRepository rolePermissionRepository,
                                   GatewayLoginLogRepository loginLogRepository,
                                   GatewayUserMfaRepository mfaRepository,
-                                  GatewayRefreshSessionRepository refreshSessionRepository) {
+                                  LoginSessionRepository sessions) {
         this(userRepository, roleRepository, permissionRepository, userRoleRepository,
-                rolePermissionRepository, loginLogRepository, mfaRepository, refreshSessionRepository, null);
+                rolePermissionRepository, loginLogRepository, mfaRepository, sessions, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -70,7 +70,7 @@ public class AuthPersistenceService {
                                   GatewayRolePermissionRepository rolePermissionRepository,
                                   GatewayLoginLogRepository loginLogRepository,
                                   GatewayUserMfaRepository mfaRepository,
-                                  GatewayRefreshSessionRepository refreshSessionRepository,
+                                  LoginSessionRepository sessions,
                                   org.springframework.beans.factory.ObjectProvider<com.surprising.gateway.provider.notification.service.DeviceLoginAlertService> deviceLoginAlertProvider) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -79,7 +79,7 @@ public class AuthPersistenceService {
         this.rolePermissionRepository = rolePermissionRepository;
         this.loginLogRepository = loginLogRepository;
         this.mfaRepository = mfaRepository;
-        this.refreshSessionRepository = refreshSessionRepository;
+        this.sessions = sessions;
         this.deviceLoginAlertProvider = deviceLoginAlertProvider;
     }
 
@@ -231,66 +231,38 @@ public class AuthPersistenceService {
         mfaRepository.disable(userId, now);
     }
 
-    public long saveRefreshSession(long userId,
-                                   String tokenHash,
-                                   Instant expiresAt,
-                                   String userAgent,
-                                   String ipAddress,
-                                   String deviceId,
-                                   Instant now) {
-        return refreshSessionRepository.save(userId, tokenHash, expiresAt, userAgent, ipAddress, deviceId, now);
+    public long createSession(long userId, java.time.Duration ttl, String userAgent, String ipAddress, String deviceId, Instant now) {
+        return sessions.create(userId,ttl,userAgent,ipAddress,deviceId,now);
     }
 
-    public boolean activeRefreshSession(long userId, long sessionId, Instant now) {
-        return refreshSessionRepository.active(userId, sessionId, now);
+    public void revokeSession(long sessionId, Instant now) {
+        sessions.revoke(sessionId, now);
     }
 
-    public long saveRefreshSession(long userId, String tokenHash, Instant expiresAt,
-                                   String userAgent, String ipAddress, String deviceId,
-                                   Instant now, Instant authenticatedAt) {
-        return refreshSessionRepository.save(userId, tokenHash, expiresAt, userAgent, ipAddress, deviceId, now, authenticatedAt);
-    }
-
-    public Optional<Instant> primaryAuthenticatedAt(long userId, long sessionId, Instant now) {
-        return refreshSessionRepository.authenticatedAt(userId, sessionId, now);
-    }
-
-    public Optional<GatewayRefreshSessionRepository.RefreshSession> refreshSession(String tokenHash) {
-        return refreshSessionRepository.find(tokenHash);
-    }
-
-    public void revokeRefreshSession(long sessionId, Instant now) {
-        refreshSessionRepository.revoke(sessionId, now);
-    }
-
-    public int consumeRefreshSession(long sessionId, Instant now) {
-        return refreshSessionRepository.consume(sessionId, now);
-    }
-
-    public AdminCursorPage.CursorPage<AdminRefreshSessionResponse> refreshSessionsPage(Long userId,
+    public AdminCursorPage.CursorPage<AdminSessionResponse> sessionsPage(Long userId,
                                                                                       Boolean active,
                                                                                       AuthPageQuery pageQuery) {
-        return refreshSessionRepository.findPage(userId, active, pageQuery);
+        return sessions.findPage(userId, active, pageQuery);
     }
 
-    public int revokeRefreshSessionForAdmin(long sessionId, Instant now) {
-        return refreshSessionRepository.revokeActive(sessionId, now);
+    public int revokeSessionForAdmin(long sessionId, Instant now) {
+        return sessions.revokeActive(sessionId, now);
     }
 
-    public int revokeUserRefreshSessions(long userId, Instant now) {
-        return refreshSessionRepository.revokeActiveForUser(userId, now);
+    public int revokeUserSessions(long userId, Instant now) {
+        return sessions.revokeActiveForUser(userId, now);
     }
 
     public int revokeActiveForUserExcept(long userId, long excludedSessionId, Instant now) {
-        return refreshSessionRepository.revokeActiveForUserExcept(userId, excludedSessionId, now);
+        return sessions.revokeActiveForUserExcept(userId, excludedSessionId, now);
     }
 
-    public int revokeRefreshSessionForUser(long userId, long sessionId, Instant now) {
-        return refreshSessionRepository.revokeActiveForUserSession(userId, sessionId, now);
+    public int revokeSessionForUser(long userId, long sessionId, Instant now) {
+        return sessions.revokeActiveForUserSession(userId, sessionId, now);
     }
 
     public Optional<String> deviceIdForSession(long userId, long sessionId) {
-        return refreshSessionRepository.deviceIdForSession(userId, sessionId);
+        return sessions.deviceIdForSession(userId, sessionId);
     }
 
     public int updatePasswordHash(long userId, String passwordHash, Instant now) {

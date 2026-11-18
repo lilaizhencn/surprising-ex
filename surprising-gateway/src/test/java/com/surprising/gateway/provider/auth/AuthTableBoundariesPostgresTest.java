@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayPermissionRepository;
-import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayRolePermissionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayRoleRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
@@ -74,7 +74,7 @@ class AuthTableBoundariesPostgresTest {
         context.registerBean(GatewayAuthChallengeRepository.class,()->new GatewayAuthChallengeRepository(jdbc));
         context.registerBean(AuthPersistenceService.class,()->new AuthPersistenceService(userRows,new GatewayRoleRepository(jdbc),
                 new GatewayPermissionRepository(jdbc),new GatewayUserRoleRepository(jdbc),new GatewayRolePermissionRepository(jdbc),
-                new GatewayLoginLogRepository(jdbc),mfaRows,new GatewayRefreshSessionRepository(jdbc)));
+                new GatewayLoginLogRepository(jdbc),mfaRows,org.mockito.Mockito.mock(LoginSessionRepository.class)));
         context.registerBean(TotpService.class,()->new TotpService(properties));context.registerBean(PasswordHasher.class,()->passwords);
         context.registerBean(EmailMessageSender.class,()->mock(EmailMessageSender.class));
         context.register(EmailVerificationService.class,LoginVerificationService.class);context.refresh();

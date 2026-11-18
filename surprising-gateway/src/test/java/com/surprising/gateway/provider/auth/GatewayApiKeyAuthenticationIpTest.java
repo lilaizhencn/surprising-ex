@@ -86,7 +86,7 @@ class GatewayApiKeyAuthenticationIpTest {
     private GatewayApiKeyRepository.ApiKeyRecord record(TotpService totpService, String apiKey, String allowlist) {
         return new GatewayApiKeyRepository.ApiKeyRecord(
                 UUID.randomUUID(), 42L, apiKey, totpService.encryptSecret("secret"), "test", "READ",
-                allowlist, "ACTIVE", Instant.now(), null, null);
+                allowlist, "ACTIVE", Instant.now(), null);
     }
 
     private MockHttpServletRequest signedRequest(GatewayApiKeyService service, String apiKey,

@@ -35,8 +35,8 @@ class TelegramLoginServiceTest {
     AuthPersistenceService users = mock(AuthPersistenceService.class);
     AuthService auth = mock(AuthService.class);
     AuthStateFixture authState = new AuthStateFixture();
-    TelegramIdentityService identityService = new TelegramIdentityService(identities, authState.state,
-            new TelegramIdentityBinder(identities, users, userRows, authState.state));
+    TelegramIdentityService identityService = new TelegramIdentityService(authState.state,
+            new TelegramIdentityBinder(identities, users, userRows, authState.state, mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
     TelegramLoginService service = new TelegramLoginService(repository, identityService, userRows, oidc, auth);
     String state = "s".repeat(43), verifier = "v".repeat(43);
     com.surprising.gateway.provider.auth.model.AuthClientMetadata http = new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest());
@@ -92,9 +92,12 @@ class TelegramLoginServiceTest {
 
     @Test
     void repeatLoginUsesSubjectEvenWhenNicknameChanges() {
+        authState.state.putUser(new com.surprising.gateway.provider.auth.state.UserState(7,"telegram",null,null,Instant.EPOCH,
+                "NORMAL",List.of("USER"),List.of(),java.util.Set.of(),java.util.Set.of(),false,true));
         when(repository.lockResult(any(), any(), any(), any())).thenReturn(Optional.of(
                 new TelegramLoginRows.Result("123", "新的昵称", false)));
         when(identities.find("123")).thenReturn(Optional.of(7L));
+        when(userRows.find(7)).thenReturn(Optional.of(new GatewayUserRepository.UserRecord(7,null,null,"NORMAL",Instant.EPOCH)));
         service.complete(state, verifier, "device", http);
         service.complete(state, verifier, "device", http);
         verify(identities, times(1)).find("123");

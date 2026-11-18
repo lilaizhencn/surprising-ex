@@ -102,7 +102,7 @@ class WebSocketApiKeyAuthenticationTest {
 
     private void stored(String ip) {
         fixture.putApiKey(new GatewayApiKeyRepository.ApiKeyRecord(
-                UUID.randomUUID(), 42L, key, totp.encryptSecret("secret"), "bot", "READ", ip, "ACTIVE", Instant.now(), null, null));
+                UUID.randomUUID(), 42L, key, totp.encryptSecret("secret"), "bot", "READ", ip, "ACTIVE", Instant.now(), null));
     }
 
     private Map<String, Object> proof(WsTransportSession session) {
