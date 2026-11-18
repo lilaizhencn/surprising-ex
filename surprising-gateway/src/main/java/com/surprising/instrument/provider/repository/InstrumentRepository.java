@@ -86,6 +86,15 @@ public class InstrumentRepository {
                 (rs, row) -> rs.getInt(1), line.name()).stream().findFirst();
     }
 
+    public String snapshotVersion(ProductLine line) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COALESCE((SELECT string_agg(instrument_id::text || ':' || last_change_id::text, ',' ORDER BY instrument_id)
+                                   FROM instruments WHERE product_line = ?), '')
+                       || '|' || COALESCE((SELECT string_agg(asset_id::text || ':' || revision::text, ',' ORDER BY asset_id)
+                                              FROM assets), '')
+                """, String.class, line.name());
+    }
+
     public int nextInstrumentId() {
         return jdbcTemplate.queryForObject("SELECT nextval('instrument_identity_sequence')", Integer.class);
     }

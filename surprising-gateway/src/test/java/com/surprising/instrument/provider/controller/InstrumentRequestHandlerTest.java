@@ -87,8 +87,8 @@ class InstrumentRequestHandlerTest {
         var draft = instrument(type, InstrumentStatus.DRAFT);
         var closed = instrument(type, InstrumentStatus.CLOSED);
         when(storage.latest(73, type.productLine())).thenReturn(java.util.Optional.of(settling));
-        when(storage.list(type.productLine(), null, null))
-                .thenReturn(List.of(settling, draft, closed));
+        when(storage.configuration(type.productLine(), null))
+                .thenReturn(new com.surprising.instrument.provider.service.InstrumentStorageService.Configuration("1", List.of(settling, draft, closed), java.util.Map.of()));
 
         assertThat(requests.latest(73, null, type.productLine().name())).isSameAs(settling);
         var catalog = (InstrumentQueryResponse) requests.list(null, null, null, type.productLine().name(), false, false);
@@ -114,8 +114,8 @@ class InstrumentRequestHandlerTest {
     void closedDeliveryCanBeReadByIdentityButIsAbsentFromDefaultCatalog(ContractType type) {
         var closed = instrument(type, InstrumentStatus.CLOSED);
         when(storage.latest(73, type.productLine())).thenReturn(java.util.Optional.of(closed));
-        when(storage.list(type.productLine(), null, null))
-                .thenReturn(List.of(closed));
+        when(storage.configuration(type.productLine(), null))
+                .thenReturn(new com.surprising.instrument.provider.service.InstrumentStorageService.Configuration("1", List.of(closed), java.util.Map.of()));
         assertThat(requests.latest(73, null, type.productLine().name())).isSameAs(closed);
         assertThat(((InstrumentQueryResponse) requests.list(null, null, null, type.productLine().name(), false, false)).instruments()).isEmpty();
     }
@@ -123,14 +123,14 @@ class InstrumentRequestHandlerTest {
     @Test void catalogAggregatesOnlyVisibleContractsAndPreservesResponseFields() {
         var visible = instrument(ContractType.LINEAR_PERPETUAL, InstrumentStatus.TRADING);
         var draft = instrument(ContractType.LINEAR_PERPETUAL, InstrumentStatus.DRAFT);
-        when(storage.list(ProductLine.LINEAR_PERPETUAL, null, null)).thenReturn(List.of(visible, draft));
+        when(storage.configuration(ProductLine.LINEAR_PERPETUAL, null)).thenReturn(new com.surprising.instrument.provider.service.InstrumentStorageService.Configuration("1", List.of(visible, draft), java.util.Map.of()));
         var one = java.math.BigDecimal.ONE;
         var summary = new com.surprising.instrument.provider.model.MarketSummaryRows.Summary(one, one, one, one, one, one, List.of(one));
-        when(market.summaries(eq(List.of(73)), any())).thenReturn(java.util.Map.of(73, summary));
+        when(market.summaries(eq(ProductLine.LINEAR_PERPETUAL), eq(List.of(73)), any())).thenReturn(java.util.Map.of(73, summary));
         var catalog = instruments.publicCatalog(ProductLine.LINEAR_PERPETUAL, null, null, true);
         assertThat(catalog.instruments().instruments()).containsExactly(visible);
         assertThat(catalog.summaries()).containsEntry(73, summary);
-        verify(market).summaries(eq(List.of(73)), any());
+        verify(market).summaries(eq(ProductLine.LINEAR_PERPETUAL), eq(List.of(73)), any());
     }
 
     private InstrumentResponse instrument(ContractType type, InstrumentStatus status) {
@@ -138,6 +138,7 @@ class InstrumentRequestHandlerTest {
         when(value.instrumentId()).thenReturn(73);
         when(value.status()).thenReturn(status);
         when(value.contractType()).thenReturn(type);
-        return value;
+        when(value.symbol()).thenReturn("BTC-USDT");
+        return InstrumentResponse.immutableCopy(value);
     }
 }

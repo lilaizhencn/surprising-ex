@@ -20,6 +20,10 @@ public class WalletFundingService {
     private final AssetNetworkRepository networks;
     private final CustodyWalletClient custody;
     private final UserDepositAddressRepository addressRepository;
+    private final java.util.function.LongSupplier nanoTime;
+    private Map<String, List<FundingAsset>> catalog;
+    private long catalogLoadedAt;
+    private static final long CATALOG_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
 
     public WalletFundingService(AssetRepository assets, AssetNetworkRepository networks, CustodyWalletClient custody) {
         this(assets, networks, custody, null);
@@ -29,6 +33,12 @@ public class WalletFundingService {
     public WalletFundingService(AssetRepository assets, AssetNetworkRepository networks,
                                 CustodyWalletClient custody,
                                 @Autowired(required = false) UserDepositAddressRepository addressRepository) {
+        this(assets, networks, custody, addressRepository, System::nanoTime);
+    }
+
+    WalletFundingService(AssetRepository assets, AssetNetworkRepository networks, CustodyWalletClient custody,
+                         UserDepositAddressRepository addressRepository, java.util.function.LongSupplier nanoTime) {
+        this.nanoTime = nanoTime;
         this.assets = assets;
         this.networks = networks;
         this.custody = custody;
@@ -90,11 +100,23 @@ public class WalletFundingService {
         return "generic";
     }
 
-    public List<FundingAsset> catalog(String operation) {
+    public synchronized List<FundingAsset> catalog(String operation) {
         if (!Set.of("deposit", "withdraw").contains(operation)) throw new IllegalArgumentException("invalid funding operation");
-        var chains = custody.chains();
+        long now = nanoTime.getAsLong();
+        if (catalog != null && now - catalogLoadedAt < CATALOG_NANOS) return catalog.get(operation);
+        var chains = Objects.requireNonNull(custody.chains(), "custody chains unavailable");
         var routes = networks.enabled();
-        return assets.list(false).stream()
+        var configuredAssets = assets.list(false);
+        var refreshed = Map.of("deposit", buildCatalog("deposit", configuredAssets, routes, chains),
+                "withdraw", buildCatalog("withdraw", configuredAssets, routes, chains));
+        catalog = refreshed;
+        catalogLoadedAt = now;
+        return refreshed.get(operation);
+    }
+
+    private static List<FundingAsset> buildCatalog(String operation, List<Asset> assets, List<Network> routes,
+                                                   List<Map<String, Object>> chains) {
+        return assets.stream()
                 .filter(asset -> asset.listed() && asset.visible()
                         && ("deposit".equals(operation) ? asset.depositEnabled() : asset.withdrawalEnabled()))
                 .map(asset -> {

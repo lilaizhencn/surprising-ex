@@ -13,7 +13,8 @@ import org.springframework.stereotype.Component;
 public class ProjectionWatermarkWaiter {
 
     public static final int DEFAULT_MAX_WAIT_MS = 2_000;
-    private static final long POLL_INTERVAL_MS = 1L;
+    private static final long INITIAL_POLL_MS = 10L;
+    private static final long MAX_POLL_MS = 100L;
     private static final int DEFAULT_MAX_ATTEMPTS = 2_048;
     private static final String WATERMARK_SQL = """
             SELECT last_export_sequence FROM core_projection_watermark
@@ -70,9 +71,13 @@ public class ProjectionWatermarkWaiter {
 
         long deadline = Math.addExact(clock.millis(), maxWaitMs);
         int attempts = 0;
+        long pollMs = INITIAL_POLL_MS;
         while (observed < requiredExportSequence && attempts < maxAttempts && clock.millis() < deadline) {
             long remaining = deadline - clock.millis();
-            waitStrategy.await(Math.min(POLL_INTERVAL_MS, remaining));
+            if (remaining <= 0 || Thread.currentThread().isInterrupted()) break;
+            waitStrategy.await(Math.min(pollMs, remaining));
+            if (Thread.currentThread().isInterrupted()) break;
+            pollMs = Math.min(MAX_POLL_MS, pollMs * 2);
             attempts++;
             observed = observed(productLine);
         }

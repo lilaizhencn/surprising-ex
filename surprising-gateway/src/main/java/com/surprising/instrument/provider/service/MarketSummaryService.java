@@ -17,19 +17,28 @@ import org.springframework.stereotype.Service;
 public class MarketSummaryService {
     private static final int TREND_POINTS = 32;
     private final MarketSummaryRepository repository;
+    private final Map<com.surprising.product.api.ProductLine, CachedSummary> cachedSummaries = new HashMap<>();
+    private record CachedSummary(List<Integer> instrumentIds, Instant asOf, Map<Integer, Summary> summaries) {}
 
     public MarketSummaryService(MarketSummaryRepository repository) {
         this.repository = repository;
     }
 
-    public Map<Integer, Summary> summaries(List<Integer> instrumentIds, Instant now) {
+    public synchronized Map<Integer, Summary> summaries(com.surprising.product.api.ProductLine productLine,
+                                                       List<Integer> instrumentIds, Instant now) {
         if (instrumentIds.isEmpty()) return Map.of();
-        var rows = repository.samples(instrumentIds, now.minusSeconds(86_400), now);
+        var ids = instrumentIds.stream().distinct().sorted().toList();
+        var cached = cachedSummaries.get(productLine);
+        if (cached != null && cached.instrumentIds().equals(ids)
+                && !now.isBefore(cached.asOf()) && now.isBefore(cached.asOf().plusSeconds(5))) return cached.summaries();
+        var rows = repository.samples(ids, now.minusSeconds(86_400), now);
         Map<Integer, List<Sample>> grouped = new HashMap<>();
         for (Sample row : rows) grouped.computeIfAbsent(row.instrumentId(), ignored -> new ArrayList<>()).add(row);
         Map<Integer, Summary> result = new HashMap<>();
         grouped.forEach((instrumentId, samples) -> result.put(instrumentId, summarize(samples)));
-        return result;
+        var summaries = Map.copyOf(result);
+        cachedSummaries.put(productLine, new CachedSummary(ids, now, summaries));
+        return summaries;
     }
 
     static Summary summarize(List<Sample> rows) {

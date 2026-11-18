@@ -33,6 +33,10 @@ public class NotificationPreferenceService {
     @Transactional(readOnly = true)
     public boolean isChannelEnabled(long userId, String category, String channel) {
         var pref = repository.findByUserId(userId);
+        return isChannelEnabled(pref, category, channel);
+    }
+
+    public boolean isChannelEnabled(NotificationPreference pref, String category, String channel) {
         boolean isPush = "PUSH".equalsIgnoreCase(channel);
         boolean isInApp = "IN_APP".equalsIgnoreCase(channel);
         boolean isEmail = "EMAIL".equalsIgnoreCase(channel);

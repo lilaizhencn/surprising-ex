@@ -171,6 +171,17 @@ public class InstrumentStorageService {
 
     public InstrumentTradeEncoding tradeEncoding(ProductLine line,int instrumentId,long id) { return changeLog.tradeEncoding(line,instrumentId,id); }
 
+    /** 版本及完整配置使用同一已提交快照；未变化只执行一条轻量版本查询。 */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true,
+            isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public Configuration configuration(ProductLine line, String knownVersion) {
+        String version = instrumentRepository.snapshotVersion(line);
+        if (knownVersion != null && knownVersion.equals(version)) return null;
+        return new Configuration(version, list(line, null, null), assetScales());
+    }
+
+    public record Configuration(String version, List<InstrumentResponse> instruments, Map<String, Long> assetScales) {}
+
     public Map<String, Long> assetScales() {
         return assetScaleRepository == null ? Map.of() : assetScaleRepository.findAll();
     }

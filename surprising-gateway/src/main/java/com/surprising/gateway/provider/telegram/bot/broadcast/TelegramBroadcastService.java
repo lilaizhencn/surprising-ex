@@ -15,8 +15,17 @@ public class TelegramBroadcastService {
 
     private final TelegramBroadcastRepository broadcasts;
     private final TelegramBotClient bot;
+    private final java.util.function.LongSupplier nanoTime;
+    private long nextUnconfiguredCheck;
+    private boolean unconfiguredChecked;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TelegramBroadcastService(TelegramBroadcastRepository broadcasts, TelegramBotClient bot) {
+        this(broadcasts, bot, System::nanoTime);
+    }
+
+    TelegramBroadcastService(TelegramBroadcastRepository broadcasts, TelegramBotClient bot, java.util.function.LongSupplier nanoTime) {
+        this.nanoTime = nanoTime;
         this.broadcasts = broadcasts;
         this.bot = bot;
     }
@@ -29,8 +38,8 @@ public class TelegramBroadcastService {
             throw new IllegalArgumentException("通知超过 Telegram 单条 4096 字符上限");
         }
         long id = broadcasts.insert(adminUserId, body);
-        broadcasts.copyRecipients(id);
-        broadcasts.seedCounts(id);
+        int recipientCount = broadcasts.copyRecipients(id);
+        broadcasts.seedCounts(id, recipientCount);
         return view(broadcasts.require(id));
     }
 
@@ -38,11 +47,17 @@ public class TelegramBroadcastService {
         return broadcasts.list().stream().map(TelegramBroadcastService::view).toList();
     }
 
-    public void drain() {
+    public synchronized void drain() {
         if (!bot.isConfigured()) {
-            broadcasts.failOutstanding("Telegram Bot 未配置，通知没有发出");
+            long now = nanoTime.getAsLong();
+            if (!unconfiguredChecked || now - nextUnconfiguredCheck >= 0) {
+                broadcasts.failOutstanding("Telegram Bot 未配置，通知没有发出");
+                nextUnconfiguredCheck = now + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+                unconfiguredChecked = true;
+            }
             return;
         }
+        unconfiguredChecked = false;
         broadcasts.releaseStaleClaims();
         List<PendingSend> batch = broadcasts.claim(15);
         Set<Long> touched = new LinkedHashSet<>();

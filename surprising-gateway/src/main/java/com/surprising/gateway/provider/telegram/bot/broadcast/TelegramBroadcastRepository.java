@@ -13,19 +13,39 @@ import org.springframework.transaction.annotation.Transactional;
 public class TelegramBroadcastRepository {
 
     private final JdbcTemplate jdbc;
+    private final java.util.function.LongSupplier nanoTime;
+    private final java.util.LinkedHashMap<String, RememberedChat> rememberedChats = new java.util.LinkedHashMap<>();
+    private static final long CHAT_RECHECK_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+    private static final int MAX_REMEMBERED_CHATS = 4096;
+    private record RememberedChat(long chatId, long checkedAt) {}
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TelegramBroadcastRepository(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+        this(jdbc, System::nanoTime);
     }
 
-    public void rememberChat(String subject, long chatId) {
+    TelegramBroadcastRepository(JdbcTemplate jdbc, java.util.function.LongSupplier nanoTime) {
+        this.jdbc = jdbc;
+        this.nanoTime = nanoTime;
+    }
+
+    public synchronized void rememberChat(String subject, long chatId) {
+        long now = nanoTime.getAsLong();
+        var previous = rememberedChats.get(subject);
+        if (previous != null && previous.chatId() == chatId && now - previous.checkedAt() < CHAT_RECHECK_NANOS) return;
         jdbc.update("""
                 INSERT INTO gateway_telegram_chats(subject, chat_id, updated_at)
                 VALUES (?, ?, now())
                 ON CONFLICT (subject) DO UPDATE
                    SET chat_id = EXCLUDED.chat_id,
                        updated_at = now()
+                 WHERE gateway_telegram_chats.chat_id IS DISTINCT FROM EXCLUDED.chat_id
                 """, subject, chatId);
+        // No caller transaction: only memoize a completed autocommit write.
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            rememberedChats.put(subject, new RememberedChat(chatId, now));
+            if (rememberedChats.size() > MAX_REMEMBERED_CHATS) rememberedChats.remove(rememberedChats.firstEntry().getKey());
+        }
     }
 
     public long insert(long createdBy, String bodyHtml) {
@@ -111,18 +131,12 @@ public class TelegramBroadcastRepository {
                 """, status, error, broadcastId, subject);
     }
 
-    public void seedCounts(long broadcastId) {
+    public void seedCounts(long broadcastId, int recipientCount) {
         jdbc.update("""
-                UPDATE gateway_telegram_broadcasts b
-                   SET recipient_count = (SELECT count(*) FROM gateway_telegram_broadcast_recipients r WHERE r.broadcast_id = b.broadcast_id),
-                       status = CASE WHEN EXISTS (
-                           SELECT 1 FROM gateway_telegram_broadcast_recipients r WHERE r.broadcast_id = b.broadcast_id
-                       ) THEN 'QUEUED' ELSE 'COMPLETED' END,
-                       finished_at = CASE WHEN EXISTS (
-                           SELECT 1 FROM gateway_telegram_broadcast_recipients r WHERE r.broadcast_id = b.broadcast_id
-                       ) THEN NULL ELSE now() END
-                 WHERE b.broadcast_id = ?
-                """, broadcastId);
+                UPDATE gateway_telegram_broadcasts
+                   SET recipient_count = ?, status = ?, finished_at = CASE WHEN ? = 0 THEN now() ELSE NULL END
+                 WHERE broadcast_id = ?
+                """, recipientCount, recipientCount == 0 ? "COMPLETED" : "QUEUED", recipientCount, broadcastId);
     }
 
     public void failOutstanding(String error) {
@@ -141,22 +155,21 @@ public class TelegramBroadcastRepository {
                 """, error);
     }
 
+    @Transactional
     public void refresh(long broadcastId) {
+        jdbc.queryForObject("SELECT broadcast_id FROM gateway_telegram_broadcasts WHERE broadcast_id = ? FOR UPDATE",
+                Long.class, broadcastId);
         jdbc.update("""
                 UPDATE gateway_telegram_broadcasts b
-                   SET recipient_count = (SELECT count(*) FROM gateway_telegram_broadcast_recipients r WHERE r.broadcast_id = b.broadcast_id),
-                       sent_count = (SELECT count(*) FROM gateway_telegram_broadcast_recipients r WHERE r.broadcast_id = b.broadcast_id AND r.status = 'SENT'),
-                       failed_count = (SELECT count(*) FROM gateway_telegram_broadcast_recipients r WHERE r.broadcast_id = b.broadcast_id AND r.status = 'FAILED'),
-                       status = CASE WHEN EXISTS (
-                           SELECT 1 FROM gateway_telegram_broadcast_recipients r
-                            WHERE r.broadcast_id = b.broadcast_id AND r.status IN ('PENDING', 'SENDING')
-                       ) THEN 'SENDING' ELSE 'COMPLETED' END,
-                       finished_at = CASE WHEN EXISTS (
-                           SELECT 1 FROM gateway_telegram_broadcast_recipients r
-                            WHERE r.broadcast_id = b.broadcast_id AND r.status IN ('PENDING', 'SENDING')
-                       ) THEN NULL ELSE COALESCE(b.finished_at, now()) END
+                   SET sent_count = counts.sent, failed_count = counts.failed,
+                       status = CASE WHEN counts.outstanding > 0 THEN 'SENDING' ELSE 'COMPLETED' END,
+                       finished_at = CASE WHEN counts.outstanding > 0 THEN NULL ELSE COALESCE(b.finished_at, now()) END
+                  FROM (SELECT count(*) FILTER (WHERE status = 'SENT') AS sent,
+                               count(*) FILTER (WHERE status = 'FAILED') AS failed,
+                               count(*) FILTER (WHERE status IN ('PENDING', 'SENDING')) AS outstanding
+                          FROM gateway_telegram_broadcast_recipients WHERE broadcast_id = ?) counts
                  WHERE b.broadcast_id = ?
-                """, broadcastId);
+                """, broadcastId, broadcastId);
     }
 
     private static BroadcastRow map(ResultSet rs) throws SQLException {

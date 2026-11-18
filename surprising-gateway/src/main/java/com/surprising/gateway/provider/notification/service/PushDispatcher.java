@@ -50,7 +50,8 @@ public class PushDispatcher {
         Instant now = Instant.now();
 
         // 1. 偏好校验与站内信写入
-        boolean inAppAllowed = preferenceService.isChannelEnabled(userId, category, "IN_APP");
+        var preference = preferenceService.getPreference(userId);
+        boolean inAppAllowed = preferenceService.isChannelEnabled(preference, category, "IN_APP");
         if (inAppAllowed) {
             inAppRepository.create(userId, category, title, body, route, routeParams, now);
         } else {
@@ -58,7 +59,7 @@ public class PushDispatcher {
         }
 
         // 2. 偏好校验与系统级推送出件箱入队
-        boolean pushAllowed = preferenceService.isChannelEnabled(userId, category, "PUSH");
+        boolean pushAllowed = preferenceService.isChannelEnabled(preference, category, "PUSH");
         if (!pushAllowed) {
             log.debug("Push notification skipped for userId={}, category={} due to preferences", userId, category);
             return;

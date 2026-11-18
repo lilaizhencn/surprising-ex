@@ -27,6 +27,14 @@ class InstrumentStorageServiceTest {
             riskBracketRepository, indexSourceRepository, null,
             tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build());
 
+    @Test void unchangedVersionDoesNotReadFullConfiguration() {
+        var line = com.surprising.product.api.ProductLine.SPOT;
+        when(instrumentRepository.snapshotVersion(line)).thenReturn("v1");
+        assertThat(storageService.configuration(line, "v1")).isNull();
+        org.mockito.Mockito.verifyNoInteractions(riskBracketRepository, indexSourceRepository);
+        org.mockito.Mockito.verify(instrumentRepository, org.mockito.Mockito.never()).list(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
     @Test
     void latestAggregatesSingleTableRepositories() {
         InstrumentResponse core = mock(InstrumentResponse.class);

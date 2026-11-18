@@ -59,6 +59,28 @@ class ProjectionWatermarkWaiterTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("[0, 2000]");
     }
 
+    @Test void usesBoundedBackoffAgainstCommittedPgWatermark() {
+        JdbcTemplate jdbc = org.mockito.Mockito.mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(any(String.class), eq(Long.class), eq("SPOT"))).thenReturn(3L);
+        AtomicLong now = new AtomicLong();
+        var waits = new java.util.ArrayList<Long>();
+        var waiter = new ProjectionWatermarkWaiter(jdbc, new MutableClock(now), ms -> { waits.add(ms); now.addAndGet(ms); });
+        assertThat(waiter.await(ProductLine.SPOT, 9, 2000).status()).isEqualTo(ProjectionReadResult.Status.PROJECTION_LAG);
+        assertThat(now).hasValue(2000);
+        assertThat(waits.subList(0, 4)).containsExactly(10L, 20L, 40L, 80L);
+        assertThat(waits).allMatch(ms -> ms > 0 && ms <= 100);
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.times(24)).queryForObject(any(String.class), eq(Long.class), eq("SPOT"));
+    }
+
+    @Test void backoffStillReturnsAsSoonAsCommittedWatermarkCatchesUp() {
+        JdbcTemplate jdbc = org.mockito.Mockito.mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(any(String.class), eq(Long.class), eq("SPOT"))).thenReturn(3L, 9L);
+        AtomicLong now = new AtomicLong();
+        var waiter = new ProjectionWatermarkWaiter(jdbc, new MutableClock(now), now::addAndGet);
+        assertThat(waiter.await(ProductLine.SPOT, 9, 2000).status()).isEqualTo(ProjectionReadResult.Status.OK);
+        assertThat(now).hasValue(10);
+    }
+
     private static final class MutableClock extends Clock {
         private final AtomicLong millis;
 

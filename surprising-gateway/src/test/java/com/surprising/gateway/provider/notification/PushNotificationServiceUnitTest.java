@@ -91,6 +91,8 @@ class PushNotificationServiceUnitTest {
                 "VOLATILITY:2002:BTC:1"
         );
 
+        verify(preferenceRepository).findByUserId(userId);
+
         // 验证写入了站内信
         verify(inAppRepository, times(1)).create(
                 eq(userId), eq("MARKET"), eq("BTC 价格异动"), eq("BTC 突破 76,000"),
@@ -123,6 +125,8 @@ class PushNotificationServiceUnitTest {
                 "{\"section\":\"devices\"}",
                 "LOGIN_ALERT:3003:127.0.0.1:20261106"
         );
+
+        verify(preferenceRepository).findByUserId(userId);
 
         // 验证写入站内信
         verify(inAppRepository, times(1)).create(

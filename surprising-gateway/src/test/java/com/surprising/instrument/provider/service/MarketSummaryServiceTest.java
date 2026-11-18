@@ -9,6 +9,38 @@ import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 
 class MarketSummaryServiceTest {
+    @Test void sharesFiveSecondResultsAndSeparatesProductsAndCatalogMembership() throws Exception {
+        var repository = org.mockito.Mockito.mock(com.surprising.instrument.provider.repository.MarketSummaryRepository.class);
+        var price = BigDecimal.TEN;
+        org.mockito.Mockito.when(repository.samples(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(java.util.List.of(new Sample(7, price, price, price, price, BigDecimal.ONE, price)));
+        var service = new MarketSummaryService(repository);
+        var now = java.time.Instant.parse("2026-11-18T00:00:00Z");
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+            var results = new java.util.ArrayList<java.util.concurrent.Future<java.util.Map<Integer, com.surprising.instrument.provider.model.MarketSummaryRows.Summary>>>();
+            for (int i=0;i<16;i++) results.add(executor.submit(() -> service.summaries(com.surprising.product.api.ProductLine.SPOT, java.util.List.of(7), now)));
+            var first = results.getFirst().get();
+            for (var result : results) assertThat(result.get()).isSameAs(first);
+        }
+        service.summaries(com.surprising.product.api.ProductLine.SPOT, java.util.List.of(7), now.plusSeconds(4));
+        org.mockito.Mockito.verify(repository).samples(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        service.summaries(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, java.util.List.of(7), now);
+        service.summaries(com.surprising.product.api.ProductLine.SPOT, java.util.List.of(7), now.plusSeconds(5));
+        service.summaries(com.surprising.product.api.ProductLine.SPOT, java.util.List.of(7,8), now.plusSeconds(5));
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.times(4)).samples(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test void queryErrorsAreNotConvertedIntoCachedZeroMarketData() {
+        var repository = org.mockito.Mockito.mock(com.surprising.instrument.provider.repository.MarketSummaryRepository.class);
+        org.mockito.Mockito.when(repository.samples(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new IllegalStateException("offline")).thenReturn(java.util.List.of());
+        var service = new MarketSummaryService(repository);
+        var now = java.time.Instant.EPOCH;
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.summaries(com.surprising.product.api.ProductLine.SPOT, java.util.List.of(7), now))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(service.summaries(com.surprising.product.api.ProductLine.SPOT, java.util.List.of(7), now)).isEmpty();
+    }
+
     @Test
     void summarizesRollingPricesAndBoundsTrendPayload() {
         var candles = new ArrayList<Sample>();

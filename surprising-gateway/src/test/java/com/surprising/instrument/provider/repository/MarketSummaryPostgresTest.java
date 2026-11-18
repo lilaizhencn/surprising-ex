@@ -30,11 +30,11 @@ class MarketSummaryPostgresTest {
                            (?,'1m','2026-01-02 12:00Z','2026-01-02 12:01Z',105,105,105,105,2,210,1,'CLOSED',now())
                     """, String.valueOf(id), String.valueOf(id));
             var service = new MarketSummaryService(new MarketSummaryRepository(new NamedParameterJdbcTemplate(source)));
-            var active = service.summaries(List.of(id), Instant.parse("2026-01-03T00:00:00Z")).get(id);
+            var active = service.summaries(com.surprising.product.api.ProductLine.SPOT, List.of(id), Instant.parse("2026-01-03T00:00:00Z")).get(id);
             assertThat(active.change24h()).isEqualByComparingTo("5");
             assertThat(active.volume24h()).isEqualByComparingTo("2");
             assertThat(active.quoteVolume24h()).isEqualByComparingTo("210");
-            var quiet = service.summaries(List.of(id), Instant.parse("2026-01-05T00:00:00Z")).get(id);
+            var quiet = service.summaries(com.surprising.product.api.ProductLine.SPOT, List.of(id), Instant.parse("2026-01-05T00:00:00Z")).get(id);
             assertThat(quiet.lastPrice()).isEqualByComparingTo("105");
             assertThat(quiet.change24h()).isZero();
             assertThat(quiet.volume24h()).isZero();
@@ -61,7 +61,7 @@ class MarketSummaryPostgresTest {
                       ('8','1m','2026-01-03 00:00Z','2026-01-03 00:01Z',888,888,888,888,888,888,'CLOSED');
                     """);
             var service = new MarketSummaryService(new MarketSummaryRepository(new NamedParameterJdbcTemplate(source)));
-            var results = service.summaries(List.of(7,8), Instant.parse("2026-01-03T00:00:00Z"));
+            var results = service.summaries(com.surprising.product.api.ProductLine.SPOT, List.of(7,8), Instant.parse("2026-01-03T00:00:00Z"));
             assertThat(results).containsOnlyKeys(8);
             assertThat(results.get(8).lastPrice()).isEqualByComparingTo("100");
             assertThat(results.get(8).volume24h()).isEqualByComparingTo("1");

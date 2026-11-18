@@ -31,6 +31,38 @@ class WalletFundingServiceTest {
         when(custody.chains()).thenReturn(List.of(chain(true)));
         when(custody.subject(42)).thenReturn("user:42");
     }
+    @Test void displayReadsAreSharedAcrossOperationsAndExpireButAddressChecksStayFresh() throws Exception {
+        var now = new java.util.concurrent.atomic.AtomicLong();
+        var cached = new WalletFundingService(assets, networks, custody, addressRepository, now::get);
+        when(assets.list(false)).thenReturn(List.of(asset()));
+        when(networks.enabled()).thenReturn(List.of(network(true)));
+        when(custody.chains()).thenReturn(List.of(chain(true)));
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+            var futures = new ArrayList<java.util.concurrent.Future<List<WalletFundingService.FundingAsset>>>();
+            for (int i=0;i<16;i++) futures.add(executor.submit(() -> cached.catalog("deposit")));
+            for (var future : futures) assertThat(future.get()).hasSize(1);
+        }
+        assertThat(cached.catalog("withdraw")).hasSize(1);
+        verify(assets).list(false); verify(networks).enabled(); verify(custody).chains();
+        when(assets.byAccountingCode("USDT")).thenReturn(Optional.of(asset()));
+        when(networks.list(1)).thenReturn(List.of(network(false)));
+        assertThatThrownBy(() -> cached.depositAddress(42, "USDT", "ETH")).isInstanceOf(IllegalArgumentException.class);
+        verify(custody, never()).createAddress(anyLong(), anyString(), any());
+        now.set(java.util.concurrent.TimeUnit.SECONDS.toNanos(5));
+        when(custody.chains()).thenReturn(List.of(chain(false)));
+        assertThat(cached.catalog("deposit")).isEmpty();
+        verify(assets, times(2)).list(false);
+    }
+    @Test void failedCustodyRefreshDoesNotPublishUsableOrCachedFakeNetworks() {
+        var now = new java.util.concurrent.atomic.AtomicLong();
+        var cached = new WalletFundingService(assets, networks, custody, addressRepository, now::get);
+        when(assets.list(false)).thenReturn(List.of(asset())); when(networks.enabled()).thenReturn(List.of(network(true)));
+        when(custody.chains()).thenThrow(new IllegalStateException("offline")).thenReturn(List.of(chain(true)));
+        assertThatThrownBy(() -> cached.catalog("deposit")).hasMessage("offline");
+        assertThat(cached.catalog("deposit")).hasSize(1);
+        verify(custody, times(2)).chains();
+    }
+
     @Test void catalogIntersectsAdminConfigurationAndCustodyCapabilities() {
         when(assets.list(false)).thenReturn(List.of(asset()));
         when(networks.enabled()).thenReturn(List.of(network(true)));

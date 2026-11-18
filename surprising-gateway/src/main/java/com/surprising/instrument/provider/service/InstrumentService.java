@@ -41,6 +41,11 @@ public class InstrumentService {
     private final InstrumentOutboxService outboxService;
     private final MarketSummaryService marketSummaries;
     private final ApplicationEventPublisher eventPublisher;
+    private final java.util.function.LongSupplier nanoTime;
+    private final Map<ProductLine, CatalogSnapshot> catalogSnapshots = new java.util.EnumMap<>(ProductLine.class);
+    private static final long CONFIG_RECHECK_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+    private record CatalogSnapshot(String version, InstrumentSnapshotResponse response, long checkedAt) {}
+
 
     public InstrumentService(InstrumentStorageService storageService,
                              InstrumentValidator instrumentValidator,
@@ -56,6 +61,14 @@ public class InstrumentService {
                              InstrumentOutboxService outboxService,
                              MarketSummaryService marketSummaries,
                              ApplicationEventPublisher eventPublisher) {
+        this(storageService, instrumentValidator, properties, outboxService, marketSummaries, eventPublisher, System::nanoTime);
+    }
+
+    InstrumentService(InstrumentStorageService storageService, InstrumentValidator instrumentValidator,
+                      InstrumentProperties properties, InstrumentOutboxService outboxService,
+                      MarketSummaryService marketSummaries, ApplicationEventPublisher eventPublisher,
+                      java.util.function.LongSupplier nanoTime) {
+        this.nanoTime = nanoTime;
         this.storageService = storageService;
         this.instrumentValidator = instrumentValidator;
         this.properties = properties;
@@ -88,10 +101,16 @@ public class InstrumentService {
     }
 
     public InstrumentCatalog publicCatalog(ProductLine line, InstrumentType type, InstrumentStatus status, boolean includeSummary) {
-        var visible = storageService.list(line, type, status).stream().filter(InstrumentService::publiclyVisible).toList();
+        var allVisible = (line == null
+                ? java.util.Arrays.stream(ProductLine.values()).flatMap(product -> snapshot(product).instruments().stream())
+                : snapshot(line).instruments().stream()).filter(InstrumentService::publiclyVisible).toList();
+        var visible = allVisible.stream()
+                .filter(row -> type == null || row.instrumentType() == type)
+                .filter(row -> status == null || row.status() == status)
+                .sorted(Comparator.comparing(InstrumentResponse::symbol)).toList();
         var response = new InstrumentQueryResponse(visible.size(), visible);
-        var summaries = includeSummary ? marketSummaries.summaries(
-                visible.stream().map(InstrumentResponse::instrumentId).distinct().toList(), Instant.now())
+        var summaries = includeSummary ? marketSummaries.summaries(line,
+                allVisible.stream().map(InstrumentResponse::instrumentId).distinct().sorted().toList(), Instant.now())
                 : java.util.Map.<Integer, com.surprising.instrument.provider.model.MarketSummaryRows.Summary>of();
         return new InstrumentCatalog(response, summaries);
     }
@@ -109,9 +128,14 @@ public class InstrumentService {
         return new InstrumentQueryResponse(rows.size(), rows);
     }
 
-    @Transactional(readOnly = true)
     public Map<String, Long> assetScales() {
-        return storageService.assetScales();
+        long now = nanoTime.getAsLong();
+        synchronized (this) {
+            for (CatalogSnapshot snapshot : catalogSnapshots.values()) {
+                if (now - snapshot.checkedAt() < CONFIG_RECHECK_NANOS) return snapshot.response().assetScales();
+            }
+        }
+        return snapshot(ProductLine.SPOT).assetScales();
     }
 
     public InstrumentQueryResponse list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
@@ -122,16 +146,30 @@ public class InstrumentService {
     /**
      * 返回指定产品线的完整合约快照，供其他服务启动初始化和缓存修复使用。
      */
-    @Transactional(readOnly = true)
-    public InstrumentSnapshotResponse snapshot(ProductLine productLine) {
-        if (productLine == null) {
-            throw new IllegalArgumentException("productLine is required");
+    public synchronized InstrumentSnapshotResponse snapshot(ProductLine productLine) {
+        if (productLine == null) throw new IllegalArgumentException("productLine is required");
+        long now = nanoTime.getAsLong();
+        CatalogSnapshot previous = catalogSnapshots.get(productLine);
+        if (previous != null && now - previous.checkedAt() < CONFIG_RECHECK_NANOS) return previous.response();
+        var configuration = storageService.configuration(productLine, previous == null ? null : previous.version());
+        if (configuration == null) {
+            if (previous == null) throw new IllegalStateException("合约快照尚未就绪");
+            catalogSnapshots.put(productLine, new CatalogSnapshot(previous.version(), previous.response(), now));
+            return previous.response();
         }
-        var rows = storageService.list(productLine,null,null);
-        var assetScales = storageService.assetScales();
+        var rows = configuration.instruments().stream().map(InstrumentResponse::immutableCopy).toList();
+        var scales = Map.copyOf(configuration.assetScales());
         long sequence = rows.stream().mapToLong(InstrumentResponse::lastChangeId).max().orElse(0L);
-        return new InstrumentSnapshotResponse(productLine, sequence,
-                snapshotChecksum(productLine, rows, assetScales), rows, assetScales);
+        var response = new InstrumentSnapshotResponse(productLine, sequence,
+                snapshotChecksum(productLine, rows, scales), rows, scales);
+        catalogSnapshots.put(productLine, new CatalogSnapshot(configuration.version(), response, now));
+        return response;
+    }
+
+    /** 本节点配置事务提交后失效；其他节点每五秒核对持久版本。 */
+    @org.springframework.context.event.EventListener
+    public synchronized void onInstrumentEvent(InstrumentEvent event) {
+        if (event != null) catalogSnapshots.remove(event.productLine());
     }
 
     public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status, InstrumentPageQuery query) {
