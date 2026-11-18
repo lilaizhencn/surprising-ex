@@ -4,6 +4,8 @@
 
 **代码简化、逻辑整理或结构重构前，必须读取子规范 [AGENTS-simplify.md](AGENTS-simplify.md)。**
 
+**前端视觉、交互或样式改动前，必须读取子规范 [AGENTS-frontend.md](AGENTS-frontend.md)。**
+
 ## MVC 分层
 
 - `controller`：请求/消息入口、参数绑定、响应转换；不写业务或 SQL。
