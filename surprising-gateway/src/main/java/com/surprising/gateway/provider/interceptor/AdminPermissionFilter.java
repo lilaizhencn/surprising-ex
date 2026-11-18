@@ -89,7 +89,7 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         if (path.startsWith("/product-lines")) {
             return "admin.gateway.instrument-admin." + (read ? "read" : "write");
         }
-        if (path.startsWith("/users") || path.startsWith("/sessions")) {
+        if (path.startsWith("/users") || path.startsWith("/sessions") || path.startsWith("/sub-accounts")) {
             return "admin.users." + (read ? "read" : "write");
         }
         if (path.startsWith("/audit")) {
@@ -115,6 +115,9 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
             if (path.endsWith("/publish") || path.endsWith("/withdraw")) return "admin.legal.publish";
             return "admin.legal."+(read?"read":"write");
         }
+        if (path.equals("/telegram/broadcasts") || path.startsWith("/telegram/broadcasts/")) {
+            return "admin.telegram.broadcast";
+        }
         if (path.startsWith("/announcements")) {
             if (path.endsWith("/publish") || path.endsWith("/withdraw")) {
                 return "admin.announcements.publish";
@@ -134,7 +137,7 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
             "/adl", "/funding", "/market-maker", "/risk", "/risk-admin", "/liquidations", "/liquidation-admin",
             "/insurance-admin", "/instrument-admin", "/order-admin", "/account-admin",
             "/fee-admin", "/fees", "/lifecycle", "/maintenance", "/alerts", "/exports",
-            "/queries", "/trading", "/accounts", "/instruments", "/orders", "/reports", "/market"
+            "/queries", "/trading", "/accounts", "/instruments", "/orders", "/reports", "/market", "/websocket"
         }) {
             if (path.equals(prefix) || path.startsWith(prefix + "/")) {
                 return "admin.gateway." + prefix.substring(1) + "." + (read ? "read" : "write");

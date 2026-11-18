@@ -176,6 +176,20 @@ class AdminPermissionFilterTest {
         assertThat(response.getStatus()).isEqualTo(403);
     }
 
+    @Test
+    void mapsWebSocketMetricsToGatewayWebSocketReadPermission() throws ServletException, IOException {
+        AuthService authService = mock(AuthService.class);
+        AdminPermissionFilter filter = new AdminPermissionFilter(authService);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/admin/websocket/metrics");
+        request.addHeader("Authorization", "Bearer admin");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, new MockFilterChain());
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        verify(authService).requireAdminPermission("Bearer admin", "admin.gateway.websocket.read");
+    }
+
     private AuthService authService() {
         AuthService authService = mock(AuthService.class);
         org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.users.read"))

@@ -1,0 +1,53 @@
+surprising:
+  gateway:
+    limits:
+      ip:
+        rate: 5000
+        burst: 10000
+      public-requests:
+        rate: 10000
+        burst: 20000
+      reserved-requests:
+        rate: 2000
+        burst: 4000
+      new-web-socket:
+        rate: 50
+        burst: 200
+      socket-messages:
+        rate: 200
+        burst: 2048
+      sockets-per-ip: 200
+      sockets-per-user: 50
+      user:
+        read:
+          rate: 1000
+          burst: 2000
+        order:
+          rate: 500
+          burst: 1000
+        cancel:
+          rate: 500
+          burst: 1000
+        cancel-all:
+          rate: 50
+          burst: 200
+      product:
+        read:
+          rate: 1000
+          burst: 2000
+        order:
+          rate: 500
+          burst: 1000
+        cancel:
+          rate: 500
+          burst: 1000
+    security:
+      admin-browser-allowed-origins: http://localhost:5174,http://127.0.0.1:5174,http://localhost:5176,http://127.0.0.1:5176,https://ex-api.tokdou.com
+      browser-cookie-secure: false
+      require-approval-for-high-risk-admin-writes: false
+  price:
+    index:
+      http:
+        proxy-enabled: ${PRICE_HTTP_PROXY_ENABLED:false}
+        proxy-host: ${PRICE_HTTP_PROXY_HOST:127.0.0.1}
+        proxy-port: ${PRICE_HTTP_PROXY_PORT:27890}

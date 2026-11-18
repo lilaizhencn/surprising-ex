@@ -4,6 +4,10 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.service.AccountService;
+import com.surprising.asset.model.AssetConfiguration.Asset;
+import com.surprising.asset.model.AssetConfiguration.Network;
+import com.surprising.asset.repository.AssetNetworkRepository;
+import com.surprising.asset.repository.AssetRepository;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
@@ -13,6 +17,7 @@ import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -20,7 +25,6 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -35,6 +39,8 @@ public class OpenCapitalApiService {
     private final CustodyWalletClient custodyWalletClient;
     private final CustodyWithdrawalService withdrawalService;
     private final UserDepositAddressRepository depositAddressRepository;
+    private final AssetRepository assetRepository;
+    private final AssetNetworkRepository networkRepository;
     private final OpenApiSupport support;
 
     public OpenCapitalApiService(GatewayProperties properties,
@@ -45,6 +51,20 @@ public class OpenCapitalApiService {
                                  CustodyWithdrawalService withdrawalService,
                                  @Autowired(required = false) UserDepositAddressRepository depositAddressRepository,
                                  OpenApiSupport support) {
+        this(properties, accountService, verificationService, complianceService, custodyWalletClient,
+                withdrawalService, depositAddressRepository, null, null, support);
+    }
+
+    public OpenCapitalApiService(GatewayProperties properties,
+                                 AccountService accountService,
+                                 SensitiveActionVerificationService verificationService,
+                                 ComplianceService complianceService,
+                                 CustodyWalletClient custodyWalletClient,
+                                 CustodyWithdrawalService withdrawalService,
+                                 @Autowired(required = false) UserDepositAddressRepository depositAddressRepository,
+                                 @Autowired(required = false) AssetRepository assetRepository,
+                                 @Autowired(required = false) AssetNetworkRepository networkRepository,
+                                 OpenApiSupport support) {
         this.properties = properties;
         this.accountService = accountService;
         this.verificationService = verificationService;
@@ -52,6 +72,8 @@ public class OpenCapitalApiService {
         this.custodyWalletClient = custodyWalletClient;
         this.withdrawalService = withdrawalService;
         this.depositAddressRepository = depositAddressRepository;
+        this.assetRepository = assetRepository;
+        this.networkRepository = networkRepository;
         this.support = support;
     }
 
@@ -109,8 +131,65 @@ public class OpenCapitalApiService {
         if (!wallet.isEnabled()) {
             return support.json(HttpStatus.OK, List.of());
         }
+        List<Map<String, Object>> custodyChains = custodyWalletClient.chains();
+        if (assetRepository != null && networkRepository != null) {
+            List<Asset> dbAssets = assetRepository.list(false);
+            if (!dbAssets.isEmpty()) {
+                List<Network> enabledRoutes = networkRepository.enabled();
+                List<Map<String, Object>> items = new ArrayList<>();
+                for (Asset asset : dbAssets) {
+                    if (!asset.listed() || !asset.visible()) continue;
+                    List<Map<String, Object>> networkList = new ArrayList<>();
+                    for (Network route : enabledRoutes) {
+                        if (route.assetId() != asset.assetId()) continue;
+                        Map<String, Object> chain = custodyChains.stream()
+                                .filter(c -> route.networkCode().equals(c.get("chain"))
+                                        && Boolean.TRUE.equals(c.get("enabled"))
+                                        && c.get("assetSymbols") instanceof Collection<?> symbols
+                                        && symbols.contains(asset.asset()))
+                                .findFirst().orElse(null);
+                        if (chain == null) continue;
+                        Map<String, Object> net = new LinkedHashMap<>();
+                        net.put("coin", asset.asset());
+                        net.put("network", route.networkCode());
+                        net.put("name", route.displayName());
+                        net.put("tokenStandard", route.tokenStandard());
+                        net.put("isDefault", route.isDefault());
+                        net.put("depositEnable", asset.depositEnabled() && route.depositEnabled()
+                                && Boolean.TRUE.equals(chain.get("scanEnabled")) && !route.maintenanceMode());
+                        net.put("withdrawEnable", asset.withdrawalEnabled() && route.withdrawalEnabled()
+                                && Boolean.TRUE.equals(chain.get("withdrawalEnabled")) && !route.maintenanceMode());
+                        net.put("busy", route.maintenanceMode());
+                        net.put("withdrawFee", route.withdrawalFee().stripTrailingZeros().toPlainString());
+                        net.put("withdrawMin", route.minWithdrawal().stripTrailingZeros().toPlainString());
+                        net.put("withdrawMax", route.maxWithdrawal() == null ? "0" : route.maxWithdrawal().stripTrailingZeros().toPlainString());
+                        net.put("depositMin", route.minDeposit().stripTrailingZeros().toPlainString());
+                        net.put("minConfirm", route.confirmations());
+                        net.put("unLockConfirm", route.unlockConfirmations());
+                        net.put("sameAddress", route.memoRequired());
+                        net.put("addressRegex", route.addressRegex());
+                        net.put("memoRegex", route.memoRegex());
+                        net.put("contractAddress", route.contractAddress());
+                        net.put("estimatedArrivalTime", route.estimatedArrivalMinutes());
+                        net.put("specialTips", route.specialTips());
+                        networkList.add(net);
+                    }
+                    if (!networkList.isEmpty()) {
+                        Map<String, Object> coin = new LinkedHashMap<>();
+                        coin.put("coin", asset.asset());
+                        coin.put("name", asset.displayName());
+                        coin.put("trading", asset.tradingEnabled());
+                        coin.put("depositAllEnable", asset.depositEnabled());
+                        coin.put("withdrawAllEnable", asset.withdrawalEnabled());
+                        coin.put("networkList", networkList);
+                        items.add(coin);
+                    }
+                }
+                return support.json(HttpStatus.OK, items);
+            }
+        }
         Map<String, List<Map<String, Object>>> networksByAsset = new LinkedHashMap<>();
-        for (Map<String, Object> chain : custodyWalletClient.chains()) {
+        for (Map<String, Object> chain : custodyChains) {
             if (!Boolean.TRUE.equals(chain.get("enabled"))) {
                 continue;
             }

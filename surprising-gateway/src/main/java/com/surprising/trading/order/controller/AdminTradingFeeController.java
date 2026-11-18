@@ -9,9 +9,15 @@ import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.trading.order.model.FeeSchedulePageQuery;
+import com.surprising.trading.order.model.VipTierModels;
 import com.surprising.trading.order.service.TradingFeeService;
+import com.surprising.trading.order.service.VipTierService;
 import java.time.DateTimeException;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,10 +39,106 @@ public class AdminTradingFeeController {
     private static final Pattern TIER_CODE_PATTERN = Pattern.compile("[A-Z0-9][A-Z0-9_-]{0,31}");
 
     private final TradingFeeService tradingFeeService;
+    private final VipTierService vipTierService;
 
     public AdminTradingFeeController(TradingFeeService tradingFeeService) {
-        this.tradingFeeService = tradingFeeService;
+        this(tradingFeeService, null);
     }
+
+    @Autowired
+    public AdminTradingFeeController(TradingFeeService tradingFeeService,
+                                     @Autowired(required = false) VipTierService vipTierService) {
+        this.tradingFeeService = tradingFeeService;
+        this.vipTierService = vipTierService;
+    }
+
+    @GetMapping("/api/v1/admin/trading/fees/vip/levels")
+    public List<Map<String, Object>> vipLevels(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
+        GatewayUserContext.requireAdminUserId(adminUserId);
+        List<VipTierModels.VipTierDefinition> tiers = vipTierService != null
+                ? vipTierService.getVipTiers()
+                : VipTierModels.VIP_TIERS;
+        VipTierModels.VipTierDefinition vip0 = tiers.getFirst();
+        return tiers.stream().map(t -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("level", t.tierLevel());
+            row.put("name", t.tierCode());
+            row.put("minVolume30d", String.valueOf(t.min30DayVolumeUsd()));
+            row.put("minAssetBalanceUsd", String.valueOf(t.minAssetBalanceUsd()));
+            row.put("makerFeeDiscountPpm", Math.max(0L, vip0.makerFeeRatePpm() - t.makerFeeRatePpm()));
+            row.put("takerFeeDiscountPpm", Math.max(0L, vip0.takerFeeRatePpm() - t.takerFeeRatePpm()));
+            row.put("makerFeeRatePpm", t.makerFeeRatePpm());
+            row.put("takerFeeRatePpm", t.takerFeeRatePpm());
+            return row;
+        }).toList();
+    }
+
+    @GetMapping("/api/v1/admin/trading/fees/vip/status")
+    public VipTierService.AdminUserVipStatus vipStatus(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestParam("userId") long userId,
+            @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
+            @RequestParam(value = "productLine", required = false) String queryProductLine) {
+        GatewayUserContext.requireAdminUserId(adminUserId);
+        if (vipTierService == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "VIP tier service unavailable");
+        }
+        try {
+            ProductLine productLine = TradingControllerSupport.productLine(queryProductLine, headerProductLine);
+            return vipTierService.getAdminUserVipStatus(userId, productLine);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    @PostMapping("/api/v1/admin/trading/fees/vip/override")
+    public Map<String, Object> overrideVip(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestBody AdminVipOverrideRequest request,
+            @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
+            @RequestParam(value = "productLine", required = false) String queryProductLine) {
+        GatewayUserContext.requireAdminUserId(adminUserId);
+        if (vipTierService == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "VIP tier service unavailable");
+        }
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "request is required");
+        }
+        try {
+            Integer level = request.vipLevel() != null ? request.vipLevel() : request.manualLevel();
+            if (level == null) {
+                throw new IllegalArgumentException("vipLevel is required");
+            }
+            ProductLine productLine = request.productLine() != null
+                    ? request.productLine()
+                    : TradingControllerSupport.productLine(queryProductLine, headerProductLine);
+            VipTierService.AdminUserVipStatus updated = vipTierService.overrideUserVip(
+                    request.userId(),
+                    level,
+                    request.makerFeeRatePpm(),
+                    request.takerFeeRatePpm(),
+                    request.makerFeeDiscountPpm(),
+                    request.takerFeeDiscountPpm(),
+                    request.reason(),
+                    productLine);
+            return Map.of("ok", true, "status", updated);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    public record AdminVipOverrideRequest(
+            long userId,
+            Integer vipLevel,
+            Integer manualLevel,
+            ProductLine productLine,
+            Long makerFeeRatePpm,
+            Long takerFeeRatePpm,
+            Long makerFeeDiscountPpm,
+            Long takerFeeDiscountPpm,
+            String reason
+    ) {}
 
     @GetMapping("/api/v1/admin/trading/fees/effective")
     public EffectiveTradingFeeResponse effectiveFee(

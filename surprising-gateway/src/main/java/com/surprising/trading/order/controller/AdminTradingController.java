@@ -15,16 +15,21 @@ import com.surprising.trading.api.model.AdminTriggerOrderTimelineResponse;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.TriggerOrderQueryResponse;
 import com.surprising.trading.api.model.TriggerOrderResponse;
+import com.surprising.trading.order.model.GridStrategyModels.GridStrategyRecord;
 import com.surprising.trading.order.repository.ProjectionReadResult;
+import com.surprising.trading.order.service.GridStrategyService;
 import com.surprising.trading.order.service.OrderQueryService;
 import com.surprising.trading.order.service.OrderService;
 import com.surprising.trading.order.utils.TradeReadCursors;
 import com.surprising.trading.trigger.service.TriggerOrderService;
 import com.surprising.trading.trigger.utils.TriggerReadCursors;
 import jakarta.validation.Valid;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,19 +46,28 @@ public class AdminTradingController {
     private final OrderService orderService;
     private final OrderQueryService orderQueryService;
     private final TriggerOrderService triggerOrderService;
+    private final GridStrategyService gridStrategyService;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public AdminTradingController(OrderService orderService,
                                   OrderQueryService orderQueryService,
                                   TriggerOrderService triggerOrderService) {
+        this(orderService, orderQueryService, triggerOrderService, null);
+    }
+
+    @Autowired
+    public AdminTradingController(OrderService orderService,
+                                  OrderQueryService orderQueryService,
+                                  TriggerOrderService triggerOrderService,
+                                  @Autowired(required = false) GridStrategyService gridStrategyService) {
         this.orderService = orderService;
         this.orderQueryService = orderQueryService;
         this.triggerOrderService = triggerOrderService;
+        this.gridStrategyService = gridStrategyService;
     }
 
     public AdminTradingController(OrderService orderService,
                                   TriggerOrderService triggerOrderService) {
-        this(orderService, null, triggerOrderService);
+        this(orderService, null, triggerOrderService, null);
     }
 
     @GetMapping("/api/v1/admin/trading/orders/metrics")
@@ -226,5 +240,54 @@ public class AdminTradingController {
         return TradingControllerSupport.call(() -> orderService.adminCancelOrder(
                 orderId, request == null ? null : request.reason(),
                 TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
+    }
+
+    @GetMapping("/api/v1/admin/trading/grid/list")
+    public List<Map<String, Object>> listGridStrategies(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @RequestParam(value = "symbol", required = false) String symbol,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "userId", required = false) Long userId) {
+        GatewayUserContext.requireAdminUserId(adminUserId);
+        if (gridStrategyService == null) {
+            return List.of();
+        }
+        return gridStrategyService.listAllStrategies(symbol, status, userId).stream()
+                .map(AdminTradingController::mapGridStrategy)
+                .toList();
+    }
+
+    @PostMapping("/api/v1/admin/trading/grid/{strategyId}/stop")
+    public Map<String, Object> stopGridStrategy(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
+            @PathVariable("strategyId") long strategyId) {
+        GatewayUserContext.requireAdminUserId(adminUserId);
+        if (gridStrategyService == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Grid strategy service unavailable");
+        }
+        try {
+            GridStrategyRecord stopped = gridStrategyService.adminStopGrid(strategyId);
+            return Map.of("ok", true, "strategy", mapGridStrategy(stopped));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        }
+    }
+
+    private static Map<String, Object> mapGridStrategy(GridStrategyRecord r) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("strategyId", String.valueOf(r.strategyId()));
+        row.put("userId", r.userId());
+        row.put("symbol", r.instrumentId());
+        row.put("productLine", r.productLine() == null ? "" : r.productLine().name());
+        row.put("gridType", r.isArithmetic() ? "ARITHMETIC" : "GEOMETRIC");
+        row.put("lowerPrice", String.valueOf(r.lowerPriceTicks()));
+        row.put("upperPrice", String.valueOf(r.upperPriceTicks()));
+        row.put("gridCount", r.gridCount());
+        row.put("investAmount", String.valueOf(r.totalInvestmentUnits()));
+        row.put("matchedCount", r.matchedTradeCount());
+        row.put("profitUsd", String.valueOf(r.totalProfitUnits()));
+        row.put("status", "ACTIVE".equalsIgnoreCase(r.status()) ? "RUNNING" : r.status());
+        row.put("createdAt", r.createdAt());
+        return row;
     }
 }

@@ -95,11 +95,13 @@ public class WalletFundingService {
         var chains = custody.chains();
         var routes = networks.enabled();
         return assets.list(false).stream()
-                .filter(asset -> asset.listed() && ("deposit".equals(operation) ? asset.depositEnabled() : asset.withdrawalEnabled()))
+                .filter(asset -> asset.listed() && asset.visible()
+                        && ("deposit".equals(operation) ? asset.depositEnabled() : asset.withdrawalEnabled()))
                 .map(asset -> {
             var supported = new ArrayList<FundingNetwork>();
             for (var route : routes) {
                 if (route.assetId() != asset.assetId()
+                        || !route.enabled()
                         || !("deposit".equals(operation) ? route.depositEnabled() : route.withdrawalEnabled())) continue;
                 var chain = chains.stream().filter(c -> supports(c, asset.asset(), route.networkCode(), operation))
                         .findFirst().orElse(null);
@@ -109,7 +111,8 @@ public class WalletFundingService {
                 }
                 supported.add(new FundingNetwork(route, family));
             }
-            return new FundingAsset(asset.asset(), asset.displayName(), asset.logoUrl(), List.copyOf(supported));
+            return new FundingAsset(asset.asset(), asset.displayName(), asset.aliasName(), asset.assetType(),
+                    asset.logoUrl(), asset.displayDecimals(), asset.sortOrder(), List.copyOf(supported));
         }).filter(a -> !a.networks().isEmpty()).toList();
     }
 
@@ -118,8 +121,11 @@ public class WalletFundingService {
         var asset = assets.byAccountingCode(assetCode).filter(a -> a.listed() && a.depositEnabled())
                 .orElseThrow(() -> new IllegalArgumentException("asset is not supported for deposits"));
         var route = networks.list(asset.assetId()).stream()
-                .filter(n -> n.networkCode().equals(networkCode) && n.depositEnabled()).findFirst()
+                .filter(n -> n.networkCode().equals(networkCode) && n.enabled() && n.depositEnabled()).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("deposit network is disabled or does not belong to this asset"));
+        if (route.maintenanceMode()) {
+            throw new IllegalArgumentException("deposit network is currently under maintenance");
+        }
 
         // 1. 本地持久化查询（0 穿透）
         if (addressRepository != null) {
@@ -156,7 +162,7 @@ public class WalletFundingService {
 
     public void validateNetwork(int assetId, NetworkRequest request) {
         if (request == null) throw new IllegalArgumentException("network configuration is required");
-        if (!request.depositEnabled() && !request.withdrawalEnabled()) return;
+        if (!Boolean.TRUE.equals(request.enabled()) || (!request.depositEnabled() && !request.withdrawalEnabled())) return;
         var asset = assets.find(assetId).orElseThrow(() -> new IllegalArgumentException("asset not found"));
         var chains = custody.chains();
         for (String operation : List.of("deposit", "withdraw")) {
@@ -174,7 +180,13 @@ public class WalletFundingService {
         return chain.get("assetSymbols") instanceof Collection<?> symbols && symbols.contains(asset);
     }
 
-    public record FundingAsset(String asset, String displayName, String logoUrl, List<FundingNetwork> networks) {}
+    public record FundingAsset(String asset, String displayName, String aliasName, String assetType,
+                               String logoUrl, int displayDecimals, int sortOrder,
+                               List<FundingNetwork> networks) {
+        public FundingAsset(String asset, String displayName, String logoUrl, List<FundingNetwork> networks) {
+            this(asset, displayName, "", "CRYPTO", logoUrl, 4, 100, networks);
+        }
+    }
     /** Preserve the configured network JSON fields and add custody's canonical address family. */
     public record FundingNetwork(@com.fasterxml.jackson.annotation.JsonUnwrapped Network configuration, String family) {}
     public record DepositAddress(String asset, String network, String address, String memo) {}

@@ -1,12 +1,15 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.product.api.ProductLine;
 import com.surprising.websocket.provider.config.WebSocketProperties;
 import io.aeron.driver.MediaDriver;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import tools.jackson.databind.ObjectMapper;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -42,6 +45,37 @@ class RealtimeWebSocketBridgeLifecycleTest {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
             while (!before.containsAll(receivers()) && System.nanoTime() < deadline) Thread.sleep(10);
             assertThat(receivers()).isSubsetOf(before);
+        }
+    }
+
+    @Test void pinnedMarkRoutesAreSeededAtConstructionAndPreservedAcrossRecovery() throws Exception {
+        String directory = System.getProperty("java.io.tmpdir") + "/bridge-mark-" + UUID.randomUUID();
+        var environment = new MockEnvironment().withProperty("surprising.realtime.directory", directory)
+                .withProperty("surprising.realtime.ws.channel", "aeron:udp?endpoint=localhost:0");
+        var redis = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked") ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(redis.execute(any(RedisScript.class), anyList(), any(), any(), any())).thenReturn(1L);
+        var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
+                .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
+             var bridge = new RealtimeWebSocketBridge(registry, redis, environment, new ObjectMapper())) {
+            assertThat(bridge.hasPinnedMarkRouteForTest(ProductLine.SPOT)).isTrue();
+            assertThat(bridge.hasPinnedMarkRouteForTest(ProductLine.LINEAR_PERPETUAL)).isTrue();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (!bridge.ready() && System.nanoTime() < deadline) Thread.sleep(10);
+            assertThat(bridge.ready()).isTrue();
+            clearInvocations(redis);
+            bridge.simulateContinuityLossForTest();
+            bridge.heartbeat();
+            assertThat(bridge.hasPinnedMarkRouteForTest(ProductLine.SPOT)).isTrue();
+            assertThat(bridge.hasPinnedMarkRouteForTest(ProductLine.LINEAR_PERPETUAL)).isTrue();
+            verify(redis).execute(any(RedisScript.class),
+                    eq(List.of("rt:route:{SPOT:public:MARK:*}", "rt:route:{SPOT:public:MARK:*}:versions")),
+                    any(), any(), any());
+            verify(redis).execute(any(RedisScript.class),
+                    eq(List.of("rt:route:{LINEAR_PERPETUAL:public:MARK:*}", "rt:route:{LINEAR_PERPETUAL:public:MARK:*}:versions")),
+                    any(), any(), any());
         }
     }
 }

@@ -7,6 +7,10 @@ import com.surprising.asset.repository.AssetRepository;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -14,6 +18,8 @@ import tools.jackson.databind.ObjectMapper;
 /** 按币种锁串行修改基础配置和网络配置；配置与审计同事务提交。 */
 @Service
 public class AssetConfigurationService {
+    private static final Set<String> VALID_ASSET_TYPES = Set.of(
+            "STABLECOIN", "CRYPTO", "MEME", "DEFI", "RWA", "FIAT_EQUIVALENT");
     private final AssetRepository assets;
     private final AssetNetworkRepository networks;
     private final AssetConfigurationChangeRepository changes;
@@ -29,6 +35,13 @@ public class AssetConfigurationService {
 
     public List<Asset> list(boolean listedOnly) { return assets.list(listedOnly); }
 
+    public Optional<Network> findRoute(String assetCode, String chain) {
+        return assets.byAccountingCode(assetCode)
+                .flatMap(asset -> networks.list(asset.assetId()).stream()
+                        .filter(network -> network.networkCode().equals(chain))
+                        .findFirst());
+    }
+
     public List<Network> networks(int assetId) {
         requireAsset(assetId);
         return networks.list(assetId);
@@ -38,9 +51,22 @@ public class AssetConfigurationService {
     public Asset save(AssetRequest request, long operatorId) {
         requireOperator(operatorId);
         requireScale(request.scaleUnits());
+        if (!VALID_ASSET_TYPES.contains(request.assetType())) {
+            throw new IllegalArgumentException("unsupported assetType: " + request.assetType());
+        }
+        if (request.displayDecimals() == null || request.displayDecimals() < 0 || request.displayDecimals() > 18) {
+            throw new IllegalArgumentException("displayDecimals must be between 0 and 18");
+        }
+        if (request.collateralHaircutPpm() == null || request.collateralHaircutPpm() < 0
+                || request.collateralHaircutPpm() > 1_000_000L) {
+            throw new IllegalArgumentException("collateralHaircutPpm must be between 0 and 1000000");
+        }
         if (!request.listed() && (request.tradingEnabled() || request.depositEnabled()
-                || request.withdrawalEnabled() || request.transferEnabled())) {
-            throw new IllegalArgumentException("unlisted asset cannot enable trading, deposit, withdrawal or transfer");
+                || request.withdrawalEnabled() || request.transferEnabled()
+                || Boolean.TRUE.equals(request.internalTransferEnabled())
+                || Boolean.TRUE.equals(request.c2cEnabled())
+                || Boolean.TRUE.equals(request.collateralEnabled()))) {
+            throw new IllegalArgumentException("unlisted asset cannot enable trading, deposit, withdrawal, transfer, c2c or collateral");
         }
         Asset before = null;
         if (request.assetId() != null) {
@@ -80,9 +106,40 @@ public class AssetConfigurationService {
         if (!asset.withdrawalEnabled() && request.withdrawalEnabled()) {
             throw new IllegalStateException("asset withdrawal master switch is disabled");
         }
+        if (request.withdrawPrecision() == null || request.withdrawPrecision() < 0
+                || request.withdrawPrecision() > request.chainDecimals()) {
+            throw new IllegalArgumentException("withdrawPrecision must be between 0 and chainDecimals");
+        }
+        if (request.unlockConfirmations() == null || request.unlockConfirmations() < request.confirmations()) {
+            throw new IllegalArgumentException("unlockConfirmations must be >= confirmations");
+        }
+        if (request.estimatedArrivalMinutes() == null || request.estimatedArrivalMinutes() < 0) {
+            throw new IllegalArgumentException("estimatedArrivalMinutes must be non-negative");
+        }
+        requireRegex(request.addressRegex(), "addressRegex");
+        requireRegex(request.memoRegex(), "memoRegex");
         requireAmount(request.minDeposit(), asset.scaleUnits(), request.chainDecimals(), false);
         requireAmount(request.minWithdrawal(), asset.scaleUnits(), request.chainDecimals(), false);
         requireAmount(request.withdrawalFee(), asset.scaleUnits(), request.chainDecimals(), true);
+        if (request.maxWithdrawal() != null) {
+            requireAmount(request.maxWithdrawal(), asset.scaleUnits(), request.chainDecimals(), false);
+            if (request.maxWithdrawal().compareTo(request.minWithdrawal()) < 0) {
+                throw new IllegalArgumentException("maxWithdrawal must be >= minWithdrawal");
+            }
+        }
+        if (request.dailyMaxWithdrawal() != null) {
+            requireAmount(request.dailyMaxWithdrawal(), asset.scaleUnits(), request.chainDecimals(), false);
+            if (request.dailyMaxWithdrawal().compareTo(request.minWithdrawal()) < 0) {
+                throw new IllegalArgumentException("dailyMaxWithdrawal must be >= minWithdrawal");
+            }
+            if (request.maxWithdrawal() != null
+                    && request.dailyMaxWithdrawal().compareTo(request.maxWithdrawal()) < 0) {
+                throw new IllegalArgumentException("dailyMaxWithdrawal must be >= maxWithdrawal");
+            }
+        }
+        if (request.autoAuditMaxAmount() != null) {
+            requireAmount(request.autoAuditMaxAmount(), asset.scaleUnits(), request.chainDecimals(), true);
+        }
         if (request.withdrawalFee().compareTo(request.minWithdrawal()) >= 0) {
             throw new IllegalArgumentException("withdrawal fee must be below minimum withdrawal");
         }
@@ -118,11 +175,21 @@ public class AssetConfigurationService {
                 .filter(a -> a.listed() && a.withdrawalEnabled())
                 .orElseThrow(() -> new IllegalArgumentException("asset is not listed for withdrawal"));
         Network route = networks.list(asset.assetId()).stream()
-                .filter(network -> network.networkCode().equals(chain) && network.withdrawalEnabled())
+                .filter(network -> network.networkCode().equals(chain)
+                        && network.enabled() && network.withdrawalEnabled())
                 .findFirst().orElseThrow(() -> new IllegalArgumentException("withdrawal network is disabled for this asset"));
+        if (route.maintenanceMode()) {
+            throw new IllegalArgumentException("withdrawal network is currently under maintenance");
+        }
         long grossUnits = amountUnits(assetCode, amount);
         BigDecimal gross = new BigDecimal(amount);
         if (gross.compareTo(route.minWithdrawal()) < 0) throw new IllegalArgumentException("amount is below the minimum withdrawal");
+        if (route.maxWithdrawal() != null && gross.compareTo(route.maxWithdrawal()) > 0) {
+            throw new IllegalArgumentException("amount exceeds maximum single withdrawal");
+        }
+        if (gross.stripTrailingZeros().scale() > route.withdrawPrecision()) {
+            throw new IllegalArgumentException("amount exceeds network withdrawal precision (" + route.withdrawPrecision() + " decimals)");
+        }
         requireAmount(gross, asset.scaleUnits(), route.chainDecimals(), false);
         requireAmount(route.withdrawalFee(), asset.scaleUnits(), route.chainDecimals(), true);
         long feeUnits = route.withdrawalFee().multiply(BigDecimal.valueOf(asset.scaleUnits())).longValueExact();
@@ -185,6 +252,18 @@ public class AssetConfigurationService {
     }
 
 
+
+    private static void requireRegex(String regex, String field) {
+        if (regex == null || regex.isEmpty()) return;
+        if (regex.length() > 300) {
+            throw new IllegalArgumentException(field + " is too long");
+        }
+        try {
+            Pattern.compile(regex);
+        } catch (PatternSyntaxException ex) {
+            throw new IllegalArgumentException("invalid " + field + ": " + ex.getDescription(), ex);
+        }
+    }
 
     private String encode(Object value) { return value == null ? null : json.writeValueAsString(value); }
 }

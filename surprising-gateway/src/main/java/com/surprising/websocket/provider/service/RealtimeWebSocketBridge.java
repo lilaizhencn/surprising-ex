@@ -88,7 +88,7 @@ public final class RealtimeWebSocketBridge
                         env.getProperty("surprising.realtime.ws.stream", Integer.class, 2103),
                         this::receive, failure -> continuityLost.set(true));
         try {
-            memberships.put(new RealtimeRoute(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, 0, "MARK", "*"), 1);
+            seedPinnedRoutes();
             heartbeat();
             registry.routeLifecycle(this);
         } catch (RuntimeException | Error failure) {
@@ -138,6 +138,20 @@ public final class RealtimeWebSocketBridge
         }
     }
 
+    private void seedPinnedRoutes() {
+        for (ProductLine product : ProductLine.values()) {
+            memberships.put(new RealtimeRoute(product, 0, "MARK", "*"), 1);
+        }
+    }
+
+    void simulateContinuityLossForTest() {
+        continuityLost.set(true);
+    }
+
+    boolean hasPinnedMarkRouteForTest(ProductLine product) {
+        return memberships.containsKey(new RealtimeRoute(product, 0, "MARK", "*"));
+    }
+
     private void renewSnapshot(RealtimeRoute route, long now) {
         if (route.userId() > 0) refresh.renew(route.productLine(), route.userId(), now + 30000);
         else if (route.channel().equals("BOOK"))
@@ -174,6 +188,7 @@ public final class RealtimeWebSocketBridge
             synchronized (heartbeatLock) {
                 snapshots = new SnapshotAssembler();
                 memberships.clear();
+                seedPinnedRoutes();
                 pendingDepths.clear();
                 lastDepthFlushNanos.clear();
                 lastTickers.clear();

@@ -18,7 +18,7 @@ public class AssetRepository {
 
     public List<Asset> list(boolean listedOnly) {
         return jdbc.query("SELECT * FROM assets" + (listedOnly ? " WHERE listed AND trading_enabled" : "")
-                + " ORDER BY asset_id", this::map);
+                + " ORDER BY sort_order ASC, asset_id ASC", this::map);
     }
 
     public java.util.Map<String, Long> findAll() {
@@ -40,26 +40,63 @@ public class AssetRepository {
     public Asset save(AssetRequest value) {
         if (value.assetId() == null) {
             return jdbc.queryForObject("""
-                    INSERT INTO assets(asset,display_name,logo_url,scale_units,listed,trading_enabled,
-                        deposit_enabled,withdrawal_enabled,transfer_enabled)
-                    VALUES (?,?,?,?,?,?,?,?,?) RETURNING *
-                    """, this::map, value.asset(), value.displayName(), value.logoUrl(), value.scaleUnits(),
-                    value.listed(), value.tradingEnabled(), value.depositEnabled(),
-                    value.withdrawalEnabled(), value.transferEnabled());
+                    INSERT INTO assets(asset,display_name,alias_name,asset_type,logo_url,scale_units,
+                        display_decimals,sort_order,collateral_haircut_ppm,official_website,explorer_url,
+                        listed,visible,trading_enabled,deposit_enabled,withdrawal_enabled,transfer_enabled,
+                        internal_transfer_enabled,c2c_enabled,collateral_enabled)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *
+                    """, this::map,
+                    value.asset(), value.displayName(), value.aliasName(), value.assetType(), value.logoUrl(),
+                    value.scaleUnits(), value.displayDecimals(), value.sortOrder(), value.collateralHaircutPpm(),
+                    value.officialWebsite(), value.explorerUrl(), value.listed(),
+                    Boolean.TRUE.equals(value.visible()), value.tradingEnabled(), value.depositEnabled(),
+                    value.withdrawalEnabled(), value.transferEnabled(),
+                    Boolean.TRUE.equals(value.internalTransferEnabled()),
+                    Boolean.TRUE.equals(value.c2cEnabled()),
+                    Boolean.TRUE.equals(value.collateralEnabled()));
         }
         return jdbc.queryForObject("""
-                UPDATE assets SET display_name=?,logo_url=?,listed=?,trading_enabled=?,
-                    deposit_enabled=?,withdrawal_enabled=?,transfer_enabled=?,
+                UPDATE assets SET display_name=?,alias_name=?,asset_type=?,logo_url=?,display_decimals=?,
+                    sort_order=?,collateral_haircut_ppm=?,official_website=?,explorer_url=?,
+                    listed=?,visible=?,trading_enabled=?,deposit_enabled=?,withdrawal_enabled=?,
+                    transfer_enabled=?,internal_transfer_enabled=?,c2c_enabled=?,collateral_enabled=?,
                     revision=revision+1,updated_at=now() WHERE asset_id=? RETURNING *
-                """, this::map, value.displayName(), value.logoUrl(), value.listed(), value.tradingEnabled(),
-                value.depositEnabled(), value.withdrawalEnabled(), value.transferEnabled(), value.assetId());
+                """, this::map,
+                value.displayName(), value.aliasName(), value.assetType(), value.logoUrl(),
+                value.displayDecimals(), value.sortOrder(), value.collateralHaircutPpm(),
+                value.officialWebsite(), value.explorerUrl(), value.listed(),
+                Boolean.TRUE.equals(value.visible()), value.tradingEnabled(), value.depositEnabled(),
+                value.withdrawalEnabled(), value.transferEnabled(),
+                Boolean.TRUE.equals(value.internalTransferEnabled()),
+                Boolean.TRUE.equals(value.c2cEnabled()),
+                Boolean.TRUE.equals(value.collateralEnabled()),
+                value.assetId());
     }
 
     private Asset map(ResultSet rs, int row) throws SQLException {
-        return new Asset(rs.getInt("asset_id"), rs.getString("asset"), rs.getString("display_name"),
-                rs.getString("logo_url"), rs.getLong("scale_units"), rs.getBoolean("listed"),
-                rs.getBoolean("trading_enabled"), rs.getBoolean("deposit_enabled"),
-                rs.getBoolean("withdrawal_enabled"), rs.getBoolean("transfer_enabled"),
-                rs.getLong("revision"), rs.getTimestamp("updated_at").toInstant());
+        return new Asset(
+                rs.getInt("asset_id"),
+                rs.getString("asset"),
+                rs.getString("display_name"),
+                rs.getString("alias_name"),
+                rs.getString("asset_type"),
+                rs.getString("logo_url"),
+                rs.getLong("scale_units"),
+                rs.getInt("display_decimals"),
+                rs.getInt("sort_order"),
+                rs.getLong("collateral_haircut_ppm"),
+                rs.getString("official_website"),
+                rs.getString("explorer_url"),
+                rs.getBoolean("listed"),
+                rs.getBoolean("visible"),
+                rs.getBoolean("trading_enabled"),
+                rs.getBoolean("deposit_enabled"),
+                rs.getBoolean("withdrawal_enabled"),
+                rs.getBoolean("transfer_enabled"),
+                rs.getBoolean("internal_transfer_enabled"),
+                rs.getBoolean("c2c_enabled"),
+                rs.getBoolean("collateral_enabled"),
+                rs.getLong("revision"),
+                rs.getTimestamp("updated_at").toInstant());
     }
 }

@@ -106,6 +106,38 @@ public class GridStrategyService {
     }
 
     /**
+     * 后台全局检索网格策略机器人（可按合约/交易对、状态和用户过滤）。
+     */
+    public List<GridStrategyRecord> listAllStrategies(String symbolOrInstrumentId, String status, Long userId) {
+        String needle = symbolOrInstrumentId == null || symbolOrInstrumentId.isBlank()
+                ? null : symbolOrInstrumentId.trim().toUpperCase(Locale.ROOT);
+        String expectedStatus = status == null || status.isBlank()
+                ? null : status.trim().toUpperCase(Locale.ROOT);
+        return strategies.values().stream()
+                .filter(s -> userId == null || s.userId() == userId)
+                .filter(s -> needle == null || s.instrumentId().toUpperCase(Locale.ROOT).contains(needle))
+                .filter(s -> {
+                    if (expectedStatus == null) return true;
+                    String actual = "ACTIVE".equalsIgnoreCase(s.status()) ? "RUNNING" : s.status().toUpperCase(Locale.ROOT);
+                    return actual.equals(expectedStatus) || s.status().equalsIgnoreCase(expectedStatus);
+                })
+                .sorted(Comparator.comparing(GridStrategyRecord::createdAt).reversed()
+                        .thenComparing(Comparator.comparingLong(GridStrategyRecord::strategyId).reversed()))
+                .toList();
+    }
+
+    /**
+     * 管理员紧急强制终止任意用户的网格机器人并撤销活动挂单。
+     */
+    public GridStrategyRecord adminStopGrid(long strategyId) {
+        GridStrategyRecord record = strategies.get(strategyId);
+        if (record == null) {
+            throw new IllegalArgumentException("Grid strategy not found: " + strategyId);
+        }
+        return stopGrid(record.userId(), strategyId);
+    }
+
+    /**
      * 停止网格并撤销所有活动挂单。
      */
     public GridStrategyRecord stopGrid(long userId, long strategyId) {

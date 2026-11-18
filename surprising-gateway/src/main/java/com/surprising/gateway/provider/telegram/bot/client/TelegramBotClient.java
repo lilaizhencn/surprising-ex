@@ -69,6 +69,40 @@ public class TelegramBotClient {
         }
     }
 
+    /** Sends one HTML notice. HTTP 429 stays claimed so the worker retries after the stale-claim window. */
+    public SendOutcome sendHtml(long chatId, String html) {
+        if (!isConfigured()) {
+            return new SendOutcome(false, false, "telegram bot is not configured");
+        }
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("chat_id", chatId);
+            body.put("text", html);
+            body.put("parse_mode", "HTML");
+            body.put("disable_web_page_preview", true);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            ResponseEntity<String> response = restTemplate.postForEntity(
+                    apiUrl("sendMessage"), new HttpEntity<>(body, headers), String.class);
+            if (response.getStatusCode().is2xxSuccessful()) return new SendOutcome(true, false, null);
+            return new SendOutcome(false, false, "telegram rejected the message");
+        } catch (org.springframework.web.client.RestClientResponseException ex) {
+            boolean retry = ex.getStatusCode().value() == 429;
+            String detail = ex.getResponseBodyAsString();
+            return new SendOutcome(false, retry, clip(detail == null || detail.isBlank() ? ex.getMessage() : detail));
+        } catch (RestClientException ex) {
+            return new SendOutcome(false, false, clip(ex.getMessage()));
+        }
+    }
+
+    private static String clip(String value) {
+        if (value == null) return "telegram send failed";
+        String single = value.replace('\n', ' ').replace('\r', ' ').trim();
+        return single.length() <= 300 ? single : single.substring(0, 300);
+    }
+
+    public record SendOutcome(boolean accepted, boolean retry, String error) {}
+
     public boolean editMessageText(long chatId, long messageId, String text, TelegramInlineKeyboardMarkup replyMarkup) {
         if (!isConfigured()) {
             return false;

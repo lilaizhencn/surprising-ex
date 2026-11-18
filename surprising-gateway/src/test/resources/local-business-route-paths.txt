@@ -95,3 +95,8 @@
 /api/v1/trading/trigger-orders/submission
 /api/v1/trading/trigger-orders/cancellations/{triggerOrderId}
 /api/v1/trading/orders/trades
+/api/v1/admin/trading/fees/vip/levels
+/api/v1/admin/trading/fees/vip/status
+/api/v1/admin/trading/fees/vip/override
+/api/v1/admin/trading/grid/list
+/api/v1/admin/trading/grid/{strategyId}/stop

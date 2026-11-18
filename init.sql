@@ -12,17 +12,28 @@ CREATE TABLE assets (
     asset_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY CHECK (asset_id > 0),
     asset TEXT NOT NULL UNIQUE CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
     display_name TEXT NOT NULL DEFAULT '',
+    alias_name TEXT NOT NULL DEFAULT '',
+    asset_type TEXT NOT NULL DEFAULT 'CRYPTO' CHECK (asset_type IN ('STABLECOIN','CRYPTO','MEME','DEFI','RWA','FIAT_EQUIVALENT')),
     logo_url TEXT NOT NULL DEFAULT '',
     scale_units BIGINT NOT NULL CHECK (scale_units IN (1,10,100,1000,10000,100000,1000000,10000000,100000000,1000000000,10000000000,100000000000,1000000000000,10000000000000,100000000000000,1000000000000000,10000000000000000,100000000000000000,1000000000000000000)),
+    display_decimals INTEGER NOT NULL DEFAULT 4 CHECK (display_decimals BETWEEN 0 AND 18),
+    sort_order INTEGER NOT NULL DEFAULT 100,
+    collateral_haircut_ppm BIGINT NOT NULL DEFAULT 1000000 CHECK (collateral_haircut_ppm BETWEEN 0 AND 1000000),
+    official_website TEXT NOT NULL DEFAULT '',
+    explorer_url TEXT NOT NULL DEFAULT '',
     listed BOOLEAN NOT NULL DEFAULT FALSE,
+    visible BOOLEAN NOT NULL DEFAULT TRUE,
     trading_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     deposit_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     withdrawal_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     transfer_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    internal_transfer_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    c2c_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    collateral_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK (listed OR (NOT trading_enabled AND NOT deposit_enabled AND NOT withdrawal_enabled AND NOT transfer_enabled))
+    CHECK (listed OR (NOT trading_enabled AND NOT deposit_enabled AND NOT withdrawal_enabled AND NOT transfer_enabled AND NOT internal_transfer_enabled AND NOT c2c_enabled AND NOT collateral_enabled))
 );
 COMMENT ON TABLE assets IS '全产品线共用币种目录；账务精度唯一来源；永久 ID 不随显示信息变化';
 CREATE TABLE asset_networks (
@@ -30,15 +41,32 @@ CREATE TABLE asset_networks (
     asset_id INTEGER NOT NULL REFERENCES assets(asset_id),
     network_code TEXT NOT NULL CHECK (network_code ~ '^[A-Z0-9][A-Z0-9_-]{0,31}$'),
     display_name TEXT NOT NULL,
+    token_standard TEXT NOT NULL DEFAULT '',
     contract_address TEXT NOT NULL DEFAULT '',
     native_asset BOOLEAN NOT NULL,
     chain_decimals INTEGER NOT NULL CHECK (chain_decimals BETWEEN 0 AND 36),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
     deposit_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     withdrawal_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    memo_required BOOLEAN NOT NULL DEFAULT FALSE,
+    internal_withdraw_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    auto_withdraw_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    maintenance_mode BOOLEAN NOT NULL DEFAULT FALSE,
     min_deposit NUMERIC NOT NULL CHECK (min_deposit > 0),
     min_withdrawal NUMERIC NOT NULL CHECK (min_withdrawal > 0),
+    max_withdrawal NUMERIC CHECK (max_withdrawal IS NULL OR max_withdrawal >= min_withdrawal),
+    daily_max_withdrawal NUMERIC CHECK (daily_max_withdrawal IS NULL OR daily_max_withdrawal >= min_withdrawal),
     withdrawal_fee NUMERIC NOT NULL CHECK (withdrawal_fee >= 0),
+    auto_audit_max_amount NUMERIC CHECK (auto_audit_max_amount IS NULL OR auto_audit_max_amount >= 0),
+    withdraw_precision INTEGER NOT NULL DEFAULT 6 CHECK (withdraw_precision BETWEEN 0 AND 36),
     confirmations INTEGER NOT NULL CHECK (confirmations > 0),
+    unlock_confirmations INTEGER NOT NULL DEFAULT 0 CHECK (unlock_confirmations >= 0),
+    estimated_arrival_minutes INTEGER NOT NULL DEFAULT 3 CHECK (estimated_arrival_minutes >= 0),
+    address_regex TEXT NOT NULL DEFAULT '',
+    memo_regex TEXT NOT NULL DEFAULT '',
+    explorer_tx_url_template TEXT NOT NULL DEFAULT '',
+    special_tips TEXT NOT NULL DEFAULT '',
     revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -124,7 +152,22 @@ ON CONFLICT (asset) DO NOTHING;
 
 
 
-UPDATE assets SET display_name=asset, listed=true, trading_enabled=true;
+UPDATE assets SET
+  display_name = CASE asset WHEN 'USDT' THEN 'Tether USD' WHEN 'BTC' THEN 'Bitcoin' WHEN 'ETH' THEN 'Ethereum' WHEN 'SOL' THEN 'Solana' ELSE asset END,
+  alias_name = CASE asset WHEN 'USDT' THEN '泰达币' WHEN 'BTC' THEN '比特币' WHEN 'ETH' THEN '以太坊' WHEN 'SOL' THEN '索拉纳' ELSE '' END,
+  asset_type = CASE asset WHEN 'USDT' THEN 'STABLECOIN' ELSE 'CRYPTO' END,
+  display_decimals = CASE asset WHEN 'USDT' THEN 2 WHEN 'BTC' THEN 6 WHEN 'ETH' THEN 5 ELSE 4 END,
+  sort_order = CASE asset WHEN 'USDT' THEN 1 WHEN 'BTC' THEN 2 WHEN 'ETH' THEN 3 WHEN 'SOL' THEN 4 ELSE 100 END,
+  collateral_haircut_ppm = CASE asset WHEN 'USDT' THEN 1000000 WHEN 'BTC' THEN 950000 WHEN 'ETH' THEN 950000 ELSE 850000 END,
+  listed = true,
+  visible = true,
+  trading_enabled = true,
+  deposit_enabled = true,
+  withdrawal_enabled = true,
+  transfer_enabled = true,
+  internal_transfer_enabled = true,
+  c2c_enabled = (asset IN ('USDT', 'BTC', 'ETH')),
+  collateral_enabled = true;
 
 -- 01. Instrument definitions, lifecycle metadata and index sources.
 
@@ -1714,6 +1757,7 @@ VALUES
     ('admin.announcements.read', 'Read announcements', 'View and preview exchange announcements.'),
     ('admin.announcements.write', 'Write announcements', 'Create and edit announcement drafts.'),
     ('admin.announcements.publish', 'Publish announcements', 'Publish, schedule and withdraw exchange announcements.'),
+    ('admin.telegram.broadcast', 'Broadcast Telegram notices', 'Send a notice through the Telegram bot to accounts that have linked Telegram.'),
     ('admin.compliance.read', 'Read compliance', 'View KYC, AML cases and risk tags.'),
     ('admin.compliance.write', 'Write compliance', 'Update KYC, AML cases and risk tags.'),
     ('admin.permissions.read', 'Read permissions', 'View roles, permission catalog and role assignments.'),
@@ -1762,6 +1806,7 @@ SELECT r.role_id, p.permission_id
       'admin.announcements.read',
       'admin.announcements.write',
       'admin.announcements.publish',
+      'admin.telegram.broadcast',
       'admin.gateway.*.read',
       'admin.gateway.*.write'
   )
@@ -4365,6 +4410,49 @@ CREATE TABLE IF NOT EXISTS gateway_telegram_identities (
     user_id BIGINT NOT NULL UNIQUE REFERENCES gateway_users(user_id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS gateway_telegram_chats (
+    subject TEXT PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS gateway_telegram_broadcasts (
+    broadcast_id BIGSERIAL PRIMARY KEY,
+    body_html TEXT NOT NULL,
+    status TEXT NOT NULL,
+    recipient_count INT NOT NULL DEFAULT 0,
+    sent_count INT NOT NULL DEFAULT 0,
+    failed_count INT NOT NULL DEFAULT 0,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ,
+    error TEXT,
+    CONSTRAINT gateway_telegram_broadcasts_status CHECK (status IN ('QUEUED', 'SENDING', 'COMPLETED'))
+);
+CREATE TABLE IF NOT EXISTS gateway_telegram_broadcast_recipients (
+    broadcast_id BIGINT NOT NULL REFERENCES gateway_telegram_broadcasts(broadcast_id),
+    subject TEXT NOT NULL,
+    user_id BIGINT NOT NULL,
+    chat_id BIGINT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    claimed_at TIMESTAMPTZ,
+    PRIMARY KEY (broadcast_id, subject),
+    CONSTRAINT gateway_telegram_broadcast_recipients_status CHECK (status IN ('PENDING', 'SENDING', 'SENT', 'FAILED'))
+);
+CREATE INDEX IF NOT EXISTS gateway_telegram_broadcast_recipients_pending_idx
+    ON gateway_telegram_broadcast_recipients (broadcast_id, subject)
+    WHERE status = 'PENDING';
+INSERT INTO gateway_permissions (permission_code, permission_name, description)
+VALUES ('admin.telegram.broadcast', 'Broadcast Telegram notices', 'Send a notice through the Telegram bot to accounts that have linked Telegram.')
+ON CONFLICT (permission_code) DO UPDATE
+   SET permission_name = EXCLUDED.permission_name,
+       description = EXCLUDED.description;
+INSERT INTO gateway_role_permissions (role_id, permission_id)
+SELECT r.role_id, p.permission_id
+  FROM gateway_roles r
+  JOIN gateway_permissions p ON p.permission_code = 'admin.telegram.broadcast'
+ WHERE r.role_code = 'ADMIN'
+ON CONFLICT (role_id, permission_id) DO NOTHING;
 CREATE TABLE IF NOT EXISTS gateway_telegram_login_flows (
     state_hash TEXT PRIMARY KEY,
     return_to_app BOOLEAN NOT NULL DEFAULT false,
@@ -5002,19 +5090,31 @@ BEGIN
   WHERE src.instrument_id IN (604, 653, 866)
     AND NOT EXISTS (SELECT 1 FROM instruments existing WHERE existing.product_line = 'SPOT' AND existing.symbol = src.symbol);
 
-  INSERT INTO asset_networks (asset_id, network_code, display_name, contract_address, native_asset, chain_decimals, deposit_enabled, withdrawal_enabled, min_deposit, min_withdrawal, withdrawal_fee, confirmations)
-  SELECT a.asset_id, v.network_code, v.display_name, v.contract_address, v.native_asset, v.chain_decimals, true, true, v.min_deposit, v.min_withdrawal, v.withdrawal_fee, v.confirmations
+  INSERT INTO asset_networks (
+    asset_id, network_code, display_name, token_standard, contract_address, native_asset, chain_decimals,
+    enabled, is_default, deposit_enabled, withdrawal_enabled, memo_required, internal_withdraw_enabled,
+    auto_withdraw_enabled, maintenance_mode, min_deposit, min_withdrawal, max_withdrawal, daily_max_withdrawal,
+    withdrawal_fee, auto_audit_max_amount, withdraw_precision, confirmations, unlock_confirmations,
+    estimated_arrival_minutes, address_regex, memo_regex, explorer_tx_url_template, special_tips
+  )
+  SELECT
+    a.asset_id, v.network_code, v.display_name, v.token_standard, v.contract_address, v.native_asset, v.chain_decimals,
+    true, v.is_default, true, true, false, true,
+    true, false, v.min_deposit, v.min_withdrawal, v.max_withdrawal, v.daily_max_withdrawal,
+    v.withdrawal_fee, v.auto_audit_max_amount, v.withdraw_precision, v.confirmations, v.unlock_confirmations,
+    v.estimated_arrival_minutes, v.address_regex, '', v.explorer_tx_url_template, v.special_tips
   FROM (VALUES
-    ('USDT', 'TRON', 'TRON (TRC20)', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', false, 6, 1::numeric, 10::numeric, 1::numeric, 20),
-    ('USDT', 'ETH', 'Ethereum (ERC20)', '0xdAC17F958D2ee523a2206206994597C13D831ec7', false, 6, 1::numeric, 10::numeric, 5::numeric, 12),
-    ('BTC', 'BTC', 'Bitcoin', '', true, 8, 0.0001::numeric, 0.0005::numeric, 0.0001::numeric, 2),
-    ('ETH', 'ETH', 'Ethereum', '', true, 18, 0.001::numeric, 0.005::numeric, 0.001::numeric, 12),
-    ('SOL', 'SOL', 'Solana', '', true, 9, 0.01::numeric, 0.05::numeric, 0.005::numeric, 32)
-  ) AS v(asset, network_code, display_name, contract_address, native_asset, chain_decimals, min_deposit, min_withdrawal, withdrawal_fee, confirmations)
+    ('USDT', 'TRON', 'TRON (TRC20)', 'TRC20', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', false, 6, true, 1::numeric, 10::numeric, 1000000::numeric, 5000000::numeric, 1::numeric, 10000::numeric, 2, 20, 20, 2, '^T[1-9A-HJ-NP-Za-km-z]{33}$', 'https://tronscan.org/#/transaction/{txid}', '仅支持 TRC20 协议 USDT，切勿充值其他链资产。'),
+    ('USDT', 'ETH', 'Ethereum (ERC20)', 'ERC20', '0xdAC17F958D2ee523a2206206994597C13D831ec7', false, 6, false, 1::numeric, 10::numeric, 1000000::numeric, 5000000::numeric, 5::numeric, 10000::numeric, 2, 12, 12, 5, '^0x[a-fA-F0-9]{40}$', 'https://etherscan.io/tx/{txid}', 'Ethereum 主网 Gas 波动较高，请留意到账时间。'),
+    ('BTC', 'BTC', 'Bitcoin', 'NATIVE', '', true, 8, true, 0.0001::numeric, 0.0005::numeric, 100::numeric, 500::numeric, 0.0001::numeric, 0.5::numeric, 6, 2, 2, 20, '^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,62}$', 'https://mempool.space/tx/{txid}', '比特币主网需要 2 个区块确认。'),
+    ('ETH', 'ETH', 'Ethereum', 'NATIVE', '', true, 18, true, 0.001::numeric, 0.005::numeric, 1000::numeric, 5000::numeric, 0.001::numeric, 5::numeric, 6, 12, 12, 4, '^0x[a-fA-F0-9]{40}$', 'https://etherscan.io/tx/{txid}', ''),
+    ('SOL', 'SOL', 'Solana', 'NATIVE', '', true, 9, true, 0.01::numeric, 0.05::numeric, 10000::numeric, 50000::numeric, 0.005::numeric, 100::numeric, 4, 32, 32, 1, '^[1-9A-HJ-NP-Za-km-z]{32,44}$', 'https://solscan.io/tx/{txid}', '')
+  ) AS v(asset, network_code, display_name, token_standard, contract_address, native_asset, chain_decimals, is_default, min_deposit, min_withdrawal, max_withdrawal, daily_max_withdrawal, withdrawal_fee, auto_audit_max_amount, withdraw_precision, confirmations, unlock_confirmations, estimated_arrival_minutes, address_regex, explorer_tx_url_template, special_tips)
   JOIN assets a ON a.asset = v.asset
   ON CONFLICT (asset_id, network_code, contract_address) DO UPDATE SET
     deposit_enabled = true,
     withdrawal_enabled = true,
+    enabled = true,
     updated_at = now();
 END $$;
 

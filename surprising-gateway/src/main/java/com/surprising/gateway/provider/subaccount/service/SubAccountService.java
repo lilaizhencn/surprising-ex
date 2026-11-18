@@ -11,6 +11,8 @@ import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -90,6 +92,33 @@ public class SubAccountService {
             throw new IllegalArgumentException("parentUserId must be positive");
         }
         return subAccountRepository.listByParent(parentUserId);
+    }
+
+    public List<SubAccountRecord> adminListSubAccounts(Long masterUserId, String status, int limit) {
+        if (masterUserId != null && masterUserId <= 0) {
+            throw new IllegalArgumentException("masterUserId must be positive");
+        }
+        String normalizedStatus = status == null || status.isBlank() ? null : status.trim().toUpperCase(Locale.ROOT);
+        if (normalizedStatus != null && !Set.of("ACTIVE", "FROZEN").contains(normalizedStatus)) {
+            throw new IllegalArgumentException("unsupported sub-account status: " + status);
+        }
+        return subAccountRepository.listForAdmin(masterUserId, normalizedStatus, limit);
+    }
+
+    @Transactional
+    public SubAccountRecord adminUpdateStatus(long subUserId, String status) {
+        if (subUserId <= 0) {
+            throw new IllegalArgumentException("subUserId must be positive");
+        }
+        String normalized = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("ACTIVE", "FROZEN").contains(normalized)) {
+            throw new IllegalArgumentException("status must be ACTIVE or FROZEN");
+        }
+        subAccountRepository.findBySubUserId(subUserId)
+                .orElseThrow(() -> new IllegalArgumentException("SubAccount not found: " + subUserId));
+        subAccountRepository.updateStatusBySubUserId(subUserId, normalized);
+        return subAccountRepository.findBySubUserId(subUserId)
+                .orElseThrow(() -> new IllegalStateException("SubAccount disappeared after update: " + subUserId));
     }
 
     /**

@@ -126,7 +126,39 @@ public class CustodyWithdrawalService {
         if (request.networkRevision() == null || request.networkRevision() != quote.networkRevision()) {
             throw new IllegalArgumentException("withdrawal fees or limits changed; request a new quote before confirming");
         }
+        var routeOpt = assets.findRoute(quote.asset(), quote.chain());
+        if (routeOpt.isPresent()) {
+            var route = routeOpt.get();
+            if (!route.addressRegex().isBlank()) {
+                try {
+                    if (!java.util.regex.Pattern.compile(route.addressRegex())
+                            .matcher(request.toAddress().trim()).matches()) {
+                        throw new IllegalArgumentException("invalid withdrawal destination address format for " + quote.chain());
+                    }
+                } catch (java.util.regex.PatternSyntaxException ignored) {
+                    // Validated at asset configuration save time.
+                }
+            }
+        }
         BigDecimal usdtValue = valuationClient.toUsdt(quote.asset(), new BigDecimal(quote.amount()));
+        boolean requiresApproval = usdtValue.compareTo(properties.getWithdrawal().getSingleApprovalThresholdUsdt()) >= 0;
+        BigDecimal dailyLimitUsdt = properties.getWithdrawal().getDailyLimitUsdt();
+        if (routeOpt.isPresent()) {
+            var route = routeOpt.get();
+            if (!route.autoWithdrawEnabled()) {
+                requiresApproval = true;
+            }
+            if (route.autoAuditMaxAmount() != null
+                    && new BigDecimal(quote.amount()).compareTo(route.autoAuditMaxAmount()) >= 0) {
+                requiresApproval = true;
+            }
+            if (route.dailyMaxWithdrawal() != null && route.dailyMaxWithdrawal().signum() > 0) {
+                BigDecimal networkDailyUsdt = valuationClient.toUsdt(quote.asset(), route.dailyMaxWithdrawal());
+                if (networkDailyUsdt != null && networkDailyUsdt.signum() > 0) {
+                    dailyLimitUsdt = dailyLimitUsdt.min(networkDailyUsdt);
+                }
+            }
+        }
         String externalReference = "custody-wallet-withdrawal:" + sha256(userId + ":" + normalizedKey).substring(0, 32);
         // Core authorizes the user's entitlement; custody reserves tenant principal independently.
         var normalized = new WithdrawalRequest(null, quote.chain(), quote.asset(),
@@ -135,8 +167,8 @@ public class CustodyWithdrawalService {
                 new CustodyWithdrawalModels.CreateRequest(userId, normalizedKey, requestHash, quote.chain(), quote.asset(),
                         null, normalized.toAddress(), quote.amount(), quote.amountUnits(), usdtValue,
                         externalReference, externalReference, payload(normalized, externalReference),
-                        usdtValue.compareTo(properties.getWithdrawal().getSingleApprovalThresholdUsdt()) >= 0,
-                        properties.getWithdrawal().getDailyLimitUsdt(),
+                        requiresApproval,
+                        dailyLimitUsdt,
                         new CustodyWithdrawalModels.FeeSnapshot(quote.fee(), quote.feeUnits(), quote.receivedAmount(),
                                 quote.receivedUnits(), quote.networkId(), quote.networkRevision()), "TENANT_POOL"));
         CustodyWithdrawalModels.WithdrawalRecord record = result.record();

@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.telegram.bot.service;
 
+import com.surprising.gateway.provider.telegram.bot.broadcast.TelegramBroadcastRepository;
 import com.surprising.gateway.provider.telegram.bot.client.TelegramBotClient;
 import com.surprising.gateway.provider.telegram.bot.handler.*;
 import com.surprising.gateway.provider.telegram.bot.model.TelegramCallbackQuery;
@@ -31,6 +32,7 @@ public class TelegramUpdateDispatcher {
     private final TelegramTransferHandler transferHandler;
     private final TelegramSettingsHandler settingsHandler;
     private final TelegramAffiliateHandler affiliateHandler;
+    private final TelegramBroadcastRepository chats;
 
     public TelegramUpdateDispatcher(TelegramBotClient botClient,
                                     TelegramSessionService sessionService,
@@ -44,7 +46,8 @@ public class TelegramUpdateDispatcher {
                                     TelegramWithdrawHandler withdrawHandler,
                                     TelegramTransferHandler transferHandler,
                                     TelegramSettingsHandler settingsHandler,
-                                    TelegramAffiliateHandler affiliateHandler) {
+                                    TelegramAffiliateHandler affiliateHandler,
+                                    TelegramBroadcastRepository chats) {
         this.botClient = botClient;
         this.sessionService = sessionService;
         this.authHandler = authHandler;
@@ -58,6 +61,16 @@ public class TelegramUpdateDispatcher {
         this.transferHandler = transferHandler;
         this.settingsHandler = settingsHandler;
         this.affiliateHandler = affiliateHandler;
+        this.chats = chats;
+    }
+
+    private void rememberChat(TelegramUser user, long chatId) {
+        if (user == null || chats == null) return;
+        try {
+            chats.rememberChat(String.valueOf(user.id()), chatId);
+        } catch (RuntimeException ex) {
+            log.warn("Failed to remember Telegram chat for subject {}: {}", user.id(), ex.getMessage());
+        }
     }
 
     public void dispatch(TelegramUpdate update) {
@@ -86,6 +99,7 @@ public class TelegramUpdateDispatcher {
         long chatId = cq.message().chat().id();
         long messageId = cq.message().messageId();
         TelegramUser tgUser = cq.from();
+        rememberChat(tgUser, chatId);
 
         log.info("Telegram callback data: {} from userId={}", data, tgUser.id());
 
@@ -183,8 +197,9 @@ public class TelegramUpdateDispatcher {
     }
 
     private void handleMessage(TelegramMessage msg) {
+        if (msg.chat() != null) rememberChat(msg.from(), msg.chat().id());
         String text = msg.text();
-        if (text == null) return;
+        if (text == null || msg.from() == null || msg.chat() == null) return;
         text = text.trim();
 
         long chatId = msg.chat().id();

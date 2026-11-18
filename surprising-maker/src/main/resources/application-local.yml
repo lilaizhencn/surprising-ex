@@ -1,0 +1,147 @@
+spring:
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: false
+
+surprising:
+  market-maker:
+    engine:
+      enabled: true
+      quote-watchdog-interval: 100ms
+      trade-interval: 150ms
+    quoting:
+      order-book-depth: 100
+      order-levels: 40
+      min-spread-ticks: 2
+      level-spacing-ticks: 1
+      refresh-threshold-ticks: 3
+      refresh-tolerance-ppm: 50
+      quantity-refresh-tolerance-ppm: 150000
+      quantity-variation-ppm: 500000
+      reference-pressure-skew-ppm: 150
+      inventory-price-skew-ppm: 0
+      order-reconciliation-interval: 50ms
+      max-open-orders-per-account-symbol: 200
+    trade:
+      enabled: true
+      account-ids: [6]
+      orders-per-batch: 1
+      min-quantity-steps: 1
+      max-quantity-steps: 3
+      slippage-ticks: 10
+      max-sweep-levels: 2
+    reference-market:
+      enabled: true
+      web-socket-enabled: true
+      refresh-interval: 150ms
+      sources:
+        - name: okx-btc
+          enabled: true
+          product-line: LINEAR_PERPETUAL
+          instrument-id: "604"
+          external-symbol: BTC-USDT-SWAP
+          url: https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=20
+          parser: OKX_BOOKS
+          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
+          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"BTC-USDT-SWAP"}]}'
+          web-socket-parser: OKX_BOOKS_WS
+        - name: okx-eth
+          enabled: true
+          product-line: LINEAR_PERPETUAL
+          instrument-id: "653"
+          external-symbol: ETH-USDT-SWAP
+          url: https://www.okx.com/api/v5/market/books?instId=ETH-USDT-SWAP&sz=20
+          parser: OKX_BOOKS
+          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
+          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"ETH-USDT-SWAP"}]}'
+          web-socket-parser: OKX_BOOKS_WS
+        - name: okx-sol
+          enabled: true
+          product-line: LINEAR_PERPETUAL
+          instrument-id: "866"
+          external-symbol: SOL-USDT-SWAP
+          url: https://www.okx.com/api/v5/market/books?instId=SOL-USDT-SWAP&sz=20
+          parser: OKX_BOOKS
+          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
+          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"SOL-USDT-SWAP"}]}'
+          web-socket-parser: OKX_BOOKS_WS
+        - name: okx-spot-btc
+          enabled: true
+          product-line: SPOT
+          instrument-id: "1001"
+          external-symbol: BTC-USDT
+          url: https://www.okx.com/api/v5/market/books?instId=BTC-USDT&sz=20
+          parser: OKX_BOOKS
+          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
+          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"BTC-USDT"}]}'
+          web-socket-parser: OKX_BOOKS_WS
+        - name: okx-spot-eth
+          enabled: true
+          product-line: SPOT
+          instrument-id: "1002"
+          external-symbol: ETH-USDT
+          url: https://www.okx.com/api/v5/market/books?instId=ETH-USDT&sz=20
+          parser: OKX_BOOKS
+          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
+          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"ETH-USDT"}]}'
+          web-socket-parser: OKX_BOOKS_WS
+        - name: okx-spot-sol
+          enabled: true
+          product-line: SPOT
+          instrument-id: "1003"
+          external-symbol: SOL-USDT
+          url: https://www.okx.com/api/v5/market/books?instId=SOL-USDT&sz=20
+          parser: OKX_BOOKS
+          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
+          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"SOL-USDT"}]}'
+          web-socket-parser: OKX_BOOKS_WS
+    strategies:
+      - strategy-id: local-perp-top
+        product-line: LINEAR_PERPETUAL
+        enabled: true
+        account-ids: [4]
+        instrument-ids: ["604", "653", "866"]
+        base-quantity-steps: 3
+        margin-mode: CROSS
+        spread-ticks: 1
+        level-spacing-ticks: 1
+        order-levels: 20
+        max-inventory-steps: 10000
+        max-inventory-skew-ppm: 500000
+      - strategy-id: local-perp-mid
+        product-line: LINEAR_PERPETUAL
+        enabled: true
+        account-ids: [5]
+        instrument-ids: ["604", "653", "866"]
+        base-quantity-steps: 7
+        margin-mode: CROSS
+        spread-ticks: 21
+        level-spacing-ticks: 2
+        order-levels: 40
+        max-inventory-steps: 10000
+        max-inventory-skew-ppm: 500000
+      - strategy-id: local-spot-top
+        product-line: SPOT
+        enabled: true
+        account-ids: [4]
+        instrument-ids: ["1001", "1002", "1003"]
+        base-quantity-steps: 3
+        margin-mode: CROSS
+        spread-ticks: 1
+        level-spacing-ticks: 1
+        order-levels: 20
+        max-inventory-steps: 10000
+        max-inventory-skew-ppm: 500000
+      - strategy-id: local-spot-mid
+        product-line: SPOT
+        enabled: true
+        account-ids: [5]
+        instrument-ids: ["1001", "1002", "1003"]
+        base-quantity-steps: 7
+        margin-mode: CROSS
+        spread-ticks: 21
+        level-spacing-ticks: 2
+        order-levels: 40
+        max-inventory-steps: 10000
+        max-inventory-skew-ppm: 500000

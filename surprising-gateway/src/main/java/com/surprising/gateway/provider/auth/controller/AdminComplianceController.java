@@ -3,7 +3,10 @@ package com.surprising.gateway.provider.auth.controller;
 import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
 import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.compliance.por.model.PorModels.PorSnapshotSummary;
+import com.surprising.gateway.provider.compliance.por.service.ProofOfReservesService;
 
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
@@ -21,12 +24,17 @@ import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTagCreate
 import com.surprising.gateway.provider.exception.KycDocumentNotFoundException;
 import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,11 +53,29 @@ public class AdminComplianceController {
 
     private final ComplianceService complianceService;
     private final ObjectMapper objectMapper;
+    private final ProofOfReservesService porService;
+    private final AuthService authService;
+    private final AdminApprovalService approvalService;
+    private final JdbcTemplate jdbcTemplate;
 
     public AdminComplianceController(ComplianceService complianceService,
                                      ObjectMapper objectMapper) {
+        this(complianceService, objectMapper, null, null, null, null);
+    }
+
+    @Autowired
+    public AdminComplianceController(ComplianceService complianceService,
+                                     ObjectMapper objectMapper,
+                                     @Autowired(required = false) ProofOfReservesService porService,
+                                     @Autowired(required = false) AuthService authService,
+                                     @Autowired(required = false) AdminApprovalService approvalService,
+                                     @Autowired(required = false) JdbcTemplate jdbcTemplate) {
         this.complianceService = complianceService;
         this.objectMapper = objectMapper;
+        this.porService = porService;
+        this.authService = authService;
+        this.approvalService = approvalService;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @GetMapping("/users")
@@ -251,6 +277,78 @@ public class AdminComplianceController {
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
         }
+    }
+
+    @GetMapping("/por/latest")
+    public Map<String, Object> latestPor(@RequestHeader("Authorization") String authorization) {
+        requirePorRead(authorization);
+        PorSnapshotSummary latest = porService.getLatestSummary();
+        if (latest == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no PoR snapshot recorded");
+        }
+        return mapPorSummary(latest);
+    }
+
+    @GetMapping("/por/history")
+    public List<Map<String, Object>> porHistory(@RequestHeader("Authorization") String authorization) {
+        requirePorRead(authorization);
+        return porService.listSnapshots().stream()
+                .map(AdminComplianceController::mapPorSummary)
+                .toList();
+    }
+
+    @PostMapping("/por/snapshot/trigger")
+    public Map<String, Object> triggerPorSnapshot(@RequestHeader("Authorization") String authorization,
+                                                    @RequestBody(required = false) byte[] body,
+                                                    HttpServletRequest httpRequest) {
+        if (porService == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "PoR service unavailable");
+        }
+        try {
+            if (approvalService != null) {
+                withApproval(() -> approvalService.requireWrite(
+                        authorization, "admin.compliance.write", "gateway-admin",
+                        requestMetadata(httpRequest), body == null ? new byte[0] : body));
+            } else if (authService != null) {
+                authService.requireAdminPermission(authorization, "admin.compliance.write");
+            }
+            PorSnapshotSummary created = porService.triggerSnapshotFromDatabase(jdbcTemplate);
+            Map<String, Object> res = new LinkedHashMap<>(mapPorSummary(created));
+            res.put("ok", true);
+            return res;
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+        }
+    }
+
+    private void requirePorRead(String authorization) {
+        if (porService == null) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "PoR service unavailable");
+        }
+        try {
+            if (authService != null) {
+                authService.requireAdminPermission(authorization, "admin.compliance.read");
+            }
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+        }
+    }
+
+    private static Map<String, Object> mapPorSummary(PorSnapshotSummary s) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("snapshotId", s.snapshotId());
+        row.put("timestamp", s.snapshotTime() == null ? System.currentTimeMillis() : s.snapshotTime().toEpochMilli());
+        row.put("merkleRoot", s.rootHash());
+        row.put("totalReserveUsd", String.format(Locale.ROOT, "%,d.00", s.totalReserveUsd()));
+        row.put("totalLiabilityUsd", String.format(Locale.ROOT, "%,d.00", s.totalLiabilityUsd()));
+        row.put("reserveRatioPct", String.format(Locale.ROOT, "%.2f%%", s.reserveRatioPpm() / 10_000.0));
+        row.put("includedAccountCount", s.totalUserCount());
+        row.put("status", s.reserveRatioPpm() >= 1_000_000L ? "VERIFIED_100_PERCENT" : "UNDER_RESERVED");
+        return row;
     }
 
     private <T> T withApproval(Supplier<T> action) {

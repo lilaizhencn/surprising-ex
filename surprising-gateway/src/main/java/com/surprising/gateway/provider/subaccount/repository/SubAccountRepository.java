@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.subaccount.repository;
 import com.surprising.gateway.provider.subaccount.model.SubAccountModels.SubAccountRecord;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,6 +36,26 @@ public class SubAccountRepository {
         return jdbc.query(sql, this::mapRow, parentUserId);
     }
 
+    public List<SubAccountRecord> listForAdmin(Long parentUserId, String status, int limit) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT id, parent_user_id, sub_user_id, sub_account_name, permissions, status, created_at
+                FROM gateway_sub_account_relations
+                WHERE 1=1
+                """);
+        List<Object> params = new ArrayList<>();
+        if (parentUserId != null) {
+            sql.append(" AND parent_user_id = ?");
+            params.add(parentUserId);
+        }
+        if (status != null && !status.isBlank()) {
+            sql.append(" AND status = ?");
+            params.add(status);
+        }
+        sql.append(" ORDER BY created_at DESC LIMIT ?");
+        params.add(Math.clamp(limit, 1, 500));
+        return jdbc.query(sql.toString(), this::mapRow, params.toArray());
+    }
+
     public Optional<SubAccountRecord> findRelation(long parentUserId, long subUserId) {
         String sql = """
                 SELECT id, parent_user_id, sub_user_id, sub_account_name, permissions, status, created_at
@@ -46,6 +66,16 @@ public class SubAccountRepository {
         return list.isEmpty() ? Optional.empty() : Optional.of(list.getFirst());
     }
 
+    public Optional<SubAccountRecord> findBySubUserId(long subUserId) {
+        String sql = """
+                SELECT id, parent_user_id, sub_user_id, sub_account_name, permissions, status, created_at
+                FROM gateway_sub_account_relations
+                WHERE sub_user_id = ?
+                """;
+        List<SubAccountRecord> list = jdbc.query(sql, this::mapRow, subUserId);
+        return list.isEmpty() ? Optional.empty() : Optional.of(list.getFirst());
+    }
+
     public boolean updateStatus(long parentUserId, long subUserId, String status) {
         String sql = """
                 UPDATE gateway_sub_account_relations
@@ -53,6 +83,15 @@ public class SubAccountRepository {
                 WHERE parent_user_id = ? AND sub_user_id = ?
                 """;
         return jdbc.update(sql, status, parentUserId, subUserId) > 0;
+    }
+
+    public boolean updateStatusBySubUserId(long subUserId, String status) {
+        String sql = """
+                UPDATE gateway_sub_account_relations
+                SET status = ?, updated_at = now()
+                WHERE sub_user_id = ?
+                """;
+        return jdbc.update(sql, status, subUserId) > 0;
     }
 
     private SubAccountRecord mapRow(ResultSet rs, int rowNum) throws SQLException {

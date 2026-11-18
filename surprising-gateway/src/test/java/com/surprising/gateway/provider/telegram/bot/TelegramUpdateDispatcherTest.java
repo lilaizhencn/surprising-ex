@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.telegram.bot;
 
+import com.surprising.gateway.provider.telegram.bot.broadcast.TelegramBroadcastRepository;
 import com.surprising.gateway.provider.telegram.bot.client.TelegramBotClient;
 import com.surprising.gateway.provider.telegram.bot.handler.*;
 import com.surprising.gateway.provider.telegram.bot.model.*;
@@ -29,6 +30,7 @@ class TelegramUpdateDispatcherTest {
     private TelegramTransferHandler transferHandler;
     private TelegramSettingsHandler settingsHandler;
     private TelegramAffiliateHandler affiliateHandler;
+    private TelegramBroadcastRepository chats;
     private TelegramUpdateDispatcher dispatcher;
 
     private final TelegramUser testUser = new TelegramUser(88888L, false, "Alice", null, "alice", "en");
@@ -49,11 +51,12 @@ class TelegramUpdateDispatcherTest {
         transferHandler = mock(TelegramTransferHandler.class);
         settingsHandler = mock(TelegramSettingsHandler.class);
         affiliateHandler = mock(TelegramAffiliateHandler.class);
+        chats = mock(TelegramBroadcastRepository.class);
 
         dispatcher = new TelegramUpdateDispatcher(
                 botClient, sessionService, authHandler, assetHandler, marketHandler,
                 positionHandler, orderHandler, tradeHandler, depositHandler, withdrawHandler,
-                transferHandler, settingsHandler, affiliateHandler
+                transferHandler, settingsHandler, affiliateHandler, chats
         );
     }
 
@@ -63,6 +66,7 @@ class TelegramUpdateDispatcherTest {
         dispatcher.dispatch(new TelegramUpdate(1L, msg, null));
 
         verify(authHandler).sendWelcomeAndMainMenu(eq(testChat.id()), eq(testUser));
+        verify(chats).rememberChat("88888", testChat.id());
     }
 
     @Test

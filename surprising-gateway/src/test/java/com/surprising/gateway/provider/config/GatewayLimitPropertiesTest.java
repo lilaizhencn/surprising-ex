@@ -9,7 +9,11 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.io.ClassPathResource;
 
 class GatewayLimitPropertiesTest {
     @Test void yamlOverridesRefillPeriodAndRetainsTheOtherDefaultOperationGroups() {
@@ -33,6 +37,23 @@ class GatewayLimitPropertiesTest {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
             assertThat(factory.getValidator().validate(properties)).extracting(v -> v.getPropertyPath().toString())
                     .contains("complete", "loginAccount.bounded");
+        }
+    }
+
+    @Test void localProfileLimitsBindAndValidateCompletely() throws Exception {
+        var sources = new MutablePropertySources();
+        for (var source : new YamlPropertySourceLoader().load("local", new ClassPathResource("application-local.yml"))) {
+            sources.addLast(source);
+        }
+        var properties = new GatewayLimitProperties();
+        new Binder(ConfigurationPropertySources.from(sources))
+                .bind("surprising.gateway.limits", Bindable.ofInstance(properties));
+        assertThat(properties.getIp().rate()).isEqualTo(5000);
+        assertThat(properties.getUser().get(Group.ORDER).rate()).isEqualTo(500);
+        assertThat(properties.getUser().get(Group.CANCEL_ALL).rate()).isEqualTo(50);
+        assertThat(properties.getProduct().get(Group.ORDER).rate()).isEqualTo(500);
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            assertThat(factory.getValidator().validate(properties)).isEmpty();
         }
     }
 }

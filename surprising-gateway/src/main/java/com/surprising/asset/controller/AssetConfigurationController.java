@@ -100,8 +100,17 @@ public class AssetConfigurationController {
         requireText(request.displayName(), "displayName", 100);
         if (request.logoUrl() == null || request.logoUrl().length() > 500
                 || !(request.logoUrl().isEmpty() || request.logoUrl().startsWith("/assets/")
+                || request.logoUrl().startsWith("/api/")
                 || request.logoUrl().startsWith("https://"))) {
-            throw new IllegalArgumentException("logoUrl must be an asset path or HTTPS URL");
+            throw new IllegalArgumentException("logoUrl must be an asset/media path or HTTPS URL");
+        }
+        if (request.officialWebsite() != null && !request.officialWebsite().isEmpty()
+                && !request.officialWebsite().startsWith("https://")) {
+            throw new IllegalArgumentException("officialWebsite must start with https://");
+        }
+        if (request.explorerUrl() != null && !request.explorerUrl().isEmpty()
+                && !request.explorerUrl().startsWith("https://")) {
+            throw new IllegalArgumentException("explorerUrl must start with https://");
         }
         return request;
     }
@@ -119,6 +128,13 @@ public class AssetConfigurationController {
         }
         if (request.chainDecimals() < 0 || request.chainDecimals() > 36 || request.confirmations() <= 0) {
             throw new IllegalArgumentException("invalid chain decimals or confirmations");
+        }
+        if (request.explorerTxUrlTemplate() != null && !request.explorerTxUrlTemplate().isEmpty()
+                && !request.explorerTxUrlTemplate().startsWith("https://")) {
+            throw new IllegalArgumentException("explorerTxUrlTemplate must start with https://");
+        }
+        if (request.specialTips() != null && request.specialTips().length() > 500) {
+            throw new IllegalArgumentException("specialTips length must not exceed 500");
         }
         return request;
     }

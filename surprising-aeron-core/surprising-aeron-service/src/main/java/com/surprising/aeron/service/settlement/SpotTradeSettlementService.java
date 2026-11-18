@@ -138,13 +138,15 @@ public final class SpotTradeSettlementService {
             reservationDebit = Math.addExact(quoteUnits, Math.max(0, Math.negateExact(feeDelta)));
             nextQuoteLocked = Math.subtractExact(nextQuoteLocked, quoteUnits);
             if (feeDelta < 0) nextQuoteLocked = Math.subtractExact(nextQuoteLocked, Math.negateExact(feeDelta));
-            else if (feeDelta > 0) nextQuoteAvailable = Math.addExact(nextQuoteAvailable, feeDelta);
-            nextBaseAvailable = Math.addExact(nextBaseAvailable, baseUnits);
+            else if (feeDelta > 0) nextQuoteAvailable = creditAvailable(
+                    nextQuoteAvailable, nextQuoteLocked, feeDelta, quoteAssetId, systemFundsChange);
+            nextBaseAvailable = creditAvailable(
+                    nextBaseAvailable, nextBaseLocked, baseUnits, baseAssetId, systemFundsChange);
         } else {
             reservationDebit = baseUnits;
             nextBaseLocked = Math.subtractExact(nextBaseLocked, baseUnits);
-            nextQuoteAvailable = Math.addExact(nextQuoteAvailable, quoteUnits);
-            nextQuoteAvailable = Math.addExact(nextQuoteAvailable, feeDelta);
+            nextQuoteAvailable = applyQuoteProceeds(
+                    nextQuoteAvailable, nextQuoteLocked, quoteUnits, feeDelta, quoteAssetId, systemFundsChange);
         }
         if (nextBaseAvailable < 0 || nextBaseLocked < 0 || nextQuoteAvailable < 0 || nextQuoteLocked < 0) {
             throw new IllegalStateException("runtime spot fill balance would become negative");
@@ -328,13 +330,15 @@ public final class SpotTradeSettlementService {
                     reservationDebit = Math.addExact(quoteUnits, Math.max(0, Math.negateExact(feeDelta)));
                     quote.locked = Math.subtractExact(quote.locked, quoteUnits);
                     if (feeDelta < 0) quote.locked = Math.subtractExact(quote.locked, Math.negateExact(feeDelta));
-                    else if (feeDelta > 0) quote.available = Math.addExact(quote.available, feeDelta);
-                    base.available = Math.addExact(base.available, baseUnits);
+                    else if (feeDelta > 0) quote.available = creditAvailable(
+                            quote.available, quote.locked, feeDelta, quoteAssetId, systemFunds);
+                    base.available = creditAvailable(
+                            base.available, base.locked, baseUnits, baseAssetId, systemFunds);
                 } else {
                     reservationDebit = baseUnits;
                     base.locked = Math.subtractExact(base.locked, baseUnits);
-                    quote.available = Math.addExact(quote.available, quoteUnits);
-                    quote.available = Math.addExact(quote.available, feeDelta);
+                    quote.available = applyQuoteProceeds(
+                            quote.available, quote.locked, quoteUnits, feeDelta, quoteAssetId, systemFunds);
                 }
                 if (base.available < 0 || base.locked < 0 || quote.available < 0 || quote.locked < 0) {
                     throw new IllegalStateException("runtime spot fill balance would become negative");
@@ -377,6 +381,38 @@ public final class SpotTradeSettlementService {
                 fills = 0;
             }
         }
+    }
+
+    /** 按卖方成交价款与手续费净入账；盈余信用封顶至 Long.MAX_VALUE - locked 并记入清算差额。 */
+    private static long applyQuoteProceeds(long available, long locked, long quoteUnits, long feeDelta,
+                                           int quoteAssetId, SystemFundsChange systemFundsChange) {
+        if (feeDelta >= 0) {
+            long credited = creditAvailable(available, locked, quoteUnits, quoteAssetId, systemFundsChange);
+            return creditAvailable(credited, locked, feeDelta, quoteAssetId, systemFundsChange);
+        }
+        long netQuoteDelta = quoteUnits + feeDelta;
+        return netQuoteDelta >= 0
+                ? creditAvailable(available, locked, netQuoteDelta, quoteAssetId, systemFundsChange)
+                : Math.addExact(available, netQuoteDelta);
+    }
+
+    /** 将非负成交入账封顶在 Long.MAX_VALUE - locked，保持 available + locked 不溢出并路由超额至清算平衡表。 */
+    static long creditAvailable(long available, long locked, long creditUnits,
+                                int assetId, SystemFundsChange systemFundsChange) {
+        if (creditUnits < 0) {
+            throw new IllegalArgumentException("spot credit units must be non-negative");
+        }
+        if (creditUnits == 0) {
+            return available;
+        }
+        long maxAvailable = Long.MAX_VALUE - locked;
+        long headroom = available >= maxAvailable ? 0L : maxAvailable - available;
+        long credited = Math.min(creditUnits, headroom);
+        long overflow = creditUnits - credited;
+        if (overflow > 0) {
+            systemFundsChange.addClearing(assetId, overflow);
+        }
+        return available + credited;
     }
 
     private static void replaceBalance(AccountBook accountBook, AccountPartition lane, long userId, int assetId,

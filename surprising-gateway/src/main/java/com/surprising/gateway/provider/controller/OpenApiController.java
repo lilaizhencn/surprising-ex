@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.controller;
 
 import com.surprising.account.provider.service.AccountService;
+import com.surprising.asset.repository.AssetNetworkRepository;
+import com.surprising.asset.repository.AssetRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
@@ -63,7 +65,7 @@ public class OpenApiController {
                              ObjectMapper objectMapper) {
         this(properties, instrumentService, orderService, accountService, marketDataService,
                 apiKeyService, verificationService, authService, complianceService, custodyWalletClient,
-                withdrawalService, null, objectMapper);
+                withdrawalService, null, null, null, objectMapper);
     }
 
     @Autowired
@@ -79,13 +81,16 @@ public class OpenApiController {
                              CustodyWalletClient custodyWalletClient,
                              CustodyWithdrawalService withdrawalService,
                              @Autowired(required = false) UserDepositAddressRepository depositAddressRepository,
+                             @Autowired(required = false) AssetRepository assetRepository,
+                             @Autowired(required = false) AssetNetworkRepository networkRepository,
                              ObjectMapper objectMapper) {
         this.properties = properties;
         this.support = new OpenApiSupport(properties, apiKeyService, authService, objectMapper);
         this.marketApi = new OpenMarketApiService(properties, instrumentService, marketDataService, support);
         this.tradingApi = new OpenTradingApiService(properties, orderService, accountService, complianceService, support);
         this.capitalApi = new OpenCapitalApiService(properties, accountService, verificationService, complianceService,
-                custodyWalletClient, withdrawalService, depositAddressRepository, support);
+                custodyWalletClient, withdrawalService, depositAddressRepository,
+                assetRepository, networkRepository, support);
     }
 
     public OpenApiController(GatewayProperties properties,
