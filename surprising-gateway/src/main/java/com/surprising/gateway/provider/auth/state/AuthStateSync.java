@@ -28,6 +28,30 @@ public class AuthStateSync {
     private final JdbcTemplate jdbc;
     private final AuthState state;
     private final GatewayProperties properties;
+    private final java.util.concurrent.ConcurrentHashMap<String,Runnable> pending=new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile long retryAt;
+
+    /** 已提交的持久配置同步失败会显式报错，并在后台重试；普通身份读取不回库。 */
+    private void synchronize(String key,Runnable action) {
+        pending.put(key,action);
+        try { action.run();pending.remove(key,action); }
+        catch(RuntimeException failure) { retryAt=System.nanoTime()+5_000_000_000L;throw failure; }
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay=1000)
+    public void retryPendingConfiguration() {
+        if(System.nanoTime()<retryAt) return;
+        int count=0;
+        for(var entry:pending.entrySet()) {
+            if(count++>=100) break;
+            try { entry.getValue().run();pending.remove(entry.getKey(),entry.getValue()); }
+            catch(RuntimeException unavailable) {
+                retryAt=System.nanoTime()+5_000_000_000L;
+                log.warn("persistent auth configuration synchronization pending; retrying after store recovery");
+                return;
+            }
+        }
+    }
 
     public AuthStateSync(JdbcTemplate jdbc, AuthState state, GatewayProperties properties) {
         this.jdbc = jdbc;
@@ -47,7 +71,7 @@ public class AuthStateSync {
     /** 读取用户最新状态；事务提交后才发布到 Valkey。 */
     public Optional<UserState> reloadUser(long userId) {
         if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-            afterCommit(() -> loadUser(userId));
+            afterCommit(() -> synchronize("user:"+userId,() -> loadUser(userId)));
             return Optional.empty();
         }
         return loadUser(userId);
@@ -98,7 +122,7 @@ public class AuthStateSync {
 
     /** 仅用于已经提交的绑定回调；独立只读事务结束后立即发布用户配置。 */
     @org.springframework.transaction.annotation.Transactional(propagation=org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,readOnly=true)
-    public void reloadCommittedUser(long userId) { loadUser(userId); }
+    public void reloadCommittedUser(long userId) { synchronize("user:"+userId,() -> loadUser(userId)); }
 
     /** 角色权限变更：拥有该角色的用户批量读取后写入 Valkey，避免按用户 N+1 查询。 */
     public void roleChanged(long roleId) {
@@ -107,7 +131,7 @@ public class AuthStateSync {
         if (userIds.isEmpty()) {
             return;
         }
-        afterCommit(() -> reloadUsers(userIds));
+        afterCommit(() -> synchronize("role:"+roleId,() -> reloadUsers(userIds)));
     }
 
     private void reloadUsers(List<Long> userIds) {
@@ -187,7 +211,7 @@ public class AuthStateSync {
 
     /** API Key 创建、修改或撤销：有效就写入，否则删除；同时刷新所属用户。 */
     public void apiKeyChanged(String apiKey) {
-        afterCommit(() -> loadApiKey(apiKey));
+        afterCommit(() -> synchronize("apikey:"+apiKey,() -> loadApiKey(apiKey)));
     }
 
     private void loadApiKey(String apiKey) {

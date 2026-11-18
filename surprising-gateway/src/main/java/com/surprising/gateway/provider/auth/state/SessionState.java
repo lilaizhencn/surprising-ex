@@ -29,13 +29,14 @@ public record SessionState(long sessionId, long userId, String deviceId,
     }
 
     static SessionState fromFields(long sessionId, Map<String, String> fields) {
-        if (!fields.containsKey("uid") || Long.parseLong(fields.getOrDefault("ttlSeconds", "0")) <= 0)
+        if (!fields.containsKey("uid") || !fields.containsKey("createdAt")
+                || Long.parseLong(fields.getOrDefault("ttlSeconds", "0")) <= 0)
             throw new IllegalArgumentException("invalid session state");
         return new SessionState(sessionId, Long.parseLong(fields.get("uid")),
                 fields.get("deviceId"), Long.parseLong(fields.getOrDefault("authenticatedAt", "0")),
                 Long.parseLong(fields.getOrDefault("ttlSeconds", "0")),
                 Long.parseLong(fields.getOrDefault("renewedAt", "0")), fields.get("userAgent"), fields.get("ipAddress"),
-                Long.parseLong(fields.getOrDefault("createdAt", "0")));
+                Long.parseLong(fields.get("createdAt")));
     }
 
     SessionState renewedAt(long millis) {

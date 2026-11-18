@@ -31,6 +31,8 @@ class AuthStateTest {
     void 残缺会话或用户记录不能误放行() {
         fixture.backend.hashPut("auth:session:999",java.util.Map.of("uid","7"),Duration.ofDays(7));
         assertThatThrownBy(()->fixture.state.session(999)).isInstanceOf(IllegalArgumentException.class);
+        fixture.backend.hashPut("auth:session:998",java.util.Map.of("uid","7","ttlSeconds","604800","renewedAt","1"),Duration.ofDays(7));
+        assertThatThrownBy(()->fixture.state.session(998)).as("旧格式没有新索引对应的创建资料，不能继续作为登录态").isInstanceOf(IllegalArgumentException.class);
         fixture.backend.hashPut("auth:user:999",java.util.Map.of("roles","SUPER_ADMIN"),Duration.ofDays(7));
         assertThatThrownBy(()->fixture.state.user(999)).isInstanceOf(IllegalArgumentException.class);
     }

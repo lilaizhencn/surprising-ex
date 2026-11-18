@@ -84,7 +84,7 @@ See the [project architecture and class-level trading flows](../README.md). Hist
 - 活跃会话及设备资料来自 `auth:session:{id}`，全局/用户/到期索引分别为 `auth:sessions`、`auth:sessions:user:{uid}`、`auth:sessions:expiry`。列表按游标有界读取，每页最多 200 条；单用户最多 100 个活跃会话。后台会话列表只显示当前会话，`active=false` 返回空列表；过期/注销记录不当作可恢复会话保留。设备列表从这些活跃会话去重。
 - 到期索引每秒最多清理 1000 项；存储故障会退避。创建会话时也有界清理该用户已失效的索引。注销、踢人和设备/IP 吊销会原子删除会话与索引并广播，不做全库扫描。
 - Telegram 绑定不是 7 天网页会话。`auth:telegram:{subject}` 与仍有绑定用户的 `auth:user:{uid}` 均不设置自然到期时间；网关重启不会要求重新绑定。普通机器人消息/回调先校验 JVM→Valkey 身份和封禁状态，再进入业务处理；明确注册 `/start` 或通过验证的登录才允许进入持久绑定流程。解绑留撤销记录，不能靠 `/start` 自动复活。语言等业务设置仍可查数据库，但语言预热每用户每分钟最多一次，不作为身份回源。
-- PostgreSQL 保留用户资料、角色权限、封禁、API Key 配置、Telegram 绑定以及真实业务设置。启动同步按每批 500 条读取持久配置，补齐 API Key、Telegram 绑定及其用户资料；撤销配置也会同步删除。它不读取、创建或恢复任何浏览器/App 会话；Valkey 数据丢失的网页/App 会话需重新登录。
+- PostgreSQL 保留用户资料、角色权限、封禁、API Key 配置、Telegram 绑定以及真实业务设置。启动同步按每批 500 条读取持久配置，补齐 API Key、Telegram 绑定及其用户资料；撤销配置也会同步删除。它不读取、创建或恢复任何浏览器/App 会话；Valkey 数据丢失的网页/App 会话需重新登录。持久配置提交后的同步失败会显式报错并排队重试（每轮最多 100 项，故障时退避 5 秒），不靠普通身份请求回库；待重试队列在进程内，不是跨存储原子提交保证。
 - `init.sql` 不再包含 `gateway_refresh_sessions` 或 `gateway_api_keys.last_used_at`。登录历史仍在 `gateway_login_logs`；注销/踢人等操作单独追加到 `gateway_session_operation_logs`，只含目标用户、操作、会话 ID 和时间，没有令牌或会话到期时间，也不混入登录成功统计。管理 API 的 `lastUsedAt` 响应字段保持为 `null`，不会触发请求时写库。
 - 当前未上线，schema 直接以 `init.sql` 为准，不提供旧登录态兼容或升级脚本。修改初始化文件不等于已更改任何现有数据库；不要对已有数据自动执行删表/清库。
 

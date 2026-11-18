@@ -8,6 +8,18 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionSynchronization;
 
 class AuthStateStartupTest {
+    @Test void failedCommittedConfigurationIsRetriedWithoutAnyIdentityRequestDatabaseFallback() {
+        var jdbc=mock(JdbcTemplate.class);var fixture=new AuthStateFixture();
+        var sync=new AuthStateSync(jdbc,fixture.state,fixture.properties);
+        fixture.backend.down=true;
+        assertThatThrownBy(()->sync.apiKeyChanged("key")).isInstanceOf(AuthStateUnavailableException.class);
+        fixture.backend.down=false;
+        org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(7)).untilAsserted(()->{
+            sync.retryPendingConfiguration();
+            assertThat(org.mockito.Mockito.mockingDetails(jdbc).getInvocations()).hasSizeGreaterThanOrEqualTo(2);
+        });
+        assertThat(fixture.state.apiKey("key")).isNull();
+    }
     @Test void startupReadsOnlyPersistentConfigurationNeverOldLoginSessions() {
         var jdbc=mock(JdbcTemplate.class);var fixture=new AuthStateFixture();
         new AuthStateSync(jdbc,fixture.state,fixture.properties).syncPersistentState();
