@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.controller;
 
 import com.surprising.account.api.model.*;
 import com.surprising.account.provider.service.AccountService;
-import com.surprising.gateway.provider.auth.model.CurrentUser;
+import com.surprising.gateway.provider.auth.model.OperatingUser;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
@@ -27,7 +27,7 @@ public class AccountAssetsController {
     }
 
     @GetMapping("/balances")
-    public ResponseEntity<BalanceQueryResponse> balances(@CurrentUser long owner,
+    public ResponseEntity<BalanceQueryResponse> balances(@OperatingUser long owner,
                                          @RequestParam long userId, HttpServletRequest request) {
         ProductLine product = product(owner, userId, request);
         var balance = products.disabled().contains(product) ? new BalanceQueryResponse(0, List.of())
@@ -36,7 +36,7 @@ public class AccountAssetsController {
     }
 
     @GetMapping("/product-balances")
-    public ResponseEntity<ProductBalanceQueryResponse> productBalances(@CurrentUser long owner,
+    public ResponseEntity<ProductBalanceQueryResponse> productBalances(@OperatingUser long owner,
             @RequestParam long userId, @RequestParam AccountType accountType, HttpServletRequest request) {
         ProductLine product = product(owner, userId, request);
         if (accountType.productLine().orElse(null) != product)

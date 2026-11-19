@@ -16,18 +16,25 @@ import java.util.Set;
 public record UserState(long userId, String username, String email, String displayName, Instant createdAt,
                         String status, List<String> roles, List<String> permissions,
                         Set<String> blockedIps, Set<String> blockedDevices, boolean hasApiKey, boolean telegramBound,
-                        String subAccountStatus, String subAccountPermissions) {
+                        String subAccountStatus, String subAccountPermissions, Long subAccountParentUserId) {
 
     public UserState(long userId, String username, String email, String displayName, Instant createdAt,
                      String status, List<String> roles, List<String> permissions,
                      Set<String> blockedIps, Set<String> blockedDevices, boolean hasApiKey) {
-        this(userId, username, email, displayName, createdAt, status, roles, permissions, blockedIps, blockedDevices, hasApiKey, false, null, null);
+        this(userId, username, email, displayName, createdAt, status, roles, permissions, blockedIps, blockedDevices, hasApiKey, false, null, null, null);
     }
 
     public UserState(long userId, String username, String email, String displayName, Instant createdAt,
                      String status, List<String> roles, List<String> permissions,
                      Set<String> blockedIps, Set<String> blockedDevices, boolean hasApiKey, boolean telegramBound) {
-        this(userId, username, email, displayName, createdAt, status, roles, permissions, blockedIps, blockedDevices, hasApiKey, telegramBound, null, null);
+        this(userId, username, email, displayName, createdAt, status, roles, permissions, blockedIps, blockedDevices, hasApiKey, telegramBound, null, null, null);
+    }
+
+    public UserState(long userId, String username, String email, String displayName, Instant createdAt,
+                     String status, List<String> roles, List<String> permissions,
+                     Set<String> blockedIps, Set<String> blockedDevices, boolean hasApiKey, boolean telegramBound,
+                     String subAccountStatus, String subAccountPermissions) {
+        this(userId, username, email, displayName, createdAt, status, roles, permissions, blockedIps, blockedDevices, hasApiKey, telegramBound, subAccountStatus, subAccountPermissions, null);
     }
 
     public boolean subAccountFrozen() {
@@ -54,6 +61,7 @@ public record UserState(long userId, String username, String email, String displ
         fields.put("persistent", hasApiKey || telegramBound ? "1" : "0");
         fields.put("subAccountStatus", subAccountStatus == null ? "" : subAccountStatus);
         fields.put("subAccountPermissions", subAccountPermissions == null ? "" : subAccountPermissions);
+        fields.put("subAccountParentUserId", subAccountParentUserId == null || subAccountParentUserId <= 0 ? "" : Long.toString(subAccountParentUserId));
         return fields;
     }
 
@@ -71,7 +79,13 @@ public record UserState(long userId, String username, String email, String displ
                 fields.get("status"), split(fields.get("roles")), split(fields.get("permissions")),
                 new LinkedHashSet<>(split(fields.get("blockedIps"))),
                 new LinkedHashSet<>(split(fields.get("blockedDevices"))), "1".equals(fields.get("hasApiKey")), "1".equals(fields.get("telegramBound")),
-                subStatus, subPermissions);
+                subStatus, subPermissions, parseParent(fields.get("subAccountParentUserId")));
+    }
+
+    private static Long parseParent(String value) {
+        if (value == null || value.isBlank()) return null;
+        long parent = Long.parseLong(value);
+        return parent > 0 ? parent : null;
     }
 
     private static String emptyToNull(String value) {

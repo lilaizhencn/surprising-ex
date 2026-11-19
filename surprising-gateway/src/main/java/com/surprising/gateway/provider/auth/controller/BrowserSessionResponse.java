@@ -32,6 +32,6 @@ public class BrowserSessionResponse implements ResponseBodyAdvice<Object> {
         response.getHeaders().add(HttpHeaders.SET_COOKIE, BrowserSessionCookies.sessionCookie(properties, client,
                 session.accessToken(), properties.getSecurity().getSessionTokenMaxLifetime()).toString());
         return new AuthResponse(session.user(), null, session.sessionExpiresAt(),
-                session.requiresEmailVerification(), true);
+                session.requiresEmailVerification(), true, session.operatingAccount());
     }
 }

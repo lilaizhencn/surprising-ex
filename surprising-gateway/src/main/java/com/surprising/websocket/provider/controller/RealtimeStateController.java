@@ -1,6 +1,6 @@
 package com.surprising.websocket.provider.controller;
 
-import com.surprising.gateway.provider.auth.model.CurrentUser;
+import com.surprising.gateway.provider.auth.model.OperatingUser;
 import com.surprising.websocket.provider.service.RealtimeWebSocketBridge;
 
 import com.surprising.product.api.ProductLine;
@@ -22,7 +22,7 @@ public final class RealtimeStateController {
     @GetMapping("/{productLine}/state")
     public UserReadView state(
             @PathVariable ProductLine productLine,
-            @CurrentUser long user) {
+            @OperatingUser long user) {
         if (user <= 0) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.UNAUTHORIZED);

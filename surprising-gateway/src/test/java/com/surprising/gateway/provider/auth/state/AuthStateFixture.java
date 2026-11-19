@@ -64,9 +64,14 @@ public final class AuthStateFixture {
     }
 
     public static UserState subUser(long userId, String status, String subAccountStatus, String subAccountPermissions) {
+        return subUser(userId, status, subAccountStatus, subAccountPermissions, null);
+    }
+
+    public static UserState subUser(long userId, String status, String subAccountStatus, String subAccountPermissions,
+                                    Long parentUserId) {
         return new UserState(userId, "user" + userId, "u" + userId + "@example.com", null, Instant.EPOCH,
                 status, List.of("USER"), List.of(), new LinkedHashSet<>(), new LinkedHashSet<>(), true, false,
-                subAccountStatus, subAccountPermissions);
+                subAccountStatus, subAccountPermissions, parentUserId);
     }
 
     public SessionState startSession(long userId, long sessionId) {

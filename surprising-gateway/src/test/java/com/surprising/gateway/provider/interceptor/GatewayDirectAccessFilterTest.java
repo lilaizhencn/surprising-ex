@@ -295,4 +295,33 @@ class GatewayDirectAccessFilterTest {
         assertThat(res.getStatus()).isEqualTo(403);
         assertThat(proceeded.get()).isFalse();
     }
+
+    @Test
+    void switchedOperatingAccountIsInjectedAndFrozenWritesAreRejected() throws Exception {
+        AuthService auth = mock(AuthService.class);
+        when(auth.authenticateBearer("Bearer parentTok")).thenReturn(new JwtPrincipal(
+                1001L, "parent", "NORMAL", List.of("USER"), Instant.now().plusSeconds(60), 9L, 2001L));
+        var f = filter(auth);
+
+        var readReq = new MockHttpServletRequest("GET", "/api/v1/trading/orders");
+        readReq.setParameter("productLine", "SPOT");
+        readReq.setQueryString("productLine=SPOT");
+        readReq.addHeader("Authorization", "Bearer parentTok");
+        var readRes = new MockHttpServletResponse();
+        var seenUser = new java.util.concurrent.atomic.AtomicReference<String>();
+        f.doFilter(readReq, readRes, (r, s) -> seenUser.set(((HttpServletRequest) r).getHeader("X-User-Id")));
+        assertThat(readRes.getStatus()).isEqualTo(200);
+        assertThat(seenUser.get()).isEqualTo("2001");
+
+        doThrow(new IllegalStateException("sub-account is not active")).when(auth).requireSubAccountWrite(2001L);
+        var writeReq = new MockHttpServletRequest("POST", "/api/v1/trading/orders");
+        writeReq.setParameter("productLine", "SPOT");
+        writeReq.addHeader("Authorization", "Bearer parentTok");
+        var writeRes = new MockHttpServletResponse();
+        var proceeded = new java.util.concurrent.atomic.AtomicBoolean(false);
+        f.doFilter(writeReq, writeRes, (r, s) -> proceeded.set(true));
+        assertThat(writeRes.getStatus()).isEqualTo(403);
+        assertThat(proceeded.get()).isFalse();
+        verify(auth).requireSubAccountWrite(2001L);
+    }
 }

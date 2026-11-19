@@ -2,6 +2,7 @@ package com.surprising.gateway.provider.config;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.CurrentUser;
+import com.surprising.gateway.provider.auth.model.OperatingUser;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.ObjectProvider;
@@ -16,7 +17,7 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * 解析控制器方法上的 {@link CurrentUser} 参数，优先直接读取过滤器已认证的上下文。
+ * 解析控制器方法上的 {@link CurrentUser} 或 {@link OperatingUser} 参数，优先直接读取过滤器已认证的上下文。
  */
 public final class CurrentUserArgumentResolver implements HandlerMethodArgumentResolver {
     private final ObjectProvider<AuthService> authServiceProvider;
@@ -34,7 +35,8 @@ public final class CurrentUserArgumentResolver implements HandlerMethodArgumentR
 
     @Override
     public boolean supportsParameter(MethodParameter parameter) {
-        if (!parameter.hasParameterAnnotation(CurrentUser.class)) {
+        if (!parameter.hasParameterAnnotation(CurrentUser.class)
+                && !parameter.hasParameterAnnotation(OperatingUser.class)) {
             return false;
         }
         Class<?> type = parameter.getParameterType();
@@ -50,6 +52,9 @@ public final class CurrentUserArgumentResolver implements HandlerMethodArgumentR
         Class<?> type = parameter.getParameterType();
         if (type == JwtPrincipal.class) {
             return principal;
+        }
+        if (parameter.hasParameterAnnotation(OperatingUser.class)) {
+            return principal.operatingUserId();
         }
         return principal.userId();
     }

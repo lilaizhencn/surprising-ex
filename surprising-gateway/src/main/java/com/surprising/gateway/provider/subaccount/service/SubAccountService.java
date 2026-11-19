@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.subaccount.service;
 
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.ProductBalanceQueryResponse;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
@@ -30,6 +32,7 @@ public class SubAccountService {
     private final GatewayProductServices products;
     private final AccountCommandGateway accountCommandGateway;
     private AuthStateSync authStateSync;
+    private final AccountService accountService;
 
     @Autowired
     public SubAccountService(SubAccountRepository subAccountRepository,
@@ -39,15 +42,24 @@ public class SubAccountService {
         this.authPersistenceService = authPersistenceService;
         this.products = products;
         this.accountCommandGateway = null;
+        this.accountService = null;
     }
 
     public SubAccountService(SubAccountRepository subAccountRepository,
                              AuthPersistenceService authPersistenceService,
                              AccountCommandGateway accountCommandGateway) {
+        this(subAccountRepository, authPersistenceService, accountCommandGateway, null);
+    }
+
+    public SubAccountService(SubAccountRepository subAccountRepository,
+                             AuthPersistenceService authPersistenceService,
+                             AccountCommandGateway accountCommandGateway,
+                             AccountService accountService) {
         this.subAccountRepository = subAccountRepository;
         this.authPersistenceService = authPersistenceService;
         this.products = null;
         this.accountCommandGateway = accountCommandGateway;
+        this.accountService = accountService;
     }
 
     @Autowired(required = false)
@@ -191,5 +203,43 @@ public class SubAccountService {
         return new SubAccountTransferResponse(
                 refId, fromUserId, toUserId, request.asset(), request.amountUnits(), "SUCCESS", Instant.now()
         );
+    }
+
+    public SubAccountRecord requireOwnedRelation(long parentUserId, long subUserId) {
+        if (parentUserId <= 0 || subUserId <= 0) {
+            throw new IllegalArgumentException("parentUserId and subUserId must be positive");
+        }
+        return subAccountRepository.findRelation(parentUserId, subUserId)
+                .orElseThrow(() -> new IllegalArgumentException("SubAccount not found for this parent user"));
+    }
+
+    /** 主账号冻结或解冻自己的子账号，并立即发布到 Valkey。 */
+    @Transactional
+    public SubAccountRecord updateStatus(long parentUserId, long subUserId, String status) {
+        requireOwnedRelation(parentUserId, subUserId);
+        String normalized = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("ACTIVE", "FROZEN").contains(normalized)) {
+            throw new IllegalArgumentException("status must be ACTIVE or FROZEN");
+        }
+        subAccountRepository.updateStatus(parentUserId, subUserId, normalized);
+        publishUser(subUserId);
+        return requireOwnedRelation(parentUserId, subUserId);
+    }
+
+    /** 主账号查看某个子账号的产品余额；冻结子账号也可以看。 */
+    public ProductBalanceQueryResponse assets(long parentUserId, long subUserId, AccountType accountType) {
+        requireOwnedRelation(parentUserId, subUserId);
+        AccountType type = accountType == null ? AccountType.SPOT : accountType;
+        if (accountService != null) {
+            return accountService.productBalances(subUserId, type);
+        }
+        if (products != null) {
+            ProductLine product = type.productLine().orElse(ProductLine.SPOT);
+            if (products.disabled().contains(product)) {
+                return new ProductBalanceQueryResponse(0, List.of());
+            }
+            return products.service(product, AccountService.class).productBalances(subUserId, type);
+        }
+        throw new IllegalStateException("account service is not available");
     }
 }

@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.controller;
 
 import com.surprising.gateway.provider.service.PortfolioIncomeService;
 import com.surprising.gateway.provider.auth.service.AuthService;
-import com.surprising.gateway.provider.auth.model.CurrentUser;
+import com.surprising.gateway.provider.auth.model.OperatingUser;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -17,7 +17,7 @@ public class PortfolioIncomeController {
     public PortfolioIncomeController(AuthService auth, PortfolioIncomeService income) { this(income); }
 
     @GetMapping("/income")
-    public ResponseEntity<PortfolioIncomeService.Summary> income(@CurrentUser long userId) {
+    public ResponseEntity<PortfolioIncomeService.Summary> income(@OperatingUser long userId) {
         try {
             return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(income.income(userId));
         } catch (DataAccessException unavailable) {

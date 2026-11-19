@@ -99,7 +99,7 @@ public class GatewaySecurityConfiguration {
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/session", "/api/v1/auth/verify-email", "/api/v1/auth/resend-email-verification",
                                 "/api/v1/legal/status", "/api/v1/legal/consents",
                                 "/api/v1/security/**", "/api/v1/users/scan", "/api/v1/notifications/**", "/api/v1/wallet/**",
-                                "/api/v1/realtime/**", "/api/v1/portfolio/**", "/api/v1/affiliate/**", "/api/v1/compliance/**", "/api/v1/c2c/**", "/api/v1/announcements/**").authenticated()
+                                "/api/v1/realtime/**", "/api/v1/portfolio/**", "/api/v1/affiliate/**", "/api/v1/compliance/**", "/api/v1/c2c/**", "/api/v1/announcements/**", "/api/v1/sub-account/**").authenticated()
                         .anyRequest().denyAll());
         return http.build();
     }

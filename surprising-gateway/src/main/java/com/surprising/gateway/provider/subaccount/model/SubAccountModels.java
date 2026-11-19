@@ -41,4 +41,10 @@ public final class SubAccountModels {
             String status,
             Instant timestamp
     ) {}
+
+    public record SwitchOperatingAccountRequest(Long userId) {}
+
+    public record UpdateSubAccountStatusRequest(
+            @NotBlank String status
+    ) {}
 }

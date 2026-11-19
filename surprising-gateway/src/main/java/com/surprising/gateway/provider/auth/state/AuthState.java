@@ -86,6 +86,14 @@ public class AuthState {
         sessions.remove(key);
     }
 
+    /** 更新已登录会话属性（如当前操作账户）并通知各节点丢掉本地缓存。 */
+    public void replaceSession(SessionState state, Duration ttl) {
+        String key = sessionKey(state.sessionId());
+        backend.hashPut(key, state.toFields(), ttl);
+        sessions.remove(key);
+        broadcast("session:" + state.sessionId());
+    }
+
     public boolean sessionExists(long sessionId) {
         return backend.exists(sessionKey(sessionId));
     }

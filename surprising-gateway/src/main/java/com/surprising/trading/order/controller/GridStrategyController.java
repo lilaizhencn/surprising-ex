@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.auth.model.CurrentUser;
+import com.surprising.gateway.provider.auth.model.OperatingUser;
 import com.surprising.trading.order.model.GridStrategyModels.CreateGridStrategyRequest;
 import com.surprising.trading.order.model.GridStrategyModels.GridStrategyRecord;
 import com.surprising.trading.order.service.GridStrategyService;
@@ -21,7 +21,7 @@ public class GridStrategyController {
     }
 
     @PostMapping("/create")
-    public GridStrategyRecord create(@CurrentUser long userId,
+    public GridStrategyRecord create(@OperatingUser long userId,
                                      @Valid @RequestBody CreateGridStrategyRequest request,
                                      @RequestParam(defaultValue = "0") long currentPriceTicks) {
         try {
@@ -32,12 +32,12 @@ public class GridStrategyController {
     }
 
     @GetMapping("/list")
-    public List<GridStrategyRecord> list(@CurrentUser long userId) {
+    public List<GridStrategyRecord> list(@OperatingUser long userId) {
         return gridStrategyService.listStrategies(userId);
     }
 
     @PostMapping("/{strategyId}/stop")
-    public GridStrategyRecord stop(@CurrentUser long userId,
+    public GridStrategyRecord stop(@OperatingUser long userId,
                                    @PathVariable long strategyId) {
         try {
             return gridStrategyService.stopGrid(userId, strategyId);

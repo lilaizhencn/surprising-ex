@@ -100,13 +100,18 @@ public final class AuthModels {
             String accessToken,
             Instant sessionExpiresAt,
             boolean requiresEmailVerification,
-            boolean browserSession) implements LoginResult {
+            boolean browserSession,
+            OperatingAccount operatingAccount) implements LoginResult {
         public AuthResponse(AuthenticatedUser user, String accessToken, Instant sessionExpiresAt) {
-            this(user, accessToken, sessionExpiresAt, false, false);
+            this(user, accessToken, sessionExpiresAt, false, false, null);
         }
         public AuthResponse(AuthenticatedUser user, String accessToken, Instant sessionExpiresAt,
                             boolean requiresEmailVerification) {
-            this(user, accessToken, sessionExpiresAt, requiresEmailVerification, false);
+            this(user, accessToken, sessionExpiresAt, requiresEmailVerification, false, null);
+        }
+        public AuthResponse(AuthenticatedUser user, String accessToken, Instant sessionExpiresAt,
+                            boolean requiresEmailVerification, boolean browserSession) {
+            this(user, accessToken, sessionExpiresAt, requiresEmailVerification, browserSession, null);
         }
     }
 
@@ -116,10 +121,28 @@ public final class AuthModels {
             String status,
             List<String> roles,
             Instant expiresAt,
-            long sessionId) {
-        public JwtPrincipal(long userId, String username, String status, List<String> roles, Instant expiresAt) {
-            this(userId, username, status, roles, expiresAt, 0L);
+            long sessionId,
+            long operatingUserId) {
+        public JwtPrincipal {
+            if (operatingUserId <= 0) operatingUserId = userId;
         }
+        public JwtPrincipal(long userId, String username, String status, List<String> roles, Instant expiresAt) {
+            this(userId, username, status, roles, expiresAt, 0L, userId);
+        }
+        public JwtPrincipal(long userId, String username, String status, List<String> roles, Instant expiresAt,
+                            long sessionId) {
+            this(userId, username, status, roles, expiresAt, sessionId, userId);
+        }
+    }
+
+    public record OperatingAccount(
+            long userId,
+            String username,
+            String displayName,
+            String status,
+            String subAccountStatus,
+            String subAccountPermissions,
+            boolean parent) {
     }
 
     public record AdminUserQueryResponse(

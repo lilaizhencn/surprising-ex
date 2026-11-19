@@ -131,19 +131,22 @@ public class AuthStateSync {
         boolean telegramBound = Boolean.TRUE.equals(jdbc.queryForObject(
                 "SELECT EXISTS(SELECT 1 FROM gateway_telegram_identities WHERE user_id = ? AND revoked_at IS NULL)",
                 Boolean.class, userId));
-        String[] relation = loadSubAccountRelation(userId);
+        Object[] relation = loadSubAccountRelation(userId);
         var loaded = new UserState(userId, (String) user[0], (String) user[1], (String) user[2], (Instant) user[3],
                 (String) user[4], roles, permissions, blockedIps, blockedDevices, hasApiKey, telegramBound,
-                relation[0], relation[1]);
+                (String) relation[0], (String) relation[1], (Long) relation[2]);
         state.putUser(loaded);
         return Optional.of(loaded);
     }
 
-    private String[] loadSubAccountRelation(long userId) {
+    private Object[] loadSubAccountRelation(long userId) {
         var rows = jdbc.query("""
-                SELECT status, permissions FROM gateway_sub_account_relations WHERE sub_user_id = ?
-                """, (rs, row) -> new String[]{rs.getString(1), rs.getString(2)}, userId);
-        return rows.isEmpty() ? new String[]{null, null} : rows.get(0);
+                SELECT status, permissions, parent_user_id FROM gateway_sub_account_relations WHERE sub_user_id = ?
+                """, (rs, row) -> {
+            long parent = rs.getLong(3);
+            return new Object[]{rs.getString(1), rs.getString(2), rs.wasNull() || parent <= 0 ? null : parent};
+        }, userId);
+        return rows.isEmpty() ? new Object[]{null, null, null} : rows.get(0);
     }
 
     /** 仅用于已经提交的绑定回调；独立可写事务里锁行后再发布，避免只读事务中 FOR UPDATE。 */
@@ -230,12 +233,15 @@ public class AuthStateSync {
 
         var subStatusByUser = new java.util.HashMap<Long, String>();
         var subPermissionsByUser = new java.util.HashMap<Long, String>();
+        var subParentByUser = new java.util.HashMap<Long, Long>();
         jdbc.query("""
-                SELECT sub_user_id, status, permissions FROM gateway_sub_account_relations
+                SELECT sub_user_id, status, permissions, parent_user_id FROM gateway_sub_account_relations
                  WHERE sub_user_id IN (%s)
                 """.formatted(placeholders), rs -> {
             subStatusByUser.put(rs.getLong(1), rs.getString(2));
             subPermissionsByUser.put(rs.getLong(1), rs.getString(3));
+            long parent = rs.getLong(4);
+            if (!rs.wasNull() && parent > 0) subParentByUser.put(rs.getLong(1), parent);
         }, args);
 
         for (Long userId : userIds) {
@@ -251,7 +257,8 @@ public class AuthStateSync {
             UserState loaded = new UserState(userId, (String) user[0], (String) user[1], (String) user[2],
                     (Instant) user[3], (String) user[4], roles, perms, blockedIps, blockedDevices,
                     activeApiKeyUsers.contains(userId), telegramUsers.contains(userId),
-                    subStatusByUser.get(userId), subPermissionsByUser.get(userId));
+                    subStatusByUser.get(userId), subPermissionsByUser.get(userId),
+                    subParentByUser.get(userId));
             state.putUser(loaded);
         }
     }

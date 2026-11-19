@@ -130,4 +130,43 @@ class SubAccountServiceTest {
         verify(repository).updateStatusBySubUserId(2001L, "FROZEN");
         verify(sync).reloadUser(2001L);
     }
+
+    @Test
+    @DisplayName("主账号可以查看子账号资产并冻结或解冻")
+    void canViewAndFreezeOwnedSubAccount() {
+        com.surprising.account.provider.service.AccountService accounts = mock(com.surprising.account.provider.service.AccountService.class);
+        SubAccountService managing = new SubAccountService(repository, authPersistenceService, accountGateway, accounts);
+        SubAccountRecord relation = new SubAccountRecord(
+                1L, 1001L, 2001L, "trader1", "TRADE_SPOT", "ACTIVE", Instant.now());
+        SubAccountRecord frozen = new SubAccountRecord(
+                1L, 1001L, 2001L, "trader1", "TRADE_SPOT", "FROZEN", Instant.now());
+        when(repository.findRelation(1001L, 2001L)).thenReturn(Optional.of(relation), Optional.of(frozen), Optional.of(frozen));
+        when(repository.updateStatus(1001L, 2001L, "FROZEN")).thenReturn(true);
+        ProductBalanceResponse balance = new ProductBalanceResponse(
+                2001L, com.surprising.account.api.model.AccountType.SPOT, "USDT", 100_000000L, 0L, 100_000000L, Instant.now());
+        when(accounts.productBalances(2001L, com.surprising.account.api.model.AccountType.SPOT))
+                .thenReturn(new com.surprising.account.api.model.ProductBalanceQueryResponse(1, List.of(balance)));
+
+        var assets = managing.assets(1001L, 2001L, com.surprising.account.api.model.AccountType.SPOT);
+        assertEquals(1, assets.count());
+        assertEquals(2001L, assets.balances().get(0).userId());
+
+        SubAccountRecord updated = managing.updateStatus(1001L, 2001L, "FROZEN");
+        assertEquals("FROZEN", updated.status());
+        verify(repository).updateStatus(1001L, 2001L, "FROZEN");
+    }
+
+    @Test
+    @DisplayName("不能查看或冻结不属于自己的子账号")
+    void cannotManageAnotherParentsSubAccount() {
+        com.surprising.account.provider.service.AccountService accounts = mock(com.surprising.account.provider.service.AccountService.class);
+        SubAccountService managing = new SubAccountService(repository, authPersistenceService, accountGateway, accounts);
+        when(repository.findRelation(1001L, 2001L)).thenReturn(Optional.empty());
+        assertThrows(IllegalArgumentException.class,
+                () -> managing.assets(1001L, 2001L, com.surprising.account.api.model.AccountType.SPOT));
+        assertThrows(IllegalArgumentException.class,
+                () -> managing.updateStatus(1001L, 2001L, "FROZEN"));
+        verify(repository, never()).updateStatus(anyLong(), anyLong(), anyString());
+        verify(accounts, never()).productBalances(anyLong(), any());
+    }
 }

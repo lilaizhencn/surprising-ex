@@ -24,6 +24,7 @@ import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionRevokeR
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminUserQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogQueryResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.OperatingAccount;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.EmailVerificationRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
@@ -172,8 +173,44 @@ public class AuthService {
     public AuthResponse currentSession(JwtPrincipal principal) {
         UserState user = authState.user(principal.userId());
         if (user == null) throw new IllegalArgumentException("access session is no longer active");
-        return new AuthResponse(new AuthenticatedUser(user.userId(), user.username(), user.email(), user.status(),
-                user.roles(), user.createdAt(), user.displayName()), null, null);
+        long operatingUserId = principal.userId();
+        if (principal.sessionId() > 0) {
+            SessionState session = authState.session(principal.sessionId());
+            if (session == null || session.userId() != principal.userId()) {
+                throw new IllegalArgumentException("access session is no longer active");
+            }
+            operatingUserId = restoreOperatingAccount(session);
+        }
+        return sessionAuthResponse(user, operatingUserId);
+    }
+
+    /**
+     * 在当前主账号登录会话内切换查看/交易账户。传主账号 ID 或空表示切回主账号。
+     * 允许切到已冻结或只读的子账号以便查看；写操作仍走 {@link #requireSubAccountWrite(long)}。
+     */
+    public AuthResponse switchOperatingAccount(JwtPrincipal principal, Long requestedUserId) {
+        if (principal == null || principal.sessionId() <= 0) {
+            throw new IllegalArgumentException("access session is no longer active");
+        }
+        SessionState session = authState.session(principal.sessionId());
+        if (session == null || session.userId() != principal.userId()) {
+            throw new IllegalArgumentException("access session is no longer active");
+        }
+        long loginUserId = principal.userId();
+        long target = requestedUserId == null || requestedUserId <= 0 ? loginUserId : requestedUserId;
+        if (target != loginUserId) {
+            UserState operating = ownedOperatingAccount(loginUserId, target, true);
+            if (operating == null) {
+                throw new IllegalStateException("operating account is not available for this user");
+            }
+            if ("FROZEN".equals(operating.status())) {
+                throw new IllegalStateException("user is not active");
+            }
+        }
+        authState.replaceSession(session.withOperatingUserId(target), Duration.ofSeconds(session.ttlSeconds()));
+        UserState user = authState.user(loginUserId);
+        if (user == null) throw new IllegalArgumentException("access session is no longer active");
+        return sessionAuthResponse(user, target);
     }
 
     /** 登出：作废当前登录会话；Valkey 会话立即删除，Postgres 仅追加操作记录。 */
@@ -244,8 +281,9 @@ public class AuthService {
         }
         AuthClientMetadata client = currentClient.current();
         requireStateAccessAllowed(user, session.deviceId(), client == null ? null : client.ipAddress());
+        long operatingUserId = resolveOperatingUserId(session, user.userId());
         JwtPrincipal verified = new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(),
-                principal.expiresAt(), principal.sessionId());
+                principal.expiresAt(), principal.sessionId(), operatingUserId);
         currentClient.cacheBearer(authorizationHeader, verified);
         return verified;
     }
@@ -389,7 +427,66 @@ public class AuthService {
         authStateSync.reloadUser(user.userId());
         long sessionId = repository.createSession(user.userId(), ttl, userAgent(request), ipAddress(request), deviceId, now);
         String token = jwtTokenService.createSessionToken(user.userId(), user.username(), user.roles(), sessionId, now);
-        return new AuthResponse(user, token, sessionExpiresAt, requiresEmailVerification);
+        UserState published = authState.user(user.userId());
+        return new AuthResponse(user, token, sessionExpiresAt, requiresEmailVerification, false,
+                operatingAccount(published != null ? published : null, user, true));
+    }
+
+    private AuthResponse sessionAuthResponse(UserState loginUser, long operatingUserId) {
+        AuthenticatedUser user = new AuthenticatedUser(loginUser.userId(), loginUser.username(), loginUser.email(),
+                loginUser.status(), loginUser.roles(), loginUser.createdAt(), loginUser.displayName());
+        boolean parent = operatingUserId == loginUser.userId();
+        UserState operating = parent ? loginUser : authState.user(operatingUserId);
+        return new AuthResponse(user, null, null, false, false, operatingAccount(operating, user, parent));
+    }
+
+    private OperatingAccount operatingAccount(UserState operating, AuthenticatedUser fallback, boolean parent) {
+        if (operating != null) {
+            return new OperatingAccount(operating.userId(), operating.username(), operating.displayName(),
+                    operating.status(), operating.subAccountStatus(), operating.subAccountPermissions(), parent);
+        }
+        if (fallback == null || !parent) return null;
+        return new OperatingAccount(fallback.userId(), fallback.username(), fallback.displayName(),
+                fallback.status(), null, null, true);
+    }
+
+    /** 请求路径只读 Valkey：操作账户必须是本主账号的子账号，否则拒绝，不回落到主账号下单。 */
+    private long resolveOperatingUserId(SessionState session, long loginUserId) {
+        long operatingUserId = session.effectiveOperatingUserId();
+        if (operatingUserId == loginUserId) return loginUserId;
+        UserState operating = ownedOperatingAccount(loginUserId, operatingUserId, false);
+        if (operating == null) {
+            throw new IllegalStateException("operating account is no longer available");
+        }
+        if ("FROZEN".equals(operating.status())) {
+            throw new IllegalStateException("user is not active");
+        }
+        return operatingUserId;
+    }
+
+    /** 刷新会话时：无法确认的操作账户切回主账号，避免页面一直卡在失效选择。 */
+    private long restoreOperatingAccount(SessionState session) {
+        long operatingUserId = session.effectiveOperatingUserId();
+        if (operatingUserId == session.userId()) return operatingUserId;
+        UserState operating = ownedOperatingAccount(session.userId(), operatingUserId, true);
+        if (operating != null && !"FROZEN".equals(operating.status())) return operatingUserId;
+        authState.replaceSession(session.withOperatingUserId(session.userId()), Duration.ofSeconds(session.ttlSeconds()));
+        return session.userId();
+    }
+
+    private UserState ownedOperatingAccount(long loginUserId, long operatingUserId, boolean mayReload) {
+        UserState operating = authState.user(operatingUserId);
+        if (!ownedSubAccount(loginUserId, operating) && mayReload && authStateSync != null) {
+            authStateSync.reloadUser(operatingUserId);
+            operating = authState.user(operatingUserId);
+        }
+        return ownedSubAccount(loginUserId, operating) ? operating : null;
+    }
+
+    private static boolean ownedSubAccount(long loginUserId, UserState operating) {
+        return operating != null
+                && operating.subAccountParentUserId() != null
+                && operating.subAccountParentUserId() == loginUserId;
     }
 
     private java.util.Optional<GatewayUserRepository.UserCredential> credential(String identifier) {

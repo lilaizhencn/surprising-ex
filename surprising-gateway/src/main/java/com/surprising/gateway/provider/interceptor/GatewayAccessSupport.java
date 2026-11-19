@@ -78,7 +78,7 @@ public final class GatewayAccessSupport {
 
     public static GatewayIdentity authenticateBearerUser(AuthService authService, String authorization) {
         JwtPrincipal principal = authenticateBearerPrincipal(authService, authorization);
-        return new GatewayIdentity(Long.toString(principal.userId()), principal.username(),
+        return new GatewayIdentity(Long.toString(principal.operatingUserId()), principal.username(),
                 principal.status(), principal.roles(), false);
     }
 

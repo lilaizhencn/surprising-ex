@@ -190,6 +190,7 @@ public class CustodyWalletController {
             @Valid @RequestBody CreateWithdrawalRequest request) {
         try {
             JwtPrincipal principal = principal(authorization);
+            requireParentOperatingAccount(principal);
             var intent = new CustodyWithdrawalService.WithdrawalRequest(request.custodyAddressId(), request.chain(),
                     request.assetSymbol(), request.toAddress(), request.amount(), request.externalReference(), request.networkRevision());
             var replay = withdrawalService.replay(principal.userId(), idempotencyKey, intent);
@@ -240,6 +241,12 @@ public class CustodyWalletController {
 
     private JwtPrincipal principal(String authorization) {
         return GatewayAccessSupport.authenticateBearerPrincipal(authService, authorization);
+    }
+
+    private void requireParentOperatingAccount(JwtPrincipal principal) {
+        if (principal.operatingUserId() != principal.userId()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sub-account cannot withdraw");
+        }
     }
 
     private ResponseStatusException badRequest(IllegalArgumentException ex) {

@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.auth.model.CurrentUser;
+import com.surprising.gateway.provider.auth.model.OperatingUser;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.VipTierModels.UserVipStatusResponse;
 import com.surprising.trading.order.model.VipTierModels.VipTierDefinition;
@@ -24,12 +24,12 @@ public class VipFeeController {
     }
 
     @GetMapping("/my-status")
-    public UserVipStatusResponse myStatus(@CurrentUser long userId) {
+    public UserVipStatusResponse myStatus(@OperatingUser long userId) {
         return vipTierService.getUserVipStatus(userId);
     }
 
     @PostMapping("/evaluate")
-    public UserVipStatusResponse evaluate(@CurrentUser long userId,
+    public UserVipStatusResponse evaluate(@OperatingUser long userId,
                                           @RequestParam(required = false) ProductLine productLine) {
         return vipTierService.evaluateAndApplyUserVip(userId, productLine);
     }

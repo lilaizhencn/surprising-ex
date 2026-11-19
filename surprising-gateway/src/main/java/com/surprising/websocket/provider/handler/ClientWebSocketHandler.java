@@ -154,7 +154,7 @@ public class ClientWebSocketHandler {
     private void subscribe(ClientConnection connection, WsClientCommand command) {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
         if (topic.userId() != null) {
-            long verified = connection.apiKey() == null ? authenticator.principal(connection.accessToken(), connection.clientIp()).userId()
+            long verified = connection.apiKey() == null ? authenticator.principal(connection.accessToken(), connection.clientIp()).operatingUserId()
                     : authenticator.apiKeyUser(connection.apiKey(), connection.clientIp());
             if (verified != topic.userId()) throw new IllegalArgumentException("websocket identity mismatch");
         }
@@ -177,7 +177,7 @@ public class ClientWebSocketHandler {
         String token = command.token() != null && !command.token().isBlank()
                 ? command.token() : connection.browserSessionToken();
         var principal = authenticator.principal(token, connection.clientIp());
-        long userId = principal.userId();
+        long userId = principal.operatingUserId();
         try {
             if (connection.authenticatedUserId() != null && connection.authenticatedUserId() != userId)
                 throw new IllegalArgumentException("websocket session is already authenticated");
