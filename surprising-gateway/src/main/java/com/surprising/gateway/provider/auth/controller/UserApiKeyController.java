@@ -43,7 +43,7 @@ public class UserApiKeyController {
             @Valid @RequestBody CreateApiKeyRequest request,
             HttpServletRequest httpRequest) {
         try {
-            return service.create(authorization, binding.label(request.label()), binding.normalizePermissions(request.permissions()), binding.normalizeIpAllowlist(request.ipAllowlist()), emailCode, totpCode,
+            return service.create(authorization, binding.label(request.label()), binding.normalizePermissions(request.permissions()), binding.normalizeIpAllowlist(request.ipAllowlist()), request.subUserId(), emailCode, totpCode,
                     httpRequest.getRemoteAddr());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

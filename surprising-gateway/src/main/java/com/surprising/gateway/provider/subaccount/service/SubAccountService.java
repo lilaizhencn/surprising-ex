@@ -7,6 +7,7 @@ import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.subaccount.model.SubAccountModels.*;
 import com.surprising.gateway.provider.subaccount.repository.SubAccountRepository;
+import com.surprising.gateway.provider.auth.state.AuthStateSync;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
@@ -28,6 +29,7 @@ public class SubAccountService {
     private final AuthPersistenceService authPersistenceService;
     private final GatewayProductServices products;
     private final AccountCommandGateway accountCommandGateway;
+    private AuthStateSync authStateSync;
 
     @Autowired
     public SubAccountService(SubAccountRepository subAccountRepository,
@@ -46,6 +48,15 @@ public class SubAccountService {
         this.authPersistenceService = authPersistenceService;
         this.products = null;
         this.accountCommandGateway = accountCommandGateway;
+    }
+
+    @Autowired(required = false)
+    public void setAuthStateSync(AuthStateSync authStateSync) {
+        this.authStateSync = authStateSync;
+    }
+
+    private void publishUser(long userId) {
+        if (authStateSync != null) authStateSync.reloadUser(userId);
     }
 
     /**
@@ -79,6 +90,7 @@ public class SubAccountService {
         SubAccountRecord record = subAccountRepository.createRelation(
                 parentUserId, subUser.userId(), request.subAccountName().trim(), perms);
 
+        publishUser(subUser.userId());
         log.info("SubAccount created: parentUserId={}, subUserId={}, name={}",
                 parentUserId, subUser.userId(), request.subAccountName());
         return record;
@@ -117,6 +129,7 @@ public class SubAccountService {
         subAccountRepository.findBySubUserId(subUserId)
                 .orElseThrow(() -> new IllegalArgumentException("SubAccount not found: " + subUserId));
         subAccountRepository.updateStatusBySubUserId(subUserId, normalized);
+        publishUser(subUserId);
         return subAccountRepository.findBySubUserId(subUserId)
                 .orElseThrow(() -> new IllegalStateException("SubAccount disappeared after update: " + subUserId));
     }

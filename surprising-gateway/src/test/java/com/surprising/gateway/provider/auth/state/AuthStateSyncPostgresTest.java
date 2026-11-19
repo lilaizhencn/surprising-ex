@@ -34,7 +34,7 @@ class AuthStateSyncPostgresTest {
                 System.getenv("INSTRUMENT_TEST_DB_USER"), System.getenv("INSTRUMENT_TEST_DB_PASSWORD")));
         jdbc.execute("TRUNCATE gateway_users CASCADE");
         fixture = new AuthStateFixture();
-        sync = new AuthStateSync(jdbc, fixture.state, fixture.properties);
+        sync = new AuthStateSync(jdbc, fixture.state, fixture.properties, new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource()));
         users = new GatewayUserRepository(jdbc); users.setAuthState(sync);
         userRoles = new GatewayUserRoleRepository(jdbc); userRoles.setAuthState(sync);
         rolePermissions = new GatewayRolePermissionRepository(jdbc); rolePermissions.setAuthState(sync);

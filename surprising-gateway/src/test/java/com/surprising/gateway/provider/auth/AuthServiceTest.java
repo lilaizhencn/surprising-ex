@@ -136,6 +136,35 @@ class AuthServiceTest {
     }
 
     @Test
+    void frozenSubAccountApiKeyCannotTradeOrTransfer() {
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.subUser(
+                42L, "NORMAL", "FROZEN", "TRADE_SPOT"));
+        service.requireApiKeyAccess(42L, "203.0.113.7", "READ");
+        assertThatThrownBy(() -> service.requireApiKeyAccess(42L, "203.0.113.7", "TRADE"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("sub-account is not active");
+        assertThatThrownBy(() -> service.requireApiKeyAccess(42L, "203.0.113.7", "WITHDRAW"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("sub-account is not active");
+        assertThatThrownBy(() -> service.requireSubAccountWrite(42L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("sub-account is not active");
+    }
+
+    @Test
+    void readOnlySubAccountApiKeyCannotEscalateToTradeOrWithdraw() {
+        fixture.state.putUser(com.surprising.gateway.provider.auth.state.AuthStateFixture.subUser(
+                42L, "NORMAL", "ACTIVE", "READONLY"));
+        service.requireApiKeyAccess(42L, "203.0.113.7", "READ");
+        assertThatThrownBy(() -> service.requireApiKeyAccess(42L, "203.0.113.7", "TRADE"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("read-only");
+        assertThatThrownBy(() -> service.requireApiKeyAccess(42L, "203.0.113.7", "WITHDRAW"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("read-only");
+    }
+
+    @Test
     void adminSessionsReturnsRepositoryRows() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         when(jwtTokenService.verifySessionToken("admin-token"))

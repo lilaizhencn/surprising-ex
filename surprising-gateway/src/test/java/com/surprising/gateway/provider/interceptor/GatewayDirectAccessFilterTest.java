@@ -153,6 +153,7 @@ class GatewayDirectAccessFilterTest {
         }
 
         var mismatchReq = new MockHttpServletRequest("GET", "/api/v1/risk/account/latest");
+        mismatchReq.setQueryString("productLine=LINEAR_PERPETUAL&userId=99");
         mismatchReq.setParameter("productLine", "LINEAR_PERPETUAL");
         mismatchReq.setParameter("userId", "99");
         mismatchReq.addHeader("Authorization", "Bearer tok4");
@@ -161,6 +162,7 @@ class GatewayDirectAccessFilterTest {
         assertThat(mismatchRes.getStatus()).isEqualTo(403);
 
         var okReq = new MockHttpServletRequest("GET", "/api/v1/risk/account/latest");
+        okReq.setQueryString("productLine=LINEAR_PERPETUAL&userId=4");
         okReq.setParameter("productLine", "LINEAR_PERPETUAL");
         okReq.setParameter("userId", "4");
         okReq.addHeader("Authorization", "Bearer tok4");
@@ -275,5 +277,22 @@ class GatewayDirectAccessFilterTest {
         assertThat(wsAdminRes.getStatus()).isEqualTo(200);
         assertThat(seenWsAdmin.get()).isEqualTo("3");
         verify(auth).requireAdminPermission(3L, List.of("ADMIN"), "admin.gateway.websocket-admin.read");
+    }
+
+    @Test
+    void frozenSubAccountBearerCannotTrade() throws Exception {
+        AuthService auth = mock(AuthService.class);
+        when(auth.authenticateBearer("Bearer subTok")).thenReturn(new JwtPrincipal(
+                2001L, "sub_1001_trader1", "NORMAL", List.of("USER"), Instant.now().plusSeconds(60), 9L));
+        doThrow(new IllegalStateException("sub-account is not active")).when(auth).requireSubAccountWrite(2001L);
+        var f = filter(auth);
+        var req = new MockHttpServletRequest("POST", "/api/v1/trading/orders");
+        req.setParameter("productLine", "SPOT");
+        req.addHeader("Authorization", "Bearer subTok");
+        var res = new MockHttpServletResponse();
+        var proceeded = new java.util.concurrent.atomic.AtomicBoolean(false);
+        f.doFilter(req, res, (r, s) -> proceeded.set(true));
+        assertThat(res.getStatus()).isEqualTo(403);
+        assertThat(proceeded.get()).isFalse();
     }
 }

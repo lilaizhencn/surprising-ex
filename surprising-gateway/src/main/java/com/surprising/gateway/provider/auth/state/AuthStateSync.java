@@ -10,15 +10,20 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Postgres → Valkey 的低频同步：登录、管理员改状态/角色/权限、封禁 IP/设备、API Key 增删改时，
  * 从 Postgres 读出最新持久配置写入 Valkey。普通身份校验不会调用这里；不存储或恢复登录会话。
  * 只用 JdbcTemplate 直接查询，避免和各个仓储互相依赖。
+ * 发布用户状态时在独立可写事务里先锁 gateway_users 行，再读最新已提交配置并写入 Valkey，避免并发旧读覆盖新状态。
  */
 @Component
 public class AuthStateSync {
@@ -28,6 +33,7 @@ public class AuthStateSync {
     private final JdbcTemplate jdbc;
     private final AuthState state;
     private final GatewayProperties properties;
+    private final TransactionTemplate write;
     private final java.util.concurrent.ConcurrentHashMap<String,Runnable> pending=new java.util.concurrent.ConcurrentHashMap<>();
     private volatile long retryAt;
 
@@ -53,10 +59,16 @@ public class AuthStateSync {
         }
     }
 
-    public AuthStateSync(JdbcTemplate jdbc, AuthState state, GatewayProperties properties) {
+    @Autowired
+    public AuthStateSync(JdbcTemplate jdbc, AuthState state, GatewayProperties properties,
+                         PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
         this.state = state;
         this.properties = properties;
+        TransactionTemplate write = new TransactionTemplate(transactions);
+        write.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        write.setReadOnly(false);
+        this.write = write;
     }
 
     private void afterCommit(Runnable action) {
@@ -78,6 +90,11 @@ public class AuthStateSync {
     }
 
     private Optional<UserState> loadUser(long userId) {
+        return write.execute(status -> loadUserLocked(userId));
+    }
+
+    private Optional<UserState> loadUserLocked(long userId) {
+        jdbc.query("SELECT user_id FROM gateway_users WHERE user_id = ? FOR UPDATE", rs -> {}, userId);
         var rows = jdbc.query("""
                 SELECT username, email, display_name, created_at, status FROM gateway_users WHERE user_id = ?
                 """, (rs, row) -> new Object[]{rs.getString(1), rs.getString(2), rs.getString(3),
@@ -114,14 +131,22 @@ public class AuthStateSync {
         boolean telegramBound = Boolean.TRUE.equals(jdbc.queryForObject(
                 "SELECT EXISTS(SELECT 1 FROM gateway_telegram_identities WHERE user_id = ? AND revoked_at IS NULL)",
                 Boolean.class, userId));
+        String[] relation = loadSubAccountRelation(userId);
         var loaded = new UserState(userId, (String) user[0], (String) user[1], (String) user[2], (Instant) user[3],
-                (String) user[4], roles, permissions, blockedIps, blockedDevices, hasApiKey, telegramBound);
+                (String) user[4], roles, permissions, blockedIps, blockedDevices, hasApiKey, telegramBound,
+                relation[0], relation[1]);
         state.putUser(loaded);
         return Optional.of(loaded);
     }
 
-    /** 仅用于已经提交的绑定回调；独立只读事务结束后立即发布用户配置。 */
-    @org.springframework.transaction.annotation.Transactional(propagation=org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,readOnly=true)
+    private String[] loadSubAccountRelation(long userId) {
+        var rows = jdbc.query("""
+                SELECT status, permissions FROM gateway_sub_account_relations WHERE sub_user_id = ?
+                """, (rs, row) -> new String[]{rs.getString(1), rs.getString(2)}, userId);
+        return rows.isEmpty() ? new String[]{null, null} : rows.get(0);
+    }
+
+    /** 仅用于已经提交的绑定回调；独立可写事务里锁行后再发布，避免只读事务中 FOR UPDATE。 */
     public void reloadCommittedUser(long userId) { synchronize("user:"+userId,() -> loadUser(userId)); }
 
     /** 角色权限变更：拥有该角色的用户批量读取后写入 Valkey，避免按用户 N+1 查询。 */
@@ -135,8 +160,19 @@ public class AuthStateSync {
     }
 
     private void reloadUsers(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) return;
+        List<Long> ordered = new ArrayList<>(new LinkedHashSet<>(userIds));
+        ordered.sort(Long::compareTo);
+        write.executeWithoutResult(status -> reloadUsersLocked(ordered));
+    }
+
+    private void reloadUsersLocked(List<Long> userIds) {
         String placeholders = String.join(",", java.util.Collections.nCopies(userIds.size(), "?"));
         Object[] args = userIds.toArray();
+
+        jdbc.query("""
+                SELECT user_id FROM gateway_users WHERE user_id IN (%s) ORDER BY user_id FOR UPDATE
+                """.formatted(placeholders), rs -> {}, args);
 
         var users = new java.util.LinkedHashMap<Long, Object[]>();
         jdbc.query("""
@@ -192,6 +228,16 @@ public class AuthStateSync {
         jdbc.query("SELECT DISTINCT user_id FROM gateway_telegram_identities WHERE user_id IN (%s) AND revoked_at IS NULL".formatted(placeholders),
                 rs -> { telegramUsers.add(rs.getLong(1)); }, args);
 
+        var subStatusByUser = new java.util.HashMap<Long, String>();
+        var subPermissionsByUser = new java.util.HashMap<Long, String>();
+        jdbc.query("""
+                SELECT sub_user_id, status, permissions FROM gateway_sub_account_relations
+                 WHERE sub_user_id IN (%s)
+                """.formatted(placeholders), rs -> {
+            subStatusByUser.put(rs.getLong(1), rs.getString(2));
+            subPermissionsByUser.put(rs.getLong(1), rs.getString(3));
+        }, args);
+
         for (Long userId : userIds) {
             Object[] user = users.get(userId);
             if (user == null) {
@@ -204,7 +250,8 @@ public class AuthStateSync {
             Set<String> blockedDevices = blockedDevicesByUser.getOrDefault(userId, Set.of());
             UserState loaded = new UserState(userId, (String) user[0], (String) user[1], (String) user[2],
                     (Instant) user[3], (String) user[4], roles, perms, blockedIps, blockedDevices,
-                    activeApiKeyUsers.contains(userId), telegramUsers.contains(userId));
+                    activeApiKeyUsers.contains(userId), telegramUsers.contains(userId),
+                    subStatusByUser.get(userId), subPermissionsByUser.get(userId));
             state.putUser(loaded);
         }
     }
@@ -215,9 +262,13 @@ public class AuthStateSync {
     }
 
     private void loadApiKey(String apiKey) {
+        write.executeWithoutResult(status -> loadApiKeyLocked(apiKey));
+    }
+
+    private void loadApiKeyLocked(String apiKey) {
         var rows = jdbc.query("""
                 SELECT api_key_id, user_id, permissions, ip_allowlist, secret_ciphertext, status
-                  FROM gateway_api_keys WHERE api_key = ?
+                  FROM gateway_api_keys WHERE api_key = ? FOR UPDATE
                 """, (rs, row) -> new Object[]{rs.getObject(1, UUID.class), rs.getLong(2), rs.getString(3),
                 rs.getString(4), rs.getString(5), rs.getString(6)}, apiKey);
         if (rows.isEmpty()) {
@@ -231,7 +282,7 @@ public class AuthStateSync {
         } else {
             state.deleteApiKey(apiKey);
         }
-        loadUser((Long) row[1]);
+        loadUserLocked((Long) row[1]);
     }
 
     /** 只同步持久配置，不读取或恢复任何浏览器/App 登录会话。 */
@@ -251,11 +302,7 @@ public class AuthStateSync {
                     """, (rs,row)->new KeyConfig(rs.getString(1),rs.getObject(2,UUID.class),rs.getLong(3),
                     rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7)),after);
             if (keys.isEmpty()) break;
-            reloadUsers(keys.stream().map(KeyConfig::userId).distinct().toList());
-            for (KeyConfig key:keys) {
-                if ("ACTIVE".equals(key.status())) state.putApiKey(new ApiKeyState(key.key(),key.id(),key.userId(),key.permissions(),key.ips(),key.secret()));
-                else state.deleteApiKey(key.key());
-            }
+            for (KeyConfig key:keys) loadApiKey(key.key());
             after = keys.get(keys.size() - 1).key();
         }
         after = "";

@@ -194,6 +194,11 @@ public class CustodyWalletController {
                     request.assetSymbol(), request.toAddress(), request.amount(), request.externalReference(), request.networkRevision());
             var replay = withdrawalService.replay(principal.userId(), idempotencyKey, intent);
             if (replay != null) return withdrawalReceipt(replay);
+            try {
+                authService.requireSubAccountWrite(principal.userId());
+            } catch (IllegalStateException ex) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+            }
             requireSecurity(principal.userId(), "WITHDRAWAL", emailCode, totpCode);
             requireKyc(principal.userId());
             complianceService.requireWithdrawalEligibility(principal.userId());

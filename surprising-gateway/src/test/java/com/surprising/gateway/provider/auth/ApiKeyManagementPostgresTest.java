@@ -191,7 +191,7 @@ class ApiKeyManagementPostgresTest {
     /** 密钥表的每次变更同步写入 Valkey（内存版），与线上仓库接线一致。 */
     private GatewayApiKeyRepository keyRepository(JdbcTemplate jdbc) {
         var repository = new GatewayApiKeyRepository(jdbc);
-        repository.setAuthState(new com.surprising.gateway.provider.auth.state.AuthStateSync(jdbc, fixture.state, new GatewayProperties()));
+        repository.setAuthState(new com.surprising.gateway.provider.auth.state.AuthStateSync(jdbc, fixture.state, new GatewayProperties(), new org.springframework.jdbc.datasource.DataSourceTransactionManager(jdbc.getDataSource())));
         return repository;
     }
 }

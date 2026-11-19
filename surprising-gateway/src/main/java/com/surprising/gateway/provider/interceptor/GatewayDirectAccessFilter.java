@@ -267,7 +267,9 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
             return GatewayAccessSupport.authenticateApiKey(apiKeys, apiKeyRequests, request, body, requiredScope);
         }
         if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            return GatewayAccessSupport.authenticateBearerUser(authService, authorization);
+            GatewayIdentity identity = GatewayAccessSupport.authenticateBearerUser(authService, authorization);
+            enforceSubAccountWrite(route, request, identity);
+            return identity;
         }
         throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "private route requires bearer token");
     }
@@ -321,6 +323,18 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     private static byte[] cachedBody(HttpServletRequest request) {
         Object attr = request.getAttribute(ProductRequestBodyFilter.BODY);
         return attr instanceof byte[] bytes ? bytes : null;
+    }
+
+    private void enforceSubAccountWrite(DirectRoute route, HttpServletRequest request, GatewayIdentity identity) {
+        if (identity == null || authService == null || GatewayAccessSupport.isReadMethod(request.getMethod())) return;
+        if (!supportsTradeApiKey(route.service())) return;
+        try {
+            authService.requireSubAccountWrite(Long.parseLong(identity.userId()));
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
+        }
     }
 
     private static boolean supportsTradeApiKey(String service) {

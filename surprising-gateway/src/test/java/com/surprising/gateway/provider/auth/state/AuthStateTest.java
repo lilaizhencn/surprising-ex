@@ -205,4 +205,22 @@ class AuthStateTest {
         过去(Duration.ofSeconds(5));
         assertThat(state.user(用户)).isNull();
     }
+
+    @Test
+    void 子账号关系字段写入后可以从Valkey读回且旧记录兼容() {
+        var sub = AuthStateFixture.subUser(8L, "NORMAL", "FROZEN", "READONLY");
+        fixture.state.putUser(sub);
+        var loaded = new AuthState(fixture.backend, fixture.properties, fixture.backend.clock::get).user(8L);
+        assertThat(loaded.subAccountStatus()).isEqualTo("FROZEN");
+        assertThat(loaded.subAccountPermissions()).isEqualTo("READONLY");
+        assertThat(loaded.subAccountFrozen()).isTrue();
+        assertThat(loaded.subAccountReadOnly()).isTrue();
+        fixture.backend.hashPut("auth:user:11", java.util.Map.of("status", "NORMAL", "roles", "USER",
+                "permissions", "", "blockedIps", "", "blockedDevices", "", "hasApiKey", "0", "telegramBound", "0"),
+                Duration.ofDays(7));
+        var legacy = new AuthState(fixture.backend, fixture.properties, fixture.backend.clock::get).user(11L);
+        assertThat(legacy.status()).isEqualTo("NORMAL");
+        assertThat(legacy.subAccountStatus()).isNull();
+        assertThat(legacy.subAccountFrozen()).isFalse();
+    }
 }

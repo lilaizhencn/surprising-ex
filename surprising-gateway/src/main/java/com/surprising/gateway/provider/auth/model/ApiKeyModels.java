@@ -12,7 +12,11 @@ public final class ApiKeyModels {
 
     public record CreateApiKeyRequest(@NotBlank @Size(max = 80) String label,
                                       List<String> permissions,
-                                      List<String> ipAllowlist) {
+                                      List<String> ipAllowlist,
+                                      Long subUserId) {
+        public CreateApiKeyRequest(String label, List<String> permissions, List<String> ipAllowlist) {
+            this(label, permissions, ipAllowlist, null);
+        }
     }
 
     public record RevokeApiKeyRequest(@NotBlank String apiKey) {
@@ -26,7 +30,12 @@ public final class ApiKeyModels {
     }
 
     public record ApiKeyView(String apiKey, String label, String permissions, String status,
-                             List<String> ipAllowlist, Instant createdAt, Instant lastUsedAt, Instant revokedAt) {
+                             List<String> ipAllowlist, Instant createdAt, Instant lastUsedAt, Instant revokedAt,
+                             Long userId) {
+        public ApiKeyView(String apiKey, String label, String permissions, String status,
+                          List<String> ipAllowlist, Instant createdAt, Instant lastUsedAt, Instant revokedAt) {
+            this(apiKey, label, permissions, status, ipAllowlist, createdAt, lastUsedAt, revokedAt, null);
+        }
     }
 
 }

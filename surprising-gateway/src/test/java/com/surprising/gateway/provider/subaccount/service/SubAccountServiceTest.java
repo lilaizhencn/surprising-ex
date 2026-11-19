@@ -97,4 +97,37 @@ class SubAccountServiceTest {
         );
         assertTrue(ex.getMessage().contains("SubAccount not found"));
     }
+
+    @Test
+    @DisplayName("冻结子账户后拒绝主子划转")
+    void shouldRejectTransferWhenSubAccountFrozen() {
+        SubAccountRecord relation = new SubAccountRecord(
+                1L, 1001L, 2001L, "trader1", "TRADE_SPOT", "FROZEN", Instant.now()
+        );
+        when(repository.findRelation(1001L, 2001L)).thenReturn(Optional.of(relation));
+        SubAccountTransferRequest request = new SubAccountTransferRequest(
+                2001L, true, "USDT", 100L, ProductLine.SPOT
+        );
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                service.transfer(1001L, request)
+        );
+        assertTrue(ex.getMessage().contains("not active"));
+        verify(accountGateway, never()).transferOut(any());
+    }
+
+    @Test
+    @DisplayName("冻结关系后发布子账户用户状态")
+    void shouldPublishUserStateAfterFreeze() {
+        com.surprising.gateway.provider.auth.state.AuthStateSync sync =
+                org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class);
+        service.setAuthStateSync(sync);
+        SubAccountRecord frozen = new SubAccountRecord(
+                1L, 1001L, 2001L, "trader1", "TRADE_SPOT", "FROZEN", Instant.now()
+        );
+        when(repository.findBySubUserId(2001L)).thenReturn(Optional.of(frozen));
+        SubAccountRecord result = service.adminUpdateStatus(2001L, "FROZEN");
+        assertEquals("FROZEN", result.status());
+        verify(repository).updateStatusBySubUserId(2001L, "FROZEN");
+        verify(sync).reloadUser(2001L);
+    }
 }

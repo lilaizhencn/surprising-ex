@@ -48,33 +48,59 @@ public class GatewayApiKeyRepository {
     }
 
     public List<ApiKeyRecord> list(long userId) {
+        return listForUsers(List.of(userId));
+    }
+
+    public List<ApiKeyRecord> listForUsers(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) return List.of();
         return jdbcTemplate.query("""
                 SELECT api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist,
                        status, created_at, revoked_at
                   FROM gateway_api_keys
-                 WHERE user_id = ?
+                 WHERE user_id = ANY(?)
                  ORDER BY created_at DESC, api_key_id DESC
-                """, (rs, rowNum) -> toRecord(rs), userId);
+                """, (rs, rowNum) -> toRecord(rs), (Object) userIds.toArray(Long[]::new));
     }
 
     public boolean revoke(long userId, String apiKey, Instant now) {
+        return revokeForUsers(List.of(userId), apiKey, now);
+    }
+
+    public boolean revokeForUsers(List<Long> userIds, String apiKey, Instant now) {
+        if (userIds == null || userIds.isEmpty()) return false;
         boolean revoked = jdbcTemplate.update("""
                 UPDATE gateway_api_keys
                    SET status = 'REVOKED', revoked_at = ?
-                 WHERE user_id = ? AND api_key = ? AND status = 'ACTIVE'
-                """, Timestamp.from(now), userId, apiKey) == 1;
+                 WHERE user_id = ANY(?) AND api_key = ? AND status = 'ACTIVE'
+                """, Timestamp.from(now), (Object) userIds.toArray(Long[]::new), apiKey) == 1;
         if (revoked && authState != null) authState.apiKeyChanged(apiKey);
         return revoked;
     }
 
     public boolean update(long userId, String apiKey, String label, String permissions, String ipAllowlist) {
+        return updateForUsers(List.of(userId), apiKey, label, permissions, ipAllowlist);
+    }
+
+    public boolean updateForUsers(List<Long> userIds, String apiKey, String label, String permissions, String ipAllowlist) {
+        if (userIds == null || userIds.isEmpty()) return false;
         boolean updated = jdbcTemplate.update("""
                 UPDATE gateway_api_keys
                    SET label = ?, permissions = ?, ip_allowlist = ?
-                 WHERE user_id = ? AND api_key = ? AND status = 'ACTIVE'
-                """, label, permissions, ipAllowlist, userId, apiKey) == 1;
+                 WHERE user_id = ANY(?) AND api_key = ? AND status = 'ACTIVE'
+                """, label, permissions, ipAllowlist, (Object) userIds.toArray(Long[]::new), apiKey) == 1;
         if (updated && authState != null) authState.apiKeyChanged(apiKey);
         return updated;
+    }
+
+    public java.util.Optional<ApiKeyRecord> findActiveForUsers(List<Long> userIds, String apiKey) {
+        if (userIds == null || userIds.isEmpty() || apiKey == null || apiKey.isBlank()) return java.util.Optional.empty();
+        List<ApiKeyRecord> rows = jdbcTemplate.query("""
+                SELECT api_key_id, user_id, api_key, secret_ciphertext, label, permissions, ip_allowlist,
+                       status, created_at, revoked_at
+                  FROM gateway_api_keys
+                 WHERE user_id = ANY(?) AND api_key = ? AND status = 'ACTIVE'
+                """, (rs, rowNum) -> toRecord(rs), (Object) userIds.toArray(Long[]::new), apiKey);
+        return rows.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(rows.getFirst());
     }
 
     private ApiKeyRecord toRecord(java.sql.ResultSet rs) throws java.sql.SQLException {

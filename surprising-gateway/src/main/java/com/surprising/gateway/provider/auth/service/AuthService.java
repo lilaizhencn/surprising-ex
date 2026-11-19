@@ -453,6 +453,20 @@ public class AuthService {
         if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
         requireStateAccessAllowed(user, null, ipAddress);
         requireUserGatewayWrite(user.status(), "TRADE".equals(permission), "WITHDRAW".equals(permission));
+        requireSubAccountWrite(user, "TRADE".equals(permission) || "WITHDRAW".equals(permission));
+    }
+
+    /** 请求路径：按 Valkey 中已发布的子账号关系状态判断交易/划转，不回源数据库。 */
+    public void requireSubAccountWrite(long userId) {
+        var user = authState.user(userId);
+        if (user == null) throw new IllegalArgumentException("user not found");
+        requireSubAccountWrite(user, true);
+    }
+
+    void requireSubAccountWrite(UserState user, boolean write) {
+        if (!write || user == null) return;
+        if (user.subAccountFrozen()) throw new IllegalStateException("sub-account is not active");
+        if (user.subAccountReadOnly()) throw new IllegalStateException("sub-account is read-only");
     }
 
     public void recordSecurityChange(long userId, Instant now) {

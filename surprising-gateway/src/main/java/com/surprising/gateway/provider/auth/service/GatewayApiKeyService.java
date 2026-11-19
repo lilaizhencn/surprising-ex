@@ -31,6 +31,12 @@ public class GatewayApiKeyService {
     private final ClientIpResolver clientIpResolver;
     private final com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient;
     private final com.surprising.gateway.provider.auth.state.AuthState authState;
+    private com.surprising.gateway.provider.subaccount.repository.SubAccountRepository subAccountRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSubAccountRepository(com.surprising.gateway.provider.subaccount.repository.SubAccountRepository subAccountRepository) {
+        this.subAccountRepository = subAccountRepository;
+    }
 
     public GatewayApiKeyService(GatewayApiKeyRepository repository,
                                 AuthService authService,
@@ -51,27 +57,46 @@ public class GatewayApiKeyService {
     public CreatedApiKey create(String authorization, String label, String permissions,
                                 String ipAllowlist,
                                 String emailCode, String totpCode, String requestIp) {
+        return create(authorization, label, permissions, ipAllowlist, null, emailCode, totpCode, requestIp);
+    }
+
+    public CreatedApiKey create(String authorization, String label, String permissions,
+                                String ipAllowlist, Long subUserId,
+                                String emailCode, String totpCode, String requestIp) {
         requireWriteIp(permissions, ipAllowlist);
         JwtPrincipal principal = authService.authenticateBearer(authorization);
         requireSecurity(principal.userId(), emailCode, totpCode);
+        long targetUserId = principal.userId();
+        if (subUserId != null) {
+            requireSubAccountKeyPermissions(principal.userId(), subUserId, permissions);
+            targetUserId = subUserId;
+        }
         String apiKey = "sx_" + randomToken(24);
         String secret = randomToken(32);
         GatewayApiKeyRepository.ApiKeyRecord record = repository.create(
-                UUID.randomUUID(), principal.userId(), apiKey, totpService.encryptSecret(secret),
+                UUID.randomUUID(), targetUserId, apiKey, totpService.encryptSecret(secret),
                 label, permissions, ipAllowlist, Instant.now());
         return new CreatedApiKey(view(record), secret);
     }
 
     public List<ApiKeyView> list(String authorization) {
         JwtPrincipal principal = authService.authenticateBearer(authorization);
-        return repository.list(principal.userId()).stream().map(this::view).toList();
+        List<Long> ownerIds = managedUserIds(principal.userId());
+        List<GatewayApiKeyRepository.ApiKeyRecord> rows = ownerIds.size() == 1
+                ? repository.list(principal.userId())
+                : repository.listForUsers(ownerIds);
+        return rows.stream().map(this::view).toList();
     }
 
     public void revoke(String authorization, String apiKey, String emailCode, String totpCode,
                        String requestIp) {
         JwtPrincipal principal = authService.authenticateBearer(authorization);
         requireSecurity(principal.userId(), emailCode, totpCode);
-        if (!repository.revoke(principal.userId(), apiKey, Instant.now())) {
+        List<Long> ownerIds = managedUserIds(principal.userId());
+        boolean ok = ownerIds.size() == 1
+                ? repository.revoke(principal.userId(), apiKey, Instant.now())
+                : repository.revokeForUsers(ownerIds, apiKey, Instant.now());
+        if (!ok) {
             throw new IllegalArgumentException("active api key not found");
         }
     }
@@ -81,9 +106,44 @@ public class GatewayApiKeyService {
         requireWriteIp(permissions, ipAllowlist);
         JwtPrincipal principal = authService.authenticateBearer(authorization);
         requireSecurity(principal.userId(), emailCode, totpCode);
-        if (!repository.update(principal.userId(), apiKey, label, permissions, ipAllowlist)) {
+        List<Long> ownerIds = managedUserIds(principal.userId());
+        var existing = repository.findActiveForUsers(ownerIds, apiKey)
+                .orElseThrow(() -> new IllegalArgumentException("active api key not found"));
+        if (existing.userId() != principal.userId()) {
+            requireSubAccountKeyPermissions(principal.userId(), existing.userId(), permissions);
+        }
+        boolean ok = ownerIds.size() == 1
+                ? repository.update(principal.userId(), apiKey, label, permissions, ipAllowlist)
+                : repository.updateForUsers(ownerIds, apiKey, label, permissions, ipAllowlist);
+        if (!ok) {
             throw new IllegalArgumentException("active api key not found");
         }
+    }
+
+
+    private void requireSubAccountKeyPermissions(long parentUserId, long subUserId, String permissions) {
+        if (subAccountRepository == null) {
+            throw new IllegalArgumentException("sub-account service is unavailable");
+        }
+        var relation = subAccountRepository.findRelation(parentUserId, subUserId)
+                .orElseThrow(() -> new IllegalArgumentException("active sub-account not found"));
+        if (!"ACTIVE".equalsIgnoreCase(relation.status())) {
+            throw new IllegalArgumentException("sub-account is not active");
+        }
+        var scopes = Set.of(permissions.split(","));
+        if ("READONLY".equalsIgnoreCase(relation.permissions()) && (scopes.contains("TRADE") || scopes.contains("WITHDRAW"))) {
+            throw new IllegalArgumentException("sub-account is read-only");
+        }
+    }
+
+    private List<Long> managedUserIds(long parentUserId) {
+        if (subAccountRepository == null) return List.of(parentUserId);
+        var subs = subAccountRepository.listByParent(parentUserId);
+        if (subs.isEmpty()) return List.of(parentUserId);
+        var ids = new java.util.ArrayList<Long>(subs.size() + 1);
+        ids.add(parentUserId);
+        for (var sub : subs) ids.add(sub.subUserId());
+        return ids;
     }
 
     public long authenticate(ApiKeyAuthenticationRequest request, String requiredPermission) {
@@ -148,7 +208,7 @@ public class GatewayApiKeyService {
 
     private ApiKeyView view(GatewayApiKeyRepository.ApiKeyRecord record) {
         return new ApiKeyView(record.apiKey(), record.label(), record.permissions(), record.status(),
-                splitIpAllowlist(record.ipAllowlist()), record.createdAt(), null, record.revokedAt());
+                splitIpAllowlist(record.ipAllowlist()), record.createdAt(), null, record.revokedAt(), record.userId());
     }
 
     private List<String> splitIpAllowlist(String value) {

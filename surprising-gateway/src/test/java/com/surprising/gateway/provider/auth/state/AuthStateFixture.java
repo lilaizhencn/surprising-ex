@@ -52,6 +52,23 @@ public final class AuthStateFixture {
         return startSession(userId, sessionId);
     }
 
+    public static org.springframework.transaction.PlatformTransactionManager passthroughTransactions() {
+        return new org.springframework.transaction.PlatformTransactionManager() {
+            @Override public org.springframework.transaction.TransactionStatus getTransaction(
+                    org.springframework.transaction.TransactionDefinition definition) {
+                return new org.springframework.transaction.support.SimpleTransactionStatus();
+            }
+            @Override public void commit(org.springframework.transaction.TransactionStatus status) {}
+            @Override public void rollback(org.springframework.transaction.TransactionStatus status) {}
+        };
+    }
+
+    public static UserState subUser(long userId, String status, String subAccountStatus, String subAccountPermissions) {
+        return new UserState(userId, "user" + userId, "u" + userId + "@example.com", null, Instant.EPOCH,
+                status, List.of("USER"), List.of(), new LinkedHashSet<>(), new LinkedHashSet<>(), true, false,
+                subAccountStatus, subAccountPermissions);
+    }
+
     public SessionState startSession(long userId, long sessionId) {
         long now = backend.clock.get();
         var session = new SessionState(sessionId, userId, null, now, properties.getSecurity().getSessionTtl().toSeconds(), now);
