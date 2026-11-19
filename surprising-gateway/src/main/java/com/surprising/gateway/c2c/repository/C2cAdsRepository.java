@@ -30,6 +30,7 @@ public class C2cAdsRepository {
         };
         return jdbc.query("""
                 SELECT a.*,COALESCE(p.nickname,'商家'||right(a.maker_user_id::text,6)) AS merchant_nickname,c.tier,
+                    c.premium_verified,c.freeze_compensation,
                     s.completed_30d,s.ended_30d,s.completed_total,s.paid_seconds,s.released_seconds
                 FROM c2c_eligible_ads a
                 JOIN c2c_merchants c ON c.user_id=a.maker_user_id
@@ -54,6 +55,7 @@ public class C2cAdsRepository {
                         ((r.user_id=? AND r.target_user_id=a.maker_user_id) OR (r.target_user_id=? AND r.user_id=a.maker_user_id)))
                 ORDER BY %s LIMIT ? OFFSET ?
                 """.formatted(sort), (r,n) -> new C2cOffer(read(r,n),r.getString("merchant_nickname"),r.getString("tier"),
+                        r.getBoolean("premium_verified"),r.getBoolean("freeze_compensation"),
                         r.getLong("completed_30d"),r.getLong("ended_30d"),r.getLong("completed_total"),
                         r.getBigDecimal("paid_seconds"),r.getBigDecimal("released_seconds")),
                 market.id(),makerSide,amount,amount,market.assetScale(),market.fiatDecimals(),amount,

@@ -14,7 +14,10 @@ import com.surprising.gateway.c2c.model.C2cPaymentAccount;
 import com.surprising.gateway.c2c.repository.C2cAppealRepository;
 import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
 import com.surprising.gateway.c2c.repository.C2cPaymentAccountRepository;
+import com.surprising.gateway.c2c.repository.C2cProfileRepository;
 import com.surprising.gateway.c2c.repository.C2cReportRepository;
+import com.surprising.gateway.c2c.model.C2cPage;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
@@ -40,6 +43,10 @@ public class C2cAdminReview {
     private final C2cQueryService queries;
     private final ComplianceService compliance;
     private final GatewayUserRepository users;
+    private C2cProfileRepository profileRows;
+
+    @Autowired(required = false)
+    void setProfileRows(C2cProfileRepository profileRows) { this.profileRows = profileRows; }
 
     public C2cAdminReview(C2cAdminAccess access,C2cMerchantRepository merchants,C2cAppealRepository appeals,
                           C2cPaymentAccountRepository paymentRows,C2cReportRepository reports,C2cMarketService markets,C2cAdsRepository adRows,C2cAds ads,
@@ -73,6 +80,20 @@ public class C2cAdminReview {
         merchants.review(userId,state,tier,input.reason(),administrator.userId());
         access.audit(administrator,request,body);
         return Map.of("userId",Long.toString(userId),"status",state,"tier",tier,"revision",Long.toString(current.revision()+1));
+    }
+
+    @Transactional
+    public Map<String,Object> merchantAttributes(String authorization,C2cAdminRequest request,byte[] body,long userId,MerchantAttributesDecision input) {
+        var administrator=access.write(authorization,request,body);
+        if(!users.lockForNoKeyUpdate(userId)) throw new IllegalArgumentException("用户不存在");
+        var current=merchants.find(userId,true).orElseThrow(()->new IllegalArgumentException("商家不存在"));
+        if(current.revision()!=input.revision()) throw C2cProblem.conflict("商家状态已变更，请刷新");
+        String bd=input.bdContact()==null || input.bdContact().isBlank()?null:input.bdContact().trim();
+        merchants.updateAttributes(userId,input.premiumVerified(),input.freezeCompensation(),bd);
+        access.audit(administrator,request,body);
+        return Map.of("userId",Long.toString(userId),"premiumVerified",input.premiumVerified(),
+                "freezeCompensation",input.freezeCompensation(),"bdContact",bd==null?"":bd,
+                "revision",Long.toString(current.revision()+1));
     }
 
     @Transactional
@@ -142,6 +163,26 @@ public class C2cAdminReview {
         if(!"OPEN".equals(current.status())) throw C2cProblem.conflict("举报已处理，请刷新");
         reports.decide(id,input.decision(),input.reason(),administrator.userId());
         access.audit(administrator,request,body);return Map.of("reportId",id.toString(),"status",input.decision());
+    }
+
+    public C2cPage<Map<String,Object>> blacklistAppeals(String status,int limit,int offset) {
+        if(profileRows==null) return new C2cPage<>(List.of(),false,offset);
+        var rows=profileRows.adminBlacklistAppeals(status,limit+1,offset);
+        return new C2cPage<>(rows.stream().limit(limit).toList(),rows.size()>limit,offset);
+    }
+
+    @Transactional
+    public Map<String,Object> reviewBlacklistAppeal(String authorization,C2cAdminRequest request,byte[] body,long userId,ReportDecision input) {
+        var administrator=access.write(authorization,request,body);
+        if(input.decision()==null || !List.of("APPROVE","REJECT").contains(input.decision()))
+            throw new IllegalArgumentException("解除审核结论无效");
+        if(profileRows==null) throw C2cProblem.conflict("档案服务暂不可用");
+        if(!users.lockForNoKeyUpdate(userId)) throw new IllegalArgumentException("用户不存在");
+        profileRows.find(userId,true).orElseThrow(()->new IllegalArgumentException("用户 C2C 档案不存在"));
+        boolean approve="APPROVE".equals(input.decision());
+        profileRows.reviewUnblockAppeal(userId,approve,input.reason());
+        access.audit(administrator,request,body);
+        return Map.of("userId",Long.toString(userId),"status",approve?"APPROVED":"REJECTED");
     }
     private C2cPaymentAccount payment(UUID id) {
         long owner=paymentRows.owner(id).orElseThrow(()->new IllegalArgumentException("收款资料不存在"));

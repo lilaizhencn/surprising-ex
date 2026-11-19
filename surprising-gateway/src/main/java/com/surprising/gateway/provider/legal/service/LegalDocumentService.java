@@ -24,7 +24,7 @@ public class LegalDocumentService {
         var byId=translations.findFor(rows.stream().map(RevisionRow::revisionId).toList()).stream()
                 .collect(Collectors.groupingBy(TranslationRow::revisionId,Collectors.mapping(TranslationRow::translation,Collectors.toList())));
         return rows.stream().map(row->{
-            var translation=byId.getOrDefault(row.revisionId(),List.of()).stream().filter(t->t.locale().equals(requested)).findFirst()
+            var translation=pickTranslation(byId.getOrDefault(row.revisionId(),List.of()),requested)
                     .orElseThrow(()->new LegalProblem(Kind.NOT_READY,"The requested legal translation is temporarily unavailable."));
             return new Document(row.revisionId(),row.type(),row.type().slug(),row.revisionLabel(),translation.locale(),translation.title(),renderer.render(List.of(translation.bodyHtml())).get(translation.bodyHtml()),row.type().registrationRequired(),row.publishedAt());
         }).toList();
@@ -44,8 +44,13 @@ public class LegalDocumentService {
     public Document revision(long id,String locale) {
         String requested=ContentLocale.require(locale).code();
         var row=revisions.find(id).filter(r->r.publishedAt()!=null).orElseThrow(()->new LegalProblem(Kind.MISSING,"The published document revision is unavailable."));
-        var translation=translations.findFor(List.of(id)).stream().map(TranslationRow::translation).filter(t->t.locale().equals(requested)).findFirst()
+        var translation=pickTranslation(translations.findFor(List.of(id)).stream().map(TranslationRow::translation).toList(),requested)
                 .orElseThrow(()->new LegalProblem(Kind.MISSING,"The requested revision language is unavailable."));
         return new Document(id,row.type(),row.type().slug(),row.revisionLabel(),translation.locale(),translation.title(),renderer.render(List.of(translation.bodyHtml())).get(translation.bodyHtml()),row.type().registrationRequired(),row.publishedAt());
+    }
+    private static java.util.Optional<Translation> pickTranslation(List<Translation> items,String requested) {
+        return items.stream().filter(t->t.locale().equals(requested)).findFirst()
+                .or(()->items.stream().filter(t->t.locale().equals("en-US")).findFirst())
+                .or(()->items.stream().findFirst());
     }
 }

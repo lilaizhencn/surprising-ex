@@ -127,6 +127,12 @@ public class C2cAdminController {
         var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->review.merchant(authorization,request,body,id,merchantDecision(body)));
     }
+    @PostMapping("/merchants/{id}/attributes")
+    public Map<String,Object> merchantAttributes(@RequestHeader(value="Authorization",required=false) String authorization,
+            @PathVariable long id,@RequestBody byte[] body,HttpServletRequest http) {
+        var request=requestBinding.bind(http);
+        return audited(authorization,request,body,()->review.merchantAttributes(authorization,request,body,id,merchantAttributesDecision(body)));
+    }
     @GetMapping("/payment-accounts")
     public C2cPage<C2cAdminViews.PaymentAccount> accounts(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestParam(required=false) String status,@RequestParam(required=false) Long userId,
@@ -221,9 +227,29 @@ public class C2cAdminController {
         var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->review.report(authorization,request,body,id,reportDecision(body)));
     }
+    @GetMapping("/blacklist-appeals")
+    public C2cPage<Map<String,Object>> blacklistAppeals(@RequestHeader(value="Authorization",required=false) String authorization,
+            @RequestParam(required=false) String status,
+            @RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset) {
+        access.read(authorization,false);
+        validateList(status,null,limit,offset,List.of("PENDING","APPROVED","REJECTED"));
+        return review.blacklistAppeals(status,limit,offset);
+    }
+    @PostMapping("/blacklist-appeals/{userId}/review")
+    public Map<String,Object> reviewBlacklistAppeal(@RequestHeader(value="Authorization",required=false) String authorization,
+            @PathVariable long userId,@RequestBody byte[] body,HttpServletRequest http) {
+        var request=requestBinding.bind(http);
+        return audited(authorization,request,body,()->review.reviewBlacklistAppeal(authorization,request,body,userId,reportDecision(body)));
+    }
     private C2cAdminReviewModels.MerchantDecision merchantDecision(byte[] body) {
         var input=read(body,C2cAdminReviewModels.MerchantRequest.class);reason(input.reason());
         return new C2cAdminReviewModels.MerchantDecision(version(input.revision(),false),input.decision(),input.tier(),input.reason().trim());
+    }
+    private C2cAdminReviewModels.MerchantAttributesDecision merchantAttributesDecision(byte[] body) {
+        var input=read(body,C2cAdminReviewModels.MerchantAttributesRequest.class);reason(input.reason());
+        String bd=input.bdContact()==null?null:input.bdContact().trim();
+        if(bd!=null && bd.length()>120) throw new IllegalArgumentException("对接商务长度不能超过 120 字符");
+        return new C2cAdminReviewModels.MerchantAttributesDecision(version(input.revision(),false),input.premiumVerified(),input.freezeCompensation(),bd,input.reason().trim());
     }
 
     private C2cAdminReviewModels.PaymentDecision paymentDecision(byte[] body) {

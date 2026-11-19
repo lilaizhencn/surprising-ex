@@ -8,7 +8,13 @@ import tools.jackson.databind.JsonNode;
 /** 本人设置及列表的持久化投影；数值/标识保持原生类型，HTTP格式化由聚合层负责。 */
 public final class C2cProfileRows {
     private C2cProfileRows() { }
-    public record Profile(String nickname,boolean strangers,int verificationMinutes,long revision) { }
+    public record Profile(String nickname,boolean strangers,int verificationMinutes,long revision,
+                          int timeoutStrikes,boolean blacklisted,String blacklistReason,
+                          String unblockAppealStatus,String unblockAppealReason,String unblockReviewNote) {
+        public Profile(String nickname,boolean strangers,int verificationMinutes,long revision) {
+            this(nickname,strangers,verificationMinutes,revision,0,false,null,null,null,null);
+        }
+    }
     public record OrderStats(long completed,long canceled,long ongoing,long appealed) { }
     public record QuickReply(UUID id,long userId,String text) { }
     public record Relation(long targetUserId,String nickname,String kind,String merchantStatus,String tier) { }

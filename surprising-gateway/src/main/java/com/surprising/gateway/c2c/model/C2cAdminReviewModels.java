@@ -5,6 +5,8 @@ public final class C2cAdminReviewModels {
     private C2cAdminReviewModels() { }
 
     public record MerchantRequest(String revision,String decision,String tier,String reason) { }
+    public record MerchantAttributesRequest(String revision,boolean premiumVerified,boolean freezeCompensation,String bdContact,String reason) { }
+    public record MerchantAttributesDecision(long revision,boolean premiumVerified,boolean freezeCompensation,String bdContact,String reason) { }
     public record PaymentRequest(String revision,String decision,boolean identityChecked,String reason) { }
     public record AdRequest(String revision,String action,String reason) { }
     public record AppealDecision(String decision,String reason) { }

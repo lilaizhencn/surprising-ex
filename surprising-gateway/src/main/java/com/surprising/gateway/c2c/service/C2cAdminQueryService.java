@@ -51,6 +51,7 @@ public class C2cAdminQueryService {
         var rows = merchants.adminPage(status, userId, limit + 1, offset);
         var items = rows.stream().limit(limit).map(row -> new C2cAdminViews.Merchant(
                 Long.toString(row.userId()), row.nickname(), row.status(), row.tier(), row.application(), row.reviewReason(),
+                row.targetFiat(), row.targetAsset(), row.premiumVerified(), row.freezeCompensation(), row.bdContact(),
                 Long.toString(row.revision()), row.kycStatus(), row.bondStatus(), row.bondAsset(),
                 row.bondUnits() == null ? null : C2cViews.quantity(row.bondUnits(), row.bondScale()),
                 text(row.kycExpiresAt()), text(row.createdAt()))).toList();

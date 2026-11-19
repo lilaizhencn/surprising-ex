@@ -17,7 +17,10 @@ import org.springframework.web.bind.annotation.*;
 @ConditionalOnProperty(name="surprising.c2c.enabled",havingValue="true")
 public class C2cMeController {
     public record Settings(String revision,String nickname,boolean receiveStrangers,int verificationMinutes,C2cVerification verification) { }
-    public record MerchantApplication(String revision,String application) { }
+    public record MerchantApplication(String revision,String application,String targetFiat,String targetAsset) {
+        public MerchantApplication(String revision,String application) { this(revision,application,null,null); }
+    }
+    public record UnblockAppeal(String reason) { }
     public record QuickReply(UUID replyId,String text) { }
     public record Report(UUID reportId,String targetUserId,UUID orderId,String reason) { }
     public record Alert(UUID alertId,String revision,UUID marketId,String side,String targetPrice,boolean enabled) { }
@@ -41,7 +44,12 @@ public class C2cMeController {
     }
     @PostMapping("/me/merchant-application")
     public Map<String,Object> apply(@RequestHeader(value="Authorization",required=false) String authorization,@RequestBody MerchantApplication request) {
-        return profiles.applyMerchant(access.user(authorization),version(request.revision()),text(request.application(),10,2000,"商家申请资料"));
+        return profiles.applyMerchant(access.user(authorization),version(request.revision()),text(request.application(),10,2000,"商家申请资料"),
+                request.targetFiat(),request.targetAsset());
+    }
+    @PostMapping("/me/unblock-appeal")
+    public Map<String,Object> unblockAppeal(@RequestHeader(value="Authorization",required=false) String authorization,@RequestBody UnblockAppeal request) {
+        return profiles.submitUnblockAppeal(access.user(authorization),text(request.reason(),5,1000,"申请解除原因"));
     }
     @GetMapping("/me/quick-replies")
     public Map<String,Object> quickReplies(@RequestHeader(value="Authorization",required=false) String authorization) {

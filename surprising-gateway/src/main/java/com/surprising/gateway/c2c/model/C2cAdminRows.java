@@ -8,7 +8,9 @@ public final class C2cAdminRows {
     private C2cAdminRows() { }
 
     public record Merchant(long userId, String nickname, String status, String tier, String application,
-                           String reviewReason, long revision, String kycStatus, Instant kycExpiresAt,
+                           String reviewReason, String targetFiat, String targetAsset,
+                           boolean premiumVerified, boolean freezeCompensation, String bdContact,
+                           long revision, String kycStatus, Instant kycExpiresAt,
                            String bondStatus, String bondAsset, Long bondUnits, long bondScale, Instant createdAt) { }
 
     public record PaymentAccount(UUID accountId, long userId, String nickname, String fiat, String methodCode,

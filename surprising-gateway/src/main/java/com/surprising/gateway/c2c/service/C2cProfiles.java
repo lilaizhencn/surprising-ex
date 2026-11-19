@@ -73,20 +73,26 @@ public class C2cProfiles {
 
     @Transactional
     public Map<String,Object> applyMerchant(JwtPrincipal user,long revision,String application) {
+        return applyMerchant(user,revision,application,null,null);
+    }
+    @Transactional
+    public Map<String,Object> applyMerchant(JwtPrincipal user,long revision,String application,String targetFiat,String targetAsset) {
         if(!"NORMAL".equals(user.status())) throw C2cProblem.conflict("账户当前不能申请商家");
         var kyc=compliance.kyc(user.userId());
         if(kyc==null || !"VERIFIED".equals(kyc.status()) || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now())))
             throw C2cProblem.conflict("请先完成有效身份认证");
+        String fiat=targetFiat==null || targetFiat.isBlank()?null:targetFiat.trim().toUpperCase(Locale.ROOT);
+        String asset=targetAsset==null || targetAsset.isBlank()?null:targetAsset.trim().toUpperCase(Locale.ROOT);
         lockUser(user.userId());
         var existing=merchants.find(user.userId(),true);
         if(existing.isEmpty()) {
             if(revision!=0) throw C2cProblem.conflict("商家申请状态已变更");
-            merchants.apply(user.userId(),application);
+            merchants.apply(user.userId(),application,fiat,asset);
         } else {
             var current=existing.get();
             if(current.revision()!=revision) throw C2cProblem.conflict("商家申请状态已变更");
             if(!List.of("PENDING","REJECTED","WITHDRAWN").contains(current.status())) throw C2cProblem.conflict("请联系客服处理当前商家状态");
-            merchants.reapply(user.userId(),application);
+            merchants.reapply(user.userId(),application,fiat,asset);
         }
         return merchant(user.userId());
     }
@@ -198,12 +204,32 @@ public class C2cProfiles {
     private Map<String,Object> profileView(Profile profile,long userId) {
         var view=new LinkedHashMap<String,Object>();view.put("userId",Long.toString(userId));view.put("nickname",profile.nickname());
         view.put("receiveStrangers",profile.strangers());view.put("verificationMinutes",profile.verificationMinutes());
+        view.put("timeoutStrikes",profile.timeoutStrikes());
+        view.put("blacklisted",profile.blacklisted());
+        view.put("blacklistReason",profile.blacklistReason());
+        view.put("unblockAppealStatus",profile.unblockAppealStatus());
+        view.put("unblockAppealReason",profile.unblockAppealReason());
+        view.put("unblockReviewNote",profile.unblockReviewNote());
         view.put("revision",Long.toString(profile.revision()));return view;
+    }
+
+    @Transactional
+    public Map<String,Object> submitUnblockAppeal(JwtPrincipal user,String reason) {
+        lockUser(user.userId());
+        var current=profiles.find(user.userId(),true).orElseThrow(()->C2cProblem.conflict("当前账户暂无 C2C 档案"));
+        if(!current.blacklisted()) throw C2cProblem.conflict("当前账户未被限制下单，无需申请解除");
+        if("PENDING".equals(current.unblockAppealStatus())) throw C2cProblem.conflict("解除申请正在审核中，请勿重复提交");
+        profiles.submitUnblockAppeal(user.userId(),reason);
+        return profileView(profiles.find(user.userId(),false).orElseThrow(),user.userId());
     }
     private Map<String,Object> merchant(long userId) {
         return merchants.find(userId,false).<Map<String,Object>>map(row -> {
             var view=new LinkedHashMap<String,Object>();view.put("status",row.status());view.put("tier",row.tier());
-            view.put("application",row.application());view.put("reviewReason",row.reviewReason());view.put("revision",Long.toString(row.revision()));return view;
+            view.put("application",row.application());view.put("reviewReason",row.reviewReason());
+            view.put("targetFiat",row.targetFiat());view.put("targetAsset",row.targetAsset());
+            view.put("premiumVerified",row.premiumVerified());view.put("freezeCompensation",row.freezeCompensation());
+            view.put("bdContact",row.bdContact());
+            view.put("revision",Long.toString(row.revision()));return view;
         }).orElse(null);
     }
     private void lockUser(long userId) {

@@ -43,9 +43,11 @@ public final class GatewayBearerFilter extends OncePerRequestFilter {
             GatewaySecurityErrors.write(response, 403, "ADMIN_ORIGIN_DENIED"); return;
         }
         String header = request.getHeader("Authorization");
+        String cookieClient = null;
         if (header == null) {
             String cookieToken = BrowserSessionCookies.sessionToken(request);
             if (cookieToken != null) {
+                cookieClient = BrowserSessionCookies.client(request);
                 header = "Bearer " + cookieToken;
                 request = new AuthorizationHeaderRequest(request, header);
             }
@@ -61,12 +63,34 @@ public final class GatewayBearerFilter extends OncePerRequestFilter {
                         principal.roles().stream().map(role -> new SimpleGrantedAuthority("ROLE_" + role)).toList());
                 SecurityContextHolder.getContext().setAuthentication(token);
             } catch (IllegalArgumentException invalid) {
+                if (cookieClient != null) {
+                    response.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE,
+                            BrowserSessionCookies.clearedSessionCookie(properties, cookieClient).toString());
+                    if (isPublicAuthOrLegalPath(original.getRequestURI())) {
+                        chain.doFilter(original, response);
+                        return;
+                    }
+                }
                 GatewaySecurityErrors.write(response, 401, "UNAUTHENTICATED"); return;
             } catch (IllegalStateException forbidden) {
                 GatewaySecurityErrors.write(response, 403, "ACCESS_DENIED"); return;
             }
         }
         chain.doFilter(request, response);
+    }
+
+    private static boolean isPublicAuthOrLegalPath(String uri) {
+        return uri != null && (uri.equals("/api/v1/auth/csrf")
+                || uri.equals("/api/v1/auth/login")
+                || uri.equals("/api/v1/auth/login/verify")
+                || uri.equals("/api/v1/auth/register")
+                || uri.equals("/api/v1/auth/forgot-password")
+                || uri.equals("/api/v1/auth/reset-password")
+                || uri.startsWith("/api/v1/auth/google/")
+                || uri.startsWith("/api/v1/auth/telegram/")
+                || uri.equals("/api/v1/legal/current")
+                || uri.startsWith("/api/v1/legal/documents/")
+                || uri.startsWith("/api/v1/legal/revisions/"));
     }
 
     /** 把 Cookie 里的登录令牌当作 Authorization 请求头交给下游。 */

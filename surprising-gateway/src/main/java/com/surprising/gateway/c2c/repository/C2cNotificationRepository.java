@@ -25,6 +25,12 @@ public class C2cNotificationRepository {
                 """, alerts.stream().map(alert -> new Object[]{alert.userId(), alert.id(), alert.marketId().toString(),
                         alert.asset(), alert.fiat(), alert.side(), alert.targetPrice().toPlainString()}).toList());
     }
+    public void insertOrderEvent(long userId, UUID orderId, String status, String message) {
+        jdbc.update("""
+                INSERT INTO c2c_notifications(user_id,kind,entity_id,details)
+                VALUES(?,'ORDER_STATUS',?,jsonb_build_object('orderId',CAST(? AS text),'status',CAST(? AS text),'message',CAST(? AS text)))
+                """, userId, orderId, orderId.toString(), status, message);
+    }
     public List<Notification> byUser(long userId,Long before,int count) {
         return jdbc.query("""
                 SELECT * FROM c2c_notifications WHERE user_id=? AND (CAST(? AS bigint) IS NULL OR notification_id<?)

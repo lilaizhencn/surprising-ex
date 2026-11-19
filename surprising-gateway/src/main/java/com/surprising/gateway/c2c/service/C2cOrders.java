@@ -18,7 +18,9 @@ import com.surprising.gateway.c2c.model.C2cQuote;
 import com.surprising.gateway.c2c.repository.C2cAppealRepository;
 import com.surprising.gateway.c2c.repository.C2cAttachmentRepository;
 import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
+import com.surprising.gateway.c2c.repository.C2cNotificationRepository;
 import com.surprising.gateway.c2c.repository.C2cOrderEventRepository;
+import com.surprising.gateway.c2c.repository.C2cProfileRepository;
 import com.surprising.gateway.c2c.repository.C2cQuoteRepository;
 import com.surprising.gateway.c2c.repository.C2cRelationRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
@@ -28,6 +30,7 @@ import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,6 +51,14 @@ public class C2cOrders {
     private final C2cMerchantRepository merchants;
     private final C2cRelationRepository relations;
     private final C2cSubmissions submissions;
+    private C2cProfileRepository profiles;
+    private C2cNotificationRepository notifications;
+
+    @Autowired(required = false)
+    void setProfiles(C2cProfileRepository profiles) { this.profiles = profiles; }
+
+    @Autowired(required = false)
+    void setNotifications(C2cNotificationRepository notifications) { this.notifications = notifications; }
     public C2cOrders(C2cOrdersRepository orders, C2cAdsRepository ads, C2cMarketService markets,
                      C2cPaymentAccounts payments, C2cAccess access, C2cFundsRepository funds, C2cSubmissions submissions,
                      GatewayUserRepository users, C2cQuoteRepository quotes, C2cOrderEventRepository events,
@@ -67,6 +78,13 @@ public class C2cOrders {
     @Transactional
     public C2cQuote quote(JwtPrincipal user,UUID adId,String amountType,String amount,UUID paymentAccountId) {
         if(!markets.configuration(true).enabled()) throw C2cProblem.conflict("C2C 暂未开放");
+        if(profiles!=null && profiles.isBlacklisted(user.userId()))
+            throw C2cProblem.forbidden("您因多次 C2C 订单超时违约已被系统限制下单，仅可查看，可在页面顶部提交解除申请");
+        if(!merchants.approved(user.userId())) {
+            Long active=orders.activeCountForUser(user.userId());
+            if(active!=null && active>=1)
+                throw C2cProblem.conflict("普通用户一次只能进行一笔 C2C 订单，请先完成或取消当前订单");
+        }
         var ad=ads.get(adId,true);var market=markets.market(ad.marketId(),true);
         requireOffer(user,ad,market);
         if(amountType==null || paymentAccountId==null) throw new IllegalArgumentException("报价与收款方式不完整");
@@ -107,6 +125,13 @@ public class C2cOrders {
             throw C2cProblem.conflict("报价已失效，请重新获取");
         if(orders.byQuote(quoteId)!=null) throw C2cProblem.conflict("报价已使用，请查看原订单");
         requireOffer(user,ad,market);requireAmount(ad,market,quote.quantityUnits(),quote.fiatAmount());
+        if(profiles!=null && profiles.isBlacklisted(user.userId()))
+            throw C2cProblem.forbidden("您因多次 C2C 订单超时违约已被系统限制下单，仅可查看，可在页面顶部提交解除申请");
+        if(!merchants.approved(user.userId())) {
+            Long active=orders.activeCountForUser(user.userId());
+            if(active!=null && active>=1)
+                throw C2cProblem.conflict("普通用户一次只能进行一笔 C2C 订单，请先完成或取消当前订单");
+        }
         var count=orders.openCount(market.id(),user.userId());
         if(count!=null && count>=market.maxOpenOrders()) throw C2cProblem.conflict("请先处理进行中的订单");
         var account=paymentAccount(user.userId(),ad,market,quote.paymentAccountId());
@@ -127,6 +152,8 @@ public class C2cOrders {
             access.verifyFunds(user,authorization,email,totp);
             funds.createOrGet("ORDER",order.id(),"ORDER_RESERVE",order.sellerUserId(),config.escrowUserId(),market.asset(),order.quantityUnits());
         }
+        notifyOrder(order.buyerUserId(),order.id(),status.name(),"已创建 C2C 订单，请在有效期内完成付款并确认");
+        notifyOrder(order.sellerUserId(),order.id(),status.name(),"您有一笔新的 C2C 订单，请留意收款与订单状态");
         submissions.succeed(user.userId(),key,order.id());
         return order;
     }
@@ -141,6 +168,7 @@ public class C2cOrders {
         if(proofId!=null && !attachments.readyProof(proofId,user.userId(),id)) throw new IllegalArgumentException("付款证明归属不匹配");
         orders.markPaid(order);
         events.append(order.id(),order.buyerUserId(),"BUYER_MARKED_PAID",proofId==null?Map.of():Map.of("proofId",proofId.toString()));
+        notifyOrder(order.sellerUserId(),order.id(),"PAID","买方已点击确认付款，请核对收款账户到账后放币");
         return orders.get(id,false);
     }
 
@@ -173,6 +201,15 @@ public class C2cOrders {
         var initial=orders.get(id,false);ads.get(initial.adId(),true);var order=orders.get(id,true);
         if(order.status()!=C2cOrderStatus.PAYMENT_PENDING || order.paymentExpiresAt()==null || order.paymentExpiresAt().isAfter(Instant.now())) return;
         prepareCancellation(order,C2cOrderStatus.EXPIRED,"付款窗口已结束",null,false);
+        if(profiles!=null) {
+            int strikes=profiles.recordTimeoutStrike(order.buyerUserId());
+            if(strikes>=2) {
+                notifyOrder(order.buyerUserId(),order.id(),"EXPIRED","您的 C2C 订单付款超时已累计超过一次，系统已限制您的 C2C 下单权限，请提交解除申请");
+            } else {
+                notifyOrder(order.buyerUserId(),order.id(),"EXPIRED","您的 C2C 订单因超时未付款/未确认已冻结处理，若再次超时将被系统拉黑限制下单");
+            }
+        }
+        notifyOrder(order.sellerUserId(),order.id(),"EXPIRED","订单已超时自动关闭，托管资产将按规则退回");
     }
 
     @Transactional
@@ -239,6 +276,21 @@ public class C2cOrders {
     private void finishOrder(C2cOrder order,C2cOrderStatus status,String reason) {
         orders.terminal(order,status,reason);
         events.append(order.id(),null,status.name(),Map.of());
+        String msg = switch(status) {
+            case COMPLETED -> "C2C 订单已完成放币";
+            case CANCELED -> "C2C 订单已取消";
+            case EXPIRED -> "C2C 订单已超时关闭";
+            case FAILED -> "C2C 订单托管未成功";
+            default -> "C2C 订单状态已更新：" + status.name();
+        };
+        notifyOrder(order.buyerUserId(),order.id(),status.name(),msg);
+        notifyOrder(order.sellerUserId(),order.id(),status.name(),msg);
+    }
+
+    private void notifyOrder(long userId,UUID orderId,String status,String message) {
+        if(notifications!=null && userId>0) {
+            notifications.insertOrderEvent(userId,orderId,status,message);
+        }
     }
 
     private C2cOrder lockForParticipant(long userId,UUID id) {

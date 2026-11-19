@@ -3447,9 +3447,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS c2c_profiles_nickname_unique ON c2c_profiles(l
 
 CREATE TABLE IF NOT EXISTS c2c_merchants (
     user_id BIGINT PRIMARY KEY REFERENCES gateway_users(user_id),
-    status VARCHAR(16) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED','SUSPENDED')),
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED','SUSPENDED','WITHDRAWN')),
     tier VARCHAR(16) NOT NULL DEFAULT 'VERIFIED' CHECK (tier IN ('VERIFIED','VIP')),
     application_text VARCHAR(2000) NOT NULL,
+    target_fiat VARCHAR(16),
+    target_asset VARCHAR(16),
+    premium_verified BOOLEAN NOT NULL DEFAULT false,
+    freeze_compensation BOOLEAN NOT NULL DEFAULT false,
+    bd_contact VARCHAR(128),
     revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0),
     review_reason VARCHAR(1000),
     reviewed_by BIGINT REFERENCES gateway_users(user_id),

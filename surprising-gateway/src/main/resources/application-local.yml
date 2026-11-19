@@ -45,6 +45,8 @@ surprising:
       admin-browser-allowed-origins: http://localhost:5174,http://127.0.0.1:5174,http://localhost:5176,http://127.0.0.1:5176,https://ex-api.tokdou.com
       browser-cookie-secure: false
       require-approval-for-high-risk-admin-writes: false
+  c2c:
+    enabled: true
   price:
     index:
       http:

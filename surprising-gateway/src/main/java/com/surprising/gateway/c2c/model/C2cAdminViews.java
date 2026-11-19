@@ -5,7 +5,9 @@ public final class C2cAdminViews {
     private C2cAdminViews() { }
 
     public record Merchant(String userId, String nickname, String status, String tier, String application,
-                           String reviewReason, String revision, String kycStatus, String bondStatus,
+                           String reviewReason, String targetFiat, String targetAsset,
+                           boolean premiumVerified, boolean freezeCompensation, String bdContact,
+                           String revision, String kycStatus, String bondStatus,
                            String bondAsset, String bondAmount, String kycExpiresAt, String createdAt) { }
 
     public record PaymentAccount(String accountId, String userId, String nickname, String fiat, String methodCode,

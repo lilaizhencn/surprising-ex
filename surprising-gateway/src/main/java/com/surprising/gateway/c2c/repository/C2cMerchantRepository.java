@@ -19,6 +19,7 @@ public class C2cMerchantRepository {
     public Optional<C2cMerchantStats> stats(long userId) {
         return jdbc.query("""
                 SELECT COALESCE(p.nickname,'商家'||right(c.user_id::text,6)) AS nickname,c.status,c.tier,
+                    c.premium_verified,c.freeze_compensation,
                     count(o.order_id) FILTER(WHERE o.status='COMPLETED' AND o.completed_at>=now()-interval '30 days') AS completed,
                     count(o.order_id) FILTER(WHERE o.status IN ('COMPLETED','CANCELED','EXPIRED') AND COALESCE(o.completed_at,o.canceled_at)>=now()-interval '30 days') AS ended,
                     count(o.order_id) FILTER(WHERE o.status='COMPLETED') AS total,
@@ -26,8 +27,9 @@ public class C2cMerchantRepository {
                     avg(EXTRACT(EPOCH FROM o.completed_at-o.paid_at)) FILTER(WHERE o.status='COMPLETED') AS released_seconds
                 FROM c2c_merchants c LEFT JOIN c2c_profiles p USING(user_id)
                 LEFT JOIN c2c_orders o ON o.buyer_user_id=c.user_id OR o.seller_user_id=c.user_id
-                WHERE c.user_id=? GROUP BY c.user_id,p.nickname,c.status,c.tier
+                WHERE c.user_id=? GROUP BY c.user_id,p.nickname,c.status,c.tier,c.premium_verified,c.freeze_compensation
                 """, (r,n)->new C2cMerchantStats(userId,r.getString("nickname"),r.getString("status"),r.getString("tier"),
+                r.getBoolean("premium_verified"),r.getBoolean("freeze_compensation"),
                 r.getLong("completed"),r.getLong("ended"),r.getLong("total"),r.getBigDecimal("paid_seconds"),
                 r.getBigDecimal("released_seconds")),userId).stream().findFirst();
     }
@@ -40,7 +42,10 @@ public class C2cMerchantRepository {
     public Optional<C2cMerchant> find(long userId, boolean lock) {
         return jdbc.query("SELECT * FROM c2c_merchants WHERE user_id=?" + (lock ? " FOR UPDATE" : ""),
                 (r, n) -> new C2cMerchant(r.getLong("user_id"), r.getString("status"), r.getString("tier"),
-                        r.getString("application_text"), r.getString("review_reason"), r.getLong("revision"),
+                        r.getString("application_text"), r.getString("review_reason"),
+                        r.getString("target_fiat"), r.getString("target_asset"),
+                        r.getBoolean("premium_verified"), r.getBoolean("freeze_compensation"),
+                        r.getString("bd_contact"), r.getLong("revision"),
                         r.getTimestamp("created_at").toInstant(), r.getTimestamp("updated_at").toInstant()),
                 userId).stream().findFirst();
     }
@@ -50,6 +55,13 @@ public class C2cMerchantRepository {
                 UPDATE c2c_merchants SET status=?,tier=?,review_reason=?,reviewed_by=?,reviewed_at=now(),revision=revision+1,updated_at=now()
                 WHERE user_id=?
                 """, status, tier, reason, reviewer, userId);
+    }
+
+    public void updateAttributes(long userId, boolean premiumVerified, boolean freezeCompensation, String bdContact) {
+        jdbc.update("""
+                UPDATE c2c_merchants SET premium_verified=?,freeze_compensation=?,bd_contact=?,revision=revision+1,updated_at=now()
+                WHERE user_id=?
+                """, premiumVerified, freezeCompensation, bdContact, userId);
     }
 
     /**
@@ -70,6 +82,8 @@ public class C2cMerchantRepository {
                 ORDER BY c.updated_at DESC,c.user_id DESC LIMIT ? OFFSET ?
                 """, (r, n) -> new Merchant(r.getLong("user_id"), r.getString("nickname"), r.getString("status"),
                         r.getString("tier"), r.getString("application_text"), r.getString("review_reason"),
+                        r.getString("target_fiat"), r.getString("target_asset"),
+                        r.getBoolean("premium_verified"), r.getBoolean("freeze_compensation"), r.getString("bd_contact"),
                         r.getLong("revision"), r.getString("kyc_status"),
                         r.getTimestamp("kyc_expires_at") == null ? null : r.getTimestamp("kyc_expires_at").toInstant(),
                         r.getString("bond_status"), r.getString("bond_asset"), r.getObject("bond_units", Long.class),
@@ -77,13 +91,20 @@ public class C2cMerchantRepository {
                 status, status, userId, userId, count, offset);
     }
     public void apply(long userId,String application) {
-        jdbc.update("INSERT INTO c2c_merchants(user_id,application_text) VALUES(?,?)",userId,application);
+        apply(userId, application, null, null);
+    }
+    public void apply(long userId,String application,String targetFiat,String targetAsset) {
+        jdbc.update("INSERT INTO c2c_merchants(user_id,application_text,target_fiat,target_asset) VALUES(?,?,?,?)",
+                userId,application,targetFiat,targetAsset);
     }
     public void reapply(long userId,String application) {
+        reapply(userId, application, null, null);
+    }
+    public void reapply(long userId,String application,String targetFiat,String targetAsset) {
         jdbc.update("""
-                UPDATE c2c_merchants SET status='PENDING',application_text=?,review_reason=NULL,reviewed_by=NULL,reviewed_at=NULL,
+                UPDATE c2c_merchants SET status='PENDING',application_text=?,target_fiat=?,target_asset=?,review_reason=NULL,reviewed_by=NULL,reviewed_at=NULL,
                     revision=revision+1,updated_at=now() WHERE user_id=?
-                """,application,userId);
+                """,application,targetFiat,targetAsset,userId);
     }
 
     public void withdraw(long userId) {

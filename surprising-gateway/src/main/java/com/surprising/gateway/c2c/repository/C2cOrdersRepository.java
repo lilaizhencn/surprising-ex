@@ -73,6 +73,13 @@ public class C2cOrdersRepository {
                 """, Long.class, marketId, userId, userId);
     }
 
+    public Long activeCountForUser(long userId) {
+        return jdbc.queryForObject("""
+                SELECT count(*) FROM c2c_orders WHERE (buyer_user_id=? OR seller_user_id=?)
+                    AND status NOT IN ('COMPLETED','CANCELED','EXPIRED','FAILED')
+                """, Long.class, userId, userId);
+    }
+
     public Long completedCount(long userId) {
         return jdbc.queryForObject("SELECT count(*) FROM c2c_orders WHERE status='COMPLETED' AND (buyer_user_id=? OR seller_user_id=?)",
                 Long.class, userId, userId);

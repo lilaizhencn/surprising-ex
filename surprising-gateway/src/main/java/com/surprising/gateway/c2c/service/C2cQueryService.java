@@ -56,8 +56,8 @@ public class C2cQueryService {
         var visible=rows.stream().limit(filter.limit()).map(row -> {
             var view=C2cViews.ad(row.ad(),market,false);
             view.put("methodCodes",row.ad().methods().stream().filter(enabled::contains).toList());
-            view.put("merchant",stats(row.ad().makerUserId(),row.nickname(),row.tier(),row.completed(),row.ended(),
-                    row.completedTotal(),row.paidSeconds(),row.releasedSeconds()));
+            view.put("merchant",stats(row.ad().makerUserId(),row.nickname(),row.tier(),row.premiumVerified(),row.freezeCompensation(),
+                    row.completed(),row.ended(),row.completedTotal(),row.paidSeconds(),row.releasedSeconds()));
             return view;
         }).toList();
         return Map.of("items",visible,"hasMore",rows.size()>filter.limit(),"offset",filter.offset(),"serverTime",Instant.now().toString());
@@ -99,7 +99,8 @@ public class C2cQueryService {
     public Map<String,Object> merchant(long userId) {
         var row=merchants.stats(userId).filter(value -> "APPROVED".equals(value.status()))
                 .orElseThrow(() -> new IllegalArgumentException("商家当前不可用"));
-        var view=stats(row.userId(),row.nickname(),row.tier(),row.completed(),row.ended(),row.total(),row.paidSeconds(),row.releasedSeconds());
+        var view=stats(row.userId(),row.nickname(),row.tier(),row.premiumVerified(),row.freezeCompensation(),
+                row.completed(),row.ended(),row.total(),row.paidSeconds(),row.releasedSeconds());
         view.put("status",row.status());
         return view;
     }
@@ -202,10 +203,11 @@ public class C2cQueryService {
         return view;
     }
 
-    private static Map<String,Object> stats(long userId,String nickname,String tier,long completed,long ended,
-                                            long total,BigDecimal paid,BigDecimal released) {
+    private static Map<String,Object> stats(long userId,String nickname,String tier,boolean premiumVerified,boolean freezeCompensation,
+                                            long completed,long ended,long total,BigDecimal paid,BigDecimal released) {
         var result = new LinkedHashMap<String,Object>();
         result.put("userId",Long.toString(userId));result.put("nickname",nickname);result.put("tier",tier);
+        result.put("premiumVerified",premiumVerified);result.put("freezeCompensation",freezeCompensation);
         result.put("completed30d",Long.toString(completed));result.put("ended30d",Long.toString(ended));
         result.put("completedTotal",Long.toString(total));
         result.put("completionRate",ended==0?null:BigDecimal.valueOf(completed).multiply(BigDecimal.valueOf(100))
