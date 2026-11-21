@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 定时保存交易快照，保留所有原始日志；只在已启动的主节点运行。
+# 定时保存交易快照，并清掉七天前的命令日志；只在已启动的主节点运行。
+# 快照录制本身保留，恢复和回滚仍使用 recording.log 里的有效快照。
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_ROOT="${RUNTIME_ROOT:-/var/lib/surprising/linear-perpetual/runtime}"
 RUN_ID="${RUN_ID:-linear-perpetual-single-node}"
@@ -25,6 +26,22 @@ cluster_tool() {
   timeout 30 "$JAVA_HOME/bin/java" --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
     --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --enable-native-access=ALL-UNNAMED \
     -cp "$CORE_JAR" io.aeron.cluster.ClusterTool "$CLUSTER_DIR" "$@"
+}
+
+# 只删除命令日志里早于保留窗口的段。没有成交导出游标时不删，避免未导出的成交丢失。
+retain_command_log() {
+  local aeron_base aeron_dir checkpoint
+  aeron_base="${CORE_AERON_BASE_DIR:-/dev/shm/surprising-aeron}"
+  aeron_dir="${aeron_base}-surprising-linear_perpetual-0"
+  checkpoint="${TRADE_EXPORT_CHECKPOINT:-$RUNTIME_ROOT/$RUN_ID/trade-export/checkpoint.bin}"
+  timeout 120 "$JAVA_HOME/bin/java" --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
+    --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --enable-native-access=ALL-UNNAMED \
+    -cp "$CORE_JAR" com.surprising.aeron.retention.ArchiveHistoryRetentionMain \
+    --cluster-dir "$CLUSTER_DIR" \
+    --aeron-dir "$aeron_dir" \
+    --control-channel "aeron:ipc?term-length=1m" \
+    --checkpoint "$checkpoint" \
+    --retention-days 7
 }
 
 # Aeron returns 1 with no output for a healthy non-leader. JVM/classpath/mark-file
@@ -62,6 +79,7 @@ while (( SECONDS < deadline )); do
   fi
   if (( after >= before + 2 )); then
     printf 'SNAPSHOT=COMPLETE validRecordsBefore=%s validRecordsAfter=%s\n' "$before" "$after"
+    retain_command_log
     exit 0
   fi
   sleep 2
