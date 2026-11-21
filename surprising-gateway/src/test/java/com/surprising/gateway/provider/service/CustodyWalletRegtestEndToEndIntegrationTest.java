@@ -20,8 +20,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import com.surprising.gateway.provider.client.RestClientStub;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.RestTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -38,7 +38,7 @@ class CustodyWalletRegtestEndToEndIntegrationTest {
     private final AssetConfigurationService assets = mock(AssetConfigurationService.class);
     private final CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
     private final SpotAccountClient spotAccountClient = mock(SpotAccountClient.class);
-    private final RestTemplate restTemplate = mock(RestTemplate.class);
+    private final RestClientStub walletHttp = RestClientStub.create();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private CustodyWalletWebhookService webhookService;
@@ -58,7 +58,7 @@ class CustodyWalletRegtestEndToEndIntegrationTest {
 
         webhookService = new CustodyWalletWebhookService(
                 properties, repository, withdrawalService, spotAccountClient, objectMapper, assets);
-        walletClient = new CustodyWalletClient(properties, restTemplate, objectMapper);
+        walletClient = new CustodyWalletClient(properties, walletHttp.client(), objectMapper);
 
         // 设置资产精度：BTC 8 位小数（1 BTC = 100,000,000 satoshis）
         when(assets.amountUnits(eq("BTC"), eq("1.50000000"))).thenReturn(150_000_000L);
@@ -86,8 +86,7 @@ class CustodyWalletRegtestEndToEndIntegrationTest {
                 "subject", "user:" + userId,
                 "addressVersion", 1L
         );
-        when(restTemplate.exchange(any(), any(), any(), eq(Map.class)))
-                .thenReturn(ResponseEntity.ok(addressResponse));
+        walletHttp.respond(ResponseEntity.ok(addressResponse));
 
         Map<String, Object> created = walletClient.createAddress(userId, "BTC", 1L);
         assertThat(created).isNotNull();

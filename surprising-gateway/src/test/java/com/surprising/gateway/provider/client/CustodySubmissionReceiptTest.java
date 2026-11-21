@@ -29,8 +29,9 @@ class CustodySubmissionReceiptTest {
         config.getCustodyWallet().setBaseUrl("https://wallet.example.test");
         config.getCustodyWallet().setApiKey("test-key");config.getCustodyWallet().setApiSecret("test-only-secret");
         var httpConfig=new GatewayHttpConfiguration();
-        var rest=httpConfig.custodyWalletRestTemplate(config,httpConfig.gatewayHttpClient(config));
-        server=MockRestServiceServer.bindTo(rest).build();client=new CustodyWalletClient(config,rest,json);
+        var builder=httpConfig.custodyWalletRestClientBuilder(config,httpConfig.gatewayHttpClient(config));
+        server=MockRestServiceServer.bindTo(builder).build();
+        client=new CustodyWalletClient(config,builder.build(),json);
     }
     private void failedCreate() {
         server.expect(outbound->{

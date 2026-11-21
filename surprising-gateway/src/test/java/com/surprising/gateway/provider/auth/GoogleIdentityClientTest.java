@@ -15,7 +15,7 @@ import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.springframework.security.oauth2.jwt.*;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClient;
 
 class GoogleIdentityClientTest {
     static final String WEB = "test-web.apps.googleusercontent.com", IOS = "test-ios.apps.googleusercontent.com",
@@ -40,7 +40,7 @@ class GoogleIdentityClientTest {
             exchange.sendResponseHeaders(200, body.length); exchange.getResponseBody().write(body); exchange.close();
         });
         server.start();
-        decoder = GoogleIdentityClient.decoder("http://127.0.0.1:" + server.getAddress().getPort() + "/keys", new RestTemplate());
+        decoder = GoogleIdentityClient.decoder("http://127.0.0.1:" + server.getAddress().getPort() + "/keys", RestClient.create());
     }
     @AfterEach void close() { if (server != null) server.stop(0); }
     JWTClaimsSet.Builder claims() {

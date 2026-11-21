@@ -17,14 +17,13 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.client.RestTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -33,15 +32,15 @@ public class CustodyWalletClient {
 
     private static final String API_PREFIX = "/custody/api/v1";
     private final GatewayProperties properties;
-    private final RestTemplate restTemplate;
+    private final RestClient restClient;
     private final ObjectMapper objectMapper;
 
     public CustodyWalletClient(GatewayProperties properties,
-                               @Qualifier("custodyWalletRestTemplate")
-                               RestTemplate restTemplate,
+                               @Qualifier("custodyWalletRestClient")
+                               RestClient restClient,
                                ObjectMapper objectMapper) {
         this.properties = properties;
-        this.restTemplate = restTemplate;
+        this.restClient = restClient;
         this.objectMapper = objectMapper;
     }
 
@@ -169,9 +168,9 @@ public class CustodyWalletClient {
             headers.set("Idempotency-Key", idempotencyKey);
         }
         try {
-            ResponseEntity<T> response = restTemplate.exchange(
+            ResponseEntity<T> response = GatewayRestCalls.exchange(restClient,
                     java.net.URI.create(trimTrailingSlash(wallet.getBaseUrl()) + path),
-                    method, new HttpEntity<>(body, headers), responseType);
+                    method, headers, body, responseType);
             if (response != null && !response.getStatusCode().is2xxSuccessful()
                     && resolvableSubmission(path, idempotencyKey, response.getStatusCode().value())) {
                 return responseType.cast(resolveSubmission(payload, idempotencyKey));
@@ -202,9 +201,9 @@ public class CustodyWalletClient {
             headers.set("Idempotency-Key", idempotencyKey);
         }
         try {
-            ResponseEntity<T> response = restTemplate.exchange(
+            ResponseEntity<T> response = GatewayRestCalls.exchange(restClient,
                     java.net.URI.create(trimTrailingSlash(wallet.getBaseUrl()) + path),
-                    method, new HttpEntity<>(body, headers), responseType);
+                    method, headers, body, responseType);
             requireSuccess(response, "custody wallet");
             return response.getBody();
         } catch (RestClientResponseException ex) {

@@ -2,47 +2,31 @@ package com.surprising.gateway.provider.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
-import java.net.URI;
 import java.util.List;
-import java.util.UUID;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
-import org.springframework.core.ParameterizedTypeReference;
 import java.util.Map;
-import org.springframework.web.client.RestTemplate;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.ObjectMapper;
 
 class CustodyWalletClientTest {
 
     @Test
     void historyRequiresTheExactAuthenticatedUserSubject() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.test");
-        properties.getCustodyWallet().setApiKey("test-key");
-        properties.getCustodyWallet().setApiSecret("test-only-secret");
-        RestTemplate rest = mock(RestTemplate.class);
+        GatewayProperties properties = walletProperties("https://wallet.example.test");
+        RestClientStub rest = RestClientStub.create();
         Map<String, Object> own = Map.of("subject", "user:42", "amount", "1");
-        when(rest.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class),
-                any(ParameterizedTypeReference.class))).thenReturn(ResponseEntity.ok(List.of(
-                        own, Map.of("subject", "user:420", "amount", "99"), Map.of("amount", "5"))));
-        CustodyWalletClient client = new CustodyWalletClient(properties, rest, new ObjectMapper());
+        rest.respond(ResponseEntity.ok(List.of(
+                own, Map.of("subject", "user:420", "amount", "99"), Map.of("amount", "5"))));
+        CustodyWalletClient client = new CustodyWalletClient(properties, rest.client(), new ObjectMapper());
 
         assertThat(client.deposits(42L, "ETH", "USDT", 50)).containsExactly(own);
         assertThat(client.withdrawals(42L, "ETH", "USDT", 50)).containsExactly(own);
     }
 
     private final CustodyWalletClient client = new CustodyWalletClient(
-            new GatewayProperties(), mock(RestTemplate.class), new ObjectMapper());
+            new GatewayProperties(), RestClientStub.create().client(), new ObjectMapper());
 
     @Test
     void buildsWalletCompatibleCanonicalRequestAndSignature() {
@@ -64,15 +48,9 @@ class CustodyWalletClientTest {
 
     @Test
     void mapsDeterministicWalletHttpRejectionToRejectedException() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
-        properties.getCustodyWallet().setApiKey("wallet-key");
-        properties.getCustodyWallet().setApiSecret("wallet-secret");
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
-                .thenReturn(ResponseEntity.badRequest().body(Map.of("error", "rejected")));
-        CustodyWalletClient rejectedClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
+        RestClientStub rest = RestClientStub.create();
+        rest.respond(ResponseEntity.badRequest().body(Map.of("error", "rejected")));
+        CustodyWalletClient rejectedClient = new CustodyWalletClient(walletProperties("https://wallet.example.com"), rest.client(), new ObjectMapper());
 
         assertThatThrownBy(() -> rejectedClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
                 .isInstanceOf(IllegalStateException.class).isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
@@ -80,16 +58,10 @@ class CustodyWalletClientTest {
 
     @Test
     void invalidState409WithoutAPermanentReceiptRemainsUnknown() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
-        properties.getCustodyWallet().setApiKey("wallet-key");
-        properties.getCustodyWallet().setApiSecret("wallet-secret");
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
-                .thenReturn(ResponseEntity.status(409).body(Map.of("error", Map.of(
-                        "code", "INVALID_STATE", "message", "insufficient gas balance"))));
-        CustodyWalletClient rejectedClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
+        RestClientStub rest = RestClientStub.create();
+        rest.respond(ResponseEntity.status(409).body(Map.of("error", Map.of(
+                "code", "INVALID_STATE", "message", "insufficient gas balance"))));
+        CustodyWalletClient rejectedClient = new CustodyWalletClient(walletProperties("https://wallet.example.com"), rest.client(), new ObjectMapper());
 
         assertThatThrownBy(() -> rejectedClient.createWithdrawal(42L,Map.of("amount","1"),"withdraw-1"))
                 .isInstanceOf(IllegalStateException.class).isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
@@ -97,15 +69,9 @@ class CustodyWalletClientTest {
 
     @Test
     void keepsCustodyServerErrorAsUnknownInsteadOfRejected() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
-        properties.getCustodyWallet().setApiKey("wallet-key");
-        properties.getCustodyWallet().setApiSecret("wallet-secret");
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
-                .thenReturn(ResponseEntity.internalServerError().body(Map.of("error", "unknown")));
-        CustodyWalletClient unknownClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
+        RestClientStub rest = RestClientStub.create();
+        rest.respond(ResponseEntity.internalServerError().body(Map.of("error", "unknown")));
+        CustodyWalletClient unknownClient = new CustodyWalletClient(walletProperties("https://wallet.example.com"), rest.client(), new ObjectMapper());
 
         assertThatThrownBy(() -> unknownClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
                 .isInstanceOf(IllegalStateException.class)
@@ -114,16 +80,10 @@ class CustodyWalletClientTest {
 
     @Test
     void keepsAmbiguousClientErrorsAsUnknownInsteadOfRefundableRejections() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
-        properties.getCustodyWallet().setApiKey("wallet-key");
-        properties.getCustodyWallet().setApiSecret("wallet-secret");
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        CustodyWalletClient unknownClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
+        RestClientStub rest = RestClientStub.create();
+        CustodyWalletClient unknownClient = new CustodyWalletClient(walletProperties("https://wallet.example.com"), rest.client(), new ObjectMapper());
         for (int status : List.of(401, 403, 409, 429)) {
-            when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
-                    .thenReturn(ResponseEntity.status(status).body(Map.of("error", "ambiguous")));
+            rest.respond(ResponseEntity.status(status).body(Map.of("error", "ambiguous")));
             assertThatThrownBy(() -> unknownClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
                     .isInstanceOf(IllegalStateException.class)
                     .isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
@@ -132,19 +92,13 @@ class CustodyWalletClientTest {
 
     @Test
     void businessInvalidStateIsNotRefundEvidence() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
-        properties.getCustodyWallet().setApiKey("wallet-key");
-        properties.getCustodyWallet().setApiSecret("wallet-secret");
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
-                .thenThrow(new org.springframework.web.client.HttpClientErrorException(
-                        org.springframework.http.HttpStatus.CONFLICT, "Conflict", """
-                        {"error":{"code":"INVALID_STATE","message":"insufficient gas balance"}}
-                        """.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        java.nio.charset.StandardCharsets.UTF_8));
-        CustodyWalletClient rejectedClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
+        RestClientStub rest = RestClientStub.create();
+        rest.fail(new org.springframework.web.client.HttpClientErrorException(
+                org.springframework.http.HttpStatus.CONFLICT, "Conflict", """
+                {"error":{"code":"INVALID_STATE","message":"insufficient gas balance"}}
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.charset.StandardCharsets.UTF_8));
+        CustodyWalletClient rejectedClient = new CustodyWalletClient(walletProperties("https://wallet.example.com"), rest.client(), new ObjectMapper());
 
         assertThatThrownBy(() -> rejectedClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
                 .isInstanceOf(IllegalStateException.class).isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
@@ -152,26 +106,25 @@ class CustodyWalletClientTest {
 
     @Test
     void keepsWalletIdempotencyProcessing409AsUnknown() {
-        GatewayProperties properties = new GatewayProperties();
-        properties.getCustodyWallet().setEnabled(true);
-        properties.getCustodyWallet().setBaseUrl("https://wallet.example.com");
-        properties.getCustodyWallet().setApiKey("wallet-key");
-        properties.getCustodyWallet().setApiSecret("wallet-secret");
-        RestTemplate restTemplate = mock(RestTemplate.class);
-        when(restTemplate.exchange(any(URI.class), eq(HttpMethod.POST), any(HttpEntity.class), eq(Map.class)))
-                .thenThrow(new org.springframework.web.client.HttpClientErrorException(
-                        org.springframework.http.HttpStatus.CONFLICT, "Conflict", """
-                        {"error":{"code":"WITHDRAWAL_ALREADY_PROCESSING","message":"still processing"}}
-                        """.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        java.nio.charset.StandardCharsets.UTF_8));
-        CustodyWalletClient unknownClient = new CustodyWalletClient(properties, restTemplate, new ObjectMapper());
+        RestClientStub rest = RestClientStub.create();
+        rest.fail(new org.springframework.web.client.HttpClientErrorException(
+                org.springframework.http.HttpStatus.CONFLICT, "Conflict", """
+                {"error":{"code":"WITHDRAWAL_ALREADY_PROCESSING","message":"still processing"}}
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.charset.StandardCharsets.UTF_8));
+        CustodyWalletClient unknownClient = new CustodyWalletClient(walletProperties("https://wallet.example.com"), rest.client(), new ObjectMapper());
 
         assertThatThrownBy(() -> unknownClient.createWithdrawal(42L, Map.of("amount", "1"), "withdraw-1"))
                 .isInstanceOf(IllegalStateException.class)
                 .isNotInstanceOf(CustodyWalletClient.CustodyWalletRejectedException.class);
     }
 
-
-
-
+    private static GatewayProperties walletProperties(String baseUrl) {
+        GatewayProperties properties = new GatewayProperties();
+        properties.getCustodyWallet().setEnabled(true);
+        properties.getCustodyWallet().setBaseUrl(baseUrl);
+        properties.getCustodyWallet().setApiKey("wallet-key");
+        properties.getCustodyWallet().setApiSecret("wallet-secret");
+        return properties;
+    }
 }

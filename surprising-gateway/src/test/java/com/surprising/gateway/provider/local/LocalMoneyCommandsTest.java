@@ -15,11 +15,8 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.*;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.client.RestTemplate;
-
 class LocalMoneyCommandsTest {
     private final AccountCommandGateway commands = mock(AccountCommandGateway.class);
-    private final RestTemplate http = mock(RestTemplate.class);
     private final AccountProperties account = new AccountProperties();
     private final com.surprising.gateway.provider.product.GatewayProductServices products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
     @org.junit.jupiter.api.BeforeEach void bindProducts() {
@@ -41,7 +38,6 @@ class LocalMoneyCommandsTest {
         assertThat(client.completeTransfer("USDT_PERPETUAL", request).status()).isEqualTo(ProductAccountAdjustment.Status.APPLIED);
         verify(commands).transferOut(request);
         verify(commands).completeTransfer(request);
-        verifyNoInteractions(http);
     }
 
     @Test
@@ -52,7 +48,6 @@ class LocalMoneyCommandsTest {
         assertThat(client.transferOut("USDT_PERPETUAL", transfer()).status()).isEqualTo(ProductAccountAdjustment.Status.UNKNOWN);
         doThrow(new AccountCommandRejectedException("INSUFFICIENT_FUNDS", "insufficient funds")).when(commands).transferOut(any());
         assertThat(client.transferOut("USDT_PERPETUAL", transfer()).status()).isEqualTo(ProductAccountAdjustment.Status.REJECTED);
-        verifyNoInteractions(http);
     }
 
     @Test
@@ -61,7 +56,6 @@ class LocalMoneyCommandsTest {
         var client = new SpotAccountClient(products);
         client.adjustBalance(42, "usdt", -100, "withdrawal-1", "withdrawal");
         verify(commands).adjustBalance(new BalanceAdjustmentRequest(42, "USDT", -100, "withdrawal-1", "withdrawal"), null, null);
-        verifyNoInteractions(http);
     }
 
     @Test
@@ -71,7 +65,7 @@ class LocalMoneyCommandsTest {
         var client = new SpotAccountClient(products);
         assertThatThrownBy(() -> client.adjustBalance(42, "USDT", -100, "withdrawal-1", "withdrawal"))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class).hasMessageContaining("product is not enabled");
-        verifyNoInteractions(commands, http);
+        verifyNoInteractions(commands);
     }
 
     @Test
@@ -81,6 +75,5 @@ class LocalMoneyCommandsTest {
         var client = new SpotAccountClient(products);
         assertThatThrownBy(() -> client.adjustBalance(42, "USDT", -100, "withdrawal-1", "withdrawal"))
                 .isInstanceOf(SpotAccountUnknownException.class);
-        verifyNoInteractions(http);
     }
 }

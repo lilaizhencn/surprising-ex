@@ -22,7 +22,7 @@ class SpotAccountClientTest {
         verify(spot).adjustBalance(new BalanceAdjustmentRequest(42,"USDT",1250,"deposit:1","custody deposit"),null,null);
         verifyNoInteractions(perpetual);
         assertThat(java.util.Arrays.stream(SpotAccountClient.class.getDeclaredFields())
-                .anyMatch(field -> field.getType() == org.springframework.web.client.RestTemplate.class)).isFalse();
+                .anyMatch(field -> field.getType() == org.springframework.web.client.RestClient.class)).isFalse();
     }
     @Test void onlyADefinitiveCoreDecisionCanRejectTheOriginalAdjustment() {
         var products=mock(GatewayProductServices.class); var commands=mock(AccountCommandGateway.class);

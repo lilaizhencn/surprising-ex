@@ -18,7 +18,6 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestTemplate;
 
 /** The only boundary allowed to trust externally supplied Telegram identity claims. */
 @Component
@@ -52,7 +51,9 @@ public class TelegramOidcClient {
     public static NimbusJwtDecoder decoder(String clientId, String jwksUri,
                                     org.springframework.http.client.ClientHttpRequestFactory factory) {
         var result = NimbusJwtDecoder.withJwkSetUri(jwksUri)
-                .jwsAlgorithm(SignatureAlgorithm.RS256).restOperations(new RestTemplate(factory)).build();
+                .jwsAlgorithm(SignatureAlgorithm.RS256)
+                .restOperations(JwkRestOperations.adapt(RestClient.builder().requestFactory(factory).build()))
+                .build();
         result.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
                 JwtValidators.createDefaultWithIssuer(ISSUER), token ->
                 token.getAudience().contains(clientId) && token.getExpiresAt() != null

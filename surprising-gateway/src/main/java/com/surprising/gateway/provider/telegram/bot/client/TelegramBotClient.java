@@ -1,16 +1,19 @@
 package com.surprising.gateway.provider.telegram.bot.client;
 
+import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.telegram.bot.config.TelegramBotProperties;
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramInlineKeyboardMarkup;
+import java.net.http.HttpClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -22,16 +25,36 @@ public class TelegramBotClient {
     private static final String TG_API_BASE = "https://api.telegram.org/bot";
 
     private final TelegramBotProperties properties;
-    private final RestTemplate restTemplate;
+    private final RestClient restClient;
 
     public TelegramBotClient(TelegramBotProperties properties) {
-        this(properties, new RestTemplate());
+        this(properties, RestClient.create());
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public TelegramBotClient(TelegramBotProperties properties, RestTemplate restTemplate) {
+    public TelegramBotClient(TelegramBotProperties properties, GatewayProperties gatewayProperties,
+                             HttpClient gatewayHttpClient) {
+        this(properties, client(gatewayProperties, gatewayHttpClient));
+    }
+
+    TelegramBotClient(TelegramBotProperties properties, RestClient restClient) {
         this.properties = properties;
-        this.restTemplate = restTemplate;
+        this.restClient = restClient;
+    }
+
+    private static RestClient client(GatewayProperties gatewayProperties, HttpClient gatewayHttpClient) {
+        var factory = new JdkClientHttpRequestFactory(gatewayHttpClient);
+        factory.setReadTimeout(gatewayProperties.getHttpClient().getReadTimeout());
+        return RestClient.builder().requestFactory(factory).build();
+    }
+
+    private ResponseEntity<String> post(String method, Object body, MediaType contentType) {
+        return restClient.post()
+                .uri(apiUrl(method))
+                .contentType(contentType)
+                .body(body)
+                .retrieve()
+                .toEntity(String.class);
     }
 
     private String apiUrl(String method) {
@@ -57,11 +80,7 @@ public class TelegramBotClient {
                 body.put("reply_markup", replyMarkup);
             }
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl("sendMessage"), entity, String.class);
+            ResponseEntity<String> response = post("sendMessage", body, MediaType.APPLICATION_JSON);
             return response.getStatusCode().is2xxSuccessful();
         } catch (RestClientException ex) {
             log.error("Failed to sendMessage to Telegram chatId={}: {}", chatId, ex.getMessage());
@@ -80,10 +99,7 @@ public class TelegramBotClient {
             body.put("text", html);
             body.put("parse_mode", "HTML");
             body.put("disable_web_page_preview", true);
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            ResponseEntity<String> response = restTemplate.postForEntity(
-                    apiUrl("sendMessage"), new HttpEntity<>(body, headers), String.class);
+            ResponseEntity<String> response = post("sendMessage", body, MediaType.APPLICATION_JSON);
             if (response.getStatusCode().is2xxSuccessful()) return new SendOutcome(true, false, null);
             return new SendOutcome(false, false, "telegram rejected the message");
         } catch (org.springframework.web.client.RestClientResponseException ex) {
@@ -118,11 +134,7 @@ public class TelegramBotClient {
                 body.put("reply_markup", replyMarkup);
             }
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl("editMessageText"), entity, String.class);
+            ResponseEntity<String> response = post("editMessageText", body, MediaType.APPLICATION_JSON);
             return response.getStatusCode().is2xxSuccessful();
         } catch (RestClientException ex) {
             log.error("Failed to editMessageText chatId={}, messageId={}: {}", chatId, messageId, ex.getMessage());
@@ -153,11 +165,7 @@ public class TelegramBotClient {
             };
             body.add("photo", resource);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-            HttpEntity<MultiValueMap<String, Object>> entity = new HttpEntity<>(body, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl("sendPhoto"), entity, String.class);
+            ResponseEntity<String> response = post("sendPhoto", body, MediaType.MULTIPART_FORM_DATA);
             return response.getStatusCode().is2xxSuccessful();
         } catch (RestClientException ex) {
             log.error("Failed to sendPhoto to chatId={}: {}", chatId, ex.getMessage());
@@ -177,11 +185,7 @@ public class TelegramBotClient {
             }
             body.put("show_alert", showAlert);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl("answerCallbackQuery"), entity, String.class);
+            ResponseEntity<String> response = post("answerCallbackQuery", body, MediaType.APPLICATION_JSON);
             return response.getStatusCode().is2xxSuccessful();
         } catch (RestClientException ex) {
             log.warn("Failed to answerCallbackQuery id={}: {}", callbackQueryId, ex.getMessage());
@@ -200,11 +204,7 @@ public class TelegramBotClient {
                 body.put("secret_token", secretToken);
             }
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl("setWebhook"), entity, String.class);
+            ResponseEntity<String> response = post("setWebhook", body, MediaType.APPLICATION_JSON);
             log.info("Telegram setWebhook response: {}", response.getBody());
             return response.getStatusCode().is2xxSuccessful();
         } catch (RestClientException ex) {
@@ -226,11 +226,7 @@ public class TelegramBotClient {
                 body.put("language_code", languageCode.trim().toLowerCase());
             }
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(apiUrl("setMyCommands"), entity, String.class);
+            ResponseEntity<String> response = post("setMyCommands", body, MediaType.APPLICATION_JSON);
             log.info("Telegram setMyCommands (lang={}) response: {}", languageCode, response.getBody());
             return response.getStatusCode().is2xxSuccessful();
         } catch (RestClientException ex) {
@@ -245,7 +241,7 @@ public class TelegramBotClient {
         }
         try {
             String url = apiUrl("getUpdates") + "?offset=" + offset + "&limit=" + limit + "&timeout=" + timeoutSec;
-            var response = restTemplate.getForObject(url, GetUpdatesResponse.class);
+            var response = restClient.get().uri(url).retrieve().body(GetUpdatesResponse.class);
             if (response != null && response.result() != null) {
                 return response.result();
             }

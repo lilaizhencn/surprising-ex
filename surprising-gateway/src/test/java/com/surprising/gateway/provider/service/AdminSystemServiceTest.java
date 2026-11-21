@@ -8,16 +8,22 @@ import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.client.SystemHealthClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.http.client.ClientHttpRequest;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.mock.http.client.MockClientHttpResponse;
+import org.springframework.web.client.RestClient;
 
 class AdminSystemServiceTest {
 
@@ -25,7 +31,7 @@ class AdminSystemServiceTest {
     void routesExposeAdminAndPublicRoutesWithoutSecrets() {
         GatewayProperties properties = properties();
         AdminSystemService service = new AdminSystemService(
-                adminAuthService(), properties, new SystemHealthClient(new RestTemplate(), mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class)));
+                adminAuthService(), properties, new SystemHealthClient(RestClient.create(), mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class)));
 
         var response = service.routes("Bearer admin");
 
@@ -38,9 +44,12 @@ class AdminSystemServiceTest {
     @Test
     void healthChecksActuatorHealthForConfiguredBackend() {
         GatewayProperties properties = properties();
-        CapturingRestTemplate restTemplate = new CapturingRestTemplate();
+        CapturingRequestFactory http = new CapturingRequestFactory();
         AdminSystemService service = new AdminSystemService(
-                adminAuthService(), properties, new SystemHealthClient(restTemplate, mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class)));
+                adminAuthService(), properties, new SystemHealthClient(
+                        RestClient.builder().requestFactory(http).defaultStatusHandler(status -> false, (request, response) -> {
+                        }).build(),
+                        mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class)));
 
         var response = service.health("Bearer admin", false);
 
@@ -48,8 +57,8 @@ class AdminSystemServiceTest {
         assertThat(response.up()).isEqualTo(1);
         assertThat(response.services().get(0).healthUrl())
                 .isEqualTo("http://wallet:8002/actuator/health");
-        assertThat(restTemplate.url.toString()).isEqualTo("http://wallet:8002/actuator/health");
-        assertThat(restTemplate.requestEntity.getHeaders().getFirst("Authorization"))
+        assertThat(http.url.toString()).isEqualTo("http://wallet:8002/actuator/health");
+        assertThat(http.headers.getFirst("Authorization"))
                 .isEqualTo("Basic YWRtaW46c2VjcmV0");
     }
 
@@ -62,7 +71,7 @@ class AdminSystemServiceTest {
                 "trading", new GatewayProperties.BackendRoute("local:", "/api/v1/admin/trading/orders", true)));
         properties.setRoutes(Map.of("instrument", new GatewayProperties.BackendRoute(
                 "http://old-instrument:9080", "/api/v1/instruments", false)));
-        var http = mock(RestTemplate.class);
+        var http = mock(RestClient.class);
         var endpoint = mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class);
         var health = mock(org.springframework.boot.health.actuate.endpoint.IndicatedHealthDescriptor.class);
         when(health.getStatus()).thenReturn(new org.springframework.boot.health.contributor.Status(status));
@@ -89,7 +98,7 @@ class AdminSystemServiceTest {
                 .withBean("testDependency", org.springframework.boot.health.contributor.HealthIndicator.class,
                         () -> () -> org.springframework.boot.health.contributor.Health.down().build())
                 .withBean(AuthService.class, this::adminAuthService)
-                .withBean(RestTemplate.class, () -> mock(RestTemplate.class))
+                .withBean(RestClient.class, () -> mock(RestClient.class))
                 .withBean(GatewayProperties.class, () -> {
                     var properties = new GatewayProperties();
                     properties.setAdminRoutes(Map.of("account", new GatewayProperties.BackendRoute(
@@ -101,7 +110,7 @@ class AdminSystemServiceTest {
                     assertThat(context).hasNotFailed();
                     var result = context.getBean(AdminSystemService.class).health("Bearer admin", false);
                     assertThat(result.down()).isEqualTo(1);
-                    org.mockito.Mockito.verifyNoInteractions(context.getBean(RestTemplate.class));
+                    org.mockito.Mockito.verifyNoInteractions(context.getBean(RestClient.class));
                 });
     }
 
@@ -130,18 +139,35 @@ class AdminSystemServiceTest {
         return authService;
     }
 
-    private static final class CapturingRestTemplate extends RestTemplate {
+    private static final class CapturingRequestFactory implements ClientHttpRequestFactory {
         private URI url;
-        private HttpEntity<?> requestEntity;
+        private HttpHeaders headers;
 
         @Override
-        public <T> ResponseEntity<T> exchange(URI url,
-                                              HttpMethod method,
-                                              HttpEntity<?> requestEntity,
-                                              Class<T> responseType) {
-            this.url = url;
-            this.requestEntity = requestEntity;
-            return ResponseEntity.ok(responseType.cast("{\"status\":\"UP\"}"));
+        public ClientHttpRequest createRequest(URI uri, HttpMethod httpMethod) {
+            this.url = uri;
+            return new org.springframework.http.client.AbstractClientHttpRequest() {
+                @Override
+                protected OutputStream getBodyInternal(HttpHeaders requestHeaders) {
+                    return OutputStream.nullOutputStream();
+                }
+
+                @Override
+                protected ClientHttpResponse executeInternal(HttpHeaders requestHeaders) throws IOException {
+                    headers = requestHeaders;
+                    return new MockClientHttpResponse("{\"status\":\"UP\"}".getBytes(StandardCharsets.UTF_8), 200);
+                }
+
+                @Override
+                public HttpMethod getMethod() {
+                    return httpMethod;
+                }
+
+                @Override
+                public URI getURI() {
+                    return uri;
+                }
+            };
         }
     }
 }

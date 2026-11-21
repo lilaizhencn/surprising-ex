@@ -7,7 +7,6 @@ import java.net.URI;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Objects;
-import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -15,7 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -37,11 +36,11 @@ public class MarketMakerClient {
     );
 
     private final GatewayProperties properties;
-    private final RestTemplate restTemplate;
+    private final RestClient restClient;
 
-    public MarketMakerClient(GatewayProperties properties, RestTemplate restTemplate) {
+    public MarketMakerClient(GatewayProperties properties, RestClient restClient) {
         this.properties = Objects.requireNonNull(properties, "properties");
-        this.restTemplate = Objects.requireNonNull(restTemplate, "restTemplate");
+        this.restClient = Objects.requireNonNull(restClient, "restClient");
     }
 
     public URI resolveTargetUri(HttpServletRequest request) {
@@ -63,9 +62,8 @@ public class MarketMakerClient {
                                               GatewayIdentity identity) {
         URI targetUri = resolveTargetUri(request);
         HttpHeaders headers = buildForwardHeaders(request, identity);
-        HttpEntity<byte[]> entity = new HttpEntity<>(body, headers);
         try {
-            ResponseEntity<byte[]> response = restTemplate.exchange(targetUri, method, entity, byte[].class);
+            ResponseEntity<byte[]> response = GatewayRestCalls.exchange(restClient, targetUri, method, headers, body, byte[].class);
             HttpHeaders responseHeaders = new HttpHeaders();
             if (response.getHeaders().getContentType() != null) {
                 responseHeaders.setContentType(response.getHeaders().getContentType());

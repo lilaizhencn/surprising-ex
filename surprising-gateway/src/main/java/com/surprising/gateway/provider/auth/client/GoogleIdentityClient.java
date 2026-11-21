@@ -12,7 +12,7 @@ import org.springframework.security.oauth2.core.*;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClient;
 
 /** Only signed Google ID tokens may cross this identity boundary. */
 @Component
@@ -32,7 +32,7 @@ public class GoogleIdentityClient {
         this.properties = properties;
         var factory = new JdkClientHttpRequestFactory(gatewayHttpClient);
         factory.setReadTimeout(Duration.ofSeconds(10));
-        decoder = decoder("https://www.googleapis.com/oauth2/v3/certs", new RestTemplate(factory));
+        decoder = decoder("https://www.googleapis.com/oauth2/v3/certs", RestClient.builder().requestFactory(factory).build());
     }
 
     GoogleIdentityClient(GoogleLoginProperties properties, JwtDecoder decoder) {
@@ -40,8 +40,8 @@ public class GoogleIdentityClient {
         this.decoder = decoder;
     }
 
-    public static NimbusJwtDecoder decoder(String jwksUri, RestTemplate http) {
-        var decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri).restOperations(http)
+    public static NimbusJwtDecoder decoder(String jwksUri, RestClient http) {
+        var decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri).restOperations(JwkRestOperations.adapt(http))
                 .jwsAlgorithm(SignatureAlgorithm.RS256).build();
         decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(new JwtTimestampValidator(), token ->
                 isGoogleIssuer(token.getClaimAsString("iss"))

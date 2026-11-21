@@ -37,7 +37,7 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClient;
 import tools.jackson.databind.ObjectMapper;
 
 class ConstructorInjectionContextTest {
@@ -60,7 +60,7 @@ class ConstructorInjectionContextTest {
             context.registerBean(GatewayProductServices.class, () -> products);
             context.registerBean(ObjectMapper.class, () -> new ObjectMapper());
             for (Class<?> type : List.of(AuthService.class, GatewayApiKeyService.class, AdminAuditRepository.class, AdminApprovalRepository.class,
-                    ProductTransferService.class, ProductTransferSecurityService.class, RestTemplate.class,
+                    ProductTransferService.class, ProductTransferSecurityService.class, RestClient.class,
                     com.surprising.instrument.provider.service.InstrumentService.class,
                     OrderValidator.class, OrderAeronGateway.class,
                     AeronOrderProjectionRepository.class, MatchingMarketDataService.class, TradingMetricsService.class,
@@ -85,7 +85,7 @@ class ConstructorInjectionContextTest {
 
             assertThat(context.getBean(com.surprising.gateway.provider.controller.RuntimeController.class).runtime().get("productLines"))
                     .containsExactly(product);
-            verifyNoInteractions(context.getBean(RestTemplate.class));
+            verifyNoInteractions(context.getBean(RestClient.class));
         }
     }
 

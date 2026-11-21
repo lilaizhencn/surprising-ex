@@ -5,24 +5,23 @@ import com.surprising.gateway.provider.model.SystemHealthItem;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
-import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 
 /** 负责本地 Actuator 与外部健康端点的实际探测；不承担权限、目标去重和结果聚合。 */
 @Component
 public class SystemHealthClient {
-    private final RestTemplate restTemplate;
+    private final RestClient restClient;
     private final org.springframework.boot.health.actuate.endpoint.HealthEndpoint healthEndpoint;
 
-    public SystemHealthClient(RestTemplate restTemplate,
+    public SystemHealthClient(RestClient restClient,
                               org.springframework.boot.health.actuate.endpoint.HealthEndpoint healthEndpoint) {
-        this.restTemplate = restTemplate;
+        this.restClient = restClient;
         this.healthEndpoint = healthEndpoint;
     }
 
@@ -40,8 +39,8 @@ public class SystemHealthClient {
             if (route.hasBasicAuth()) {
                 headers.setBasicAuth(route.getBasicAuthUsername(), route.getBasicAuthPassword());
             }
-            ResponseEntity<String> response = restTemplate.exchange(
-                    healthUri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            ResponseEntity<String> response = GatewayRestCalls.exchange(
+                    restClient, healthUri, HttpMethod.GET, headers, null, String.class);
             long latencyMs = Duration.between(startedAt, Instant.now()).toMillis();
             String status = response.getStatusCode().is2xxSuccessful() ? "UP" : "DOWN";
             return new SystemHealthItem(
