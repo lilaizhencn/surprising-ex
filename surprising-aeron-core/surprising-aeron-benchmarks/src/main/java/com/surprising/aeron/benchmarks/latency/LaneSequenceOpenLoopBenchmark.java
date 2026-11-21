@@ -21,7 +21,6 @@ public final class LaneSequenceOpenLoopBenchmark implements JLBHTask {
                 .throughput(200_000)
                 .runs(2)
                 .accountForCoordinatedOmission(true)
-                .accountForInterruptions(false)
                 .jlbhTask(new LaneSequenceOpenLoopBenchmark());
         new JLBH(options).start();
     }
