@@ -31,6 +31,9 @@ public record SubscriptionTopic(
         instrumentId = normalizeInstrumentId(instrumentId, channel);
         period = normalizePeriod(period, channel);
         depth = normalizeDepth(depth, channel);
+        if (channel == WsChannel.MARKET_LIST && productLine == null) {
+            throw new IllegalArgumentException("productLine is required for marketList");
+        }
         if (!channel.isPublicChannel() && userId == null) {
             throw new IllegalArgumentException("private channel requires userId");
         }
@@ -72,6 +75,11 @@ public record SubscriptionTopic(
     }
 
     private static String normalizeInstrumentId(String instrumentId, WsChannel channel) {
+        if (channel == WsChannel.MARKET_LIST) {
+            if (instrumentId == null || instrumentId.isBlank() || WILDCARD.equals(instrumentId.trim())) {
+                return WILDCARD;
+            }
+        }
         if (!channel.isPublicChannel() && (instrumentId == null || instrumentId.isBlank())) {
             return WILDCARD;
         }

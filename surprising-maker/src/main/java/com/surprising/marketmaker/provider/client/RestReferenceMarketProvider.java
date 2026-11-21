@@ -8,9 +8,11 @@ import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
+import com.surprising.marketmaker.provider.model.ExternalTrade;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.model.OrderSide;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
@@ -20,12 +22,15 @@ import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -47,9 +52,14 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private final java.util.concurrent.locks.ReentrantLock configurationLock = new java.util.concurrent.locks.ReentrantLock();
     private volatile MarketMakerProperties.ReferenceMarket loadedConfiguration;
     private volatile long configurationGeneration;
+    private static final Duration BOOK_HOLD = Duration.ofSeconds(15);
+    private static final int MAX_QUEUED_PRINTS = 64;
+    private static final int MAX_SEEN_TRADE_IDS = 4096;
+
     private final Map<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
     private final Map<String, LiveBook> liveBooks = new ConcurrentHashMap<>();
     private final Map<String, WebSocketState> webSockets = new ConcurrentHashMap<>();
+    private final Map<String, TradeTape> tradeTapes = new ConcurrentHashMap<>();
 
     @org.springframework.beans.factory.annotation.Autowired
     public RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper,
@@ -78,7 +88,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                         state.retired = true;
                         if (state.webSocket != null) state.webSocket.abort();
                     }
-                    webSockets.clear(); liveBooks.clear(); cache.clear();
+                    webSockets.clear(); liveBooks.clear(); cache.clear(); tradeTapes.clear();
                     loadedConfiguration = referenceMarket;
                     configurationGeneration++;
                 }
@@ -126,9 +136,18 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         }
 
         synchronized (configurationLock) {
-            return generation == configurationGeneration && cached != null && fresh(cached.snapshot(), now)
-                    ? cached.snapshot() : null;
+            if (generation != configurationGeneration || cached == null) return null;
+            // A brief gap keeps the last two-sided book. Quoting holds it instead of pulling the ladder.
+            return fresh(cached.snapshot(), now) || held(cached.snapshot(), now) ? cached.snapshot() : null;
         }
+    }
+
+    @Override
+    public List<ExternalTrade> drainTrades(String instrumentId, ProductLine productLine, int limit) {
+        if (limit <= 0) return List.of();
+        ProductLine effective = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+        TradeTape tape = tradeTapes.get(cacheKey(effective, normalizeSymbol(instrumentId)));
+        return tape == null ? List.of() : tape.drain(limit);
     }
 
     ReferenceOrderBookSnapshot parsePayload(MarketMakerProperties.ReferenceMarket.Source source,
@@ -170,6 +189,9 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                                                              JsonNode root,
                                                              Instant receivedAt) {
         try {
+            if (recordTrades(source, instrumentId, instrument, root, receivedAt)) {
+                return null;
+            }
             ParsedBookUpdate update = parseLiveBookUpdate(liveParser(source), root);
             if (update == null || update.empty()) {
                 return null;
@@ -367,6 +389,51 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 && snapshot.receivedAt().plus(maxAge).isAfter(now);
     }
 
+    private boolean held(ReferenceOrderBookSnapshot snapshot, Instant now) {
+        return snapshot != null
+                && snapshot.receivedAt() != null
+                && snapshot.receivedAt().plus(holdAge()).isAfter(now);
+    }
+
+    /** OKX public trades use the same socket as the book. The taker side is the print side. */
+    private boolean recordTrades(MarketMakerProperties.ReferenceMarket.Source source, String instrumentId,
+                                 InstrumentResponse instrument, JsonNode root, Instant receivedAt) {
+        if (root == null || !"trades".equalsIgnoreCase(root.path("arg").path("channel").asString(""))) {
+            return false;
+        }
+        JsonNode data = root.path("data");
+        if (!data.isArray() || data.isEmpty()) return true;
+        String key = cacheKey(source.getProductLine(), normalizeSymbol(instrumentId));
+        TradeTape tape = tradeTapes.computeIfAbsent(key, ignored -> new TradeTape());
+        for (JsonNode trade : data) {
+            OrderSide side = "buy".equalsIgnoreCase(trade.path("side").asString("")) ? OrderSide.BUY
+                    : "sell".equalsIgnoreCase(trade.path("side").asString("")) ? OrderSide.SELL : null;
+            if (side == null) continue;
+            long priceTicks = toTicks(decimalText(trade.path("px").asString(null)), instrument.pricePrecision());
+            long quantitySteps = toSteps(decimalText(trade.path("sz").asString(null)), instrument, source,
+                    properties.getReferenceMarket());
+            if (priceTicks <= 0 || quantitySteps <= 0) continue;
+            String tradeId = trade.path("tradeId").asString("");
+            tape.add(new ExternalTrade(tradeId.isBlank() ? priceTicks + ":" + receivedAt.toEpochMilli() : tradeId,
+                    side, priceTicks, quantitySteps, receivedAt));
+        }
+        return true;
+    }
+
+    private BigDecimal decimalText(String value) {
+        if (value == null || value.isBlank()) return BigDecimal.ZERO;
+        return new BigDecimal(value);
+    }
+
+    private List<String> subscriptions(String subscribeMessage) {
+        if (!hasText(subscribeMessage)) return List.of();
+        List<String> messages = new ArrayList<>();
+        messages.add(subscribeMessage);
+        String trades = subscribeMessage.replace("\"channel\":\"books\"", "\"channel\":\"trades\"");
+        if (!trades.equals(subscribeMessage)) messages.add(trades);
+        return messages;
+    }
+
     private void ensureWebSocketConnections(MarketMakerProperties.ReferenceMarket referenceMarket,
                                             ProductLine productLine,
                                             String instrumentId,
@@ -388,9 +455,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             WebSocketBinding binding = new WebSocketBinding(bindingKey, source, instrumentId, instrument, subscribeMessage);
             state.attach(binding);
             WebSocket activeSocket = state.webSocket;
-            if (activeSocket != null && !activeSocket.isInputClosed() && !activeSocket.isOutputClosed()
-                    && subscribeMessage != null && state.sentSubscriptions.add(subscribeMessage)) {
-                activeSocket.sendText(subscribeMessage, true);
+            if (activeSocket != null && !activeSocket.isInputClosed() && !activeSocket.isOutputClosed()) {
+                for (String message : subscriptions(subscribeMessage)) {
+                    if (state.sentSubscriptions.add(message)) activeSocket.sendText(message, true);
+                }
             }
             if (!shouldConnect(state, now)) {
                 continue;
@@ -451,6 +519,11 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private Duration maxAge() {
         Duration maxAge = properties.getReferenceMarket().getMaxAge();
         return maxAge == null || maxAge.isNegative() || maxAge.isZero() ? Duration.ofSeconds(3) : maxAge;
+    }
+
+    private Duration holdAge() {
+        Duration maxAge = maxAge();
+        return maxAge.compareTo(BOOK_HOLD) > 0 ? maxAge : BOOK_HOLD;
     }
 
     private Duration reconnectBackoff() {
@@ -518,9 +591,8 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (state.retired) { webSocket.abort(); return; }
             state.connecting = false;
             for (WebSocketBinding binding : state.bindings.values()) {
-                String subscribeMessage = binding.subscribeMessage();
-                if (hasText(subscribeMessage) && state.sentSubscriptions.add(subscribeMessage)) {
-                    webSocket.sendText(subscribeMessage, true);
+                for (String message : subscriptions(binding.subscribeMessage())) {
+                    if (state.sentSubscriptions.add(message)) webSocket.sendText(message, true);
                 }
             }
             webSocket.request(1);
@@ -698,5 +770,29 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     private record ParsedLevel(BigDecimal price, BigDecimal quantity) {
+    }
+
+    private static final class TradeTape {
+        private final ArrayDeque<ExternalTrade> trades = new ArrayDeque<>();
+        private final ArrayDeque<String> seenOrder = new ArrayDeque<>();
+        private final Set<String> seen = new HashSet<>();
+
+        private void add(ExternalTrade trade) {
+            synchronized (this) {
+                if (!seen.add(trade.tradeId())) return;
+                seenOrder.addLast(trade.tradeId());
+                while (seenOrder.size() > MAX_SEEN_TRADE_IDS) seen.remove(seenOrder.removeFirst());
+                if (trades.size() >= MAX_QUEUED_PRINTS) trades.removeFirst();
+                trades.addLast(trade);
+            }
+        }
+
+        private List<ExternalTrade> drain(int limit) {
+            synchronized (this) {
+                List<ExternalTrade> drained = new ArrayList<>();
+                while (drained.size() < limit && !trades.isEmpty()) drained.add(trades.removeFirst());
+                return List.copyOf(drained);
+            }
+        }
     }
 }

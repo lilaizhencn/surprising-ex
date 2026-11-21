@@ -85,9 +85,12 @@ public class GlobalGatewayExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, failure.getMessage());
     }
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalGatewayExceptionHandler.class);
+
     @ExceptionHandler(ReadViewUnavailableException.class)
     public void readViewUnavailable(ReadViewUnavailableException failure, HttpServletResponse response)
             throws IOException {
+        log.warn("503 read-view unavailable: message={}", failure.getMessage());
         response.sendError(HttpStatus.SERVICE_UNAVAILABLE.value(), failure.getMessage());
     }
 

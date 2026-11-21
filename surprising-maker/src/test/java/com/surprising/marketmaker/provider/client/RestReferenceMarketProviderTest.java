@@ -139,6 +139,32 @@ class RestReferenceMarketProviderTest {
     }
 
     @Test
+    void okxTradesBecomeDrainedPrintsWithoutChangingTheBook() {
+        RestReferenceMarketProvider provider = provider();
+        MarketMakerProperties.ReferenceMarket.Source source = source("OKX_BOOKS");
+        source.setWebSocketParser("OKX_BOOKS_WS");
+        source.setProductLine(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
+        source.setExternalSymbol("BTC-USDT-SWAP");
+        provider.parseWebSocketPayload(source, "604", instrument(), """
+                {"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot",
+                 "data":[{"bids":[["60000.1","0.015","0","1"]],"asks":[["60000.3","0.017","0","1"]]}]}
+                """, Instant.now());
+        var book = provider.parseWebSocketPayload(source, "604", instrument(), """
+                {"arg":{"channel":"trades","instId":"BTC-USDT-SWAP"},
+                 "data":[{"instId":"BTC-USDT-SWAP","tradeId":"9","px":"60000.3","sz":"0.020","side":"buy","ts":"1"},
+                          {"instId":"BTC-USDT-SWAP","tradeId":"9","px":"60000.3","sz":"0.020","side":"buy","ts":"1"},
+                          {"instId":"BTC-USDT-SWAP","tradeId":"10","px":"60000.1","sz":"0.015","side":"sell","ts":"2"}]}
+                """, Instant.now());
+        assertThat(book).isNull();
+        var prints = provider.drainTrades("604", com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, 10);
+        assertThat(prints).extracting(com.surprising.marketmaker.provider.model.ExternalTrade::tradeId)
+                .containsExactly("9", "10");
+        assertThat(prints.getFirst().takerSide()).isEqualTo(com.surprising.trading.api.model.OrderSide.BUY);
+        assertThat(prints.getFirst().quantitySteps()).isEqualTo(20L);
+        assertThat(provider.drainTrades("604", com.surprising.product.api.ProductLine.LINEAR_PERPETUAL, 10)).isEmpty();
+    }
+
+    @Test
     void parsesBybitWebSocketOrderBookSnapshot() {
         RestReferenceMarketProvider provider = provider();
         MarketMakerProperties.ReferenceMarket.Source source = source("BYBIT_ORDERBOOK");

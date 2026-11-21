@@ -1,7 +1,20 @@
 server:
   address: ${GATEWAY_BIND_ADDRESS:0.0.0.0}
 
+spring:
+  data:
+    redis:
+      connect-timeout: 1s
+      timeout: 2s
+
 surprising:
+  trade-export:
+    internal-maker-accounts: 4,5,6,101,102,103,201,202,203
+  aeron:
+    self-trade-allowed-users: 4,5,6,101,102,103,201,202,203
+    topology:
+      nacos:
+        enabled: false
   gateway:
     limits:
       ip:

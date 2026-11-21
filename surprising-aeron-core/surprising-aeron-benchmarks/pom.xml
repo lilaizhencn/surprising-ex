@@ -40,6 +40,11 @@
             <artifactId>HdrHistogram</artifactId>
         </dependency>
         <dependency>
+            <groupId>net.openhft</groupId>
+            <artifactId>jlbh</artifactId>
+            <version>1.9.2</version>
+        </dependency>
+        <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-service</artifactId>
             <version>${project.version}</version>

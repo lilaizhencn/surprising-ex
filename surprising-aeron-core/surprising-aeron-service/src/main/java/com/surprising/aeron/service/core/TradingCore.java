@@ -231,6 +231,10 @@ public final class TradingCore implements AutoCloseable {
         this(productLine, CoreConfiguration.standaloneLaneTopology());
     }
 
+    public TradingCore(ProductLine productLine, CoreRuntimeConfiguration configuration) {
+        this(productLine, CoreConfiguration.standaloneLaneTopology(), configuration);
+    }
+
     public TradingCore(ProductLine productLine, LaneTopology startupTopology) {
         this(productLine, startupTopology, CoreRuntimeConfiguration.standalone());
     }
@@ -1135,6 +1139,13 @@ public final class TradingCore implements AutoCloseable {
     /** 按指定产品线解码完整分块快照，恢复协议决定候选运行时的装配与激活。 */
     public static TradingCore fromSnapshot(ProductLine productLine, byte[] snapshot) {
         return SectionedCoreSnapshotCodec.decode(snapshot, productLine);
+    }
+
+    /** 按指定产品线和显式配置解码完整分块快照。 */
+    public static TradingCore fromSnapshot(ProductLine productLine, byte[] snapshot,
+            CoreRuntimeConfiguration configuration) {
+        return SectionedCoreSnapshotCodec.decode(snapshot, productLine, configuration,
+                CoreConfiguration.standaloneLaneTopology());
     }
 
     /** 只检查快照清单和产品线边界，不在这里运行交易命令。 */

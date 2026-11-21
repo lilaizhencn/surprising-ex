@@ -402,3 +402,13 @@ mvn -pl surprising-gateway -am test
 Performance procedures are defined in [AGENTS-performance.md](AGENTS-performance.md). The formal local topology is one real Aeron member, one Matcher, and global in-flight 256, with network, Archive, and Core retained. Report profiling separately from primary throughput. An in-flight limit reached under closed-loop load is not proof of Core saturation.
 
 Historical observations and their limitations are in [PERFORMANCE_VALIDATION.md](PERFORMANCE_VALIDATION.md). These are evidence for their recorded versions and environments, not current capacity guarantees. Module READMEs are maintained as current source guides; historical change narratives remain in validation documents and Git history.
+
+### Aeron 客户端等待与本地故障诊断
+
+客户端只有“当前可投递的新请求”才跳过空闲等待。等待已接收响应、连接恢复、窗口腾空或 `ADMIN_ACTION` 重试时，仍执行既有短时轮询退避；入队保留 `parked`/`unpark` 唤醒检查，超时、背压与结果未知语义不变。响应消费回调按 Lane 复用，空响应集合不创建迭代器。
+
+诊断 API/WS 故障时不能只看健康接口：需同时检查公开盘口内容与更新时间、匿名 WS 握手、做市依赖及实际日志。堆容量/RSS 高不等于泄漏，需比较回收后存活量、DirectBuffer、线程/FD 趋势与分配速率。当前证据、复现测试、未闭环项及重载边界见 [PERFORMANCE_VALIDATION.md](PERFORMANCE_VALIDATION.md)。
+
+做市周期还须区分“RPC 返回”和“成功补单”：启用参考盘口而参考数据不可用时，仍按原逻辑撤空自己的不安全报价，但应标记 `DEGRADED / REFERENCE_MARKET_UNAVAILABLE`，不能报告 `CYCLE_SUCCESS`。补单拒绝与参考不可用使用每进程最多每 5 秒一条的静态原因诊断，不记录账户、订单或余额。只有必要参考恢复、正常补单成功后，才恢复成功状态。
+
+本地做市诊断（2026-11-19）：仅重载Maker加载脱敏诊断后，现货1001/永续604实测出现Core `INSUFFICIENT_AVAILABLE_BALANCE` 补单拒绝，API/WS可通但盘口仍空。该码同时覆盖账户/币种余额缺失或可用不足，不据此自动充值、解冻或调整风控；详细运行包校验与验证边界见 `PERFORMANCE_VALIDATION.md`。

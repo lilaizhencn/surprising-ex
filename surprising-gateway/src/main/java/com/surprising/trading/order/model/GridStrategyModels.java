@@ -16,7 +16,7 @@ public final class GridStrategyModels {
             ProductLine productLine,
             @Positive long lowerPriceTicks,
             @Positive long upperPriceTicks,
-            @Min(2) @Max(100) int gridCount,
+            @Min(2) @Max(150) int gridCount,
             @Positive long totalInvestmentUnits,
             boolean isArithmetic
     ) {}

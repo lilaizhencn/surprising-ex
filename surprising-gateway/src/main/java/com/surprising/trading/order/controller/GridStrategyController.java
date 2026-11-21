@@ -2,6 +2,7 @@ package com.surprising.trading.order.controller;
 
 import com.surprising.gateway.provider.auth.model.OperatingUser;
 import com.surprising.trading.order.model.GridStrategyModels.CreateGridStrategyRequest;
+import com.surprising.trading.order.model.GridStrategyModels.GridStrategyDetailResponse;
 import com.surprising.trading.order.model.GridStrategyModels.GridStrategyRecord;
 import com.surprising.trading.order.service.GridStrategyService;
 import jakarta.validation.Valid;
@@ -34,6 +35,16 @@ public class GridStrategyController {
     @GetMapping("/list")
     public List<GridStrategyRecord> list(@OperatingUser long userId) {
         return gridStrategyService.listStrategies(userId);
+    }
+
+    @GetMapping("/{strategyId}")
+    public GridStrategyDetailResponse detail(@OperatingUser long userId,
+                                             @PathVariable long strategyId) {
+        try {
+            return gridStrategyService.getDetail(userId, strategyId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        }
     }
 
     @PostMapping("/{strategyId}/stop")

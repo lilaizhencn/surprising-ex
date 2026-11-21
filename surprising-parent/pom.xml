@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.2</version>
+        <version>4.2.0</version>
         <relativePath/>
     </parent>
 
@@ -29,7 +29,7 @@
         <spring-boot.version>4.1.2</spring-boot.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <hibernate-validator.version>9.1.0.Final</hibernate-validator.version>
-        <spring-cloud.version>2025.1.4</spring-cloud.version>
+        <spring-cloud.version>2026.0.0</spring-cloud.version>
         <bouncycastle.version>1.86</bouncycastle.version>
         <lz4-java.version>1.11.4</lz4-java.version>
         <snappy-java.version>1.1.10.12</snappy-java.version>

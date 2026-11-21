@@ -19,5 +19,6 @@
         <module>surprising-aeron-client</module>
         <module>surprising-aeron-tools</module>
         <module>surprising-aeron-benchmarks</module>
+        <module>surprising-aeron-stress</module>
     </modules>
 </project>

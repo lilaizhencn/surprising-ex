@@ -28,6 +28,7 @@ JFR_SETTINGS="${JFR_SETTINGS:-profile}"
 JFR_STACK_DEPTH="${JFR_STACK_DEPTH:-128}"
 JFR_MAX_SIZE="${JFR_MAX_SIZE:-64m}"
 JFR_MAX_AGE="${JFR_MAX_AGE:-30m}"
+JIT_LOG_ENABLED="${JIT_LOG_ENABLED:-false}"
 POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_DB="${POSTGRES_DB:-postgres}"
@@ -36,7 +37,7 @@ POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
 POSTGRES_MODE="${POSTGRES_MODE:-auto}"
 PRICE_HTTP_PROXY_ENABLED="${PRICE_HTTP_PROXY_ENABLED:-false}"
 PRICE_HTTP_PROXY_HOST="${PRICE_HTTP_PROXY_HOST:-127.0.0.1}"
-PRICE_HTTP_PROXY_PORT="${PRICE_HTTP_PROXY_PORT:-7897}"
+PRICE_HTTP_PROXY_PORT="${PRICE_HTTP_PROXY_PORT:-27890}"
 PRICE_CONSUMER_CONCURRENCY="${PRICE_CONSUMER_CONCURRENCY:-1}"
 PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS="${PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS:-}"
 PRICE_INDEX_REQUIRED_INSTRUMENT_IDS="${PRICE_INDEX_REQUIRED_INSTRUMENT_IDS:-}"
@@ -314,10 +315,20 @@ java_args_for() {
   if [[ -n "${LOGGING_CONFIG:-}" && "$service" != core-probe ]]; then
     JVM_ARGS+=("-Dlogback.configurationFile=${LOGGING_CONFIG#file:}")
   fi
+  if [[ -n "${SPRING_PROFILES_ACTIVE:-}" && "$service" != core-probe ]]; then
+    JVM_ARGS+=("-Dspring.profiles.active=$SPRING_PROFILES_ACTIVE")
+  fi
   if [[ "$JFR_ENABLED" == true && "$service" != core-probe ]]; then
     JVM_ARGS+=(
       "-XX:FlightRecorderOptions=stackdepth=$JFR_STACK_DEPTH"
       "-XX:StartFlightRecording=name=surprising,filename=$JFR_DIR/$service-$(date -u +%Y%m%dT%H%M%SZ).jfr,settings=$JFR_SETTINGS,maxsize=$JFR_MAX_SIZE,maxage=$JFR_MAX_AGE,dumponexit=true"
+    )
+  fi
+  if [[ "$JIT_LOG_ENABLED" == true && "$service" != core-probe ]]; then
+    JVM_ARGS+=(
+      "-XX:+UnlockDiagnosticVMOptions"
+      "-XX:+LogCompilation"
+      "-XX:LogFile=$LOG_DIR/$service-jit.log"
     )
   fi
   if [[ "${PRICE_HTTP_PROXY_ENABLED:-false}" == "true" && ( "$service" == "gateway" || "$service" == "maker" ) ]]; then
@@ -531,6 +542,12 @@ start_core() {
     fi
     if [[ -n "${SURPRISING_AERON_MATCHING_ENGINES:-}" ]]; then
       JVM_ARGS+=("-Dsurprising.aeron.matching-engines=$SURPRISING_AERON_MATCHING_ENGINES")
+    fi
+    if [[ "${SPRING_PROFILES_ACTIVE:-}" == *local* ]]; then
+      JVM_ARGS+=(
+        "-Dsurprising.aeron.registry.enabled=false"
+        "-Dsurprising.aeron.self-trade-allowed-users=4,5,6,101,102,103,201,202,203"
+      )
     fi
     if [[ -n "${SPRING_PROFILES_ACTIVE:-}" ]]; then
   COMMON_ENV+=(SPRING_PROFILES_ACTIVE="$SPRING_PROFILES_ACTIVE")

@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -19,6 +20,7 @@ public class GridStrategyService {
     private final AtomicLong strategyIdGenerator = new AtomicLong(System.currentTimeMillis() % 10000000);
     private final Map<Long, GridStrategyRecord> strategies = new ConcurrentHashMap<>();
     private final Map<Long, List<GridLevel>> strategyLevels = new ConcurrentHashMap<>();
+    private final Map<String, String> levelClientOrderIds = new ConcurrentHashMap<>();
 
     public GridStrategyService(OrderService orderService) {
         this.orderService = orderService;
@@ -37,8 +39,8 @@ public class GridStrategyService {
         if (request.lowerPriceTicks() <= 0 || request.upperPriceTicks() <= request.lowerPriceTicks()) {
             throw new IllegalArgumentException("upperPriceTicks must be greater than lowerPriceTicks");
         }
-        if (request.gridCount() < 2 || request.gridCount() > 100) {
-            throw new IllegalArgumentException("gridCount must be between 2 and 100");
+        if (request.gridCount() < 2 || request.gridCount() > 150) {
+            throw new IllegalArgumentException("gridCount must be between 2 and 150");
         }
         if (currentPriceTicks <= 0) {
             currentPriceTicks = (request.lowerPriceTicks() + request.upperPriceTicks()) / 2;
@@ -59,6 +61,7 @@ public class GridStrategyService {
             long qty = Math.max(1L, perGridInvestment / Math.max(1L, price));
             OrderSide side = price < currentPriceTicks ? OrderSide.BUY : OrderSide.SELL;
             String clientOrderId = "grid-" + strategyId + "-" + i + "-" + (System.currentTimeMillis() % 100000);
+            levelClientOrderIds.put(levelKey(strategyId, i), clientOrderId);
 
             long orderId = 0L;
             String status = "PENDING";
@@ -168,6 +171,119 @@ public class GridStrategyService {
         strategies.put(strategyId, stopped);
         log.info("Grid strategy stopped: strategyId={}, userId={}", strategyId, userId);
         return stopped;
+    }
+
+    /**
+     * 查询单个网格策略及各档位挂单详情。
+     */
+    public GridStrategyDetailResponse getDetail(long userId, long strategyId) {
+        GridStrategyRecord record = strategies.get(strategyId);
+        if (record == null || record.userId() != userId) {
+            throw new IllegalArgumentException("Grid strategy not found");
+        }
+        List<GridLevel> levels = strategyLevels.getOrDefault(strategyId, List.of());
+        return new GridStrategyDetailResponse(record, List.copyOf(levels));
+    }
+
+    /**
+     * 定时巡检运行中的网格策略：检测已成交挂单并自动在相邻档位补挂反向单。
+     */
+    @Scheduled(fixedDelay = 2000)
+    public void reconcileActiveGrids() {
+        for (GridStrategyRecord record : strategies.values()) {
+            if (!"ACTIVE".equalsIgnoreCase(record.status()) && !"RUNNING".equalsIgnoreCase(record.status())) {
+                continue;
+            }
+            reconcileStrategy(record.strategyId());
+        }
+    }
+
+    void reconcileStrategy(long strategyId) {
+        GridStrategyRecord record = strategies.get(strategyId);
+        List<GridLevel> levels = strategyLevels.get(strategyId);
+        if (record == null || levels == null || levels.isEmpty()) {
+            return;
+        }
+        int matchedDelta = 0;
+        long profitDelta = 0L;
+        List<Integer> newlyFilled = new ArrayList<>();
+        // Pass 1: 同步各档位挂单最新终态，避免相邻档位因遍历顺序错过补单时机
+        for (int i = 0; i < levels.size(); i++) {
+            GridLevel level = levels.get(i);
+            if (!"PLACED".equalsIgnoreCase(level.status())) {
+                continue;
+            }
+            String clientOrderId = levelClientOrderIds.get(levelKey(strategyId, i));
+            if (clientOrderId == null) {
+                continue;
+            }
+            OrderResponse order;
+            try {
+                order = orderService.getByClientOrderId(record.userId(), clientOrderId, null);
+            } catch (Exception ex) {
+                continue;
+            }
+            if (order == null) {
+                continue;
+            }
+            if (order.status() == OrderStatus.FILLED) {
+                levels.set(i, new GridLevel(level.levelIndex(), level.priceTicks(), level.side(),
+                        level.quantitySteps(), level.orderId(), "FILLED"));
+                matchedDelta++;
+                newlyFilled.add(i);
+                if (OrderSide.SELL.name().equalsIgnoreCase(level.side()) && i > 0) {
+                    long spread = Math.max(0L, level.priceTicks() - levels.get(i - 1).priceTicks());
+                    profitDelta += spread * level.quantitySteps();
+                }
+            } else if (order.status() == OrderStatus.CANCELED || order.status() == OrderStatus.REJECTED) {
+                levels.set(i, new GridLevel(level.levelIndex(), level.priceTicks(), level.side(),
+                        level.quantitySteps(), level.orderId(), order.status().name()));
+            }
+        }
+        // Pass 2: 为本轮新成交的档位在相邻格补挂反向单
+        for (int i : newlyFilled) {
+            GridLevel level = levels.get(i);
+            boolean filledBuy = OrderSide.BUY.name().equalsIgnoreCase(level.side());
+            int counterIdx = filledBuy ? i + 1 : i - 1;
+            if (counterIdx >= 0 && counterIdx < levels.size()) {
+                GridLevel target = levels.get(counterIdx);
+                if (!"PLACED".equalsIgnoreCase(target.status())) {
+                    OrderSide counterSide = filledBuy ? OrderSide.SELL : OrderSide.BUY;
+                    String nextClientId = "grid-" + strategyId + "-" + counterIdx + "-" + System.nanoTime() % 1000000;
+                    levelClientOrderIds.put(levelKey(strategyId, counterIdx), nextClientId);
+                    try {
+                        OrderResponse placed = orderService.place(new PlaceOrderRequest(
+                                record.userId(), nextClientId, record.instrumentId(),
+                                counterSide, OrderType.LIMIT, TimeInForce.GTC,
+                                target.priceTicks(), target.quantitySteps(),
+                                MarginMode.CROSS, PositionSide.NET, false, true
+                        ));
+                        if (placed != null && placed.orderId() > 0) {
+                            levels.set(counterIdx, new GridLevel(
+                                    target.levelIndex(), target.priceTicks(), counterSide.name(),
+                                    target.quantitySteps(), placed.orderId(), "PLACED"
+                            ));
+                        }
+                    } catch (Exception ex) {
+                        log.warn("Failed to place counter grid order strategyId={} level={}: {}",
+                                strategyId, counterIdx, ex.getMessage());
+                    }
+                }
+            }
+        }
+        if (matchedDelta > 0 || profitDelta > 0) {
+            strategies.put(strategyId, new GridStrategyRecord(
+                    record.strategyId(), record.userId(), record.instrumentId(), record.productLine(),
+                    record.lowerPriceTicks(), record.upperPriceTicks(), record.gridCount(),
+                    record.isArithmetic(), record.totalInvestmentUnits(),
+                    record.status(), record.totalProfitUnits() + profitDelta,
+                    record.matchedTradeCount() + matchedDelta, record.createdAt()
+            ));
+        }
+    }
+
+    private static String levelKey(long strategyId, int levelIndex) {
+        return strategyId + ":" + levelIndex;
     }
 
     public List<Long> generatePriceGrid(long lower, long upper, int count, boolean isArithmetic) {

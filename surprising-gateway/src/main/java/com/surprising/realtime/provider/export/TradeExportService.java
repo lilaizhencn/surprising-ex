@@ -30,15 +30,27 @@ public class TradeExportService implements SmartLifecycle, HealthIndicator {
 
     TradeExportService(TradeExportProperties config, CandlestickProperties candles,
             CommittedOrderProjectionService orders) {
-        this(config, candles, orders, null);
+        this(config, candles, orders, null, "");
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public TradeExportService(TradeExportProperties config, CandlestickProperties candles,
             CommittedOrderProjectionService orders,
-            @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String defaultBootstrapServers) {
+            @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String defaultBootstrapServers,
+            @Value("${surprising.aeron.self-trade-allowed-users:}") String selfTradeAllowedUsers) {
         this(config, new CommittedTradeExporter(config, candles.getProductLine(),
-                KafkaBootstrapServers.resolve(candles.getKafka().getBootstrapServers(), defaultBootstrapServers), orders));
+                KafkaBootstrapServers.resolve(candles.getKafka().getBootstrapServers(), defaultBootstrapServers),
+                orders, java.time.Clock.systemUTC(), parseAccountIds(selfTradeAllowedUsers)));
+    }
+
+    private static java.util.Set<Long> parseAccountIds(String configured) {
+        if (configured == null || configured.isBlank()) return java.util.Set.of();
+        var ids = new java.util.HashSet<Long>();
+        for (String token : configured.split(",")) {
+            String trimmed = token.trim();
+            if (!trimmed.isEmpty()) ids.add(Long.parseLong(trimmed));
+        }
+        return java.util.Set.copyOf(ids);
     }
 
     TradeExportService(TradeExportProperties config, CommittedTradeExporter exporter) {

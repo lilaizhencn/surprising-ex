@@ -1564,6 +1564,24 @@ public final class AccountBook implements AutoCloseable {
         }
     }
 
+    /** 判断指定用户是否允许同账户自成交（跳过前置交叉撤单扫描）。 */
+    public boolean selfTradeAllowed(long userId) {
+        return configuration != null && configuration.selfTradeAllowedUsers().contains(userId);
+    }
+
+    /** 判断控制任务或账户结算环是否仍有尚未排空的异步项，供快照屏障轮询等待。 */
+    public boolean hasUnfinishedSettlementRing() {
+        assertOwner();
+        if (controlLanes.pending()) return true;
+        if (accountLanesStarted()) {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                SettlementLaneWorker worker = laneLifecycle.worker(laneId);
+                if (worker != null && worker.depth() != 0) return true;
+            }
+        }
+        return false;
+    }
+
     /** 要求控制任务、账户工作队列、待预留索引和本命令变化缓冲均已收尾。 */
     public void requireSnapshotFenceReady() {
         assertOwner();

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.surprising</groupId>
+        <artifactId>surprising-aeron-core</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>surprising-aeron-stress</artifactId>
+    <name>surprising-aeron-stress</name>
+    <description>JCStress checks for hand-written SPSC publication used by the trading core</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-aeron-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjdk.jcstress</groupId>
+            <artifactId>jcstress-core</artifactId>
+            <version>0.16</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/*Stress.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.openjdk.jcstress</groupId>
+                <artifactId>jcstress-maven-plugin</artifactId>
+                <version>0.16</version>
+                <configuration>
+                    <forks>1</forks>
+                    <jvmArgs>-Xms64m -Xmx256m</jvmArgs>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

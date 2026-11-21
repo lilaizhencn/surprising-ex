@@ -879,6 +879,33 @@ class CoreMatchingStateTest {
         }
     }
 
+    @Test
+    void selfTradeAllowedUserMatchesOwnCrossingOrdersAndRestoresCleanly() {
+        var base = com.surprising.aeron.config.CoreRuntimeConfiguration.standalone();
+        var config = new com.surprising.aeron.config.CoreRuntimeConfiguration(
+                base.laneCompletionSpins(), base.maxPendingMatching(), base.snapshotTimeoutSeconds(),
+                base.ownerInputBatchSize(), base.ownerCommandWindow(), base.decoderCacheSlots(),
+                base.matcherGroupSize(), base.matcherGroupNanos(), base.laneInitialEntities(),
+                base.snapshot(), java.util.Set.of(11L));
+        try (TradingCore state = new TradingCore(
+                ProductLine.LINEAR_PERPETUAL, com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology(), config)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 2, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(400, CoreOrderSide.BUY, 105, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            assertThat(state.tradingState().orders()).doesNotContainKeys(101L, 400L);
+            assertThat(state.tradingState().users().get(11L).reservations()).isEmpty();
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(11L).balances().get("USDT")))
+                    .isEqualTo(2_000);
+            try (TradingCore restored = TradingCore.fromSnapshot(ProductLine.LINEAR_PERPETUAL, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+            }
+        }
+    }
+
     /**
      * 通过币对注册配置指定负 Maker 费率和正 Taker 费率，成交后核对双边仓位、终态退休、财库净手续费十及测试资金守恒。订单辅助器的费率传参并未进入订单载荷。
      */

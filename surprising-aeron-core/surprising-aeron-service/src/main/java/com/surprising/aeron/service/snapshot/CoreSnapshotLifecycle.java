@@ -130,6 +130,7 @@ public final class CoreSnapshotLifecycle {
                     || owner.commits.publication.deferred() || owner.commits.publication.dirty()) {
                 throw new IllegalStateException("snapshot fence contains unfinished commands or patch work");
             }
+            if (owner.accountBook().hasUnfinishedSettlementRing()) return null;
             owner.accountBook().requireSnapshotFenceReady();
             boolean acquired = owner.accountBook().accountLanesStarted() && !owner.accountBook().ownerLaneAccess();
             try {

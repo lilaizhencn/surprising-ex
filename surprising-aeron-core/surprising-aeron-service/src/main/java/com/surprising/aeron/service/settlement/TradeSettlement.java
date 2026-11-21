@@ -1188,7 +1188,8 @@ public static final class Plan {
                 if (event == null) throw new IllegalArgumentException("missing matcher event");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
                 if (event.price() <= 0 || event.size() <= 0 || event.matchedOrderId() <= 0
-                        || event.matchedOrderUid() <= 0 || event.matchedOrderUid() == activeUserId)
+                        || event.matchedOrderUid() <= 0
+                        || (event.matchedOrderUid() == activeUserId && !accountBook.selfTradeAllowed(activeUserId)))
                     throw new IllegalStateException("invalid direct fill identity or quantity");
                 remaining = Math.subtractExact(remaining, event.size());
                 if (remaining < 0) throw new IllegalStateException("fill exceeds admitted taker quantity");
@@ -1209,7 +1210,8 @@ public static final class Plan {
                 if (event == null) throw new IllegalArgumentException("missing matcher event");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
                 if (event.price() <= 0 || event.size() <= 0 || event.matchedOrderId() <= 0
-                        || event.matchedOrderUid() <= 0 || event.matchedOrderUid() == activeUserId)
+                        || event.matchedOrderUid() <= 0
+                        || (event.matchedOrderUid() == activeUserId && !accountBook.selfTradeAllowed(activeUserId)))
                     throw new IllegalStateException("invalid direct fill identity or quantity");
                 remaining = Math.subtractExact(remaining, event.size());
                 if (remaining < 0) throw new IllegalStateException("fill exceeds admitted taker quantity");

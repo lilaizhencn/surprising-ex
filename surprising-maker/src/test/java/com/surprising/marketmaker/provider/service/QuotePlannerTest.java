@@ -313,30 +313,26 @@ class QuotePlannerTest {
     }
 
     @Test
-    void variedFiftyLevelLadderKeepsDistinctSizesAndConservativeBudget() {
+    void referenceLadderKeepsExternalSizesAndFillsTheTailWithTheirAverage() {
         var strategy = strategy();
-        strategy.setOrderLevels(50);
-        strategy.setBaseQuantitySteps(1000L);
-        var quoting = quoting();
-        quoting.setQuantityVariationPpm(800_000L);
-        var reference = new ReferenceOrderBookSnapshot("source", "1",
-                List.of(new ReferenceOrderBookLevel(49_990L, 1000L)),
-                List.of(new ReferenceOrderBookLevel(50_010L, 1000L)), Instant.now());
-        var spec = instrument();
-        var plan = quotePlanner.plan(strategy, quoting, risk(), spec,
-                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, reference);
-        assertThat(plan.quotes()).hasSize(100);
-        assertThat(quotePlanner.plan(strategy, quoting, risk(), spec,
-                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, reference)).isEqualTo(plan);
-        for (var side : OrderSide.values()) {
-            var quotes = plan.quotes().stream().filter(q -> q.side() == side).toList();
-            assertThat(quotes).hasSize(50);
-            assertThat(quotes.stream().map(q -> q.quantitySteps()).distinct().count()).isGreaterThan(5);
-            long worstPrice = plan.quotes().stream().mapToLong(q -> q.priceTicks()).max().orElseThrow();
-            long notional = quotes.stream().mapToLong(q -> q.quantitySteps()).sum()
-                    * worstPrice * spec.notionalMultiplierUnits();
-            assertThat(notional).isLessThanOrEqualTo(spec.userOpenInterestLimitFloorUnits());
+        strategy.setOrderLevels(8);
+        strategy.setBaseQuantitySteps(3L);
+        var bids = new java.util.ArrayList<ReferenceOrderBookLevel>();
+        var asks = new java.util.ArrayList<ReferenceOrderBookLevel>();
+        for (int level = 0; level < 3; level++) {
+            bids.add(new ReferenceOrderBookLevel(49_990L - level, 2L + level * 3L));
+            asks.add(new ReferenceOrderBookLevel(50_010L + level, 5L + level));
         }
+        var reference = new ReferenceOrderBookSnapshot("source", "1", bids, asks, Instant.now());
+        var spec = instrument();
+        var plan = quotePlanner.plan(strategy, quoting(), risk(), spec,
+                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, reference);
+        assertThat(quotePlanner.plan(strategy, quoting(), risk(), spec,
+                orderBook(49_990L, 50_010L), mark(5_000_000L), 0L, reference)).isEqualTo(plan);
+        var bidQuotes = plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY).toList();
+        assertThat(bidQuotes).extracting(q -> q.quantitySteps()).containsExactly(2L, 5L, 8L, 5L, 5L, 5L, 5L, 5L);
+        var askQuotes = plan.quotes().stream().filter(q -> q.side() == OrderSide.SELL).toList();
+        assertThat(askQuotes).extracting(q -> q.quantitySteps()).containsExactly(5L, 6L, 7L, 6L, 6L, 6L, 6L, 6L);
     }
 
     @Test
@@ -500,17 +496,19 @@ class QuotePlannerTest {
     }
 
     @Test
-    void capsReferenceMarketQuantityAtStrategyBaseQuantity() {
+    void copiesReferenceQuantityInsteadOfFlatteningToStrategyBase() {
+        var strategy = strategy();
+        strategy.setBaseQuantitySteps(10L);
         ReferenceOrderBookSnapshot reference = new ReferenceOrderBookSnapshot("BINANCE", "WEBSOCKET", "1",
                 List.of(new ReferenceOrderBookLevel(49_990L, 40L)),
                 List.of(new ReferenceOrderBookLevel(50_020L, 70L)),
                 Instant.parse("2026-01-01T00:00:00Z"));
 
-        QuotePlan plan = quotePlanner.plan(strategy(), quoting(), risk(), instrument(),
+        QuotePlan plan = quotePlanner.plan(strategy, quoting(), risk(), instrument(),
                 orderBook(49_900L, 50_100L), mark(5_000_000L), 0L, reference);
 
-        assertThat(plan.quotes().get(0).quantitySteps()).isEqualTo(10L);
-        assertThat(plan.quotes().get(1).quantitySteps()).isEqualTo(10L);
+        assertThat(plan.quotes().get(0).quantitySteps()).isEqualTo(40L);
+        assertThat(plan.quotes().get(1).quantitySteps()).isEqualTo(70L);
     }
 
     @Test
@@ -556,8 +554,9 @@ class QuotePlannerTest {
         assertThat(bidQuotes).hasSize(50);
         assertThat(bidQuotes.get(0).quantitySteps()).isEqualTo(1L);
         assertThat(bidQuotes.get(5).quantitySteps()).isEqualTo(6L);
-        assertThat(bidQuotes.get(6).quantitySteps()).isEqualTo(1L);
-        assertThat(bidQuotes.get(7).quantitySteps()).isEqualTo(2L);
+        // Levels past the visible book use the side's average size: (1+2+3+4+5+6)/6 = 4.
+        assertThat(bidQuotes.get(6).quantitySteps()).isEqualTo(4L);
+        assertThat(bidQuotes.get(7).quantitySteps()).isEqualTo(4L);
     }
 
     @Test

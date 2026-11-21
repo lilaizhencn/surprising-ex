@@ -5099,5 +5099,58 @@ BEGIN
     updated_at = now();
 END $$;
 
+-- Seed default local test account (testuser@aetern.exchange / Test@123456)
+DO $$
+DECLARE
+  v_user_id bigint;
+  v_role_id bigint;
+BEGIN
+  SELECT user_id INTO v_user_id FROM gateway_users WHERE lower(email) = 'testuser@aetern.exchange';
+  IF v_user_id IS NULL THEN
+    INSERT INTO gateway_users (email, password_hash, status, email_verified_at, display_name)
+    VALUES (
+      'testuser@aetern.exchange',
+      'pbkdf2_sha256$600000$asx4nFR9INRWyVA00m2Jwg==$jnQTnu+DVggMjuVt7oBC5gTa4X0vMm9jIjzcw8uTCvU=',
+      'NORMAL',
+      now(),
+      'Test User'
+    )
+    RETURNING user_id INTO v_user_id;
+  ELSE
+    UPDATE gateway_users
+    SET password_hash = 'pbkdf2_sha256$600000$asx4nFR9INRWyVA00m2Jwg==$jnQTnu+DVggMjuVt7oBC5gTa4X0vMm9jIjzcw8uTCvU=',
+        status = 'NORMAL',
+        email_verified_at = COALESCE(email_verified_at, now()),
+        updated_at = now()
+    WHERE user_id = v_user_id;
+  END IF;
+
+  SELECT role_id INTO v_role_id FROM gateway_roles WHERE role_code = 'USER';
+  IF v_role_id IS NOT NULL THEN
+    INSERT INTO gateway_user_roles (user_id, role_id)
+    VALUES (v_user_id, v_role_id)
+    ON CONFLICT DO NOTHING;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM account_balance_adjustments
+    WHERE user_id = v_user_id AND reference_id = 'seed-testuser-spot-usdt-1'
+  ) THEN
+    INSERT INTO account_balance_adjustments (
+      product_line, command_id, adjustment_kind, admin_user_id, admin_username,
+      user_id, asset, amount_units, balance_after_units, reference_id, reason
+    ) VALUES
+      ('SPOT', 'seed-testuser-spot-usdt-1', 'BASIC', NULL, 'init', v_user_id, 'USDT', 10000000000000, 10000000000000, 'seed-testuser-spot-usdt-1', 'default test balance'),
+      ('SPOT', 'seed-testuser-spot-btc-1', 'BASIC', NULL, 'init', v_user_id, 'BTC', 100000000, 100000000, 'seed-testuser-spot-btc-1', 'default test balance'),
+      ('LINEAR_PERPETUAL', 'seed-testuser-perp-usdt-1', 'BASIC', NULL, 'init', v_user_id, 'USDT', 10000000000000, 10000000000000, 'seed-testuser-perp-usdt-1', 'default test balance');
+  END IF;
+
+  INSERT INTO gateway_announcement_targets (announcement_id, target_type, target_value)
+  SELECT announcement_id, 'PLATFORM', p.platform
+  FROM gateway_announcements
+  CROSS JOIN (VALUES ('IOS'), ('ANDROID')) AS p(platform)
+  ON CONFLICT DO NOTHING;
+END $$;
+
 COMMIT;
 

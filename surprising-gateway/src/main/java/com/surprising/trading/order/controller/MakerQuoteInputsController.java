@@ -16,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/internal/v1/trading/maker")
 public class MakerQuoteInputsController {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MakerQuoteInputsController.class);
     private final AccountService accounts;
     private final TradingFeeService fees;
     private final InstrumentSnapshotCache instruments;
@@ -54,6 +55,8 @@ public class MakerQuoteInputsController {
         } catch (IllegalArgumentException invalid) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
         } catch (IllegalStateException unavailable) {
+            log.warn("503 maker quote-inputs unavailable: productLine={} instrumentId={} message={}",
+                    request.productLine(), request.instrumentId(), unavailable.getMessage());
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, unavailable.getMessage(), unavailable);
         }
     }

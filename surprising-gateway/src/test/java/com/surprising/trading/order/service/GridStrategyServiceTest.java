@@ -106,4 +106,60 @@ class GridStrategyServiceTest {
         assertEquals("STOPPED", stopped.status());
         verify(orderService, atLeastOnce()).cancel(any(CancelOrderRequest.class));
     }
+
+    @Test
+    @DisplayName("网格买单成交后自动在上一档位补挂卖单并累计成交次数")
+    void shouldReconcileFilledBuyAndPlaceCounterSell() {
+        var placedOrders = new java.util.ArrayList<PlaceOrderRequest>();
+        when(orderService.place(any())).thenAnswer(invocation -> {
+            PlaceOrderRequest req = invocation.getArgument(0);
+            placedOrders.add(req);
+            return new OrderResponse(
+                    99910L + placedOrders.size(), req.userId(), req.clientOrderId(), req.instrumentId(),
+                    req.side(), req.orderType(), req.timeInForce(), req.priceTicks(),
+                    req.quantitySteps(), 0L, req.quantitySteps(), req.marginMode(),
+                    req.positionSide(), 0L, 0L, false, true, OrderStatus.ACCEPTED,
+                    null, Instant.now(), Instant.now()
+            );
+        });
+
+        CreateGridStrategyRequest request = new CreateGridStrategyRequest(
+                "604", ProductLine.LINEAR_PERPETUAL,
+                40000L, 60000L, 2, 10000L, true
+        );
+        // 40000 (BUY, idx 0), 50000 (SELL, idx 1) -> mark idx 1 as canceled so counter sell can be placed there
+        GridStrategyRecord record = service.createAndStartGrid(1001L, request, 45000L);
+        String buyClientId = placedOrders.get(0).clientOrderId();
+        String sellClientId = placedOrders.get(1).clientOrderId();
+
+        when(orderService.getByClientOrderId(1001L, buyClientId, null)).thenReturn(new OrderResponse(
+                99911L, 1001L, buyClientId, "604",
+                com.surprising.trading.api.model.OrderSide.BUY,
+                com.surprising.trading.api.model.OrderType.LIMIT,
+                com.surprising.trading.api.model.TimeInForce.GTC,
+                40000L, 1L, 1L, 0L,
+                com.surprising.trading.api.model.MarginMode.CROSS,
+                com.surprising.trading.api.model.PositionSide.NET,
+                0L, 0L, false, true, OrderStatus.FILLED, null, Instant.now(), Instant.now()
+        ));
+        when(orderService.getByClientOrderId(1001L, sellClientId, null)).thenReturn(new OrderResponse(
+                99912L, 1001L, sellClientId, "604",
+                com.surprising.trading.api.model.OrderSide.SELL,
+                com.surprising.trading.api.model.OrderType.LIMIT,
+                com.surprising.trading.api.model.TimeInForce.GTC,
+                50000L, 1L, 0L, 1L,
+                com.surprising.trading.api.model.MarginMode.CROSS,
+                com.surprising.trading.api.model.PositionSide.NET,
+                0L, 0L, false, true, OrderStatus.CANCELED, null, Instant.now(), Instant.now()
+        ));
+
+        service.reconcileActiveGrids();
+
+        var detail = service.getDetail(1001L, record.strategyId());
+        assertEquals(1, detail.strategy().matchedTradeCount());
+        assertEquals("FILLED", detail.levels().get(0).status());
+        assertEquals("PLACED", detail.levels().get(1).status());
+        assertEquals("SELL", detail.levels().get(1).side());
+        assertEquals(3, placedOrders.size());
+    }
 }

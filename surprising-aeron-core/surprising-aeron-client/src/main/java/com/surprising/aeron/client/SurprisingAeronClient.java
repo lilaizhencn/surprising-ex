@@ -288,6 +288,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
 
     @Override
     public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+        if (responses.isEmpty()) return;
         var iterator = responses.entrySet().iterator();
         while (iterator.hasNext()) {
             var entry = iterator.next();

@@ -24,6 +24,11 @@ public final class RealtimeWebSocketBridge
     private final String node = UUID.randomUUID().toString();
     private final String endpoint;
     private final SubscriptionRegistry registry;
+    private final ObjectMapper mapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.surprising.instrument.provider.service.MarketSummaryService marketSummaryService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MarketListAggregator marketList;
     private final ValkeyRouteDirectory directory;
     private final ValkeyReadViewStore views;
     private final ValkeySnapshotRequests refresh;
@@ -65,6 +70,7 @@ public final class RealtimeWebSocketBridge
             ObjectMapper mapper,
             WebSocketProperties properties) {
         this.registry = registry;
+        this.mapper = mapper;
         Duration coalesce = properties == null ? Duration.ofMillis(50) : properties.getFanout().getDepthCoalesceWindow();
         this.depthCoalesceWindowNanos = coalesce == null || coalesce.isNegative() || coalesce.isZero()
                 ? 0L : coalesce.toNanos();
@@ -102,6 +108,12 @@ public final class RealtimeWebSocketBridge
     @Override
     public void subscribed(SubscriptionTopic topic) {
         if (topic.channel() == WsChannel.OPEN_INTEREST) return;
+        if (topic.channel() == WsChannel.MARKET_LIST) {
+            if (registry.subscriberCount(topic) == 1)
+                lease(new RealtimeRoute(topic.productLine(), 0, "TRADE", "*"));
+            if (marketList != null) marketList.arm(topic);
+            return;
+        }
         if (closed || continuityLost.get() || !receiver.ready())
             throw new IllegalStateException("realtime receiver unavailable");
         RealtimeRoute route = route(topic);
@@ -138,6 +150,43 @@ public final class RealtimeWebSocketBridge
         }
     }
 
+    private void lease(RealtimeRoute route) {
+        if (closed || continuityLost.get() || !receiver.ready())
+            throw new IllegalStateException("realtime receiver unavailable");
+        boolean[] firstSubscriber = {false};
+        memberships.compute(route, (ignored, priorCount) -> {
+            firstSubscriber[0] = priorCount == null || priorCount == 0;
+            return (priorCount == null ? 0 : priorCount) + 1;
+        });
+        if (!firstSubscriber[0]) return;
+        long now = System.currentTimeMillis();
+        try {
+            if (nextHeartbeatNanos == 0) directory.heartbeat(node, endpoint, Duration.ofSeconds(15));
+            directory.register(route, node, now + 15000);
+            renewSnapshot(route, now);
+        } catch (RuntimeException failure) {
+            memberships.computeIfPresent(route, (ignored, current) -> current <= 1 ? null : current - 1);
+            try { directory.unregister(route, node); }
+            catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            throw failure;
+        }
+    }
+
+    private void release(RealtimeRoute route) {
+        boolean[] lastSubscriber = {false};
+        memberships.computeIfPresent(route, (ignored, count) -> {
+            if (count <= 1) {
+                lastSubscriber[0] = true;
+                return null;
+            }
+            return count - 1;
+        });
+        if (lastSubscriber[0]) {
+            try { directory.unregister(route, node); }
+            catch (RuntimeException failure) { logCleanupFailure("route", failure); }
+        }
+    }
+
     private void seedPinnedRoutes() {
         for (ProductLine product : ProductLine.values()) {
             memberships.put(new RealtimeRoute(product, 0, "MARK", "*"), 1);
@@ -161,6 +210,10 @@ public final class RealtimeWebSocketBridge
     @Override
     public void unsubscribed(SubscriptionTopic topic) {
         if (topic.channel() == WsChannel.OPEN_INTEREST) return;
+        if (topic.channel() == WsChannel.MARKET_LIST) {
+            if (registry.subscriberCount(topic) == 0) release(new RealtimeRoute(topic.productLine(), 0, "TRADE", "*"));
+            return;
+        }
         RealtimeRoute route = route(topic);
         boolean[] lastSubscriber = {false};
         memberships.computeIfPresent(route, (ignored, count) -> {
@@ -243,6 +296,8 @@ public final class RealtimeWebSocketBridge
 
     private void receive(RealtimeFrame f) {
         if (closed || continuityLost.get()) return;
+        if (marketList != null && (f.kind() == RealtimeFrame.Kind.MARK || f.kind() == RealtimeFrame.Kind.TRADE))
+            marketList.observe(f);
         if (f.kind() == RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE) {
             registry.publishUserSnapshot(
                     f.productLine(),
@@ -324,6 +379,23 @@ public final class RealtimeWebSocketBridge
             if (hasPositionRisk) registry.publish(topic, event, eventTime);
             if (hasAccountRisk) registry.publish(accountRiskTopic, event, eventTime);
             return;
+        }
+        if (f.kind() == RealtimeFrame.Kind.CANDLE && "1m".equals(f.entityId()) && marketSummaryService != null) {
+            try {
+                var node = mapper.readTree(f.payload());
+                int instId = Integer.parseInt(f.instrumentId());
+                long openMs = Instant.parse(node.path("openTime").asText()).toEpochMilli();
+                marketSummaryService.onMinuteCandle(
+                        f.productLine(), instId, openMs,
+                        node.path("openPrice").decimalValue(),
+                        node.path("highPrice").decimalValue(),
+                        node.path("lowPrice").decimalValue(),
+                        node.path("closePrice").decimalValue(),
+                        node.path("baseVolume").decimalValue(),
+                        node.path("quoteVolume").decimalValue());
+            } catch (Exception ignored) {
+                // Best-effort 24h ring buffer update; must never block WS fanout.
+            }
         }
         if (!registry.hasSubscribers(topic)) return;
         Object value =

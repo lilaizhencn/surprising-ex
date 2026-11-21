@@ -18,7 +18,8 @@ public record CoreRuntimeConfiguration(
         @DefaultValue("256") int matcherGroupSize,
         @DefaultValue("10000") int matcherGroupNanos,
         @DefaultValue("1024") int laneInitialEntities,
-        @DefaultValue SnapshotLimits snapshot) {
+        @DefaultValue SnapshotLimits snapshot,
+        java.util.Set<Long> selfTradeAllowedUsers) {
 
     public CoreRuntimeConfiguration {
         requireRange("lane-completion-spins", laneCompletionSpins, 0, Integer.MAX_VALUE);
@@ -33,6 +34,11 @@ public record CoreRuntimeConfiguration(
         requireRange("matcher-group-nanos", matcherGroupNanos, 1, Integer.MAX_VALUE);
         requireRange("lane-initial-entities", laneInitialEntities, 16, 1 << 20);
         if (snapshot == null) throw new IllegalArgumentException("snapshot limits are required");
+        selfTradeAllowedUsers = selfTradeAllowedUsers == null
+                ? java.util.Set.of()
+                : selfTradeAllowedUsers.stream()
+                        .filter(java.util.Objects::nonNull)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private static void requireRange(String name, int value, int min, int max) {
@@ -44,6 +50,15 @@ public record CoreRuntimeConfiguration(
     public static CoreRuntimeConfiguration standalone() {
         return Binder.get(new StandardEnvironment())
                 .bindOrCreate("surprising.aeron", Bindable.of(CoreRuntimeConfiguration.class));
+    }
+
+    /** 返回替换 selfTradeAllowedUsers 后的配置副本。 */
+    public CoreRuntimeConfiguration withSelfTradeAllowedUsers(java.util.Set<Long> users) {
+        return new CoreRuntimeConfiguration(
+                laneCompletionSpins, maxPendingMatching, snapshotTimeoutSeconds,
+                ownerInputBatchSize, ownerCommandWindow, decoderCacheSlots,
+                matcherGroupSize, matcherGroupNanos, laneInitialEntities,
+                snapshot, users);
     }
 
     /** 部署限制与协议硬上限分离，恢复器和编码器使用本次绑定的值。 */

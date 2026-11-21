@@ -41,10 +41,17 @@ public final class CommittedTradeReplay implements AutoCloseable {
 
     /** 创建指定产品线空运行时或从快照恢复，挂载只采集订单投影的实时捕获器与资金费观察器，再遍历已有算法父单重建子单路由。 */
     public CommittedTradeReplay(ProductLine product, byte[] snapshot) {
+        this(product, snapshot, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().selfTradeAllowedUsers());
+    }
+
+    /** 创建带显式自成交白名单的确定性交易回放副本。 */
+    public CommittedTradeReplay(ProductLine product, byte[] snapshot, Set<Long> selfTradeAllowedUsers) {
+        var config = com.surprising.aeron.config.CoreRuntimeConfiguration.standalone()
+                .withSelfTradeAllowedUsers(selfTradeAllowedUsers);
         state =
                 snapshot == null
-                        ? new TradingCore(product)
-                        : TradingCore.fromSnapshot(product, snapshot);
+                        ? new TradingCore(product, config)
+                        : TradingCore.fromSnapshot(product, snapshot, config);
         state.assertClusterCallbackComplete();
         capture = state.attachRealtime(outbox);
         capture.orderProjectionOnly(true);

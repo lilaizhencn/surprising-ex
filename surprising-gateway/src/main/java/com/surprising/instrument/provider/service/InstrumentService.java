@@ -115,6 +115,11 @@ public class InstrumentService {
         return new InstrumentCatalog(response, summaries);
     }
 
+    public com.surprising.instrument.provider.model.MarketSummaryRows.DaySummary daySummary(
+            ProductLine line, int instrumentId) {
+        return marketSummaries.daySummary(line, instrumentId, Instant.now());
+    }
+
     // 结算中的交割合约可供持仓和减仓定位；开仓权限仍由交易校验控制。
     private static boolean publiclyVisible(InstrumentResponse instrument) {
         return instrument.status().visible() || (instrument.contractType().productLine().isDeliveryProduct()

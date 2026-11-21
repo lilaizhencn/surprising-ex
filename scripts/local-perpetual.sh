@@ -52,6 +52,16 @@ export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-local}"
 export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_IDS READINESS_INSTRUMENT_ID
 FRONTEND_DIR="${FRONTEND_DIR:-$ROOT/../surprising-ex-web}"
 backend() { "$ROOT/scripts/linear-perpetual-single-node.sh" "$@"; }
+spot_core() {
+  ACTION="$1" CORE_ONLY=true REALTIME_ENABLED=true PRODUCT_LINE=SPOT RUN_ID=local-spot \
+    REALTIME_PUBLISH_CHANNEL="aeron:udp?endpoint=127.0.0.1:21010" \
+    REALTIME_CORE_CONTROL_CHANNEL="aeron:udp?endpoint=127.0.0.1:20020" \
+    AERON_CLUSTER_HOSTNAMES=127.0.0.1 AERON_HOSTNAMES=127.0.0.1 AERON_EGRESS_HOSTNAME=127.0.0.1 \
+    SURPRISING_AERON_ACCOUNT_LANES=1 SURPRISING_AERON_MATCHING_ENGINES=1 \
+    POSTGRES_MODE=native JFR_ENABLED="${JFR_ENABLED:-true}" JFR_SETTINGS="${JFR_SETTINGS:-default}" \
+    JVM_XMS="${JVM_XMS:-512m}" JVM_XMX="${JVM_XMX:-1g}" \
+    "$ROOT/scripts/start-product-line-providers.sh"
+}
 label() { printf 'com.surprising.local-perpetual.%s' "$1"; }
 alive() {
   local name="$1" pid
@@ -149,6 +159,7 @@ case "$ACTION" in
   down)
     stop checkpoints
     stop frontend
+    spot_core down || true
     backend down
     stop kafka
     stop redis
@@ -240,9 +251,8 @@ log.retention.hours=24
 log.segment.bytes=67108864
 log.retention.bytes=134217728
 KAFKA
-    if [[ ! -f "$LOCAL_DIR/kafka/meta.properties" ]]; then
-      kafka-storage format --standalone -t "$(kafka-storage random-uuid)" -c "$LOCAL_DIR/kafka.properties" > "$LOCAL_DIR/logs/kafka-format.log" 2>&1
-    fi
+    rm -rf "$LOCAL_DIR/kafka"
+    kafka-storage format --standalone -t "$(kafka-storage random-uuid)" -c "$LOCAL_DIR/kafka.properties" > "$LOCAL_DIR/logs/kafka-format.log" 2>&1
     start kafka /usr/bin/env JAVA_HOME="$JAVA_HOME" KAFKA_HEAP_OPTS='-Xms256m -Xmx512m' LOG_DIR="$LOCAL_DIR/logs" "$(command -v kafka-server-start)" "$LOCAL_DIR/kafka.properties"
   fi
   wait_port "$POSTGRES_HOST" "$POSTGRES_PORT"
@@ -259,6 +269,15 @@ KAFKA
     mkdir -p "$ARTIFACT_ROOT/$(dirname "$relative")"
     cp "$jar" "$ARTIFACT_ROOT/$relative"
   done < <(find "$ROOT" -path '*/target/*.jar' -not -path '*/target/*/*' -type f)
+  # Clean stale Aeron / driver / checkpoint / Valkey read-view state on startup so local runs start from a clean cluster.
+  rm -rf "$LOCAL_DIR/runtime/$RUN_ID/aeron" "$LOCAL_DIR/runtime/local-spot/aeron" \
+         "$LOCAL_DIR/core-driver"* "$LOCAL_DIR/app-driver"* \
+         "$LOCAL_DIR/runtime/$RUN_ID/trade-export" "$LOCAL_DIR/runtime/local-spot/trade-export" \
+         "$LOCAL_DIR/runtime/$RUN_ID/data/kafka-streams" "$LOCAL_DIR/runtime/$RUN_ID/candlestick-state" \
+         "$LOCAL_DIR/runtime/local-spot/data/kafka-streams" "$LOCAL_DIR/runtime/local-spot/candlestick-state" \
+         "$LOCAL_DIR/runtime/$RUN_ID/trade-export-checkpoint"*
+  redis-cli -h "$VALKEY_HOST" -p "$VALKEY_PORT" FLUSHALL >/dev/null 2>&1 || true
+  spot_core up
   backend up
 fi
 # Business settings and account funding are managed in the admin Web.

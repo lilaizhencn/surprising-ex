@@ -15,7 +15,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -610,6 +609,12 @@ public final class AeronClientPool implements AutoCloseable {
         // immediately after each successful offer.
         private final LinkedHashMap<Long, Request> pending = new LinkedHashMap<>();
         private final java.util.SequencedCollection<Request> pendingInDeadlineOrder = pending.sequencedValues();
+        // Dispatcher-owned for the lifetime of this lane: do not allocate a capturing
+        // callback on every empty response poll while an admitted request is pending.
+        private final java.util.function.BiConsumer<Long, CoreResponse> responseConsumer = (id, response) -> {
+            Request request = pending.remove(id);
+            if (request != null) request.terminal(response);
+        };
         private final Set<Long> claimedCorrelations = ConcurrentHashMap.newKeySet();
         private volatile Session session;
         private long reconnectAtNanos;
@@ -845,7 +850,7 @@ public final class AeronClientPool implements AutoCloseable {
                         // retain the short poll; idle sessions still service heartbeats/reconnects.
                         parked = true;
                         try {
-                            if (!hasPendingWork()) {
+                            if (!hasDispatchableRequests()) {
                                 java.util.concurrent.locks.LockSupport.parkNanos(this, waitNanos);
                             }
                         } finally {
@@ -871,11 +876,16 @@ public final class AeronClientPool implements AutoCloseable {
             }
         }
 
-        private boolean hasPendingWork() {
+        /** Close the enqueue/unpark race only for work that can progress immediately.
+         * An admitted request, disconnected session, full window or ADMIN_ACTION retry
+         * must retain the short timed poll rather than defeating parking altogether.
+         */
+        private boolean hasDispatchableRequests() {
             for (AgentLane lane : lanes) {
-                if (!lane.mailbox.isEmpty() || !lane.pending.isEmpty() || lane.deferredAdminOffer != null) {
-                    return true;
-                }
+                Request next = lane.mailbox.peek();
+                if (next != null && lane.deferredAdminOffer == null
+                        && lane.session != null && lane.session.connected()
+                        && (next.oneWay() || lane.pending.size() < lane.maxInFlight)) return true;
             }
             return false;
         }
@@ -910,7 +920,7 @@ public final class AeronClientPool implements AutoCloseable {
             }
             try {
                 int fragments = current.pollEgress(capacity.egressFragmentLimit());
-                dispatchResponses(current, lane.pending);
+                if (!lane.pending.isEmpty()) current.drainResponses(lane.responseConsumer);
                 RuntimeException failure = current.sessionFailure();
                 if (failure != null) {
                     lane.pending.values().forEach(Request::resultUnknown);
@@ -1066,16 +1076,6 @@ public final class AeronClientPool implements AutoCloseable {
                 }
                 request.notAccepted(CoreCommandOutcome.notAccepted(rejection));
                 return true;
-            });
-        }
-
-        private void dispatchResponses(Session session, Map<Long, Request> pending) {
-            if (pending.isEmpty()) return;
-            session.drainResponses((correlationId, response) -> {
-                Request request = pending.remove(correlationId);
-                if (request != null) {
-                    request.terminal(response);
-                }
             });
         }
 

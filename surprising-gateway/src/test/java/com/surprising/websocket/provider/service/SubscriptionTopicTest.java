@@ -12,6 +12,20 @@ import org.junit.jupiter.api.Test;
 class SubscriptionTopicTest {
 
     @Test
+    void marketListSubscribesToTheWholeProduct() {
+        SubscriptionTopic topic = SubscriptionTopic.fromCommand(
+                new WsClientCommand("subscribe", "req-list", "marketList", null, null, null, "SPOT"),
+                null);
+
+        assertThat(topic.channel()).isEqualTo(WsChannel.MARKET_LIST);
+        assertThat(topic.instrumentId()).isEqualTo(SubscriptionTopic.WILDCARD);
+        assertThat(topic.productLine()).isEqualTo(ProductLine.SPOT);
+        assertThatThrownBy(() -> new SubscriptionTopic(WsChannel.MARKET_LIST, "*", null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("productLine");
+    }
+
+    @Test
     void publicCandleSubscriptionNormalizesSymbolAndPeriod() {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(
                 new WsClientCommand("subscribe", "req-1", "candles", "1", "1M", null),

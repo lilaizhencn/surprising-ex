@@ -1,0 +1,5 @@
+surprising:
+  aeron:
+    self-trade-allowed-users: [4, 5, 6, 101, 102, 103, 201, 202, 203]
+    registry:
+      enabled: false

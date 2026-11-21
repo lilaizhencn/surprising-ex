@@ -9,10 +9,10 @@ surprising:
     engine:
       enabled: true
       quote-watchdog-interval: 100ms
-      trade-interval: 150ms
+      trade-interval: 100ms
     quoting:
       order-book-depth: 100
-      order-levels: 40
+      order-levels: 30
       min-spread-ticks: 2
       level-spacing-ticks: 1
       refresh-threshold-ticks: 3
@@ -25,16 +25,20 @@ surprising:
       max-open-orders-per-account-symbol: 200
     trade:
       enabled: true
-      account-ids: [6]
+      account-ids: []
       orders-per-batch: 1
       min-quantity-steps: 1
-      max-quantity-steps: 3
+      # A copied print is still capped by the top of our own book, so one external trade cannot clear it.
+      max-quantity-steps: 1000000
       slippage-ticks: 10
       max-sweep-levels: 2
     reference-market:
       enabled: true
       web-socket-enabled: true
-      refresh-interval: 150ms
+      refresh-interval: 100ms
+      # Keep the external size. The old 1_000-step ceiling turned a 5-coin level into 10 at most,
+      # and the strategy base of 3 steps then flattened every level to 0.03.
+      max-quantity-steps: 10000000000
       sources:
         - name: okx-btc
           enabled: true
@@ -97,51 +101,75 @@ surprising:
           web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"SOL-USDT"}]}'
           web-socket-parser: OKX_BOOKS_WS
     strategies:
-      - strategy-id: local-perp-top
+      - strategy-id: local-perp-btc
         product-line: LINEAR_PERPETUAL
         enabled: true
-        account-ids: [4]
-        instrument-ids: ["604", "653", "866"]
+        account-ids: [101]
+        instrument-ids: ["604"]
         base-quantity-steps: 3
         margin-mode: CROSS
         spread-ticks: 1
         level-spacing-ticks: 1
-        order-levels: 20
+        order-levels: 30
         max-inventory-steps: 10000
         max-inventory-skew-ppm: 500000
-      - strategy-id: local-perp-mid
+      - strategy-id: local-perp-eth
         product-line: LINEAR_PERPETUAL
         enabled: true
-        account-ids: [5]
-        instrument-ids: ["604", "653", "866"]
-        base-quantity-steps: 7
-        margin-mode: CROSS
-        spread-ticks: 21
-        level-spacing-ticks: 2
-        order-levels: 40
-        max-inventory-steps: 10000
-        max-inventory-skew-ppm: 500000
-      - strategy-id: local-spot-top
-        product-line: SPOT
-        enabled: true
-        account-ids: [4]
-        instrument-ids: ["1001", "1002", "1003"]
+        account-ids: [102]
+        instrument-ids: ["653"]
         base-quantity-steps: 3
         margin-mode: CROSS
         spread-ticks: 1
         level-spacing-ticks: 1
-        order-levels: 20
+        order-levels: 30
         max-inventory-steps: 10000
         max-inventory-skew-ppm: 500000
-      - strategy-id: local-spot-mid
+      - strategy-id: local-perp-sol
+        product-line: LINEAR_PERPETUAL
+        enabled: true
+        account-ids: [103]
+        instrument-ids: ["866"]
+        base-quantity-steps: 3
+        margin-mode: CROSS
+        spread-ticks: 1
+        level-spacing-ticks: 1
+        order-levels: 30
+        max-inventory-steps: 10000
+        max-inventory-skew-ppm: 500000
+      - strategy-id: local-spot-btc
         product-line: SPOT
         enabled: true
-        account-ids: [5]
-        instrument-ids: ["1001", "1002", "1003"]
-        base-quantity-steps: 7
+        account-ids: [201]
+        instrument-ids: ["1001"]
+        base-quantity-steps: 3
         margin-mode: CROSS
-        spread-ticks: 21
-        level-spacing-ticks: 2
-        order-levels: 40
+        spread-ticks: 1
+        level-spacing-ticks: 1
+        order-levels: 30
+        max-inventory-steps: 10000
+        max-inventory-skew-ppm: 500000
+      - strategy-id: local-spot-eth
+        product-line: SPOT
+        enabled: true
+        account-ids: [202]
+        instrument-ids: ["1002"]
+        base-quantity-steps: 3
+        margin-mode: CROSS
+        spread-ticks: 1
+        level-spacing-ticks: 1
+        order-levels: 30
+        max-inventory-steps: 10000
+        max-inventory-skew-ppm: 500000
+      - strategy-id: local-spot-sol
+        product-line: SPOT
+        enabled: true
+        account-ids: [203]
+        instrument-ids: ["1003"]
+        base-quantity-steps: 3
+        margin-mode: CROSS
+        spread-ticks: 1
+        level-spacing-ticks: 1
+        order-levels: 30
         max-inventory-steps: 10000
         max-inventory-skew-ppm: 500000

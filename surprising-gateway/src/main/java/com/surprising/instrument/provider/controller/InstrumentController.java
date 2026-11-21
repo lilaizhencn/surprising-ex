@@ -124,6 +124,20 @@ public class InstrumentController {
         }
     }
 
+    @GetMapping("/day-summary")
+    public Object daySummary(
+            @RequestParam("instrumentId") int instrumentId,
+            @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
+            @RequestParam(value = "productLine", required = false) String queryProductLine) {
+        try {
+            var line = requiredProductLine(queryProductLine, headerProductLine);
+            var summary = instrumentService.daySummary(line, instrumentId);
+            return summary == null ? Map.of() : summary;
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
     @PostMapping("/admin/upsert")
     public InstrumentResponse upsert(
             @RequestBody InstrumentUpsertRequest request,

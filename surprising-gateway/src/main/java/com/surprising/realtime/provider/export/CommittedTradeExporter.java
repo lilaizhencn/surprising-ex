@@ -30,19 +30,26 @@ final class CommittedTradeExporter {
     private final String bootstrapServers;
     private final CommittedOrderProjectionService orders;
     private final Clock clock;
+    private final Set<Long> selfTradeAllowedUsers;
 
     CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers,
             CommittedOrderProjectionService orders) {
-        this(config, product, bootstrapServers, orders, Clock.systemUTC());
+        this(config, product, bootstrapServers, orders, Clock.systemUTC(), Set.of());
     }
 
     CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers,
             CommittedOrderProjectionService orders, Clock clock) {
+        this(config, product, bootstrapServers, orders, clock, Set.of());
+    }
+
+    CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers,
+            CommittedOrderProjectionService orders, Clock clock, Set<Long> selfTradeAllowedUsers) {
         this.config = config;
         this.product = product;
         this.bootstrapServers = bootstrapServers;
         this.orders = orders;
         this.clock = Objects.requireNonNull(clock);
+        this.selfTradeAllowedUsers = selfTradeAllowedUsers == null ? Set.of() : Set.copyOf(selfTradeAllowedUsers);
     }
 
     void run(java.util.concurrent.atomic.AtomicBoolean running, java.util.function.Consumer<Boolean> connected, long stopAfter) throws Exception {
@@ -238,7 +245,7 @@ final class CommittedTradeExporter {
             if (mode == ExportMode.LIVE) initializeLiquidations(checkpoint, running);
             if (mode == ExportMode.LIVE) initializeStatistics(checkpoint, running);
             if (mode == ExportMode.LIVE) initializePortfolio(checkpoint, running);
-            try (var replay = new CommittedTradeReplay(product, checkpoint.snapshot());
+            try (var replay = new CommittedTradeReplay(product, checkpoint.snapshot(), selfTradeAllowedUsers);
                     var sink =
                             mode != ExportMode.LIVE ? null : new ReliableTradeKafkaSink(
                                     new KafkaProducer<String, String>(props),

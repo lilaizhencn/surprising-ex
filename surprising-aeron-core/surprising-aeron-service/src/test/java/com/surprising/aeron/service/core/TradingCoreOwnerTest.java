@@ -1883,6 +1883,49 @@ class TradingCoreOwnerTest {
                 });
     }
 
+    @Test
+    void snapshotWaitsForSettlementRingDrainAndTimesOutAtDeadline() throws Exception {
+        try (var state = new TradingCore(ProductLine.SPOT)) {
+            state.activate();
+            var worker = AccountLaneTestAccess.workers(state.accountBook())[0];
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            worker.submit(lane -> {
+                entered.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            worker.submit(lane -> { });
+            assertThat(worker.depth()).isPositive();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            state.snapshots.beginSnapshot(1L, deadline);
+            try {
+                assertThat(state.snapshots.pollSnapshotSections(0, 0, System.nanoTime())).isNull();
+                assertThatThrownBy(() -> state.snapshots.pollSnapshotSections(0, 0, deadline))
+                        .isInstanceOf(TradingCore.SnapshotFenceTimeoutException.class);
+            } finally {
+                release.countDown();
+            }
+            long waitDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (worker.depth() != 0 && System.nanoTime() < waitDeadline) {
+                Thread.onSpinWait();
+            }
+            assertThat(worker.depth()).isZero();
+            state.snapshots.beginSnapshot(2L, System.nanoTime() + TimeUnit.SECONDS.toNanos(5));
+            SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = null;
+            long pollDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (snapshot == null && System.nanoTime() < pollDeadline) {
+                snapshot = state.snapshots.pollSnapshotSections(0, 0, System.nanoTime());
+                Thread.onSpinWait();
+            }
+            assertThat(snapshot).isNotNull();
+        }
+    }
+
     /**
      * 按代理方法声明返回类型给引用空值或 primitive 零值，不模拟真实 Cluster 行为。
      * @param type 代理方法声明的返回类型

@@ -12,4 +12,8 @@ public final class MarketSummaryRows {
     public record Summary(BigDecimal lastPrice, BigDecimal change24h, BigDecimal high24h,
                           BigDecimal low24h, BigDecimal volume24h, BigDecimal quoteVolume24h,
                           List<BigDecimal> trend) {}
+
+    public record DaySummary(BigDecimal open, BigDecimal close, BigDecimal high,
+                             BigDecimal low, BigDecimal volume, BigDecimal quoteVolume,
+                             BigDecimal change) {}
 }

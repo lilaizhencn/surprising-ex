@@ -31,6 +31,7 @@ import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
 import com.surprising.marketmaker.provider.config.MarketMakerProductLineContext;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
+import com.surprising.marketmaker.provider.model.ExternalTrade;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
@@ -82,6 +83,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -220,7 +222,7 @@ class MarketMakerServiceTest {
     }
 
     @Test
-    void everyCompletedCycleAttemptsSimulatedTradingWithoutAnIntervalGate() {
+    void completedCycleDoesNotInventTradesWithoutExternalPrints() {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.tradeEnabled = true;
         MarketMakerService service = fixtures.service();
@@ -228,14 +230,9 @@ class MarketMakerServiceTest {
             service.runOnce(new MarketMakerRunRequest("47", "1"));
         }
         assertThat(fixtures.orderRpc.placeRequests.stream()
-                .filter(request -> request.timeInForce() == TimeInForce.IOC).toList()).hasSize(3)
-                .allSatisfy(request -> {
-                    assertThat(request.orderType()).isEqualTo(OrderType.MARKET);
-                    assertThat(request.priceTicks()).isZero();
-                });
-        assertThat(fixtures.runEventRepository.events).filteredOn(event -> event.eventType().equals("TRADE_NO_FILL"))
-                .hasSize(3);
-        assertThat(fixtures.runEventRepository.events).noneMatch(event -> event.eventType().equals("TRADE_EXECUTED"));
+                .filter(request -> request.timeInForce() == TimeInForce.IOC)).isEmpty();
+        assertThat(fixtures.runEventRepository.events).noneMatch(event -> event.eventType().equals("TRADE_NO_FILL")
+                || event.eventType().equals("TRADE_EXECUTED"));
     }
 
     @Test
@@ -244,7 +241,7 @@ class MarketMakerServiceTest {
         fixtures.tradeEnabled = true;
         fixtures.tradeBatchSize = 8;
         fixtures.orderRpc.omitMarketBatchDetails = true;
-        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        fixtures.service(fixtures.runEventRepository, tape(8, OrderSide.BUY)).runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.runEventRepository.events)
                 .filteredOn(event -> event.eventType().equals("TRADE_SUBMITTED"))
                 .singleElement().satisfies(event -> {
@@ -263,7 +260,7 @@ class MarketMakerServiceTest {
         fixtures.tradeEnabled = true;
         fixtures.tradeBatchSize = 8;
         fixtures.orderRpc.rejectMarketBatch = true;
-        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        fixtures.service(fixtures.runEventRepository, tape(8, OrderSide.BUY)).runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.runEventRepository.events)
                 .filteredOn(event -> event.eventType().equals("TRADE_REJECTED"))
                 .singleElement().satisfies(event -> {
@@ -279,7 +276,7 @@ class MarketMakerServiceTest {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.tradeEnabled = true;
         fixtures.tradeBatchSize = 8;
-        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        fixtures.service(fixtures.runEventRepository, tape(8, OrderSide.BUY)).runOnce(new MarketMakerRunRequest("47", "1"));
         var trades = fixtures.orderRpc.placeRequests.stream().filter(r -> r.orderType() == OrderType.MARKET).toList();
         assertThat(trades).hasSize(8);
         assertThat(trades).extracting(PlaceOrderRequest::clientOrderId).doesNotHaveDuplicates();
@@ -402,9 +399,50 @@ class MarketMakerServiceTest {
         Fixtures fixtures = new Fixtures(List.of());
         fixtures.referenceMarketEnabled = true;
 
-        fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
+        var result = fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
 
         assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+        assertThat(result.strategies()).singleElement().satisfies(strategy -> {
+            assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.DEGRADED);
+            assertThat(strategy.lastError()).contains("REFERENCE_MARKET_UNAVAILABLE");
+        });
+        assertThat(fixtures.runEventRepository.events).noneMatch(event -> event.eventType().equals("CYCLE_SUCCESS"));
+    }
+
+    @Test
+    void missingReferenceBookKeepsOwnedQuotesAndRecoversWhenTheBookReturns() {
+        for (ProductLine line : List.of(ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL)) {
+            String symbol = line == ProductLine.SPOT ? "48" : "1";
+            String prefix = accountPrefix(line, "47", symbol, 900001L);
+            var bid = order(7L, 900001L, prefix + "b0-1", OrderSide.BUY,
+                    49_990L, 10L, OrderStatus.ACCEPTED);
+            Fixtures fixtures = new Fixtures(List.of(bid));
+            fixtures.referenceMarketEnabled = true;
+            fixtures.productLine = line;
+            fixtures.instrumentId = symbol;
+            var available = new java.util.concurrent.atomic.AtomicBoolean();
+            var service = fixtures.service(fixtures.runEventRepository, (instrumentId, product, instrument) ->
+                    available.get() ? new ReferenceOrderBookSnapshot("test", "REST", instrumentId,
+                            List.of(new ReferenceOrderBookLevel(49_990L, 10L)),
+                            List.of(new ReferenceOrderBookLevel(50_010L, 10L)), Instant.now()) : null);
+
+            var blocked = service.runOnce(new MarketMakerRunRequest("47", symbol, line));
+            assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
+            assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+            assertThat(fixtures.orderRpc.openOrders).extracting(OrderResponse::orderId).contains(7L);
+            assertThat(blocked.strategies()).singleElement()
+                    .satisfies(strategy -> assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.DEGRADED));
+            assertThat(fixtures.runEventRepository.events).filteredOn(event -> event.eventType().equals("CYCLE_FAILED"))
+                    .singleElement().satisfies(event -> assertThat(event.skippedReason()).isEqualTo("REFERENCE_MARKET_UNAVAILABLE"));
+
+            available.set(true);
+            var recovered = service.runOnce(new MarketMakerRunRequest("47", symbol, line));
+            assertThat(recovered.strategies()).singleElement().satisfies(strategy -> {
+                assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.RUNNING);
+                assertThat(strategy.lastError()).isNull();
+            });
+            assertThat(fixtures.orderRpc.placeRequests).isNotEmpty();
+        }
     }
 
     @Test
@@ -935,6 +973,48 @@ class MarketMakerServiceTest {
                                        OrderStatus status) {
         return orderAt(orderId, userId, clientOrderId, side, priceTicks, remainingQuantity, status,
                 Instant.parse("2026-01-01T00:00:00Z"));
+    }
+
+    @Test
+    void externalPrintCopiesTheTakerSideAndStopsAtTheVisibleBook() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.tradeEnabled = true;
+        fixtures.service(fixtures.runEventRepository, tape(List.of(
+                new ExternalTrade("sell-1", OrderSide.SELL, 49_990L, 10_000L, Instant.now()),
+                new ExternalTrade("buy-1", OrderSide.BUY, 50_010L, 1L, Instant.now()))))
+                .runOnce(new MarketMakerRunRequest("47", "1"));
+        var trades = fixtures.orderRpc.placeRequests.stream()
+                .filter(request -> request.orderType() == OrderType.MARKET).toList();
+        assertThat(trades).extracting(PlaceOrderRequest::side).containsExactlyInAnyOrder(OrderSide.SELL, OrderSide.BUY);
+        assertThat(trades).filteredOn(request -> request.side() == OrderSide.SELL)
+                .singleElement().satisfies(request -> assertThat(request.quantitySteps()).isEqualTo(10L));
+        assertThat(trades).filteredOn(request -> request.side() == OrderSide.BUY)
+                .singleElement().satisfies(request -> assertThat(request.quantitySteps()).isEqualTo(1L));
+    }
+
+    private static ReferenceMarketProvider tape(int buys, OrderSide side) {
+        List<ExternalTrade> prints = new ArrayList<>();
+        for (int i = 0; i < buys; i++) {
+            prints.add(new ExternalTrade("print-" + i, side, 50_010L, 1L, Instant.now()));
+        }
+        return tape(prints);
+    }
+
+    private static ReferenceMarketProvider tape(List<ExternalTrade> prints) {
+        ArrayDeque<ExternalTrade> queue = new ArrayDeque<>(prints);
+        return new ReferenceMarketProvider() {
+            @Override
+            public ReferenceOrderBookSnapshot snapshot(String instrumentId, ProductLine productLine, InstrumentResponse instrument) {
+                return null;
+            }
+
+            @Override
+            public List<ExternalTrade> drainTrades(String instrumentId, ProductLine productLine, int limit) {
+                List<ExternalTrade> drained = new ArrayList<>();
+                while (drained.size() < limit && !queue.isEmpty()) drained.add(queue.removeFirst());
+                return drained;
+            }
+        };
     }
 
     private static List<OrderResponse> staleTwentyLevelOrders() {

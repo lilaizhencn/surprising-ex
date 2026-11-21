@@ -19,6 +19,7 @@ import com.surprising.marketmaker.provider.client.MakerQuoteInputsClient;
 import com.surprising.marketmaker.provider.client.MakerTradingFeeClient;
 import com.surprising.trading.api.model.MakerQuoteInputs;
 import com.surprising.marketmaker.provider.model.DesiredQuote;
+import com.surprising.marketmaker.provider.model.ExternalTrade;
 import com.surprising.marketmaker.provider.model.QuotePlan;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
@@ -104,6 +105,8 @@ public class MarketMakerService {
     private final String orderNonce;
     // A confirmed rejection can be retried after freeing budget in the same cycle; that is a new order.
     private final java.util.concurrent.atomic.AtomicLong quoteRequestSequence = new java.util.concurrent.atomic.AtomicLong();
+    // One bounded diagnostic budget for the process; watchdog failures must not flood logs.
+    private final java.util.concurrent.atomic.AtomicLong nextQuoteFailureLogNanos = new java.util.concurrent.atomic.AtomicLong();
 
     @Autowired
     public MarketMakerService(MarketMakerProperties properties,
@@ -719,8 +722,19 @@ public class MarketMakerService {
                 if (rejectedQuotes > 0) {
                     String reason = "Quote replenishment rejected: " + rejectedQuotes + " orders; " + quoteRejection;
                     state.markFailure(reason, now);
+                    reportQuoteFailure(strategy, instrumentId, quoteRejection);
                     recordRunEvent(strategy, instrumentId, null, cycleSequence, "CYCLE_FAILED",
                             0, 0, rejectedQuotes, null, reason, now);
+                    return false;
+                }
+                if (properties.getReferenceMarket().isEnabled() && referenceOrderBook == null) {
+                    // Existing reconciliation above still drains unsafe owned quotes. An empty
+                    // ladder without its required reference is not a successful quoting cycle.
+                    String reason = "REFERENCE_MARKET_UNAVAILABLE";
+                    state.markFailure(reason, now);
+                    reportQuoteFailure(strategy, instrumentId, reason);
+                    recordRunEvent(strategy, instrumentId, null, cycleSequence, "CYCLE_FAILED",
+                            0, 0, 0, reason, reason, now);
                     return false;
                 }
                 if (tradeAfterQuote) tradeSymbol(strategy, instrumentId);
@@ -740,6 +754,18 @@ public class MarketMakerService {
             MarketMakerProductLineContext.set(previousProductLine);
             cycleLock.set(false);
         }
+    }
+
+    /** Emit only public strategy/instrument identity and a static rejection code, never account/order data. */
+    private void reportQuoteFailure(MarketMakerProperties.Strategy strategy, String instrumentId, String reason) {
+        long now = System.nanoTime();
+        long next = nextQuoteFailureLogNanos.get();
+        if ((next != 0 && now < next)
+                || !nextQuoteFailureLogNanos.compareAndSet(next, now + 5_000_000_000L)) return;
+        String code = reason != null && reason.length() <= 96 && reason.matches("[A-Z][A-Z0-9_]*")
+                ? reason : "QUOTE_REPLENISHMENT_REJECTED";
+        log.warn("maker.quote.unavailable product={} strategy={} instrumentId={} code={}",
+                strategy.getProductLine(), strategy.getStrategyId(), instrumentId, code);
     }
 
     private static void validateQuoteInputs(MakerQuoteInputs.Response inputs,
@@ -768,9 +794,13 @@ public class MarketMakerService {
                               Instant now) {
         List<OrderResponse> openOrders = openOrders(strategy.getProductLine(), accountId, instrumentId, now);
         OrderBookSnapshotResponse otherLiquidity = excludeOwnQuotes(orderBook, openOrders);
-        QuotePlan plan = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
-                ? new QuotePlan(0L, inventorySteps, List.of(), 0)
-                : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
+        if (properties.getReferenceMarket().isEnabled() && referenceOrderBook == null) {
+            // Keep the resting ladder. An empty plan would cancel every owned quote and blank the book.
+            recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "QUOTE_HELD",
+                    0, 0, 0, "REFERENCE_MARKET_UNAVAILABLE", null, now);
+            return new ReconcileResult(0, 0, 0, null);
+        }
+        QuotePlan plan = quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                         otherLiquidity, markPrice, inventorySteps, volatilityTicks, referenceOrderBook,
                         makerFeeRatePpm);
         ReconcileResult result = reconcile(strategy, accountId, instrumentId, plan, openOrders, cycleSequence, now);
@@ -1168,12 +1198,22 @@ public class MarketMakerService {
             return false;
         }
 
+        List<ExternalTrade> prints = referenceMarketProvider.drainTrades(instrumentId, strategy.getProductLine(),
+                trade.getOrdersPerBatch() * 2);
+        if (prints.isEmpty()) return false;
         OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
                 properties.getQuoting().getOrderBookDepth());
         PositionResponse position = currentPosition(strategy, accountId, instrumentId, instrument);
-        List<PlaceOrderRequest> requests = simulatedOrders(strategy, instrumentId, accountId, cycleSequence,
-                instrument, orderBook, markPrice, position.signedQuantitySteps(), ThreadLocalRandom.current());
-        if (requests.isEmpty()) return false;
+        List<PlaceOrderRequest> requests = externalPrintOrders(strategy, instrumentId, accountId, cycleSequence,
+                instrument, orderBook, position.signedQuantitySteps(), prints);
+        if (requests.isEmpty()) {
+            log.warn("Market-maker simulated trade skipped empty requests strategyId={} instrumentId={} accountId={} asks={} bids={} pos={}",
+                    strategy.getStrategyId(), instrumentId, accountId,
+                    orderBook == null || orderBook.asks() == null ? -1 : orderBook.asks().size(),
+                    orderBook == null || orderBook.bids() == null ? -1 : orderBook.bids().size(),
+                    position.signedQuantitySteps());
+            return false;
+        }
         if (requests.size() > 1) return tradeBatch(strategy, instrumentId, accountId, cycleSequence,
                 requests, state, now);
         PlaceOrderRequest request = requests.getFirst();
@@ -1181,12 +1221,17 @@ public class MarketMakerService {
         OrderResponse response = receiptResult(receipt, OrderResponse.class);
         if (response == null || response.status() == OrderStatus.REJECTED) {
             state.addRejected(1L);
+            String reason = response == null ? receiptMessage(receipt) : response.rejectReason();
+            log.warn("Market-maker simulated trade rejected strategyId={} instrumentId={} accountId={} reason={}",
+                    strategy.getStrategyId(), instrumentId, accountId, reason);
             recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "TRADE_REJECTED",
-                    0, 0, 1, null, response == null ? receiptMessage(receipt) : response.rejectReason(), now);
+                    0, 0, 1, null, reason, now);
             return false;
         }
         state.addSubmitted(1L);
         if (response.executedQuantitySteps() <= 0) {
+            log.warn("Market-maker simulated trade no fill strategyId={} instrumentId={} accountId={} status={}",
+                    strategy.getStrategyId(), instrumentId, accountId, response.status());
             recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "TRADE_NO_FILL",
                     1, 0, 0, "NO_EXECUTION", null, now);
             return false;
@@ -1196,6 +1241,66 @@ public class MarketMakerService {
         return true;
     }
 
+    /**
+     * Copy third-party taker prints onto our book. At most {@code ordersPerBatch} prints are copied
+     * on each side, and each copy stops at the configured sweep so one external print cannot clear the ladder.
+     */
+    private List<PlaceOrderRequest> externalPrintOrders(MarketMakerProperties.Strategy strategy, String instrumentId,
+                                                         long accountId, long cycleSequence, InstrumentResponse instrument,
+                                                         OrderBookSnapshotResponse book, long position,
+                                                         List<ExternalTrade> prints) {
+        if (!instrument.marketOrderEnabled() || prints == null || prints.isEmpty()) return List.of();
+        MarketMakerProperties.Trade trade = properties.getTrade();
+        RandomGenerator fullSweep = new RandomGenerator() {
+            @Override
+            public long nextLong() {
+                return Long.MAX_VALUE;
+            }
+
+            @Override
+            public int nextInt(int bound) {
+                return Math.max(0, bound - 1);
+            }
+        };
+        long buyAvailable = tradeTarget(OrderSide.BUY, book, trade.getSlippageTicks(),
+                trade.getMaxSweepLevels(), fullSweep).availableQuantitySteps();
+        long sellAvailable = tradeTarget(OrderSide.SELL, book, trade.getSlippageTicks(),
+                trade.getMaxSweepLevels(), fullSweep).availableQuantitySteps();
+        long threshold = trade.getInventoryThresholdSteps();
+        if (threshold > 0) {
+            buyAvailable = Math.min(buyAvailable, position < -threshold ? Math.negateExact(position)
+                    : Math.max(0, Math.subtractExact(threshold, position)));
+            sellAvailable = Math.min(sellAvailable, position > threshold ? position
+                    : Math.max(0, Math.addExact(threshold, position)));
+        }
+        long minimum = Math.max(trade.getMinQuantitySteps(), instrument.minQuantitySteps());
+        long maximum = Math.min(trade.getMaxQuantitySteps(), instrument.maxQuantitySteps());
+        if (minimum <= 0 || maximum < minimum) return List.of();
+        int buyCopies = 0;
+        int sellCopies = 0;
+        List<PlaceOrderRequest> requests = new ArrayList<>();
+        for (ExternalTrade print : prints) {
+            boolean buy = print.takerSide() == OrderSide.BUY;
+            if (buy && buyCopies >= trade.getOrdersPerBatch()) continue;
+            if (!buy && sellCopies >= trade.getOrdersPerBatch()) continue;
+            long available = buy ? buyAvailable : sellAvailable;
+            long quantity = Math.min(print.quantitySteps(), Math.min(maximum, available));
+            if (quantity < minimum) continue;
+            requests.add(new PlaceOrderRequest(accountId,
+                    takerClientOrderId(strategy, instrumentId, accountId, cycleSequence), instrumentId, print.takerSide(),
+                    OrderType.MARKET, TimeInForce.IOC, 0L, quantity, strategy.getMarginMode(),
+                    PositionSide.NET, false, false));
+            if (buy) {
+                buyAvailable -= quantity;
+                buyCopies++;
+            } else {
+                sellAvailable -= quantity;
+                sellCopies++;
+            }
+        }
+        return requests;
+    }
+
     /** Build local simulated orders; each side reserves its own worst-case fill budget for this batch. */
     List<PlaceOrderRequest> simulatedOrders(MarketMakerProperties.Strategy strategy, String instrumentId,
                                            long accountId, long cycleSequence, InstrumentResponse instrument,
@@ -1203,10 +1308,12 @@ public class MarketMakerService {
                                            long position, RandomGenerator random) {
         if (!instrument.marketOrderEnabled()) return List.of();
         MarketMakerProperties.Trade trade = properties.getTrade();
-        long buyAvailable = tradeTarget(OrderSide.BUY, book, trade.getSlippageTicks(),
-                trade.getMaxSweepLevels(), random).availableQuantitySteps();
-        long sellAvailable = tradeTarget(OrderSide.SELL, book, trade.getSlippageTicks(),
-                trade.getMaxSweepLevels(), random).availableQuantitySteps();
+        TradeTarget buyTarget = tradeTarget(OrderSide.BUY, book, trade.getSlippageTicks(),
+                trade.getMaxSweepLevels(), random);
+        TradeTarget sellTarget = tradeTarget(OrderSide.SELL, book, trade.getSlippageTicks(),
+                trade.getMaxSweepLevels(), random);
+        long buyAvailable = buyTarget.availableQuantitySteps();
+        long sellAvailable = sellTarget.availableQuantitySteps();
         long threshold = trade.getInventoryThresholdSteps();
         if (threshold > 0) {
             // Do not assume opposite-side orders fill: any subset of fills must respect the cap.

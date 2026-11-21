@@ -1934,8 +1934,10 @@ public static final class PlaceOrderCheckEvent extends OrderCheckEvent implement
                     closeCapacityCancellations = Position.CloseCapacity.conflictsFor(
                             lane, userId, symbolId, positionKey, positionSide(), side(), orderId(), quantitySteps());
                 }
-                closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId,
-                        side(), matchingPriceTicks(), orderId(), orderId(), closeCapacityCancellations);
+                if (!accountBook.selfTradeAllowed(userId)) {
+                    closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId,
+                            side(), matchingPriceTicks(), orderId(), orderId(), closeCapacityCancellations);
+                }
                 accountBook.placeOrderInLane(lane, userId, this, commandId,
                         requiredReservation, preparedClientKey, symbolId, assetId, coreSequence, null, timestamp, position);
             } finally {
@@ -2089,8 +2091,10 @@ public static final class ReplaceOrderCheckEvent extends OrderCheckEvent impleme
                 closeCapacityCancellations = Position.CloseCapacity.conflictsFor(
                         lane, userId, symbolId(), positionKey, positionSide(), side(), originalOrderId, quantitySteps());
             }
-            closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId(),
-                    side(), matchingPriceTicks(), originalOrderId, orderId(), closeCapacityCancellations);
+            if (!accountBook.selfTradeAllowed(userId)) {
+                closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId(),
+                        side(), matchingPriceTicks(), originalOrderId, orderId(), closeCapacityCancellations);
+            }
             var user = lane.user(userId);
             orderCheck = new OrderCommand.ReplaceOrderCheck(userId, originalOrderId, original.revision(),
                     user == null ? 0 : user.revision(), command, this, required);
