@@ -24,7 +24,7 @@ Maker settings, strategies, and reference books initialize from YAML. Administra
 
 The default engine is disabled and strategies are empty. Configure accounts, funds, reference books, size, and levels explicitly before enabling. The launcher does not inject funds, hardcode maker accounts, enable simulated fills, or override risk budgets. Risk work budgets account for the active scan workload and configured base budget.
 
-After maker activation, run `python3 scripts/check-local-perpetual.py` to check current catalog instruments and two-sided books. An empty book is not permission to inject funds or enable strategies automatically.
+After maker activation, run `./scripts/local-perpetual.sh status` or query the Gateway orderbook endpoint to check current catalog instruments and two-sided books. An empty book is not permission to inject funds or enable strategies automatically.
 
 ## Upgrade and diagnostics
 

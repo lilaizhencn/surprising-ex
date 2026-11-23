@@ -1207,7 +1207,7 @@ public class MarketMakerService {
         List<PlaceOrderRequest> requests = externalPrintOrders(strategy, instrumentId, accountId, cycleSequence,
                 instrument, orderBook, position.signedQuantitySteps(), prints);
         if (requests.isEmpty()) {
-            log.warn("Market-maker simulated trade skipped empty requests strategyId={} instrumentId={} accountId={} asks={} bids={} pos={}",
+            log.debug("Market-maker simulated trade skipped empty requests strategyId={} instrumentId={} accountId={} asks={} bids={} pos={}",
                     strategy.getStrategyId(), instrumentId, accountId,
                     orderBook == null || orderBook.asks() == null ? -1 : orderBook.asks().size(),
                     orderBook == null || orderBook.bids() == null ? -1 : orderBook.bids().size(),
@@ -1222,7 +1222,7 @@ public class MarketMakerService {
         if (response == null || response.status() == OrderStatus.REJECTED) {
             state.addRejected(1L);
             String reason = response == null ? receiptMessage(receipt) : response.rejectReason();
-            log.warn("Market-maker simulated trade rejected strategyId={} instrumentId={} accountId={} reason={}",
+            log.debug("Market-maker simulated trade rejected strategyId={} instrumentId={} accountId={} reason={}",
                     strategy.getStrategyId(), instrumentId, accountId, reason);
             recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "TRADE_REJECTED",
                     0, 0, 1, null, reason, now);
@@ -1230,7 +1230,7 @@ public class MarketMakerService {
         }
         state.addSubmitted(1L);
         if (response.executedQuantitySteps() <= 0) {
-            log.warn("Market-maker simulated trade no fill strategyId={} instrumentId={} accountId={} status={}",
+            log.debug("Market-maker simulated trade no fill strategyId={} instrumentId={} accountId={} status={}",
                     strategy.getStrategyId(), instrumentId, accountId, response.status());
             recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "TRADE_NO_FILL",
                     1, 0, 0, "NO_EXECUTION", null, now);

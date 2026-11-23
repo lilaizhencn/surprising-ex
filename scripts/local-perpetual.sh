@@ -58,8 +58,10 @@ spot_core() {
     REALTIME_CORE_CONTROL_CHANNEL="aeron:udp?endpoint=127.0.0.1:20020" \
     AERON_CLUSTER_HOSTNAMES=127.0.0.1 AERON_HOSTNAMES=127.0.0.1 AERON_EGRESS_HOSTNAME=127.0.0.1 \
     SURPRISING_AERON_ACCOUNT_LANES=1 SURPRISING_AERON_MATCHING_ENGINES=1 \
-    POSTGRES_MODE=native JFR_ENABLED="${JFR_ENABLED:-true}" JFR_SETTINGS="${JFR_SETTINGS:-default}" \
-    JVM_XMS="${JVM_XMS:-512m}" JVM_XMX="${JVM_XMX:-1g}" \
+    POSTGRES_MODE=native JFR_ENABLED="${JFR_ENABLED:-false}" JFR_SETTINGS="${JFR_SETTINGS:-default}" \
+    JVM_XMS="${JVM_XMS:-256m}" JVM_XMX="${JVM_XMX:-1g}" \
+    JVM_GC="${JVM_GC:-G1GC}" JVM_ALWAYS_PRETOUCH="${JVM_ALWAYS_PRETOUCH:-false}" \
+    AERON_THREADING_MODE="${AERON_THREADING_MODE:-SHARED}" \
     "$ROOT/scripts/start-product-line-providers.sh"
 }
 label() { printf 'com.surprising.local-perpetual.%s' "$1"; }
@@ -225,7 +227,7 @@ else
     [[ "$VALKEY_HOST" == 127.0.0.1 ]] || fail 'managed Redis must bind localhost'
     free_port "$VALKEY_PORT"
     mkdir -p "$LOCAL_DIR/redis"
-    start redis "$(command -v redis-server)" --bind 127.0.0.1 --port "$VALKEY_PORT" --dir "$LOCAL_DIR/redis" --appendonly yes --appendfsync everysec --logfile "$LOCAL_DIR/logs/redis-server.log"
+    start redis "$(command -v redis-server)" --bind 127.0.0.1 --port "$VALKEY_PORT" --dir "$LOCAL_DIR/redis" --appendonly no --save "" --logfile "$LOCAL_DIR/logs/redis-server.log"
   fi
   if [[ "${MANAGE_KAFKA:-false}" == true ]] && ! alive kafka; then
     [[ "$KAFKA_BOOTSTRAP_SERVERS" == 127.0.0.1:19092 ]] || fail 'managed Kafka uses 127.0.0.1:19092; disable management for external Kafka'

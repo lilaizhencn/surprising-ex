@@ -17,12 +17,14 @@ OWNER_FILE="$RUN_DIR/owner"
 LOCK_DIR="$RUNTIME_ROOT/active.lock"
 if [[ "$CORE_ONLY" == true ]]; then LOCK_DIR="$RUNTIME_ROOT/core-$PRODUCT_LINE.lock"; fi
 LOCK_OWNER="$LOCK_DIR/owner"
-JVM_XMS="${JVM_XMS:-512m}"
-JVM_XMX="${JVM_XMX:-512m}"
+JVM_XMS="${JVM_XMS:-256m}"
+JVM_XMX="${JVM_XMX:-1g}"
 JVM_CORE_XMX="${JVM_CORE_XMX:-$JVM_XMX}"
 JVM_GATEWAY_XMX="${JVM_GATEWAY_XMX:-$JVM_XMX}"
-JVM_PROVIDER_XMX="${JVM_PROVIDER_XMX:-$JVM_XMX}"
-JVM_GC="${JVM_GC:-ZGC}"
+JVM_PROVIDER_XMX="${JVM_PROVIDER_XMX:-512m}"
+JVM_GC="${JVM_GC:-G1GC}"
+JVM_ALWAYS_PRETOUCH="${JVM_ALWAYS_PRETOUCH:-false}"
+AERON_THREADING_MODE="${AERON_THREADING_MODE:-SHARED}"
 JFR_ENABLED="${JFR_ENABLED:-false}"
 JFR_SETTINGS="${JFR_SETTINGS:-profile}"
 JFR_STACK_DEPTH="${JFR_STACK_DEPTH:-128}"
@@ -300,13 +302,15 @@ java_args_for() {
     "-Dsurprising.launcher.identity=$RUN_ID/$service"
     "-Dsurprising.log.directory=$LOG_DIR"
     "-Dsurprising.log.service=$service"
-    "-XX:+AlwaysPreTouch"
     "--enable-native-access=ALL-UNNAMED"
     "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
     "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
     "--add-opens=java.base/java.util.zip=ALL-UNNAMED"
-    "-Xlog:gc*,safepoint:file=$LOG_DIR/$service-gc.log:time,uptime,level,tags:filecount=5,filesize=20M"
+    "-Xlog:gc*,safepoint:file=$LOG_DIR/$service-gc.log:time,uptime,level,tags:filecount=2,filesize=5M"
   )
+  if [[ "$JVM_ALWAYS_PRETOUCH" == true ]]; then
+    JVM_ARGS+=("-XX:+AlwaysPreTouch")
+  fi
   if [[ "$JVM_GC" == ZGC ]]; then
     JVM_ARGS+=("-XX:+UseZGC")
   else
@@ -568,7 +572,7 @@ if [[ "$REALTIME_ENABLED" == true ]]; then
       -Dsurprising.aeron.node-id="$node" \
       -Dsurprising.aeron.hostnames="$AERON_CLUSTER_HOSTNAMES" \
       -Dsurprising.aeron.data-dir="$RUN_DIR/aeron" \
-      -Dsurprising.aeron.core.threading-mode=DEDICATED \
+      -Dsurprising.aeron.core.threading-mode="$AERON_THREADING_MODE" \
       -jar "$(jar_path core)"
   done
   local deadline=$((SECONDS + SERVICE_HEALTH_TIMEOUT_SECONDS))

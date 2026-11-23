@@ -323,9 +323,29 @@ public class QuotePlanner {
         for (OrderSide side : OrderSide.values()) {
             long capacity = side == OrderSide.BUY ? Math.max(0, Math.subtractExact(maxSteps, position))
                     : Math.max(0, Math.addExact(maxSteps, position));
-            for (DesiredQuote quote : quotes) {
-                if (quote.side() != side || capacity < minimum) continue;
-                long quantity = Math.min(quote.quantitySteps(), capacity);
+            List<DesiredQuote> sideQuotes = quotes.stream()
+                    .filter(quote -> quote.side() == side)
+                    .toList();
+            long totalRequested = sideQuotes.stream()
+                    .mapToLong(DesiredQuote::quantitySteps)
+                    .reduce(0L, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b);
+            boolean scaleDown = totalRequested > capacity && totalRequested > 0 && capacity >= minimum;
+            long perLevelCap = Math.max(minimum, capacity / Math.max(4, sideQuotes.size() / 2));
+            long effectiveTotal = scaleDown
+                    ? sideQuotes.stream()
+                            .mapToLong(q -> Math.min(q.quantitySteps(), perLevelCap))
+                            .reduce(0L, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b)
+                    : totalRequested;
+            for (DesiredQuote quote : sideQuotes) {
+                if (capacity < minimum) break;
+                long raw = scaleDown ? Math.min(quote.quantitySteps(), perLevelCap) : quote.quantitySteps();
+                long target = scaleDown && effectiveTotal > 0
+                        ? Math.max(minimum, java.math.BigInteger.valueOf(raw)
+                                .multiply(java.math.BigInteger.valueOf(capacity))
+                                .divide(java.math.BigInteger.valueOf(effectiveTotal))
+                                .longValue())
+                        : raw;
+                long quantity = Math.min(target, capacity);
                 if (quantity < minimum) continue;
                 sized.add(new DesiredQuote(side, quote.level(), quote.priceTicks(), quantity));
                 capacity -= quantity;
