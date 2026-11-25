@@ -17,3 +17,4 @@ reports/capacity/**/resource-monitor.stop
 performance-artifacts/
 surprising-gateway/config/application.yaml
 *.env
+surprising-aeron-client-*/

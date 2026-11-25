@@ -100,3 +100,4 @@
 /api/v1/admin/trading/fees/vip/override
 /api/v1/admin/trading/grid/list
 /api/v1/admin/trading/grid/{strategyId}/stop
+/api/v1/instruments/day-summary
