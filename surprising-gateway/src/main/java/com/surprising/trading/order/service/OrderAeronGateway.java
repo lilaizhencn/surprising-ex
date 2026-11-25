@@ -2,10 +2,7 @@ package com.surprising.trading.order.service;
 
 import com.surprising.trading.order.exception.OrderCommandRejectedException;
 
-import com.surprising.product.api.ProductLine;
 import com.surprising.aeron.client.AeronClientPool;
-import io.aeron.driver.MediaDriver;
-import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOpenOrdersQuery;
@@ -16,8 +13,6 @@ import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.trading.order.config.TradingOrderProperties;
-import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Autowired;
 import java.util.List;
 import java.util.Objects;
@@ -26,27 +21,13 @@ import java.util.concurrent.CompletableFuture;
 import org.springframework.stereotype.Service;
 
 @Service
-public class OrderAeronGateway implements AutoCloseable {
+public class OrderAeronGateway {
 
     private final AeronClientPool clients;
 
     @Autowired
-    public OrderAeronGateway(TradingOrderProperties properties,
-            @Qualifier("productCommandMediaDriver")
-            MediaDriver driver) {
-        this(createClients(properties, driver));
-    }
-
     public OrderAeronGateway(AeronClientPool clients) {
         this.clients = Objects.requireNonNull(clients, "clients");
-    }
-
-    private static AeronClientPool createClients(TradingOrderProperties properties, MediaDriver driver) {
-        TradingOrderProperties.Aeron aeron = properties.getAeron();
-        ProductLine productLine = properties.getProductLine();
-        return new AeronClientPool("order", productLine, aeron.getHostnames(),
-                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
-                "order-" + productLine.name() + "-node-" + aeron.getNodeId(), driver);
     }
 
     public CoreCommandOutcome commandOutcome(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
@@ -195,12 +176,6 @@ public class OrderAeronGateway implements AutoCloseable {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron cancel-all-after query failed");
         }
         return com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeList(response.data());
-    }
-
-    @Override
-    @PreDestroy
-    public void close() {
-        clients.close();
     }
 
     public record PreflightResult(CoreResultCode resultCode,

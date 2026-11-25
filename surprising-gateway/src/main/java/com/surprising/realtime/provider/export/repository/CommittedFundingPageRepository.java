@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 
 /** 仅访问core_funding_page_projection；在原资金费结算身份锁内记录页并校验重放身份。 */
 @Repository
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedFundingPageRepository {
     private final JdbcTemplate jdbc;
 
@@ -15,12 +15,12 @@ public class CommittedFundingPageRepository {
         this.jdbc = jdbc;
     }
 
-    public boolean insertOrVerify(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public boolean insertOrVerify(com.surprising.aeron.protocol.export.CommittedFundingPage page) {
         var command = page.command();
         jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
                 page.product().name() + ':' + command.instrumentId() + ':' + command.settlementId());
         int inserted = jdbc.update("""
-                INSERT INTO core_funding_page_projection(product_line,cluster_position,instrument_id,
+                INSERT INTO funding_settlement_pages(product_line,cluster_position,instrument_id,
                   settlement_id,cursor_user_id,next_cursor_user_id,funding_rate_ppm,complete,occurred_at_epoch_ms)
                 VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING
                 """, page.product().name(), page.clusterPosition(), command.instrumentId(), command.settlementId(),
@@ -28,7 +28,7 @@ public class CommittedFundingPageRepository {
                 page.progress().complete(), page.occurredAt());
         if (inserted == 0) {
             Integer matches = jdbc.queryForObject("""
-                    SELECT count(*) FROM core_funding_page_projection WHERE product_line=? AND cluster_position=?
+                    SELECT count(*) FROM funding_settlement_pages WHERE product_line=? AND cluster_position=?
                       AND instrument_id=? AND settlement_id=? AND cursor_user_id=? AND next_cursor_user_id=?
                       AND funding_rate_ppm=? AND complete=? AND occurred_at_epoch_ms=?
                     """, Integer.class, page.product().name(), page.clusterPosition(), command.instrumentId(),
@@ -41,11 +41,11 @@ public class CommittedFundingPageRepository {
         return true;
     }
 
-    public List<FundingCursor> cursors(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public List<FundingCursor> cursors(com.surprising.aeron.protocol.export.CommittedFundingPage page) {
         var command = page.command();
         return jdbc.query("""
             SELECT cursor_user_id,next_cursor_user_id,funding_rate_ppm,complete
-            FROM core_funding_page_projection
+            FROM funding_settlement_pages
             WHERE product_line=? AND instrument_id=? AND settlement_id=? ORDER BY cluster_position
             """, (rs, row) -> new FundingCursor(rs.getLong(1),rs.getLong(2),rs.getLong(3),rs.getBoolean(4)),
             page.product().name(),command.instrumentId(),command.settlementId());

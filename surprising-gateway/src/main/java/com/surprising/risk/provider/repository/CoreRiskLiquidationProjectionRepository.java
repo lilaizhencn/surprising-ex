@@ -37,25 +37,18 @@ public class CoreRiskLiquidationProjectionRepository {
         long cursor = afterId == null ? (descending ? Long.MAX_VALUE : 0L) : afterId;
         try {
             return jdbcTemplate.query("""
-                SELECT initialized.__ready, projection_rows.*
-                  FROM (SELECT count(*)=1 AS __ready FROM core_liquidation_projection_initialization WHERE product_line=?) initialized
-                  LEFT JOIN LATERAL (
                 SELECT liquidation_id, user_id, instrument_id, asset, margin_mode, position_side,
                        signed_quantity_steps, status, updated_at_epoch_ms
-                  FROM core_liquidation_projection
+                  FROM trading_liquidations
                  WHERE product_line = ? AND status IN """ + statuses + " AND liquidation_id " + comparison
-                        + " ? ORDER BY liquidation_id "
-                        + direction + " LIMIT ?) projection_rows ON initialized.__ready ORDER BY liquidation_id " + direction, (rs, rowNum) -> {
-                if (!rs.getBoolean("__ready")) throw new ReadViewUnavailableException("LIQUIDATION_READ_VIEW_NOT_READY");
-                if (rs.getObject("liquidation_id") == null) return null;
-                return new LiquidationCandidateResponse(
+                        + " ? ORDER BY liquidation_id " + direction + " LIMIT ?", (rs, rowNum) -> new LiquidationCandidateResponse(
                 rs.getLong("liquidation_id"), null, rs.getLong("user_id"),
                 rs.getString("instrument_id"), MarginMode.valueOf(rs.getString("margin_mode")),
                 PositionSide.valueOf(rs.getString("position_side")),
                 productLine.accountTypeCode(), rs.getString("asset"), rs.getLong("signed_quantity_steps"),
                 null, null, null, null, mapStatus(rs.getString("status")),
-                Instant.ofEpochMilli(rs.getLong("updated_at_epoch_ms")));
-            }, productLine.name(), productLine.name(), cursor, limit).stream().filter(java.util.Objects::nonNull).toList();
+                Instant.ofEpochMilli(rs.getLong("updated_at_epoch_ms"))),
+                productLine.name(), cursor, limit);
         } catch (DataAccessException failure) {
             throw new ReadViewUnavailableException("LIQUIDATION_READ_VIEW_UNAVAILABLE", failure);
         } catch (IllegalArgumentException invalid) {

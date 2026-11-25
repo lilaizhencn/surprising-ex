@@ -1,23 +1,10 @@
 package com.surprising.gateway.provider.controller;
 
-import com.surprising.account.provider.service.AccountService;
-import com.surprising.asset.repository.AssetNetworkRepository;
-import com.surprising.asset.repository.AssetRepository;
-import com.surprising.gateway.provider.auth.service.AuthService;
-import com.surprising.gateway.provider.auth.service.ComplianceService;
-import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
-import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
-import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
-import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import com.surprising.gateway.provider.service.OpenApiSupport;
 import com.surprising.gateway.provider.service.OpenCapitalApiService;
 import com.surprising.gateway.provider.service.OpenMarketApiService;
 import com.surprising.gateway.provider.service.OpenTradingApiService;
-import com.surprising.instrument.provider.service.InstrumentService;
-import com.surprising.trading.matching.service.MatchingMarketDataService;
-import com.surprising.trading.order.service.OrderService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Set;
@@ -29,7 +16,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import tools.jackson.databind.ObjectMapper;
 
 /**
  * 公开 Open API 统一网关入口，按行情、交易/账户、资金/充提三类路由至专职服务。
@@ -51,48 +37,7 @@ public class OpenApiController {
     private final OpenTradingApiService tradingApi;
     private final OpenCapitalApiService capitalApi;
 
-    public OpenApiController(GatewayProperties properties,
-                             InstrumentService instrumentService,
-                             OrderService orderService,
-                             AccountService accountService,
-                             MatchingMarketDataService marketDataService,
-                             GatewayApiKeyService apiKeyService,
-                             SensitiveActionVerificationService verificationService,
-                             AuthService authService,
-                             ComplianceService complianceService,
-                             CustodyWalletClient custodyWalletClient,
-                             CustodyWithdrawalService withdrawalService,
-                             ObjectMapper objectMapper) {
-        this(properties, instrumentService, orderService, accountService, marketDataService,
-                apiKeyService, verificationService, authService, complianceService, custodyWalletClient,
-                withdrawalService, null, null, null, objectMapper);
-    }
-
     @Autowired
-    public OpenApiController(GatewayProperties properties,
-                             InstrumentService instrumentService,
-                             @Autowired(required = false) OrderService orderService,
-                             @Autowired(required = false) AccountService accountService,
-                             @Autowired(required = false) MatchingMarketDataService marketDataService,
-                             GatewayApiKeyService apiKeyService,
-                             SensitiveActionVerificationService verificationService,
-                             AuthService authService,
-                             ComplianceService complianceService,
-                             CustodyWalletClient custodyWalletClient,
-                             CustodyWithdrawalService withdrawalService,
-                             @Autowired(required = false) UserDepositAddressRepository depositAddressRepository,
-                             @Autowired(required = false) AssetRepository assetRepository,
-                             @Autowired(required = false) AssetNetworkRepository networkRepository,
-                             ObjectMapper objectMapper) {
-        this.properties = properties;
-        this.support = new OpenApiSupport(properties, apiKeyService, authService, objectMapper);
-        this.marketApi = new OpenMarketApiService(properties, instrumentService, marketDataService, support);
-        this.tradingApi = new OpenTradingApiService(properties, orderService, accountService, complianceService, support);
-        this.capitalApi = new OpenCapitalApiService(properties, accountService, verificationService, complianceService,
-                custodyWalletClient, withdrawalService, depositAddressRepository,
-                assetRepository, networkRepository, support);
-    }
-
     public OpenApiController(GatewayProperties properties,
                              OpenApiSupport support,
                              OpenMarketApiService marketApi,

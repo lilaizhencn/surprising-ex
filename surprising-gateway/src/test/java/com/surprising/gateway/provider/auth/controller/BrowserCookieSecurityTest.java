@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth.controller;
 
+import com.surprising.gateway.provider.auth.support.BrowserSessionCookies;
+
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.time.Duration;

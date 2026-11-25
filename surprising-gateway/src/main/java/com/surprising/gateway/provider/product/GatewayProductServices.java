@@ -11,6 +11,7 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.client.topology.AeronClusterTopologyProvider;
+import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PreDestroy;
 import java.nio.file.Path;
@@ -21,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.*;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -66,24 +68,40 @@ public final class GatewayProductServices implements AutoCloseable {
 
     public synchronized void reload() {
         if (closed) return;
+        var pending = settings.list().stream()
+                .filter(setting -> setting.enabled() && !products.containsKey(setting.productLine()))
+                .map(setting -> setting.productLine())
+                .toList();
         var failures = new EnumMap<ProductLine, String>(ProductLine.class);
-        for (var setting : settings.list()) {
-            if (closed || Thread.currentThread().isInterrupted()) break;
-            if (!setting.enabled() || products.containsKey(setting.productLine())) continue;
-            var product = setting.productLine();
-            try {
-                var runtime = start(product);
-                if (closed) {
-                    runtime.context().close();
-                    break;
+        if (!pending.isEmpty()) {
+            var updated = new EnumMap<ProductLine, Runtime>(ProductLine.class);
+            updated.putAll(products);
+            try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+                var futures = new java.util.LinkedHashMap<ProductLine, java.util.concurrent.Future<Runtime>>();
+                for (var product : pending) {
+                    if (closed || Thread.currentThread().isInterrupted()) break;
+                    futures.put(product, executor.submit(() -> start(product)));
                 }
-                var updated = new EnumMap<ProductLine, Runtime>(ProductLine.class);
-                updated.putAll(products);
-                updated.put(product, runtime);
+                for (var entry : futures.entrySet()) {
+                    var product = entry.getKey();
+                    try {
+                        var runtime = entry.getValue().get();
+                        if (closed) {
+                            runtime.context().close();
+                        } else {
+                            updated.put(product, runtime);
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        failures.put(product, "初始化失败，请检查 Core 及本机服务日志；系统会自动重试");
+                    } catch (java.util.concurrent.ExecutionException execution) {
+                        failures.put(product, "初始化失败，请检查 Core 及本机服务日志；系统会自动重试");
+                        org.slf4j.LoggerFactory.getLogger(getClass()).warn("product activation failed product={}", product, execution.getCause());
+                    }
+                }
+            }
+            if (!closed) {
                 products = Collections.unmodifiableMap(updated); // 完整初始化后一次发布，不暴露半成品。
-            } catch (RuntimeException failure) {
-                failures.put(product, "初始化失败，请检查 Core 及本机服务日志；系统会自动重试");
-                org.slf4j.LoggerFactory.getLogger(getClass()).warn("product activation failed product={}", product, failure);
             }
         }
         errors = Collections.unmodifiableMap(failures);
@@ -236,56 +254,6 @@ public final class GatewayProductServices implements AutoCloseable {
                 ? env.getProperty("surprising.price.mark.market-channel", "aeron:udp?endpoint=127.0.0.1:21407")
                 : "aeron:udp?endpoint=127.0.0.1:21407";
         values.put("surprising.price.mark.market-channel", perProductChannel(baseMarketChannel, product));
-        if (env != null && "true".equalsIgnoreCase(env.getProperty("surprising.trade-export.enabled"))) {
-            String slug = product.name().toLowerCase(Locale.ROOT);
-            String baseClusterDir = env.getProperty("surprising.trade-export.cluster-directory");
-            if (baseClusterDir != null && !baseClusterDir.isBlank()) {
-                Path p = Path.of(baseClusterDir);
-                if (p.getNameCount() >= 3) {
-                    Path aeronRoot = p.getParent() != null && p.getParent().getParent() != null
-                            ? p.getParent().getParent().getParent() : null;
-                    if (aeronRoot != null) {
-                        Path candidate = aeronRoot.resolve(slug).resolve("node0").resolve("cluster");
-                        if (java.nio.file.Files.isDirectory(candidate)) {
-                            values.put("surprising.trade-export.cluster-directory", candidate.toString());
-                        }
-                    }
-                }
-            }
-            String baseAeronDir = env.getProperty("surprising.trade-export.aeron-directory");
-            if (baseAeronDir != null && !baseAeronDir.isBlank()) {
-                Path parentDir = Path.of(baseAeronDir).getParent();
-                if (parentDir != null) {
-                    Path c1 = parentDir.resolve("core-driver-surprising-" + slug + "-0");
-                    Path c2 = parentDir.resolve(slug + "-core-driver-surprising-" + slug + "-0");
-                    if (java.nio.file.Files.isDirectory(c1)) {
-                        values.put("surprising.trade-export.aeron-directory", c1.toString());
-                    } else if (java.nio.file.Files.isDirectory(c2)) {
-                        values.put("surprising.trade-export.aeron-directory", c2.toString());
-                    }
-                }
-            }
-            String baseArchive = env.getProperty("surprising.trade-export.archive-control-channel");
-            if (baseArchive != null && !baseArchive.isBlank()) {
-                int colon = baseArchive.lastIndexOf(':');
-                if (colon > 0) {
-                    int archivePort = 20000 + product.ordinal() * 1000 + 1;
-                    values.put("surprising.trade-export.archive-control-channel",
-                            baseArchive.substring(0, colon + 1) + archivePort);
-                }
-            }
-            values.put("surprising.trade-export.cluster-id", 100 + product.ordinal());
-            String baseCheckpoint = env.getProperty("surprising.trade-export.checkpoint");
-            String defaultProduct = env.getProperty("PRODUCT_LINE", "LINEAR_PERPETUAL");
-            if (baseCheckpoint != null && !baseCheckpoint.isBlank()
-                    && !product.name().equalsIgnoreCase(defaultProduct)) {
-                Path cpParent = Path.of(baseCheckpoint).getParent();
-                if (cpParent != null) {
-                    values.put("surprising.trade-export.checkpoint",
-                            cpParent.resolve("checkpoint-" + slug + ".bin").toString());
-                }
-            }
-        }
         return values;
     }
 
@@ -298,6 +266,15 @@ public final class GatewayProductServices implements AutoCloseable {
             return baseChannel.substring(0, colon + 1) + (port + product.ordinal());
         } catch (NumberFormatException ignored) {
             return baseChannel;
+        }
+    }
+
+    @EventListener
+    public void onInstrumentEvent(InstrumentEvent event) {
+        if (closed || event == null || event.productLine() == null) return;
+        Runtime runtime = products.get(event.productLine());
+        if (runtime != null && runtime.context().isActive()) {
+            runtime.context().publishEvent(event);
         }
     }
 

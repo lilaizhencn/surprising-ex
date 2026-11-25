@@ -4,19 +4,20 @@ import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAds;
-import com.surprising.gateway.c2c.service.C2cFunds;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAdService;
+import com.surprising.gateway.c2c.service.C2cFundService;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.surprising.gateway.c2c.model.C2cAd;
+import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.model.ProductAccountAdjustment;
-import com.surprising.gateway.provider.service.ProductAccountClient;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -29,9 +30,9 @@ class C2cAdsPostgresTest {
     private C2cDatabaseFixture db;
     private C2cAdsRepository rows;
     private C2cFundsRepository intents;
-    private C2cAds ads;
-    private C2cAccess access;
-    private C2cFunds funds;
+    private C2cAdService ads;
+    private C2cAccessService access;
+    private C2cFundService funds;
     private UUID marketId,paymentId;
     private final JwtPrincipal owner=new JwtPrincipal(11,"seller","NORMAL",List.of(),Instant.now().plusSeconds(60));
     @BeforeEach void setup() throws Exception {
@@ -51,14 +52,12 @@ class C2cAdsPostgresTest {
                 INSERT INTO c2c_payment_accounts(account_id,user_id,fiat,method_code,details_ciphertext,masked_label,status)
                 VALUES(?,11,'CNY','ALIPAY','fixture ciphertext','****0000','APPROVED')
                 """,paymentId);
-        rows=new C2cAdsRepository(jdbc);intents=new C2cFundsRepository(jdbc);access=mock(C2cAccess.class);
+        rows=new C2cAdsRepository(jdbc);intents=new C2cFundsRepository(jdbc);access=mock(C2cAccessService.class);
         ads=C2cDatabaseFixture.ads(jdbc,rows,C2cDatabaseFixture.markets(jdbc),C2cDatabaseFixture.payments(jdbc,null,null,null,access),access,intents,new C2cSubmissions(jdbc));
-        var accounts=mock(ProductAccountClient.class);
-        var applied=new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null);
-        when(accounts.transferOut(any(),any())).thenReturn(applied);
-        when(accounts.transferIn(any(),any())).thenReturn(applied);
-        when(accounts.completeTransfer(any(),any())).thenReturn(applied);
-        funds=new C2cFunds(intents,accounts,C2cDatabaseFixture.markets(jdbc));
+        var accounts=mock(AccountCommandGateway.class);
+        var products=mock(GatewayProductServices.class);
+        when(products.service(ProductLine.SPOT,AccountCommandGateway.class)).thenReturn(accounts);
+        funds=new C2cFundService(intents,products,C2cDatabaseFixture.markets(jdbc));
     }
     @AfterEach void cleanup() {if(db!=null)db.close();}
     private C2cController.Publish request() {return new C2cController.Publish(marketId,"SELL","6.65","10","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);}

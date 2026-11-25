@@ -7,8 +7,6 @@ import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.price.api.model.MarkPriceEvent;
-import com.surprising.price.mark.config.MarkPriceProperties;
-import io.aeron.driver.MediaDriver;
 import jakarta.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -23,7 +21,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -43,31 +40,14 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
     private final AtomicBoolean draining = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    public MarkPriceCorePublisher(MarkPriceProperties properties) {
-        this(properties, null);
-    }
-
-    @Autowired
-    public MarkPriceCorePublisher(MarkPriceProperties properties,
-                                  @Autowired(required = false) @Qualifier("productCommandMediaDriver") MediaDriver driver) {
-        this(driver != null
-                ? new AeronClientPool("price-mark", properties.getProductLine(),
-                        properties.getAeron().getHostnames(), properties.getAeron().getEgressHostname(),
-                        properties.getAeron().getResponseTimeout(), properties.getAeron().getClientConnections(),
-                        "price-mark-core", driver)
-                : new AeronClientPool("price-mark", properties.getProductLine(),
-                        properties.getAeron().getHostnames(), properties.getAeron().getEgressHostname(),
-                        properties.getAeron().getResponseTimeout(), properties.getAeron().getClientConnections(),
-                        "price-mark-core"));
-    }
-
     MarkPriceCorePublisher(Transport transport) {
         this.clients = null;
         this.transport = Objects.requireNonNull(transport, "transport");
         this.executor = newExecutor();
     }
 
-    private MarkPriceCorePublisher(AeronClientPool clients) {
+    @Autowired
+    public MarkPriceCorePublisher(AeronClientPool clients) {
         this.clients = Objects.requireNonNull(clients, "clients");
         this.transport = null;
         this.executor = newExecutor();
@@ -230,9 +210,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
         if (!pendingBySymbol.isEmpty()) {
             log.warn("Mark price publisher stopped with pending symbols={}", pendingBySymbol.size());
         }
-        if (clients != null) {
-            clients.close();
-        } else {
+        if (transport != null) {
             transport.close();
         }
     }

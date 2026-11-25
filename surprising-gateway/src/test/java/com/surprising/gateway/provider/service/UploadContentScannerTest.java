@@ -80,7 +80,7 @@ class UploadContentScannerTest {
         UUID id = UUID.randomUUID();
         when(attachments.find(id)).thenReturn(Optional.of(new C2cAttachment(id, 7, null, null, "PROOF", "private/key", "application/pdf", pdf.length, C2cDigests.sha256(pdf), "document.pdf", "PENDING")));
         when(objects.read("private/key")).thenReturn(pdf);
-        var c2c = new C2cAttachments(attachments, mock(), mock(), mock(), mock(), mock(), objects, mock(PlatformTransactionManager.class), limits, scanner);
+        var c2c = new C2cAttachmentService(attachments, mock(), mock(), mock(), mock(), mock(), objects, mock(PlatformTransactionManager.class), limits, scanner);
         assertThatThrownBy(() -> c2c.confirm(7, id)).isInstanceOf(IllegalArgumentException.class);
         verify(attachments, never()).markReady(any());
     }

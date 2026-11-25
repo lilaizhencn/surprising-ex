@@ -1,10 +1,10 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cChatController;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAttachments;
-import com.surprising.gateway.c2c.service.C2cConversations;
-import com.surprising.gateway.c2c.service.C2cMessages;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAttachmentService;
+import com.surprising.gateway.c2c.service.C2cConversationService;
+import com.surprising.gateway.c2c.service.C2cMessageService;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,13 +14,13 @@ import java.util.UUID;
 import org.junit.jupiter.api.*;
 
 class C2cChatValidationTest {
-    private C2cConversations conversations;
-    private C2cMessages messages;
-    private C2cAttachments attachments;
+    private C2cConversationService conversations;
+    private C2cMessageService messages;
+    private C2cAttachmentService attachments;
     private C2cChatController controller;
     @BeforeEach void setup() {
-        conversations=mock(C2cConversations.class);messages=mock(C2cMessages.class);attachments=mock(C2cAttachments.class);
-        var access=mock(C2cAccess.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));controller=new C2cChatController(access,conversations,messages,attachments);
+        conversations=mock(C2cConversationService.class);messages=mock(C2cMessageService.class);attachments=mock(C2cAttachmentService.class);
+        var access=mock(C2cAccessService.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));controller=new C2cChatController(access,conversations,messages,attachments);
     }
     @Test void invalidConversationAndPaginationInputsNeverReachTheService() {
         assertThatThrownBy(()->controller.start("Bearer qa",new C2cChatController.Start(null,null))).isInstanceOf(IllegalArgumentException.class);

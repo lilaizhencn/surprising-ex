@@ -1,9 +1,9 @@
 package com.surprising.gateway.c2c.controller;
 
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAttachments;
-import com.surprising.gateway.c2c.service.C2cConversations;
-import com.surprising.gateway.c2c.service.C2cMessages;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAttachmentService;
+import com.surprising.gateway.c2c.service.C2cConversationService;
+import com.surprising.gateway.c2c.service.C2cMessageService;
 
 import java.io.IOException;
 import com.surprising.gateway.c2c.model.C2cChatViews;
@@ -23,11 +23,11 @@ public class C2cChatController {
     public record Send(UUID requestId,String text,UUID attachmentId) { }
     public record Read(String messageId,String eventId) { }
     public record Upload(String purpose,UUID orderId,UUID conversationId,String name,String contentType,int byteCount,String sha256) { }
-    private final C2cAccess access;
-    private final C2cConversations conversations;
-    private final C2cMessages messages;
-    private final C2cAttachments attachments;
-    public C2cChatController(C2cAccess access,C2cConversations conversations,C2cMessages messages,C2cAttachments attachments) {
+    private final C2cAccessService access;
+    private final C2cConversationService conversations;
+    private final C2cMessageService messages;
+    private final C2cAttachmentService attachments;
+    public C2cChatController(C2cAccessService access,C2cConversationService conversations,C2cMessageService messages,C2cAttachmentService attachments) {
         this.access=access;this.conversations=conversations;this.messages=messages;this.attachments=attachments;
     }
     @PostMapping("/conversations")

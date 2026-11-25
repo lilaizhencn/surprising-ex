@@ -36,6 +36,7 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * 公开 Open API 交易与账户端点处理（order、openOrders、allOrders、account、account/status）。
  */
+@Service
 public class OpenTradingApiService {
 
     private final GatewayProperties properties;
@@ -45,8 +46,8 @@ public class OpenTradingApiService {
     private final OpenApiSupport support;
 
     public OpenTradingApiService(GatewayProperties properties,
-                                 OrderService orderService,
-                                 AccountService accountService,
+                                 @org.springframework.beans.factory.annotation.Autowired(required = false) OrderService orderService,
+                                 @org.springframework.beans.factory.annotation.Autowired(required = false) AccountService accountService,
                                  ComplianceService complianceService,
                                  OpenApiSupport support) {
         this.properties = properties;

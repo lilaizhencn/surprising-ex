@@ -2,7 +2,6 @@ package com.surprising.candlestick.provider.repository;
 
 import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandlePeriod;
-import com.surprising.candlestick.provider.aggregation.CandleSink;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
@@ -12,15 +11,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * 只负责 {@code candlestick_candles} 表的批量写入。
+ * 只负责 {@code market_candles} 表的批量写入。
  *
  * <p>只写关闭的分钟快照；迟到成交产生更高版本的完整替换，重复或旧版本不回退历史。</p>
  */
 @Repository
-public class PostgresCandleSink implements CandleSink {
+public class PostgresCandleSink {
 
     private static final String UPSERT_SQL = """
-            INSERT INTO candlestick_candles (
+            INSERT INTO market_candles (
                 instrument_id, period, open_time, close_time,
                 open_price, high_price, low_price, close_price,
                 base_volume, quote_volume, trade_count,
@@ -36,7 +35,7 @@ public class PostgresCandleSink implements CandleSink {
               last_sequence=EXCLUDED.last_sequence, status=EXCLUDED.status,
               updated_at=EXCLUDED.updated_at, source_partition=EXCLUDED.source_partition,
               source_offset=EXCLUDED.source_offset
-            WHERE EXCLUDED.trade_count > candlestick_candles.trade_count
+            WHERE EXCLUDED.trade_count > market_candles.trade_count
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -48,7 +47,6 @@ public class PostgresCandleSink implements CandleSink {
     /**
      * 使用 JDBC batch 持久化完整分钟快照；旧版本和重复重试不覆盖较新成交。
      */
-    @Override
     public void upsertBatch(List<CandleSnapshot> candles) {
         if (candles == null || candles.isEmpty()) {
             return;
@@ -61,7 +59,6 @@ public class PostgresCandleSink implements CandleSink {
             return;
         }
         jdbcTemplate.batchUpdate(UPSERT_SQL, new BatchPreparedStatementSetter() {
-            @Override
             public void setValues(PreparedStatement ps, int i) throws java.sql.SQLException {
                 CandleSnapshot candle = closedCandles.get(i);
                 ps.setString(1, candle.getInstrumentId());
@@ -84,8 +81,6 @@ public class PostgresCandleSink implements CandleSink {
                 setNullableInt(ps, 18, candle.getSourcePartition());
                 setNullableLong(ps, 19, candle.getSourceOffset());
             }
-
-            @Override
             public int getBatchSize() {
                 return closedCandles.size();
             }

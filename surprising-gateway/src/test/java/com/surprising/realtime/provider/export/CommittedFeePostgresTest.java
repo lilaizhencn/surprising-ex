@@ -89,7 +89,7 @@ class CommittedFeePostgresTest {
     observe(400, 55);
     assertThat(
       jdbc.queryForList(
-        "SELECT fee_units FROM core_trade_fee_facts ORDER BY source_id",
+        "SELECT fee_units FROM trade_fee_facts ORDER BY source_id",
         Long.class
       )
     ).containsExactly(7L, -2L);
@@ -102,7 +102,7 @@ class CommittedFeePostgresTest {
     observe(500, 60);
     assertThat(
       jdbc.queryForList(
-        "SELECT fee_units FROM core_trade_fee_facts ORDER BY source_id",
+        "SELECT fee_units FROM trade_fee_facts ORDER BY source_id",
         Long.class
       )
     ).containsExactly(7L, -2L, 5L);
@@ -116,13 +116,13 @@ class CommittedFeePostgresTest {
     });
     assertThat(
       jdbc.queryForObject(
-        "SELECT count(*) FROM core_trade_fee_progress",
+        "SELECT count(*) FROM trade_fee_progress",
         Integer.class
       )
     ).isZero();
     assertThat(
       jdbc.queryForObject(
-        "SELECT count(*) FROM core_trade_fee_facts",
+        "SELECT count(*) FROM trade_fee_facts",
         Integer.class
       )
     ).isZero();
@@ -132,7 +132,7 @@ class CommittedFeePostgresTest {
     );
     assertThat(
       jdbc.queryForObject(
-        "SELECT sum(fee_units) FROM core_trade_fee_facts",
+        "SELECT sum(fee_units) FROM trade_fee_facts",
         Long.class
       )
     ).isEqualTo(30);

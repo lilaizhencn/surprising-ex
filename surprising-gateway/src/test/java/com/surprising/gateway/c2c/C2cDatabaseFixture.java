@@ -4,17 +4,17 @@ import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
-import com.surprising.gateway.c2c.service.C2cAdminMarkets;
-import com.surprising.gateway.c2c.service.C2cAds;
-import com.surprising.gateway.c2c.service.C2cAttachments;
-import com.surprising.gateway.c2c.service.C2cConversations;
-import com.surprising.gateway.c2c.service.C2cMerchantBonds;
-import com.surprising.gateway.c2c.service.C2cMessages;
-import com.surprising.gateway.c2c.service.C2cOrders;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
-import com.surprising.gateway.c2c.service.C2cProfiles;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminMarketService;
+import com.surprising.gateway.c2c.service.C2cAdService;
+import com.surprising.gateway.c2c.service.C2cAttachmentService;
+import com.surprising.gateway.c2c.service.C2cConversationService;
+import com.surprising.gateway.c2c.service.C2cMerchantBondService;
+import com.surprising.gateway.c2c.service.C2cMessageService;
+import com.surprising.gateway.c2c.service.C2cOrderService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
+import com.surprising.gateway.c2c.service.C2cProfileService;
 import com.surprising.gateway.c2c.storage.C2cR2Storage;
 
 import com.surprising.gateway.c2c.repository.C2cAppealRepository;
@@ -82,71 +82,71 @@ final class C2cDatabaseFixture implements AutoCloseable {
         jdbc.execute("CREATE SEQUENCE "+table+"_qa_sequence");
         jdbc.execute("ALTER TABLE "+table+" ALTER COLUMN "+column+" SET DEFAULT nextval('"+table+"_qa_sequence')");
     }
-    static C2cAds ads(JdbcTemplate jdbc, C2cAdsRepository rows, C2cMarketService markets, C2cPaymentAccounts payments,
-                      C2cAccess access, C2cFundsRepository funds, C2cSubmissions submissions) {
-        return new C2cAds(rows,markets,payments,access,funds,submissions,new GatewayUserRepository(jdbc),
+    static C2cAdService ads(JdbcTemplate jdbc, C2cAdsRepository rows, C2cMarketService markets, C2cPaymentAccountService payments,
+                      C2cAccessService access, C2cFundsRepository funds, C2cSubmissions submissions) {
+        return new C2cAdService(rows,markets,payments,access,funds,submissions,new GatewayUserRepository(jdbc),
                 new C2cMerchantRepository(jdbc),new C2cPaymentMethodRepository(jdbc));
     }
 
-    static C2cOrders orders(JdbcTemplate jdbc, C2cOrdersRepository rows, C2cAdsRepository ads, C2cMarketService markets,
-                            C2cPaymentAccounts payments, C2cAccess access, C2cFundsRepository funds,
+    static C2cOrderService orders(JdbcTemplate jdbc, C2cOrdersRepository rows, C2cAdsRepository ads, C2cMarketService markets,
+                            C2cPaymentAccountService payments, C2cAccessService access, C2cFundsRepository funds,
                             C2cSubmissions submissions, ObjectMapper json) {
-        return new C2cOrders(rows,ads,markets,payments,access,funds,submissions,new GatewayUserRepository(jdbc),
+        return new C2cOrderService(rows,ads,markets,payments,access,funds,submissions,new GatewayUserRepository(jdbc),
                 new C2cQuoteRepository(jdbc),new C2cOrderEventRepository(jdbc,json),new C2cAttachmentRepository(jdbc),
                 new C2cAppealRepository(jdbc),new C2cMerchantRepository(jdbc),new C2cRelationRepository(jdbc));
     }
 
     static C2cQueryService queries(JdbcTemplate jdbc,C2cAdsRepository ads,C2cOrdersRepository orders,
-                                    C2cMarketService markets,C2cPaymentAccounts payments,ObjectMapper json,C2cSubmissions submissions) {
+                                    C2cMarketService markets,C2cPaymentAccountService payments,ObjectMapper json,C2cSubmissions submissions) {
         return new C2cQueryService(ads,orders,markets,new C2cMarketRepository(jdbc),payments,new C2cMerchantRepository(jdbc),
                 new C2cPaymentMethodRepository(jdbc),new C2cPaymentAccountRepository(jdbc),new C2cOrderEventRepository(jdbc,json),
                 new C2cAppealRepository(jdbc),submissions);
     }
 
-    static C2cConversations conversations(JdbcTemplate jdbc,C2cOrdersRepository orders) {
-        return new C2cConversations(new com.surprising.gateway.c2c.repository.C2cConversationRepository(jdbc),
+    static C2cConversationService conversations(JdbcTemplate jdbc,C2cOrdersRepository orders) {
+        return new C2cConversationService(new com.surprising.gateway.c2c.repository.C2cConversationRepository(jdbc),
                 new com.surprising.gateway.c2c.repository.C2cMessageReadRepository(jdbc),orders,
                 new com.surprising.gateway.c2c.repository.C2cProfileRepository(jdbc),new C2cRelationRepository(jdbc),new GatewayUserRepository(jdbc));
     }
-    static C2cAttachments attachments(JdbcTemplate jdbc,C2cConversations conversations,C2cOrdersRepository orders,
-                                      C2cPaymentAccounts payments,C2cR2Storage storage,org.springframework.transaction.PlatformTransactionManager transactions) {
-        return new C2cAttachments(new C2cAttachmentRepository(jdbc),new com.surprising.gateway.c2c.repository.C2cMessageRepository(jdbc),
+    static C2cAttachmentService attachments(JdbcTemplate jdbc,C2cConversationService conversations,C2cOrdersRepository orders,
+                                      C2cPaymentAccountService payments,C2cR2Storage storage,org.springframework.transaction.PlatformTransactionManager transactions) {
+        return new C2cAttachmentService(new C2cAttachmentRepository(jdbc),new com.surprising.gateway.c2c.repository.C2cMessageRepository(jdbc),
                 new GatewayUserRepository(jdbc),conversations,orders,payments,storage,transactions, org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.UploadContentScanner.class));
     }
-    static C2cMessages messages(JdbcTemplate jdbc,C2cConversations conversations,C2cAttachments attachments,ObjectMapper json) {
-        return new C2cMessages(new com.surprising.gateway.c2c.repository.C2cMessageRepository(jdbc),
+    static C2cMessageService messages(JdbcTemplate jdbc,C2cConversationService conversations,C2cAttachmentService attachments,ObjectMapper json) {
+        return new C2cMessageService(new com.surprising.gateway.c2c.repository.C2cMessageRepository(jdbc),
                 new com.surprising.gateway.c2c.repository.C2cMessageReadRepository(jdbc),new com.surprising.gateway.c2c.repository.C2cConversationRepository(jdbc),
                 new C2cOrderEventRepository(jdbc,json),new GatewayUserRepository(jdbc),conversations,attachments);
     }
 
-    static C2cAdminMarkets adminMarkets(JdbcTemplate jdbc,C2cMarketService markets,C2cQueryService queries,C2cAdminAccess access,
+    static C2cAdminMarketService adminMarkets(JdbcTemplate jdbc,C2cMarketService markets,C2cQueryService queries,C2cAdminAccessService access,
                                        com.surprising.gateway.provider.product.GatewayProductServices products) {
-        return new C2cAdminMarkets(markets,queries,access,products,new C2cConfigurationRepository(jdbc),new C2cMarketRepository(jdbc),
+        return new C2cAdminMarketService(markets,queries,access,products,new C2cConfigurationRepository(jdbc),new C2cMarketRepository(jdbc),
                 new com.surprising.asset.repository.AssetRepository(jdbc),new C2cAdsRepository(jdbc),new C2cPaymentMethodRepository(jdbc),
                 new C2cPaymentAccountRepository(jdbc),new C2cFundsRepository(jdbc));
     }
 
-    static C2cMerchantBonds bonds(JdbcTemplate jdbc,C2cFundsRepository funds,C2cMarketService markets,C2cAccess access,
-                                 C2cAdminAccess admin,com.surprising.gateway.provider.product.GatewayProductServices products) {
-        return new C2cMerchantBonds(funds,markets,access,admin,products,new GatewayUserRepository(jdbc),
+    static C2cMerchantBondService bonds(JdbcTemplate jdbc,C2cFundsRepository funds,C2cMarketService markets,C2cAccessService access,
+                                 C2cAdminAccessService admin,com.surprising.gateway.provider.product.GatewayProductServices products) {
+        return new C2cMerchantBondService(funds,markets,access,admin,products,new GatewayUserRepository(jdbc),
                 new com.surprising.asset.repository.AssetRepository(jdbc),new C2cConfigurationRepository(jdbc),
                 new com.surprising.gateway.c2c.repository.C2cMerchantBondPolicyRepository(jdbc),new C2cMerchantBondRepository(jdbc),
                 new C2cMerchantRepository(jdbc),new C2cAdsRepository(jdbc),new C2cOrdersRepository(jdbc));
     }
 
-    static C2cProfiles profiles(JdbcTemplate jdbc,C2cAccess access,ComplianceService compliance,GatewayUserRepository users,
+    static C2cProfileService profiles(JdbcTemplate jdbc,C2cAccessService access,ComplianceService compliance,GatewayUserRepository users,
                                 C2cOrdersRepository orders,C2cMarketService markets,ObjectMapper json) {
-        return new C2cProfiles(access,compliance,users,orders,markets,new com.surprising.gateway.c2c.repository.C2cProfileRepository(jdbc),
+        return new C2cProfileService(access,compliance,users,orders,markets,new com.surprising.gateway.c2c.repository.C2cProfileRepository(jdbc),
                 new com.surprising.gateway.c2c.repository.C2cSecurityGrantRepository(jdbc),new C2cMerchantRepository(jdbc),
                 new com.surprising.gateway.c2c.repository.C2cQuickReplyRepository(jdbc),new C2cRelationRepository(jdbc),
                 new com.surprising.gateway.c2c.repository.C2cReportRepository(jdbc),new com.surprising.gateway.c2c.repository.C2cPriceAlertRepository(jdbc),
                 new com.surprising.gateway.c2c.repository.C2cNotificationRepository(jdbc,json),new C2cFundsRepository(jdbc));
     }
 
-    static C2cPaymentAccounts payments(JdbcTemplate jdbc, TotpService secrets,
+    static C2cPaymentAccountService payments(JdbcTemplate jdbc, TotpService secrets,
                                        ObjectMapper json,
-                                       ComplianceService compliance,C2cAccess access) {
-        return new C2cPaymentAccounts(new C2cPaymentAccountRepository(jdbc),
+                                       ComplianceService compliance,C2cAccessService access) {
+        return new C2cPaymentAccountService(new C2cPaymentAccountRepository(jdbc),
                 new C2cPaymentMethodRepository(jdbc),new C2cAdsRepository(jdbc),
                 new C2cAttachmentRepository(jdbc),secrets,json,compliance,access);
     }

@@ -25,7 +25,7 @@ class FundingHistoryPostgresTest {
         schema = "funding_history_it_" + UUID.randomUUID().toString().replace("-", "");
         admin.execute("CREATE SCHEMA " + schema);
         jdbc = new JdbcTemplate(new DriverManagerDataSource(url + (url.contains("?")?"&":"?") + "currentSchema="+schema,user,password));
-        for (String table : List.of("funding_settlement_rates", "core_funding_settlement_projection", "core_funding_payment_projection"))
+        for (String table : List.of("funding_settlement_rates", "funding_settlements", "funding_payments"))
             jdbc.execute("CREATE TABLE " + table + " (LIKE public." + table + " INCLUDING ALL)");
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
     }
@@ -85,7 +85,7 @@ class FundingHistoryPostgresTest {
         long firstId = 9_007_199_254_740_993L;
         for (int i = 0; i < 5; i++) {
             jdbc.update("""
-                INSERT INTO core_funding_payment_projection(payment_id,product_line,export_sequence,payment_index,
+                INSERT INTO funding_payments(payment_id,product_line,export_sequence,payment_index,
                   settlement_id,user_id,instrument_id,margin_mode,position_side,asset,signed_quantity_steps,
                   notional_units,funding_rate_ppm,amount_units,occurred_at_epoch_ms)
                 VALUES (?,?,?,0,100,?,?,'CROSS','LONG','USDT',1,1000,100,-1,1760000000000)
@@ -112,7 +112,7 @@ class FundingHistoryPostgresTest {
     }
     private void insert(String line, long id, long rate, long position, String status) {
         jdbc.update("""
-            INSERT INTO core_funding_settlement_projection(product_line,settlement_id,export_sequence,instrument_id,
+            INSERT INTO funding_settlements(product_line,settlement_id,export_sequence,instrument_id,
               funding_rate_ppm,command_status,result_code,total_long_payment_units,total_short_payment_units,
               position_count,occurred_at_epoch_ms) VALUES (?,?,?,'1',?,?,'NONE',-100,100,2,?)
             """,line,id,position,rate,status,id+1000);

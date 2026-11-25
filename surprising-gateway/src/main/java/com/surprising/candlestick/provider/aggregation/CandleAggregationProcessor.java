@@ -6,6 +6,7 @@ import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.provider.config.CandlestickProperties;
+import com.surprising.candlestick.provider.repository.PostgresCandleSink;
 import com.surprising.candlestick.provider.service.CandleHotCache;
 import com.surprising.candlestick.provider.service.PublicTradeEventMapper;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
@@ -34,7 +35,7 @@ import org.apache.kafka.streams.state.KeyValueStore;
 public class CandleAggregationProcessor implements Processor<String, PublicTradeEvent, String, CandleUpdatedEvent> {
 
     private final CandlestickProperties properties;
-    private final CandleSink candleSink;
+    private final PostgresCandleSink candleSink;
     private final SymbolRegistryService symbolRegistryService;
     private final PublicTradeEventMapper tradeEventMapper;
     private final CandleHotCache hotCache;
@@ -47,7 +48,7 @@ public class CandleAggregationProcessor implements Processor<String, PublicTrade
     private KeyValueStore<String, Long> dedupeStore;
     private KeyValueStore<String, Long> sequenceStore;
 
-    public CandleAggregationProcessor(CandlestickProperties properties, CandleSink candleSink,
+    public CandleAggregationProcessor(CandlestickProperties properties, PostgresCandleSink candleSink,
                                       SymbolRegistryService symbolRegistryService,
                                       PublicTradeEventMapper tradeEventMapper,
                                       CandleHotCache hotCache) {

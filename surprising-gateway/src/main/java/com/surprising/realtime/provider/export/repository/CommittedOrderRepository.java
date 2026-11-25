@@ -11,7 +11,7 @@ import com.surprising.realtime.provider.export.model.CommittedProjectionRows.Ord
 
 /** 仅访问core_order_projection；只保存提交批给出的最新订单，不查询在线Core。 */
 @Repository
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedOrderRepository {
     private final JdbcTemplate jdbc;
 
@@ -20,7 +20,7 @@ public class CommittedOrderRepository {
     }
 
     private static final String UPSERT = """
-            INSERT INTO core_order_projection
+            INSERT INTO trading_orders
               (product_line,order_id,user_id,client_order_id,instrument_id,status,
                created_at_epoch_ms,updated_at_epoch_ms,cluster_position,order_revision,
                export_sequence,raw_order_state)
@@ -30,16 +30,16 @@ public class CommittedOrderRepository {
               updated_at_epoch_ms=EXCLUDED.updated_at_epoch_ms,
               cluster_position=EXCLUDED.cluster_position,order_revision=EXCLUDED.order_revision,
               export_sequence=EXCLUDED.export_sequence,raw_order_state=EXCLUDED.raw_order_state
-            WHERE core_order_projection.order_revision < EXCLUDED.order_revision
+            WHERE trading_orders.order_revision < EXCLUDED.order_revision
             """;
     public List<Long> existingOrders(ProductLine product, List<Long> ids) {
         var args = new ArrayList<Object>(); args.add(product.name()); args.addAll(ids);
-        return jdbc.queryForList("SELECT order_id FROM core_order_projection WHERE product_line=? AND order_id IN ("
+        return jdbc.queryForList("SELECT order_id FROM trading_orders WHERE product_line=? AND order_id IN ("
                 + String.join(",", Collections.nCopies(ids.size(), "?")) + ")", Long.class, args.toArray());
     }
 
     public com.surprising.aeron.protocol.CoreOrderStateView feeBaseline(ProductLine product, long orderId) {
-        return jdbc.query("SELECT raw_order_state FROM core_order_projection WHERE product_line=? AND order_id=?",
+        return jdbc.query("SELECT raw_order_state FROM trading_orders WHERE product_line=? AND order_id=?",
                 (r,n)->com.surprising.aeron.protocol.CoreStateQueryCodec.decodeOrderState(r.getBytes(1)),product.name(),orderId)
                 .stream().findFirst().orElse(null);
     }

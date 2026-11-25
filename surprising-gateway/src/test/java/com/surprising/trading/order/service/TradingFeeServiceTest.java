@@ -17,7 +17,6 @@ import com.surprising.trading.api.model.FeeScheduleStatus;
 import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import com.surprising.trading.api.cache.FeeScheduleSnapshotCache;
 import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.FeeSchedulePageQuery;
 import com.surprising.trading.api.utils.AdminCursorPage.Cursor;
@@ -34,7 +33,7 @@ class TradingFeeServiceTest {
     @Test
     void effectiveFeeUsesCurrentInstrumentChangeIdWhenVersionIsNotProvided() {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
-        InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
+        InstrumentSnapshotRuleLookup instrumentRuleLookup = mock(InstrumentSnapshotRuleLookup.class);
         OrderFeeSnapshotLookup feeSnapshotLookup = mock(OrderFeeSnapshotLookup.class);
         TradingFeeService service = service(feeRepository, instrumentRuleLookup,
                 feeSnapshotLookup);
@@ -59,7 +58,7 @@ class TradingFeeServiceTest {
     @Test
     void effectiveFeeRejectsRequestedProductLineMismatch() {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
-        InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
+        InstrumentSnapshotRuleLookup instrumentRuleLookup = mock(InstrumentSnapshotRuleLookup.class);
         OrderFeeSnapshotLookup feeSnapshotLookup = mock(OrderFeeSnapshotLookup.class);
         TradingFeeService service = service(feeRepository, instrumentRuleLookup,
                 feeSnapshotLookup);
@@ -76,7 +75,7 @@ class TradingFeeServiceTest {
     @Test
     void upsertSchedulePublishesLocalFactWithoutWritingDatabase() {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
-        InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
+        InstrumentSnapshotRuleLookup instrumentRuleLookup = mock(InstrumentSnapshotRuleLookup.class);
         FeeScheduleEventPublisher publisher = mock(FeeScheduleEventPublisher.class);
         FeePolicyCoreImporter coreImporter = mock(FeePolicyCoreImporter.class);
         TradingFeeService service = service(feeRepository, instrumentRuleLookup, null, publisher,
@@ -98,7 +97,7 @@ class TradingFeeServiceTest {
     @Test
     void querySchedulesUsesBoundPageAndChecksProductLine() {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
-        InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
+        InstrumentSnapshotRuleLookup instrumentRuleLookup = mock(InstrumentSnapshotRuleLookup.class);
         TradingFeeService service = service(feeRepository, instrumentRuleLookup, null,
                 ProductLine.LINEAR_DELIVERY);
         FeeScheduleQueryResponse expected = new FeeScheduleQueryResponse(0, List.of(), "next", true,
@@ -123,14 +122,14 @@ class TradingFeeServiceTest {
     }
 
     private TradingFeeService service(OrderFeeRepository feeRepository,
-                                      InstrumentRuleLookup instrumentRuleLookup,
+                                      InstrumentSnapshotRuleLookup instrumentRuleLookup,
                                       OrderFeeSnapshotLookup feeSnapshotLookup) {
         return service(feeRepository, instrumentRuleLookup, feeSnapshotLookup,
                 ProductLine.LINEAR_PERPETUAL);
     }
 
     private TradingFeeService service(OrderFeeRepository feeRepository,
-                                      InstrumentRuleLookup instrumentRuleLookup,
+                                      InstrumentSnapshotRuleLookup instrumentRuleLookup,
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
                                       ProductLine productLine) {
         return service(feeRepository, instrumentRuleLookup, feeSnapshotLookup,
@@ -138,7 +137,7 @@ class TradingFeeServiceTest {
     }
 
     private TradingFeeService service(OrderFeeRepository feeRepository,
-                                      InstrumentRuleLookup instrumentRuleLookup,
+                                      InstrumentSnapshotRuleLookup instrumentRuleLookup,
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
                                       FeeScheduleEventPublisher publisher) {
         return service(feeRepository, instrumentRuleLookup, feeSnapshotLookup, publisher,
@@ -146,7 +145,7 @@ class TradingFeeServiceTest {
     }
 
     private TradingFeeService service(OrderFeeRepository feeRepository,
-                                      InstrumentRuleLookup instrumentRuleLookup,
+                                      InstrumentSnapshotRuleLookup instrumentRuleLookup,
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
                                       FeeScheduleEventPublisher publisher,
                                       ProductLine productLine) {
@@ -155,7 +154,7 @@ class TradingFeeServiceTest {
     }
 
     private TradingFeeService service(OrderFeeRepository feeRepository,
-                                      InstrumentRuleLookup instrumentRuleLookup,
+                                      InstrumentSnapshotRuleLookup instrumentRuleLookup,
                                       OrderFeeSnapshotLookup feeSnapshotLookup,
                                       FeeScheduleEventPublisher publisher,
                                       ProductLine productLine,

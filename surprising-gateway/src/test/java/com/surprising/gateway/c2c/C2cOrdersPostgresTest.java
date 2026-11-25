@@ -9,11 +9,11 @@ import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAds;
-import com.surprising.gateway.c2c.service.C2cFunds;
-import com.surprising.gateway.c2c.service.C2cOrders;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAdService;
+import com.surprising.gateway.c2c.service.C2cFundService;
+import com.surprising.gateway.c2c.service.C2cOrderService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -22,12 +22,13 @@ import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.gateway.c2c.model.C2cOrder;
 import com.surprising.gateway.c2c.model.C2cOrderStatus;
 import com.surprising.gateway.c2c.model.C2cQuote;
+import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.model.ProductAccountAdjustment;
-import com.surprising.gateway.provider.service.ProductAccountClient;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -42,12 +43,12 @@ class C2cOrdersPostgresTest {
     private C2cOrdersRepository orderRows;
     private C2cFundsRepository intents;
     private C2cSubmissions requests;
-    private C2cPaymentAccounts payments;
-    private C2cAds ads;
-    private C2cOrders orders;
-    private C2cFunds funds;
-    private C2cAccess access;
-    private ProductAccountClient core;
+    private C2cPaymentAccountService payments;
+    private C2cAdService ads;
+    private C2cOrderService orders;
+    private C2cFundService funds;
+    private C2cAccessService access;
+    private AccountCommandGateway core;
     private UUID marketId,makerAccount,sellerAccount;
     private final ObjectMapper json=new ObjectMapper();
     private static JwtPrincipal user(long id) {return new JwtPrincipal(id,"qa_"+id,"NORMAL",List.of(),Instant.now().plusSeconds(600));}
@@ -65,7 +66,7 @@ class C2cOrdersPostgresTest {
         jdbc.update("INSERT INTO c2c_merchants(user_id,status,application_text) VALUES(11,'APPROVED','QA')");
         db.seedMerchantBond(11);
         var properties=new GatewayProperties();properties.getSecurity().setMfaSecretEncryptionKey("c2c-fixture-encryption-key-not-for-deployment");
-        access=mock(C2cAccess.class);payments=C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,null,access);
+        access=mock(C2cAccessService.class);payments=C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,null,access);
         makerAccount=payments.save(11,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Seller","qa-seller-account","",null))).id();
         sellerAccount=payments.save(12,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Taker","qa-taker-account","",null))).id();
         jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
@@ -73,9 +74,10 @@ class C2cOrdersPostgresTest {
         requests=new C2cSubmissions(jdbc);var markets=C2cDatabaseFixture.markets(jdbc);
         ads=C2cDatabaseFixture.ads(jdbc,adRows,markets,payments,access,intents,requests);
         orders=C2cDatabaseFixture.orders(jdbc,orderRows,adRows,markets,payments,access,intents,requests,json);
-        core=mock(ProductAccountClient.class);var applied=new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null);
-        when(core.transferOut(any(),any())).thenReturn(applied);when(core.transferIn(any(),any())).thenReturn(applied);when(core.completeTransfer(any(),any())).thenReturn(applied);
-        funds=new C2cFunds(intents,core,markets);
+        core=mock(AccountCommandGateway.class);
+        var products=mock(GatewayProductServices.class);
+        when(products.service(ProductLine.SPOT,AccountCommandGateway.class)).thenReturn(core);
+        funds=new C2cFundService(intents,products,markets);
     }
     @AfterEach void cleanup(){if(db!=null)db.close();}
     private C2cAd ad(String side) {
@@ -103,7 +105,7 @@ class C2cOrdersPostgresTest {
         assertThat(order.status()).isEqualTo(C2cOrderStatus.PAYMENT_PENDING);
         db.transaction(()->orders.paid(user(12),order.id(),null));
         assertThat(intents.find("ORDER",order.id(),"ORDER_RELEASE")).isNull();
-        verify(core,times(1)).transferIn(any(),any());
+        verify(core,times(1)).transferIn(any());
         db.jdbc.update("UPDATE c2c_orders SET payment_expires_at=now()-interval '1 second' WHERE order_id=?",order.id());
         db.transaction(()->{orders.expire(order.id());return null;});
         assertThat(orderRows.get(order.id(),false).status()).isEqualTo(C2cOrderStatus.PAID);

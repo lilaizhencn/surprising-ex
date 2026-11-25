@@ -15,7 +15,7 @@ C2C runs inside Gateway and reuses authentication, KYC, exact asset units, funds
 
 Funding and spot currently share SPOT Core balance; do not count it twice. Reserved escrow IDs come from the existing user sequence but do not create login users. Public cross-user transfer rejects internal destinations without a real receiving user.
 
-Use `ProductAccountClient.transferOut/transferIn/completeTransfer`. Never treat an unfinished transfer directly to the buyer as a freeze: the transfer reconciler can complete it. Every advertisement/order escrow, release, fee, and refund retains persisted immutable funds intent and a stable transfer ID. Unknown results resume the original identity and become business-terminal only after Core confirmation.
+Use `AccountCommandGateway.transferOut/transferIn/completeTransfer` via `GatewayProductServices`. Never treat an unfinished transfer directly to the buyer as a freeze: the transfer reconciler can complete it. Every advertisement/order escrow, release, fee, and refund retains persisted immutable funds intent and a stable transfer ID. Unknown results resume the original identity and become business-terminal only after Core confirmation.
 
 Reconcile SQL inventory, open orders, pending refunds/releases/transfers, and actual escrow balance. Asset quantities use int64 smallest units. Quotes, fiat values, and fees use exact decimals; public int64 identifiers, units, versions, and event IDs are decimal strings. Do not convert them to floating point.
 

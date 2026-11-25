@@ -20,7 +20,7 @@ public class AffiliateFeeSourceRepository {
   public List<Fee> read(String product, SourceCursor after, int limit) {
     return jdbc.query(
       """
-      SELECT cluster_position,product_line,user_id,order_id,asset,fee_units,occurred_at FROM core_trade_fee_facts
+      SELECT cluster_position,product_line,user_id,order_id,asset,fee_units,occurred_at FROM trade_fee_facts
       WHERE product_line=? AND (cluster_position,order_id)>(?,?) AND fee_units>0 ORDER BY cluster_position,order_id LIMIT ?
       """,
       (r, n) ->

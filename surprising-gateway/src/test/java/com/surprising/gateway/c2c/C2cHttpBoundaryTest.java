@@ -6,8 +6,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import com.surprising.gateway.c2c.controller.C2cAdminRequestBinding;
 import com.surprising.gateway.c2c.controller.advice.C2cHttpErrors;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.gateway.c2c.exception.C2cProblem;
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import java.nio.charset.StandardCharsets;
@@ -34,7 +35,7 @@ class C2cHttpBoundaryTest {
             case AUTHENTICATION_REQUIRED -> 401; case ACCESS_DENIED -> 403; case NOT_FOUND -> 404;
             case RATE_LIMITED -> 429; case CONFLICT -> 409; case UNAVAILABLE -> 503;
         };
-        var mvc = MockMvcBuilders.standaloneSetup(new Probe()).setControllerAdvice(new C2cHttpErrors()).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new Probe()).setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
         mvc.perform(get("/__mvc/c2c/failure").param("reason", reason.name())).andExpect(status().is(expected))
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.code").value("C2C_QA_FAILURE"));
@@ -42,7 +43,7 @@ class C2cHttpBoundaryTest {
     }
 
     @Test void internalStateAndUnexpectedFailuresStaySanitizedAndAreNotBusinessConflicts() throws Exception {
-        var mvc = MockMvcBuilders.standaloneSetup(new Probe()).setControllerAdvice(new C2cHttpErrors()).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new Probe()).setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
         for (String reason : new String[]{"state", "runtime"}) {
             mvc.perform(get("/__mvc/c2c/failure").param("reason", reason)).andExpect(status().isInternalServerError())
                     .andExpect(jsonPath("$.code").value("C2C_INTERNAL_ERROR"))
@@ -53,7 +54,7 @@ class C2cHttpBoundaryTest {
     }
 
     @Test void transientNativeReadFailureIsSanitized503RatherThanInternalOrConflict() throws Exception {
-        var mvc = MockMvcBuilders.standaloneSetup(new Probe()).setControllerAdvice(new C2cHttpErrors()).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new Probe()).setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
         mvc.perform(get("/__mvc/c2c/failure").param("reason", "read")).andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("C2C_UNAVAILABLE"))
                 .andExpect(result -> assertThat(result.getResponse().getContentAsString()).doesNotContain("ciphertext", "123456"));
@@ -70,7 +71,7 @@ class C2cHttpBoundaryTest {
         assertThat(bound.path()).isEqualTo(http.getRequestURI());assertThat(bound.query()).isEqualTo(http.getQueryString());
         assertThat(bound.userAgent()).isEqualTo("original-agent");assertThat(bound.ip()).isEqualTo("127.0.0.9");
         byte[] body = " { \"reason\": \"原始正文\" }\r\n".getBytes(StandardCharsets.UTF_8);
-        assertThat(C2cAdminAccess.hash(body)).isEqualTo(C2cDigests.sha256(body));
-        assertThat(C2cAdminAccess.hash(body)).isNotEqualTo(C2cDigests.sha256(new String(body, StandardCharsets.UTF_8).trim().getBytes(StandardCharsets.UTF_8)));
+        assertThat(C2cAdminAccessService.hash(body)).isEqualTo(C2cDigests.sha256(body));
+        assertThat(C2cAdminAccessService.hash(body)).isNotEqualTo(C2cDigests.sha256(new String(body, StandardCharsets.UTF_8).trim().getBytes(StandardCharsets.UTF_8)));
     }
 }

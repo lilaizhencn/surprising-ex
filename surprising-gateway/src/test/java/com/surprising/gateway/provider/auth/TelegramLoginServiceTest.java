@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth;
 
-import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.config.GatewayProperties;
 
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
@@ -39,7 +39,7 @@ class TelegramLoginServiceTest {
             new TelegramIdentityBinder(identities, users, userRows, authState.state, mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
     TelegramLoginService service = new TelegramLoginService(repository, identityService, userRows, oidc, auth);
     String state = "s".repeat(43), verifier = "v".repeat(43);
-    com.surprising.gateway.provider.auth.model.AuthClientMetadata http = new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest());
+    com.surprising.gateway.provider.auth.model.AuthClientMetadata http = new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest());
 
     @Test
     void startUsesIndependentRandomSecretsAndHashesBearerVerifier() {

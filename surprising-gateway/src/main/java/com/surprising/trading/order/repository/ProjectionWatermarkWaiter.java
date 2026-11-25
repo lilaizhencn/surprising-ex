@@ -17,7 +17,7 @@ public class ProjectionWatermarkWaiter {
     private static final long MAX_POLL_MS = 100L;
     private static final int DEFAULT_MAX_ATTEMPTS = 2_048;
     private static final String WATERMARK_SQL = """
-            SELECT last_export_sequence FROM core_projection_watermark
+            SELECT last_export_sequence FROM projection_watermarks
             WHERE product_line = ?
             """;
 

@@ -2,8 +2,8 @@ package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
 import com.surprising.gateway.c2c.controller.C2cController;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -15,12 +15,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class C2cCommandValidationTest {
-    private C2cPaymentAccounts payments;
+    private C2cPaymentAccountService payments;
     private C2cSubmissionService submissions;
     private C2cController controller;
     @BeforeEach void setup() {
-        var access=mock(C2cAccess.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));
-        payments=mock(C2cPaymentAccounts.class);submissions=mock(C2cSubmissionService.class);
+        var access=mock(C2cAccessService.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));
+        payments=mock(C2cPaymentAccountService.class);submissions=mock(C2cSubmissionService.class);
         controller=new C2cController(access,null,null,submissions,null,null,payments,new tools.jackson.databind.ObjectMapper());
     }
     @Test void malformedSubmissionIdentityIsRejectedBeforePersistence() {

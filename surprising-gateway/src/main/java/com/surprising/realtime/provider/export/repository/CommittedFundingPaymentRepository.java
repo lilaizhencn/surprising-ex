@@ -6,7 +6,7 @@ import org.springframework.stereotype.Repository;
 
 /** 仅访问core_funding_payment_projection；按提交页写明细，并以NUMERIC精度汇总同一结算。 */
 @Repository
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedFundingPaymentRepository {
     private final JdbcTemplate jdbc;
 
@@ -14,9 +14,9 @@ public class CommittedFundingPaymentRepository {
         this.jdbc = jdbc;
     }
 
-    public void persist(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public void persist(com.surprising.aeron.protocol.export.CommittedFundingPage page) {
         if (!page.payments().isEmpty()) jdbc.batchUpdate("""
-                INSERT INTO core_funding_payment_projection(product_line,export_sequence,payment_index,
+                INSERT INTO funding_payments(product_line,export_sequence,payment_index,
                   settlement_id,user_id,instrument_id,margin_mode,position_side,asset,signed_quantity_steps,
                   notional_units,funding_rate_ppm,amount_units,occurred_at_epoch_ms)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -33,11 +33,11 @@ public class CommittedFundingPaymentRepository {
             }
         });
     }
-    public FundingTotals totals(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public FundingTotals totals(com.surprising.aeron.protocol.export.CommittedFundingPage page) {
         return jdbc.queryForObject("""
             SELECT COALESCE(sum(amount_units) FILTER (WHERE signed_quantity_steps>0),0),
                    COALESCE(sum(amount_units) FILTER (WHERE signed_quantity_steps<0),0),count(*)::integer
-            FROM core_funding_payment_projection WHERE product_line=? AND instrument_id=? AND settlement_id=?
+            FROM funding_payments WHERE product_line=? AND instrument_id=? AND settlement_id=?
             """, (rs,row) -> new FundingTotals(rs.getBigDecimal(1),rs.getBigDecimal(2),rs.getInt(3)),
             page.product().name(), page.command().instrumentId(), page.command().settlementId());
     }

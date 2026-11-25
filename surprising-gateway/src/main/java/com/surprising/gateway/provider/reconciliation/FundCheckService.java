@@ -116,13 +116,13 @@ public class FundCheckService {
 
             // 4. 汇总核对出入金与净资产平衡
             try {
-                String totalCompletedWithdrawalsSql = "SELECT COALESCE(SUM(amount), 0) FROM gateway_wallet_withdrawals WHERE status = 'COMPLETED'";
+                String totalCompletedWithdrawalsSql = "SELECT COALESCE(SUM(usdt_value), 0) FROM gateway_wallet_withdrawals WHERE status = 'COMPLETED'";
                 BigDecimal totalWithdrawn = jdbc.queryForObject(totalCompletedWithdrawalsSql, BigDecimal.class);
                 if (totalWithdrawn == null) totalWithdrawn = BigDecimal.ZERO;
 
                 // 检查是否有异常标记或流水孤立
                 String orphanWithdrawalSql = "SELECT COUNT(*) FROM gateway_wallet_withdrawals " +
-                        "WHERE status = 'COMPLETED' AND (tx_hash IS NULL OR tx_hash = '')";
+                        "WHERE status = 'COMPLETED' AND (wallet_withdrawal_id IS NULL OR wallet_withdrawal_id = '')";
                 Long orphanCount = jdbc.queryForObject(orphanWithdrawalSql, Long.class);
                 if (orphanCount != null && orphanCount > 0) {
                     discrepancies.add("存在 " + orphanCount + " 笔已标记完成但无链上 tx_hash 的幽灵提现记录！");

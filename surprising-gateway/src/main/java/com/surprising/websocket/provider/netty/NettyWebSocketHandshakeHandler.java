@@ -1,6 +1,6 @@
 package com.surprising.websocket.provider.netty;
 
-import com.surprising.gateway.provider.auth.controller.BrowserSessionCookies;
+import com.surprising.gateway.provider.auth.support.BrowserSessionCookies;
 import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 import com.surprising.websocket.api.WebSocketApiPaths;
 import com.surprising.websocket.provider.config.WebSocketProperties;

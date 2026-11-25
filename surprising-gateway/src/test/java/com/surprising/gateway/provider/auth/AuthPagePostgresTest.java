@@ -103,7 +103,7 @@ class AuthPagePostgresTest {
                 mock(GatewayUserMfaRepository.class), sessions);
         var properties = new GatewayProperties();
         auth = spy(new AuthService(properties, persistence, mock(PasswordHasher.class), mock(JwtTokenService.class),
-                mock(EmailVerificationService.class), mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
+                mock(EmailVerificationService.class), mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), mock(com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
         doReturn(new JwtPrincipal(7, "owner", "NORMAL", List.of("USER"), TIME.plusSeconds(3600)))
                 .when(auth).authenticateBearer("Bearer user");
         doReturn(new JwtPrincipal(99, "admin", "NORMAL", List.of("SUPER_ADMIN"), TIME.plusSeconds(3600)))
@@ -113,7 +113,8 @@ class AuthPagePostgresTest {
         var compliance = new ComplianceService(complianceUsers, mock(ComplianceKycRepository.class),
                 mock(KycProviderEventRepository.class), tags, cases, auth, approvalService, mock(KycDocumentService.class),
                 audit, persistence, mock(SecurityNotificationService.class), mock(KycProviderRegistry.class), mock(CountryRepository.class));
-        mvc = MockMvcBuilders.standaloneSetup(new AdminAuthController(auth, approvalService, json),
+        mvc = MockMvcBuilders.standaloneSetup(new AdminAuthController(
+                        new AdminAuthService(auth.properties(), auth.persistence(), auth), approvalService, json),
                 new AdminComplianceController(compliance, json), new UserSecurityController(auth,
                         mock(UserSecurityService.class), mock(LoginVerificationService.class), mock(SensitiveActionVerificationService.class),
                         persistence, mock(UserAccessService.class), properties)).build();

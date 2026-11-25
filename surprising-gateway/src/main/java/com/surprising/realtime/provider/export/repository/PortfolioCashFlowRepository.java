@@ -1,6 +1,6 @@
 package com.surprising.realtime.provider.export.repository;
 
-import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedBalanceFlow;
+import com.surprising.aeron.protocol.export.CommittedBalanceFlow;
 import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
 import java.util.Collection;
@@ -9,7 +9,7 @@ import org.springframework.stereotype.Repository;
 
 /** 仅访问core_portfolio_cash_flow；保留精确金额、不可变命令事实和划转前缀对账记录。 */
 @Repository
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class PortfolioCashFlowRepository {
     private final JdbcTemplate jdbc;
 
@@ -19,7 +19,7 @@ public class PortfolioCashFlowRepository {
 
     public void persist(Collection<CommittedBalanceFlow> flows) {
         jdbc.batchUpdate("""
-                INSERT INTO core_portfolio_cash_flow AS old
+                INSERT INTO portfolio_cash_flows AS old
                   (product_line,command_id,user_id,cluster_position,occurred_at_epoch_ms,asset,amount_units,
                    transfer_id,source_product_line,target_product_line,source_user_id,target_user_id)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
@@ -44,6 +44,6 @@ public class PortfolioCashFlowRepository {
         });
     }
     public void prune(ProductLine product, long before) {
-        jdbc.update("DELETE FROM core_portfolio_cash_flow WHERE product_line=? AND transfer_id IS NULL AND occurred_at_epoch_ms<?", product.name(),before);
+        jdbc.update("DELETE FROM portfolio_cash_flows WHERE product_line=? AND transfer_id IS NULL AND occurred_at_epoch_ms<?", product.name(),before);
     }
 }

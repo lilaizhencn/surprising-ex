@@ -1,5 +1,5 @@
 server:
-  address: ${GATEWAY_BIND_ADDRESS:0.0.0.0}
+  address: 0.0.0.0
 
 spring:
   data:
@@ -66,6 +66,6 @@ surprising:
   price:
     index:
       http:
-        proxy-enabled: ${PRICE_HTTP_PROXY_ENABLED:false}
-        proxy-host: ${PRICE_HTTP_PROXY_HOST:127.0.0.1}
-        proxy-port: ${PRICE_HTTP_PROXY_PORT:27890}
+        proxy-enabled: false
+        proxy-host: 127.0.0.1
+        proxy-port: 27890

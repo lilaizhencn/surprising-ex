@@ -20,12 +20,12 @@ public class OrderMaintenanceTask {
         this.cancelAllAfterService = cancelAllAfterService;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.algo.scan-delay-ms:250}")
+    @Scheduled(fixedDelayString = "${surprising.trading.order.algo.scan-delay-ms:1000}")
     public void scanAlgoOrders() {
         algoOrderService.scanDueAlgoOrders();
     }
 
-    @Scheduled(fixedDelayString = "${surprising.trading.order.cancel-all-after.scan-delay-ms:250}")
+    @Scheduled(fixedDelayString = "${surprising.trading.order.cancel-all-after.scan-delay-ms:1000}")
     public void scanCancelAllTimers() {
         cancelAllAfterService.scanDueTimers();
     }

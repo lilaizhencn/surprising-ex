@@ -2,10 +2,10 @@ package com.surprising.gateway.c2c.controller;
 
 import com.surprising.gateway.c2c.model.C2cAdminRequest;
 
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
-import com.surprising.gateway.c2c.service.C2cAdminInitialization;
-import com.surprising.gateway.c2c.service.C2cAdminMarkets;
-import com.surprising.gateway.c2c.service.C2cAdminReview;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminInitializationService;
+import com.surprising.gateway.c2c.service.C2cAdminMarketService;
+import com.surprising.gateway.c2c.service.C2cAdminReviewService;
 import com.surprising.gateway.c2c.model.C2cAdminReviewModels;
 
 import com.surprising.gateway.c2c.utils.C2cMoney;
@@ -37,15 +37,15 @@ public class C2cAdminController {
                               int paymentWindowSeconds,int maxOpenOrders,boolean requireKyc,int vipMinCompleted,String reason) { }
     public record MethodInput(String code,String revision,String label,boolean enabled,List<String> currencies,
                               boolean requiresBankName,boolean supportsQr,String reason) { }
-    private final C2cAdminAccess access;
-    private final C2cAdminMarkets markets;
-    private final C2cAdminReview review;
+    private final C2cAdminAccessService access;
+    private final C2cAdminMarketService markets;
+    private final C2cAdminReviewService review;
     private final C2cAdminQueryService queries;
-    private final C2cAdminInitialization initialization;
+    private final C2cAdminInitializationService initialization;
     private final ObjectMapper json;
     private final C2cAdminRequestBinding requestBinding;
-    public C2cAdminController(C2cAdminAccess access,C2cAdminMarkets markets,C2cAdminReview review,C2cAdminQueryService queries,
-                              C2cAdminInitialization initialization,ObjectMapper json,C2cAdminRequestBinding requestBinding) {
+    public C2cAdminController(C2cAdminAccessService access,C2cAdminMarketService markets,C2cAdminReviewService review,C2cAdminQueryService queries,
+                              C2cAdminInitializationService initialization,ObjectMapper json,C2cAdminRequestBinding requestBinding) {
         this.access=access;this.markets=markets;this.review=review;this.queries=queries;this.initialization=initialization;this.json=json;this.requestBinding=requestBinding;
     }
 

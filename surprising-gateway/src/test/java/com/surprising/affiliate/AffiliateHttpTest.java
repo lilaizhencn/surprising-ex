@@ -28,7 +28,7 @@ class AffiliateHttpTest {
       new AffiliateController(auth, service, mock(AffiliateQueryService.class))
     )
       .setCustomArgumentResolvers(new com.surprising.gateway.provider.config.CurrentUserArgumentResolver(auth))
-      .setControllerAdvice(new AffiliateErrors())
+      .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler())
       .build();
   }
 

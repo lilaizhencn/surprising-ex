@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 
 /** 仅访问core_trading_statistics_cursor；Service在相同事务中合并分钟计数并推进提交前缀。 */
 @Repository
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class StatisticsCursorRepository {
     private final JdbcTemplate jdbc;
 
@@ -16,13 +16,13 @@ public class StatisticsCursorRepository {
     }
 
     public long lock(ProductLine product) {
-        jdbc.update("INSERT INTO core_trading_statistics_cursor VALUES (?,0) ON CONFLICT DO NOTHING",product.name());
-        return jdbc.queryForObject("SELECT last_command_position FROM core_trading_statistics_cursor WHERE product_line=? FOR UPDATE",Long.class,product.name());
+        jdbc.update("INSERT INTO trading_stats_cursors VALUES (?,0) ON CONFLICT DO NOTHING",product.name());
+        return jdbc.queryForObject("SELECT last_command_position FROM trading_stats_cursors WHERE product_line=? FOR UPDATE",Long.class,product.name());
     }
     public List<Long> current(ProductLine product) {
-        return jdbc.queryForList("SELECT last_command_position FROM core_trading_statistics_cursor WHERE product_line=?",Long.class,product.name());
+        return jdbc.queryForList("SELECT last_command_position FROM trading_stats_cursors WHERE product_line=?",Long.class,product.name());
     }
     public void advance(ProductLine product, long position) {
-        jdbc.update("UPDATE core_trading_statistics_cursor SET last_command_position=? WHERE product_line=?",position,product.name());
+        jdbc.update("UPDATE trading_stats_cursors SET last_command_position=? WHERE product_line=?",position,product.name());
     }
 }

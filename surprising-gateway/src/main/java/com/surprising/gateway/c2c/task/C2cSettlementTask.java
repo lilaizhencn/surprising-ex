@@ -1,6 +1,6 @@
 package com.surprising.gateway.c2c.task;
 
-import com.surprising.gateway.c2c.service.C2cSettlement;
+import com.surprising.gateway.c2c.service.C2cSettlementService;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -9,13 +9,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 @Component
 @ConditionalOnProperty(name="surprising.c2c.enabled",havingValue="true")
 public final class C2cSettlementTask {
-    private final C2cSettlement service;
+    private final C2cSettlementService service;
 
-    public C2cSettlementTask(C2cSettlement service) {
+    public C2cSettlementTask(C2cSettlementService service) {
         this.service = service;
     }
 
-    @Scheduled(fixedDelayString="${surprising.c2c.settlement-delay-ms:1000}",scheduler="c2cSettlementScheduler")
+    @Scheduled(fixedDelayString="${surprising.c2c.settlement-delay-ms:5000}",scheduler="c2cSettlementScheduler")
     public void settle() {
         service.settle();
     }

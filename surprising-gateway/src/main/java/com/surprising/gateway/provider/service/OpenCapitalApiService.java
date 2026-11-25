@@ -30,6 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * 公开 Open API 资金与充提端点处理（transfer、deposit、capital/config、withdraw）。
  */
+@org.springframework.stereotype.Service
 public class OpenCapitalApiService {
 
     private final GatewayProperties properties;
@@ -55,8 +56,9 @@ public class OpenCapitalApiService {
                 withdrawalService, depositAddressRepository, null, null, support);
     }
 
+    @Autowired
     public OpenCapitalApiService(GatewayProperties properties,
-                                 AccountService accountService,
+                                 @Autowired(required = false) AccountService accountService,
                                  SensitiveActionVerificationService verificationService,
                                  ComplianceService complianceService,
                                  CustodyWalletClient custodyWalletClient,

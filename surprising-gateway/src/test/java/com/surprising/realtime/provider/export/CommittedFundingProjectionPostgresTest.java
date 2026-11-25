@@ -1,7 +1,7 @@
 package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage;
+import com.surprising.aeron.protocol.export.CommittedFundingPage;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import java.util.List;
@@ -30,7 +30,7 @@ class CommittedFundingProjectionPostgresTest {
         source = new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema,
                 System.getenv("INSTRUMENT_TEST_DB_USER"), System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
         jdbc = new JdbcTemplate(source);
-        for (String table : List.of("core_funding_page_projection", "core_funding_payment_projection", "core_funding_settlement_projection"))
+        for (String table : List.of("funding_settlement_pages", "funding_payments", "funding_settlements"))
             jdbc.execute("CREATE TABLE " + table + " (LIKE public." + table + " INCLUDING ALL)");
         repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
     }
@@ -43,15 +43,15 @@ class CommittedFundingProjectionPostgresTest {
         var last = page(line, 8192, 1, 0, true, List.of(payment(line, 2, 10, -100)));
         repository.persistFunding(first);
         repository.persistFunding(first);
-        assertThat(count("core_funding_payment_projection")).isEqualTo(1);
-        assertThat(count("core_funding_settlement_projection")).isZero();
+        assertThat(count("funding_payments")).isEqualTo(1);
+        assertThat(count("funding_settlements")).isZero();
         var restarted = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
         restarted.persistFunding(last);
         restarted.persistFunding(first);
         restarted.persistFunding(last);
-        assertThat(count("core_funding_payment_projection")).isEqualTo(2);
-        assertThat(count("core_funding_settlement_projection")).isEqualTo(1);
-        var row = jdbc.queryForMap("SELECT * FROM core_funding_settlement_projection");
+        assertThat(count("funding_payments")).isEqualTo(2);
+        assertThat(count("funding_settlements")).isEqualTo(1);
+        var row = jdbc.queryForMap("SELECT * FROM funding_settlements");
         assertThat(row.get("total_long_payment_units")).isEqualTo(-100L);
         assertThat(row.get("total_short_payment_units")).isEqualTo(100L);
         assertThat(row.get("position_count")).isEqualTo(2);
@@ -62,16 +62,16 @@ class CommittedFundingProjectionPostgresTest {
         var line = ProductLine.LINEAR_PERPETUAL;
         var last = page(line, 8192, 1, 0, true, List.of(payment(line, 2, 10, -100)));
         assertThatThrownBy(() -> repository.persistFunding(last)).hasMessageContaining("incomplete cursor chain");
-        assertThat(count("core_funding_page_projection")).isZero();
-        assertThat(count("core_funding_payment_projection")).isZero();
+        assertThat(count("funding_settlement_pages")).isZero();
+        assertThat(count("funding_payments")).isZero();
         var invalid = new CoreFundingPaymentView(900, 1, "1", CoreMarginMode.CROSS, CorePositionSide.NET,
                 "X".repeat(21), -10, 10000, 10_000, 100);
         assertThatThrownBy(() -> repository.persistFunding(page(line, 4096, 0, 1, false, List.of(invalid))))
                 .isInstanceOf(org.springframework.dao.DataAccessException.class);
-        assertThat(count("core_funding_page_projection")).isZero();
+        assertThat(count("funding_settlement_pages")).isZero();
         repository.persistFunding(page(line, 4096, 0, 1, false, List.of(payment(line, 1, -10, 100))));
         repository.persistFunding(last);
-        assertThat(count("core_funding_settlement_projection")).isEqualTo(1);
+        assertThat(count("funding_settlements")).isEqualTo(1);
     }
 
     @Test void conflictingPageCannotSilentlyOverwriteOrSkipCommittedHistory() {
@@ -79,9 +79,9 @@ class CommittedFundingProjectionPostgresTest {
         repository.persistFunding(page(line, 4096, 0, 1, false, List.of(payment(line, 1, -10, 100))));
         assertThatThrownBy(() -> repository.persistFunding(page(line, 8192, 0, 1, false,
                 List.of(payment(line, 1, -10, 100))))).hasMessageContaining("conflicting committed funding page");
-        assertThat(count("core_funding_page_projection")).isEqualTo(1);
-        assertThat(count("core_funding_payment_projection")).isEqualTo(1);
-        assertThat(count("core_funding_settlement_projection")).isZero();
+        assertThat(count("funding_settlement_pages")).isEqualTo(1);
+        assertThat(count("funding_payments")).isEqualTo(1);
+        assertThat(count("funding_settlements")).isZero();
     }
 
     @Test void emptyPaymentPageStillRecordsRealCompletedZeroChargeIntervalAndProductsRemainIsolated() {
@@ -89,9 +89,9 @@ class CommittedFundingProjectionPostgresTest {
             repository.persistFunding(new CommittedFundingPage(line, 4096, 1_700_000_000_000L,
                     new ApplyFundingCommand(900, "1", 0, 0, 1), new CoreFundingProgressView(900, true, 0, 0), "NONE", List.of()));
         }
-        assertThat(count("core_funding_payment_projection")).isZero();
-        assertThat(count("core_funding_settlement_projection")).isEqualTo(2);
-        assertThat(jdbc.queryForList("SELECT position_count FROM core_funding_settlement_projection", Integer.class))
+        assertThat(count("funding_payments")).isZero();
+        assertThat(count("funding_settlements")).isEqualTo(2);
+        assertThat(jdbc.queryForList("SELECT position_count FROM funding_settlements", Integer.class))
                 .containsExactly(0, 0);
         assertThatThrownBy(() -> page(ProductLine.SPOT, 4096, 0, 0, true, List.of())).isInstanceOf(IllegalArgumentException.class);
     }

@@ -4,7 +4,7 @@ import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.clearInvocations;
@@ -34,7 +34,7 @@ class C2cQueryPostgresTest {
         fixture=new C2cHttpFixture();
         jdbc=new CountingJdbc(fixture.db.jdbc.getDataSource());
         queries=C2cDatabaseFixture.queries(jdbc,new C2cAdsRepository(jdbc),new C2cOrdersRepository(jdbc),
-                C2cDatabaseFixture.markets(jdbc),fixture.bean(C2cPaymentAccounts.class),fixture.json,new C2cSubmissions(jdbc));
+                C2cDatabaseFixture.markets(jdbc),fixture.bean(C2cPaymentAccountService.class),fixture.json,new C2cSubmissions(jdbc));
     }
     @AfterEach void cleanup() {if(fixture!=null) fixture.close();}
 

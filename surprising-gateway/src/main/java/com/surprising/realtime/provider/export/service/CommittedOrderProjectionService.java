@@ -4,9 +4,11 @@ import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
 import com.surprising.aeron.protocol.RealtimeFrame;
-import com.surprising.aeron.service.replay.CommittedTradeReplay;
-import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult;
-import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
+import com.surprising.aeron.protocol.export.CommittedBalanceFlow;
+import com.surprising.aeron.protocol.export.CommittedCommandResult;
+import com.surprising.aeron.protocol.export.CommittedDeliveryPage;
+import com.surprising.aeron.protocol.export.CommittedFundingPage;
+import com.surprising.aeron.protocol.export.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.model.CommittedProjectionRows.DeliveryLedgerEntry;
 import com.surprising.realtime.provider.export.model.CommittedProjectionRows.ExecutionWrite;
@@ -31,18 +33,15 @@ import static com.surprising.realtime.provider.export.utils.CommittedCommandResu
 /** Read model only: the committed Archive replay remains the authority for order state. */
 @Service
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-        prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+        prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedOrderProjectionService {
     private final CommittedFeeRepository fees;
     private final CommittedOrderRepository orderRows;
     private final CommittedExecutionRepository executionRows;
     private final CommittedTriggerRepository triggerRows;
     private final CommittedLiquidationRepository liquidationRows;
-    private final LiquidationInitializationRepository liquidationInitialization;
     private final CommittedCommandResultRepository receiptRows;
     private final ProjectionWatermarkRepository watermarks;
-    private final ExecutionInitializationRepository executionInitialization;
-    private final TriggerInitializationRepository triggerInitialization;
     private final MarketMakerProjectionAccountsRepository makerAccounts;
     private final CommittedDeliveryLedgerRepository deliveryLedger;
     private final CommittedFundingPageRepository fundingPages;
@@ -59,11 +58,8 @@ public class CommittedOrderProjectionService {
             CommittedExecutionRepository executionRows,
             CommittedTriggerRepository triggerRows,
             CommittedLiquidationRepository liquidationRows,
-            LiquidationInitializationRepository liquidationInitialization,
             CommittedCommandResultRepository receiptRows,
             ProjectionWatermarkRepository watermarks,
-            ExecutionInitializationRepository executionInitialization,
-            TriggerInitializationRepository triggerInitialization,
             MarketMakerProjectionAccountsRepository makerAccounts,
             CommittedDeliveryLedgerRepository deliveryLedger,
             CommittedFundingPageRepository fundingPages,
@@ -77,11 +73,8 @@ public class CommittedOrderProjectionService {
         this.executionRows = executionRows;
         this.triggerRows = triggerRows;
         this.liquidationRows = liquidationRows;
-        this.liquidationInitialization = liquidationInitialization;
         this.receiptRows = receiptRows;
         this.watermarks = watermarks;
-        this.executionInitialization = executionInitialization;
-        this.triggerInitialization = triggerInitialization;
         this.makerAccounts = makerAccounts;
         this.deliveryLedger = deliveryLedger;
         this.fundingPages = fundingPages;
@@ -90,7 +83,7 @@ public class CommittedOrderProjectionService {
     }
 
     /** 一页交割现金变动原子入账；只写历史投影，不触发任何在线账户命令。 */
-    public void persistDelivery(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedDeliveryPage page) {
+    public void persistDelivery(CommittedDeliveryPage page) {
         transaction.executeWithoutResult(tx -> {
             String reference = page.product().name() + ':' + page.command().instrumentId() + ':' + page.command().settlementId();
             String account = page.product().accountTypeCode();
@@ -105,37 +98,11 @@ public class CommittedOrderProjectionService {
         });
     }
 
-    public void initializeFees(ProductLine product, CommittedTradeReplay replay) {
-        var values = replay.retainedTradeFeeBaselines();
-        for (int from = 0; from < values.size(); from += 512) {
-            var page = values.subList(from, Math.min(values.size(), from + 512));
-            transaction.executeWithoutResult(tx -> page.forEach(value -> fees.baseline(product, value)));
-        }
-    }
-
     public CommittedAlgoProjectionService algos() { return algos; }
 
     /** Use a method so Spring proxies delegate to the initialized target instance. */
     public CommittedTradingStatisticsService statistics() { return statistics; }
     public CommittedPortfolioHistoryService portfolio() { return portfolio; }
-
-    public boolean executionsInitialized(ProductLine product) { return executionInitialization.initialized(product); }
-    public void initializeExecutions(ProductLine product, long position) { executionInitialization.initialize(product, position); }
-
-    public boolean liquidationsInitialized(ProductLine product) { return liquidationInitialization.initialized(product); }
-    public void initializeLiquidations(ProductLine product) { liquidationInitialization.initialize(product); }
-
-    /** 原始 Archive 前缀重建，只写强平事实，不推进订单水位。 */
-    public void repairLiquidations(ProductLine product, List<LiquidationChange> changes) {
-        if (changes.isEmpty()) return;
-        transaction.executeWithoutResult(tx -> liquidationRows.persist(product, changes));
-    }
-
-    /** Finite history repair writes executions only, without the normal order watermark. */
-    public void repairExecutions(ProductLine product, List<RealtimeFrame> frames) {
-        var writes = committedExecutions(product, frames, makerAccounts.marketMakerAccounts(product));
-        transaction.executeWithoutResult(tx -> executionRows.persistExecutions(product, writes));
-    }
 
     private static final Set<Long> DEFAULT_INTERNAL_MAKER_IDS = Set.of(2L, 3L);
 
@@ -212,28 +179,11 @@ public class CommittedOrderProjectionService {
         return order;
     }
 
-    public void initializeTriggers(ProductLine product, CommittedTradeReplay replay, long checkpointPosition) {
-        if (triggerInitialization.initialized(product)) return;
-        long before = 0;
-        while (true) {
-            var page = replay.retainedTriggersBefore(before, 512);
-            if (page.isEmpty()) break;
-            var writes = page.stream().map(v -> new TriggerWrite(v, CoreTriggerOrderCodec.encodeList(List.of(v)))).toList();
-            transaction.executeWithoutResult(tx -> triggerRows.persistTriggers(product, writes, replay.exportSequence()));
-            long next = page.getLast().triggerOrderId();
-            if (next <= 0 || before != 0 && next >= before)
-                throw new IllegalStateException("nonadvancing retained trigger cursor");
-            before = next;
-        }
-        // Page failures leave this marker absent. Replay/version checks make retries idempotent.
-        triggerInitialization.initialize(product, checkpointPosition, replay.exportSequence());
-    }
-
     /** One committed funding page and its nonzero ledger entries commit together. The
      * completed interval is published only after the full cursor chain is present. Funding
      * projection export_sequence uses the immutable cluster log position, including pages
      * which emit no order/trade frame; it is not the trade-export sequence namespace. */
-    public void persistFunding(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public void persistFunding(CommittedFundingPage page) {
         transaction.executeWithoutResult(tx -> {
             var command = page.command();
             if (!fundingPages.insertOrVerify(page)) return;
@@ -268,7 +218,7 @@ public class CommittedOrderProjectionService {
                  List<CommittedCommandResult> commandResults, long exportSequence,
                  List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges,
                  List<LiquidationChange> liquidationChanges,
-                 List<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows) {
+                 List<CommittedBalanceFlow> balanceFlows) {
         persist(product, orders, commandResults, exportSequence, algoChanges, liquidationChanges, balanceFlows, List.of());
     }
 
@@ -276,7 +226,7 @@ public class CommittedOrderProjectionService {
                  List<CommittedCommandResult> commandResults, long exportSequence,
                  List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges,
                  List<LiquidationChange> liquidationChanges,
-                 List<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows,
+                 List<CommittedBalanceFlow> balanceFlows,
                  List<com.surprising.aeron.protocol.CoreTradeFeeObservation> feeObservations) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");
         for (var flow : balanceFlows)
@@ -355,9 +305,18 @@ public class CommittedOrderProjectionService {
         }
         if (!executions.isEmpty()) throw new IllegalArgumentException("incomplete execution pair");
         var fills = committedExecutions(product, orders, marketMakerAccounts);
+        List<CommittedCommandResult> retailStats = commandResults.stream()
+                .filter(result -> !marketMakerAccounts.contains(result.userId()))
+                .toList();
         transaction.executeWithoutResult(status -> {
-            for (var fee : feeObservations) fees.observe(product, fee, orderRows.feeBaseline(product, fee.orderId()));
-            statistics.persist(product,commandResults);
+            for (var fee : feeObservations) {
+                if (!marketMakerAccounts.contains(fee.userId())) {
+                    fees.observe(product, fee, orderRows.feeBaseline(product, fee.orderId()));
+                }
+            }
+            if (!retailStats.isEmpty()) {
+                statistics.persist(product, retailStats);
+            }
             algos.persist(product, algoChanges, exportSequence);
             liquidationRows.persist(product, liquidationChanges);
             portfolio.persist(balanceFlows);
@@ -379,14 +338,6 @@ public class CommittedOrderProjectionService {
             orderRows.persist(product, latest.values(), exportSequence);
             watermarks.advanceWatermark(product, exportSequence);
         });
-    }
-
-    /** Receipt backfill owns a separate checkpoint; it must not advance the order watermark. */
-    public void repairCommandResults(ProductLine product, List<CommittedCommandResult> results) {
-        if (product == null) throw new IllegalArgumentException("product is required");
-        if (results.isEmpty()) return;
-        var receipts = retailCommandResults(product, results, makerAccounts.marketMakerAccounts(product));
-        transaction.executeWithoutResult(tx -> receiptRows.persistCommandResults(product, receipts));
     }
 
     private static Map<UUID, CommittedCommandResult> retailCommandResults(ProductLine product,

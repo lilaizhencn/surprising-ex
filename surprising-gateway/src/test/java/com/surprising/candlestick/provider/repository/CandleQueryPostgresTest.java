@@ -106,7 +106,7 @@ class CandleQueryPostgresTest {
         new TransactionTemplate(new DataSourceTransactionManager(source)).executeWithoutResult(tx -> {
             tx.setRollbackOnly();
             jdbc.update("""
-                    INSERT INTO candlestick_candles(instrument_id,period,open_time,close_time,
+                    INSERT INTO market_candles(instrument_id,period,open_time,close_time,
                       open_price,high_price,low_price,close_price,base_volume,quote_volume,trade_count,status,updated_at)
                     VALUES ('2147483600','1m','2026-01-01 00:00Z','2026-01-01 00:01Z',100,102,99,101,2,202,1,'CLOSED',now()),
                            ('2147483600','1m','2026-01-01 00:01Z','2026-01-01 00:02Z',101,103,100,102,3,306,1,'CLOSED',now()),

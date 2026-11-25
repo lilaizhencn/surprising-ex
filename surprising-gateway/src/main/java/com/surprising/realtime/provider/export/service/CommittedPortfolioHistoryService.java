@@ -1,9 +1,8 @@
 package com.surprising.realtime.provider.export.service;
 
-import com.surprising.aeron.service.replay.CommittedPortfolioSnapshot;
-import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedBalanceFlow;
+import com.surprising.aeron.protocol.export.CommittedBalanceFlow;
+import com.surprising.aeron.protocol.export.CommittedPortfolioSnapshot;
 import com.surprising.product.api.ProductLine;
-import com.surprising.realtime.provider.export.model.PortfolioProjectionStart;
 import com.surprising.realtime.provider.export.repository.*;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -12,28 +11,21 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Export-thread financial read model; authoritative balances remain solely in the Core. */
 @org.springframework.stereotype.Service
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedPortfolioHistoryService {
     private final TransactionTemplate transaction;
-    private final PortfolioStartRepository startRows;
     private final PortfolioCutoffRepository cutoffs;
     private final PortfolioCashFlowRepository cashFlows;
     private final PortfolioEquityRepository equities;
     private final CommittedBalanceAdjustmentRepository balanceAdjustments;
 
-    public CommittedPortfolioHistoryService(PortfolioStartRepository startRows, PortfolioCutoffRepository cutoffs,
+    public CommittedPortfolioHistoryService(PortfolioCutoffRepository cutoffs,
             PortfolioCashFlowRepository cashFlows, PortfolioEquityRepository equities,
             CommittedBalanceAdjustmentRepository balanceAdjustments,
             @org.springframework.beans.factory.annotation.Qualifier("committedProjectionTransactions") TransactionTemplate transaction) {
-        this.startRows=startRows; this.cutoffs=cutoffs; this.cashFlows=cashFlows; this.equities=equities; this.transaction=transaction;
+        this.cutoffs=cutoffs; this.cashFlows=cashFlows; this.equities=equities; this.transaction=transaction;
         this.balanceAdjustments = balanceAdjustments;
     }
-
-    public PortfolioProjectionStart start(ProductLine product, long checkpointPosition, long checkpointTimestamp) {
-        return startRows.start(product, checkpointPosition, checkpointTimestamp);
-    }
-    public boolean initialized(ProductLine product) { return startRows.initialized(product); }
-    public void certifyGenesis(ProductLine product) { startRows.certifyGenesis(product); }
 
     /** One atomic export batch; SQL rejects a conflict even when JDBC rewrites batch inserts. */
     public void persist(List<CommittedBalanceFlow> flows) {

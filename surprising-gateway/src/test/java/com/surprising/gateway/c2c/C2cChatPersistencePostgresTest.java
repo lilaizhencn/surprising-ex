@@ -2,10 +2,10 @@ package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cChatController;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
-import com.surprising.gateway.c2c.service.C2cAttachments;
-import com.surprising.gateway.c2c.service.C2cConversations;
-import com.surprising.gateway.c2c.service.C2cMessages;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cAttachmentService;
+import com.surprising.gateway.c2c.service.C2cConversationService;
+import com.surprising.gateway.c2c.service.C2cMessageService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 import com.surprising.gateway.c2c.storage.C2cR2Storage;
 
 import static org.assertj.core.api.Assertions.*;
@@ -29,15 +29,15 @@ class C2cChatPersistencePostgresTest {
 
     @Test void inboxPagesUseOneQueryAndCountOnlyIncomingUnreadMessages() throws Exception {
         UUID first=direct(11);direct(13);
-        var incoming=fixture.bean(C2cMessages.class).send(11,first,UUID.randomUUID(),"Incoming",null);
-        fixture.bean(C2cMessages.class).send(12,first,UUID.randomUUID(),"Own reply",null);
+        var incoming=fixture.bean(C2cMessageService.class).send(11,first,UUID.randomUUID(),"Incoming",null);
+        fixture.bean(C2cMessageService.class).send(12,first,UUID.randomUUID(),"Own reply",null);
         var jdbc=new CountingJdbc(fixture.db.jdbc.getDataSource());var conversations=C2cDatabaseFixture.conversations(jdbc,new C2cOrdersRepository(jdbc));
         var page=conversations.list(12,"",10,0);assertThat(jdbc.selects).isEqualTo(1);
         assertThat((List<?>)page.get("items")).hasSize(2);
         var view=((List<?>)page.get("items")).stream().map(value -> (Map<?,?>)value).filter(value -> first.toString().equals(value.get("conversationId"))).findFirst().orElseThrow();
         assertThat(view.get("unreadCount")).isEqualTo("1");assertThat(((Map<?,?>)view.get("lastMessage")).get("text")).isEqualTo("Own reply");
-        fixture.bean(C2cMessages.class).markRead(12,first,incoming.messageId(),0);
-        assertThat(conversations.view(12,fixture.bean(C2cConversations.class).get(12,first,false)).get("unreadCount")).isEqualTo("0");
+        fixture.bean(C2cMessageService.class).markRead(12,first,incoming.messageId(),0);
+        assertThat(conversations.view(12,fixture.bean(C2cConversationService.class).get(12,first,false)).get("unreadCount")).isEqualTo("0");
         fixture.db.jdbc.update("UPDATE c2c_profiles SET nickname='QA %_Maker' WHERE user_id=11");
         jdbc.selects=0;assertThat((List<?>)conversations.list(12,"%_",10,0).get("items")).hasSize(1);assertThat(jdbc.selects).isEqualTo(1);
         var one=conversations.list(12,"",1,0);var two=conversations.list(12,"",1,1);
@@ -52,11 +52,11 @@ class C2cChatPersistencePostgresTest {
         UUID id=direct(11);byte[] bytes=C2cAttachmentsPostgresTest.png();
         fixture.db.jdbc.queryForObject("SELECT setval(pg_get_serial_sequence('c2c_messages','message_id'),9007199254740993,false)",Long.class);
         for(int i=0;i<3;i++) {
-            UUID file=UUID.randomUUID();fixture.bean(C2cAttachments.class).upload(11,file,"MESSAGE",null,id,"qa-query.png","image/png",bytes);
-            fixture.bean(C2cMessages.class).send(11,id,UUID.randomUUID(),"With attachment "+i,file);
+            UUID file=UUID.randomUUID();fixture.bean(C2cAttachmentService.class).upload(11,file,"MESSAGE",null,id,"qa-query.png","image/png",bytes);
+            fixture.bean(C2cMessageService.class).send(11,id,UUID.randomUUID(),"With attachment "+i,file);
         }
         var jdbc=new CountingJdbc(fixture.db.jdbc.getDataSource());var conversations=C2cDatabaseFixture.conversations(jdbc,new C2cOrdersRepository(jdbc));
-        var attachments=C2cDatabaseFixture.attachments(jdbc,conversations,new C2cOrdersRepository(jdbc),fixture.bean(C2cPaymentAccounts.class),
+        var attachments=C2cDatabaseFixture.attachments(jdbc,conversations,new C2cOrdersRepository(jdbc),fixture.bean(C2cPaymentAccountService.class),
                 new C2cR2Storage(fixture.r2),fixture.db.transactions.getTransactionManager());
         var messages=C2cDatabaseFixture.messages(jdbc,conversations,attachments,fixture.json);
         var page=messages.page(12,id,0,null,0,2);assertThat(jdbc.selects).isEqualTo(6);
@@ -94,7 +94,7 @@ class C2cChatPersistencePostgresTest {
     }
 
     @Test void storedFileKeepsItsCommittedOrderCheckIfReadyUpdateFails() throws Exception {
-        UUID id=UUID.randomUUID();byte[] bytes=C2cAttachmentsPostgresTest.png();var attachments=fixture.bean(C2cAttachments.class);
+        UUID id=UUID.randomUUID();byte[] bytes=C2cAttachmentsPostgresTest.png();var attachments=fixture.bean(C2cAttachmentService.class);
         fixture.db.jdbc.execute("ALTER TABLE c2c_attachments ADD CONSTRAINT reject_ready CHECK(status<>'READY')");
         assertThatThrownBy(()->attachments.upload(12,id,"PAYMENT_QR",null,null,"qa-ready.png","image/png",bytes))
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);

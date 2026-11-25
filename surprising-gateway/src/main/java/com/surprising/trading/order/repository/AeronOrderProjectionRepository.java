@@ -104,7 +104,7 @@ public class AeronOrderProjectionRepository {
         var result = submittedCommand(product, userId, commandId);
         if (result == null) return commandReceipt(product, commandId, null, List.of());
         if (!"CANCEL_ORDER_BATCH".equals(result.commandType())) throw new IllegalStateException("cancellation batch type mismatch");
-        String raw = jdbcTemplate.queryForObject("SELECT cancel_batch_results::text FROM core_command_result_projection WHERE product_line=? AND user_id=? AND command_id=?",
+        String raw = jdbcTemplate.queryForObject("SELECT cancel_batch_results::text FROM trading_command_results WHERE product_line=? AND user_id=? AND command_id=?",
                 String.class, product.name(), userId, commandId);
         // A pre-upgrade receipt needs committed replay enrichment, not Core fallback.
         if (raw == null) return commandReceipt(product, commandId, null, List.of());
@@ -164,7 +164,7 @@ public class AeronOrderProjectionRepository {
         Objects.requireNonNull(commandId, "commandId");
         var results = jdbcTemplate.query("""
                 SELECT command_type,client_order_id,instrument_id,command_status,result_code
-                  FROM core_command_result_projection WHERE product_line=? AND user_id=? AND command_id=?
+                  FROM trading_command_results WHERE product_line=? AND user_id=? AND command_id=?
                 """, (r, row) -> {
             try {
                 var status = com.surprising.aeron.protocol.ResponseStatus.valueOf(r.getString("command_status"));
@@ -419,7 +419,7 @@ public class AeronOrderProjectionRepository {
 
         private static String base(Long userId) {
             StringBuilder sql = new StringBuilder("SELECT order_id, updated_at_epoch_ms, raw_order_state "
-                    + "FROM core_order_projection WHERE product_line = ?");
+                    + "FROM trading_orders WHERE product_line = ?");
             return userId == null ? sql.toString() : sql + " AND user_id = ?";
         }
 

@@ -10,7 +10,7 @@ import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
 import com.surprising.candlestick.provider.aggregation.CandleAggregationProcessor;
 import com.surprising.candlestick.provider.aggregation.CandleRollupAccumulator;
 import com.surprising.candlestick.provider.aggregation.CandleRollupProcessor;
-import com.surprising.candlestick.provider.aggregation.CandleSink;
+import com.surprising.candlestick.provider.repository.PostgresCandleSink;
 import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
 import com.surprising.candlestick.provider.aggregation.CandleStores;
 import com.surprising.candlestick.provider.service.CandleHotCache;
@@ -104,6 +104,7 @@ public class CandlestickStreamConfiguration {
         config.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, properties.getStream().getThreads());
         config.put(StreamsConfig.STATE_DIR_CONFIG, properties.getStream().getStateDir());
         config.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, properties.getStream().getCommitInterval().toMillis());
+        config.put(StreamsConfig.STATESTORE_CACHE_MAX_BYTES_CONFIG, 4 * 1024 * 1024L);
         config.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
         config.put(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG, CandlestickRocksDbConfig.class);
         config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.StringSerde.class);
@@ -137,7 +138,7 @@ public class CandlestickStreamConfiguration {
     public KStream<String, CandleUpdatedEvent> candlestickTopology(
             StreamsBuilder streamsBuilder,
             CandlestickProperties properties,
-            CandleSink candleSink,
+            PostgresCandleSink candleSink,
             SymbolRegistryService symbolRegistryService,
             PublicTradeEventMapper tradeEventMapper,
             CandleHotCache hotCache,

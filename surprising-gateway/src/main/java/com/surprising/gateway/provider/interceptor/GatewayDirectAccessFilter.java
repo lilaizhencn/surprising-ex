@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.interceptor;
 
-import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
+import com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
@@ -240,7 +240,7 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
             return null;
         }
         String internalToken = request.getHeader("X-Internal-Service-Token");
-        String expectedSecret = System.getenv("GATEWAY_JWT_SECRET");
+        String expectedSecret = properties.getSecurity().getInternalServiceToken();
         if (("trading".equals(route.service()) || "account".equals(route.service()))
                 && !route.admin()
                 && internalToken != null && !internalToken.isBlank()

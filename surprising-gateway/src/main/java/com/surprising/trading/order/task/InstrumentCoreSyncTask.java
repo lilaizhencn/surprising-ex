@@ -13,7 +13,7 @@ public final class InstrumentCoreSyncTask {
         this.service = service;
     }
 
-    @Scheduled(fixedDelayString="${trading.order.instrument-sync-delay-ms:1000}")
+    @Scheduled(fixedDelayString="${surprising.trading.order.instrument-sync-delay-ms:5000}")
     public void reconcile() {
         service.reconcile();
     }

@@ -42,7 +42,7 @@ public class FundingPaymentRepository {
         args.add(safeLimit + 1);
         List<FundingPaymentResponse> rows = jdbcTemplate.query("""
                 SELECT *
-                  FROM core_funding_payment_projection
+                  FROM funding_payments
                  WHERE product_line = ? AND user_id = ?
                    AND (CAST(? AS text) IS NULL OR instrument_id = ?)
                 %s

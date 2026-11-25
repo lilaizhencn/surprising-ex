@@ -44,6 +44,8 @@ public class GatewaySecurityProperties {
     private String issuer = "surprising-ex-gateway";
     @Setter
     private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
+    @Setter
+    private String internalServiceToken = "";
     /** 管理员登录会话的滑动有效期：最后一次请求之后保留多久，且不超过主认证后的该时长。 */
     @Setter
     private Duration adminSessionTtl = Duration.ofHours(8);

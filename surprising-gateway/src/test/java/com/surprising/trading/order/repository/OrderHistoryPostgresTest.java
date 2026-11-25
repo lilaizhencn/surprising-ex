@@ -18,7 +18,7 @@ class OrderHistoryPostgresTest {
         String url=System.getenv("INSTRUMENT_TEST_JDBC_URL"), user=System.getenv("INSTRUMENT_TEST_DB_USER"), password=System.getenv("INSTRUMENT_TEST_DB_PASSWORD");
         new JdbcTemplate(new DriverManagerDataSource(url,user,password)).execute("CREATE SCHEMA order_history_it");
         jdbc=new JdbcTemplate(new DriverManagerDataSource(url+"?currentSchema=order_history_it",user,password));
-        jdbc.execute("CREATE TABLE core_order_projection (LIKE public.core_order_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE trading_orders (LIKE public.trading_orders INCLUDING ALL)");
         repository=new AeronOrderProjectionRepository(jdbc);
     }
     @AfterEach void clean() { if(jdbc!=null) jdbc.execute("DROP SCHEMA order_history_it CASCADE"); }
@@ -50,7 +50,7 @@ class OrderHistoryPostgresTest {
     private void add(ProductLine line,long id,long user,String instrument,String status,long created,long updated) {
         var view=new CoreOrderStateView(id,line,user,instrument,CoreOrderSide.BUY,12345,25,0,25,false,
                 CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"order-"+id,new UUID(0,id),0,0,created,updated,1,status,1);
-        jdbc.update("INSERT INTO core_order_projection(product_line,order_id,user_id,client_order_id,instrument_id,status,created_at_epoch_ms,updated_at_epoch_ms,cluster_position,order_revision,export_sequence,raw_order_state) VALUES (?,?,?,?,?,?,?,?,1,1,1,?)",
+        jdbc.update("INSERT INTO trading_orders(product_line,order_id,user_id,client_order_id,instrument_id,status,created_at_epoch_ms,updated_at_epoch_ms,cluster_position,order_revision,export_sequence,raw_order_state) VALUES (?,?,?,?,?,?,?,?,1,1,1,?)",
                 line.name(),id,user,"order-"+id,instrument,status,created,updated,CoreStateQueryCodec.encodeOrderState(view));
     }
 }

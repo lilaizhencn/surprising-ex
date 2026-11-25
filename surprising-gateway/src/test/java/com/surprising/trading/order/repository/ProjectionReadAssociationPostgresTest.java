@@ -21,8 +21,8 @@ class ProjectionReadAssociationPostgresTest {
         schema="projection_association_"+UUID.randomUUID().toString().replace("-","");
         new JdbcTemplate(new DriverManagerDataSource(url,user,password)).execute("CREATE SCHEMA "+schema);
         jdbc=new CountingJdbc(new DriverManagerDataSource(url+(url.contains("?")?"&":"?")+"currentSchema="+schema,user,password));
-        for(String table:List.of("core_algo_order_projection","core_algo_projection_initialization","core_execution_projection",
-                "core_execution_projection_initialization","core_trigger_order_projection","core_trigger_projection_initialization"))
+        for(String table:List.of("trading_algo_orders","trading_trades",
+                "trading_trigger_orders"))
             jdbc.execute("CREATE TABLE "+table+" (LIKE public."+table+" INCLUDING ALL)");
     }
     @AfterEach void clean() {if(jdbc!=null)jdbc.execute("DROP SCHEMA "+schema+" CASCADE");}

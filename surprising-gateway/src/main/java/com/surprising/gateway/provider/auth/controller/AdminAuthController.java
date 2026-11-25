@@ -53,23 +53,6 @@ public class AdminAuthController {
         this.objectMapper = objectMapper;
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
-    public AdminAuthController(@org.springframework.beans.factory.annotation.Autowired(required = false) AdminAuthService adminAuthService,
-                               AuthService authService,
-                               AdminApprovalService adminApprovalService,
-                               ObjectMapper objectMapper) {
-        this(adminAuthService != null
-                        ? adminAuthService
-                        : new AdminAuthService(authService.properties(), authService.persistence(), authService),
-                adminApprovalService, objectMapper);
-    }
-
-    public AdminAuthController(AuthService authService,
-                               AdminApprovalService adminApprovalService,
-                               ObjectMapper objectMapper) {
-        this(null, authService, adminApprovalService, objectMapper);
-    }
-
     @GetMapping("/users")
     public AdminUserQueryResponse users(@RequestHeader("Authorization") String authorization,
                                         @RequestParam(value = "query", required = false) String query,

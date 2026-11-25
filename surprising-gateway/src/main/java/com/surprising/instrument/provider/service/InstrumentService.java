@@ -192,7 +192,7 @@ public class InstrumentService {
                 page.hasMore(), page.sort(), page.limit());
     }
 
-    public java.util.List<com.surprising.instrument.provider.repository.InstrumentChangeLogRepository.Entry> changes(
+    public java.util.List<com.surprising.instrument.api.model.InstrumentChangeEntry> changes(
             int instrumentId,ProductLine line,long beforeId,int limit) {
         return storageService.changes(line,instrumentId,beforeId,limit);
     }

@@ -35,7 +35,7 @@ public class MarketSummaryRepository {
                            p.close_price AS low_price, p.close_price, 0::numeric AS base_volume,
                            0::numeric AS quote_volume, :since::timestamptz AS sample_time, 0 AS sample_order
                       FROM eligible e CROSS JOIN LATERAL (
-                          SELECT c.close_price FROM candlestick_candles c
+                          SELECT c.close_price FROM market_candles c
                            WHERE c.instrument_id = e.instrument_id AND c.period = '1m'
                              AND c.status = 'CLOSED' AND c.close_time <= :since
                            ORDER BY c.open_time DESC LIMIT 1
@@ -43,7 +43,7 @@ public class MarketSummaryRepository {
                     UNION ALL
                     SELECT c.instrument_id, c.open_price, c.high_price, c.low_price,
                            c.close_price, c.base_volume, c.quote_volume, c.open_time, 1
-                      FROM candlestick_candles c JOIN eligible e USING (instrument_id)
+                      FROM market_candles c JOIN eligible e USING (instrument_id)
                      WHERE c.period = '1m' AND c.status = 'CLOSED'
                        AND c.open_time >= :since AND c.open_time < :until
                 )

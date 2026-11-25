@@ -1,9 +1,9 @@
 package com.surprising.gateway.c2c.websocket;
 
 import com.surprising.gateway.c2c.exception.C2cProblem;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cConversations;
-import com.surprising.gateway.c2c.service.C2cMessages;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cConversationService;
+import com.surprising.gateway.c2c.service.C2cMessageService;
 
 import com.surprising.websocket.provider.session.ClientConnection;
 import com.surprising.gateway.c2c.model.C2cChatViews;
@@ -34,11 +34,11 @@ public class C2cChatRealtime {
     }
     private final Map<String,Subscription> subscriptions=new ConcurrentHashMap<>();
     private final ObjectMapper json;
-    private final C2cAccess access;
-    private final C2cConversations conversations;
-    private final C2cMessages messages;
+    private final C2cAccessService access;
+    private final C2cConversationService conversations;
+    private final C2cMessageService messages;
     private final int capacity;
-    public C2cChatRealtime(ObjectMapper json,C2cAccess access,C2cConversations conversations,C2cMessages messages,
+    public C2cChatRealtime(ObjectMapper json,C2cAccessService access,C2cConversationService conversations,C2cMessageService messages,
             @Value("${surprising.c2c.chat.max-connections:256}") int capacity) {
         if(capacity<1 || capacity>10000) throw new IllegalArgumentException("C2C 连接容量无效");
         this.json=json;this.access=access;this.conversations=conversations;this.messages=messages;this.capacity=capacity;

@@ -7,7 +7,7 @@ import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.model.C2cAdminReviewModels;
 import com.surprising.gateway.c2c.model.C2cPaymentAccountInput.Details;
 import com.surprising.gateway.c2c.model.C2cVerification;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 import java.util.*;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.*;
@@ -34,7 +34,7 @@ class C2cInputBoundaryPostgresTest {
             default -> { path="/api/v1/admin/c2c/ads/"+UUID.randomUUID()+"/status";body=new C2cAdminReviewModels.AdRequest(revision,"PAUSE","Synthetic format boundary test"); }
         }
         fixture.call(HttpMethod.POST,path,9,body,400);
-        assertThat(fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false).revision()).isEqualTo(1);
+        assertThat(fixture.bean(C2cPaymentAccountService.class).get(11,fixture.makerAccount,false).revision()).isEqualTo(1);
         verifyNoInteractions(fixture.core);
     }
     @ParameterizedTest @ValueSource(strings={"merchant","payment"})
@@ -56,7 +56,7 @@ class C2cInputBoundaryPostgresTest {
     @Test void validBankDetailsKeepLeadingZerosAndEncryptedOwnerBoundData() throws Exception {
         var result=fixture.call(HttpMethod.POST,"/api/v1/c2c/payment-accounts",13,payment("BANK_TRANSFER","000012345678","QA Bank"),200);
         UUID id=UUID.fromString((String)result.get("accountId"));
-        var accounts=fixture.bean(C2cPaymentAccounts.class);var record=accounts.get(13,id,false);
+        var accounts=fixture.bean(C2cPaymentAccountService.class);var record=accounts.get(13,id,false);
         assertThat(record.maskedLabel()).isEqualTo("****5678");
         assertThat(record.ciphertext()).doesNotContain("000012345678");
         assertThat(accounts.details(record).accountNumber()).isEqualTo("000012345678");
@@ -72,7 +72,7 @@ class C2cInputBoundaryPostgresTest {
     }
     @Test void reviewRechecksStoredFactsAgainstAChangedMethodPolicy() throws Exception {
         var result=fixture.call(HttpMethod.POST,"/api/v1/c2c/payment-accounts",13,payment("ALIPAY","qa-account","QA Bank"),200);
-        UUID id=UUID.fromString((String)result.get("accountId"));var accounts=fixture.bean(C2cPaymentAccounts.class);var before=accounts.get(13,id,false);
+        UUID id=UUID.fromString((String)result.get("accountId"));var accounts=fixture.bean(C2cPaymentAccountService.class);var before=accounts.get(13,id,false);
         fixture.db.jdbc.update("UPDATE c2c_payment_methods SET requires_bank_name=TRUE WHERE code='ALIPAY'");
         fixture.call(HttpMethod.POST,"/api/v1/admin/c2c/payment-accounts/"+id+"/review",9,
                 new C2cAdminReviewModels.PaymentRequest(Long.toString(before.revision()),"APPROVE",true,"Synthetic changed method policy"),400);

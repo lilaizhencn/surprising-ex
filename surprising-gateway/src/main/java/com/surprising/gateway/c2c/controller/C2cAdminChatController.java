@@ -1,7 +1,7 @@
 package com.surprising.gateway.c2c.controller;
 
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
-import com.surprising.gateway.c2c.service.C2cAdminChat;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminChatService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import com.surprising.gateway.c2c.model.C2cChatViews;
@@ -16,11 +16,11 @@ import tools.jackson.databind.ObjectMapper;
 @RequestMapping("/api/v1/admin/c2c/orders/{order}/chat")
 @ConditionalOnProperty(name="surprising.c2c.enabled",havingValue="true")
 public class C2cAdminChatController {
-    private final C2cAdminAccess access;
-    private final C2cAdminChat chat;
+    private final C2cAdminAccessService access;
+    private final C2cAdminChatService chat;
     private final ObjectMapper json;
     private final C2cAdminRequestBinding requestBinding;
-    public C2cAdminChatController(C2cAdminAccess access,C2cAdminChat chat,ObjectMapper json,C2cAdminRequestBinding requestBinding) {this.access=access;this.chat=chat;this.json=json;this.requestBinding=requestBinding;}
+    public C2cAdminChatController(C2cAdminAccessService access,C2cAdminChatService chat,ObjectMapper json,C2cAdminRequestBinding requestBinding) {this.access=access;this.chat=chat;this.json=json;this.requestBinding=requestBinding;}
     @GetMapping
     public C2cChatViews.Page history(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID order,
             @RequestParam(defaultValue="0") String after,@RequestParam(required=false) String before,

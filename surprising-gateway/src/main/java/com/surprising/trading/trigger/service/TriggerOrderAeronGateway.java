@@ -1,8 +1,6 @@
 package com.surprising.trading.trigger.service;
 
 import com.surprising.aeron.client.AeronClientPool;
-import io.aeron.driver.MediaDriver;
-import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -12,7 +10,6 @@ import com.surprising.aeron.protocol.CoreTriggerOrderQuery;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
@@ -22,24 +19,18 @@ import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
-import com.surprising.trading.trigger.config.TriggerProperties;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
-import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 
 @Service
-public final class TriggerOrderAeronGateway implements AutoCloseable {
+public final class TriggerOrderAeronGateway {
     private final AeronClientPool clients;
-    public TriggerOrderAeronGateway(TriggerProperties properties,
-            @Qualifier("productCommandMediaDriver")
-            MediaDriver driver) {
-        var aeron = properties.getAeron();
-        this.clients = new AeronClientPool("trigger", properties.getProductLine(), aeron.getHostnames(),
-                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
-                "trigger-" + properties.getProductLine().name() + "-node-" + aeron.getNodeId(), driver);
+    public TriggerOrderAeronGateway(AeronClientPool clients) {
+        this.clients = Objects.requireNonNull(clients, "clients");
     }
     public CoreResponse command(CoreMessageType type, UUID id, long userId, byte[] payload) {
         CoreResponse response = clients.command(type, id, userId, payload);
@@ -167,5 +158,4 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
                 com.surprising.trading.api.model.TriggerPriceSource.valueOf(value.priceSource().name()));
     }
     private static String empty(String value) { return value == null || value.isEmpty() ? null : value; }
-    @Override @PreDestroy public void close() { clients.close(); }
 }

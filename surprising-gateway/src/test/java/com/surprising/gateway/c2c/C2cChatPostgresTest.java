@@ -2,7 +2,7 @@ package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cChatController;
 import com.surprising.gateway.c2c.controller.C2cController;
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -182,7 +182,7 @@ class C2cChatPostgresTest {
         assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_conversations",Integer.class)).isZero();
         var approvals=fixture.bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class);
         var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,
-                C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic support reply approval");
+                C2cAdminAccessService.hash(fixture.json.writeValueAsBytes(body)),"Synthetic support reply approval");
         long approval=approvals.create("Bearer qa-9",request).approvalId();approvals.approve("Bearer qa-10",approval,"Synthetic independent review");
         var headers=Map.of("X-Admin-Approval-Id",Long.toString(approval));
         assertThat(fixture.perform(HttpMethod.POST,path,9,new C2cChatController.Send(body.requestId(),"不同正文",null),headers).getResponse().getStatus()).isEqualTo(403);

@@ -1,14 +1,14 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.model.ProductAccountAdjustment;
-
+import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.ProductTransferOperationRequest;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
+import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.provider.model.ProductTransferCommand;
 import com.surprising.gateway.provider.model.ProductTransferResult;
 import com.surprising.gateway.provider.model.ProductTransferStatus;
 import com.surprising.gateway.provider.model.ProductTransferWireRequest;
-
-import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.ProductTransferOperationRequest;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -30,17 +30,17 @@ public final class ProductTransferService {
     // Only the scan order lives here; pending money remains owned by each source Core.
     private final AtomicInteger nextReconciliationLine = new AtomicInteger();
 
-    private final ProductAccountClient accountClient;
+    private final GatewayProductServices products;
     private final com.surprising.gateway.provider.auth.repository.GatewayUserRepository users;
 
-    public ProductTransferService(ProductAccountClient accountClient) {
-        this(accountClient, null);
+    public ProductTransferService(GatewayProductServices products) {
+        this(products, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public ProductTransferService(ProductAccountClient accountClient,
+    public ProductTransferService(GatewayProductServices products,
             com.surprising.gateway.provider.auth.repository.GatewayUserRepository users) {
-        this.accountClient = accountClient;
+        this.products = products;
         this.users = users;
     }
 
@@ -68,15 +68,19 @@ public final class ProductTransferService {
         validate(command);
         Instant startedAt = Instant.now();
         ProductTransferOperationRequest operation = operation(command);
-        ProductAccountAdjustment debit = accountClient.transferOut(
-                providerAccountType(operation.sourceAccountType()), operation);
-        if (debit.status() == ProductAccountAdjustment.Status.REJECTED) {
+        try {
+            products.requireEnabled(operation.sourceProductLine());
+            products.requireEnabled(operation.targetProductLine());
+            products.service(operation.sourceProductLine(), AccountCommandGateway.class).transferOut(operation);
+        } catch (AccountCommandRejectedException ex) {
             return result(operation.transferId(), command, ProductTransferStatus.FAILED,
-                    "SOURCE_DEBIT_REJECTED", debit.errorMessage(), startedAt);
-        }
-        if (debit.status() == ProductAccountAdjustment.Status.UNKNOWN) {
+                    "SOURCE_DEBIT_REJECTED", ex.errorCode(), startedAt);
+        } catch (IllegalArgumentException ex) {
+            return result(operation.transferId(), command, ProductTransferStatus.FAILED,
+                    "SOURCE_DEBIT_REJECTED", ex.getMessage(), startedAt);
+        } catch (RuntimeException ex) {
             return result(operation.transferId(), command, ProductTransferStatus.PENDING,
-                    "SOURCE_DEBIT_UNKNOWN", debit.errorMessage(), startedAt);
+                    "SOURCE_DEBIT_UNKNOWN", "account transfer outcome is unknown", startedAt);
         }
         return forward(operation, command, startedAt);
     }
@@ -92,7 +96,9 @@ public final class ProductTransferService {
             int allowance = Math.min(256, Math.max(1, (limit - processed) / (lines.length - offset)));
             List<ProductTransferOperationRequest> pending;
             try {
-                pending = accountClient.pendingTransfers(productLine, allowance);
+                pending = products.enabled().contains(productLine)
+                        ? products.service(productLine, AccountCommandGateway.class).pendingTransfers(allowance)
+                        : List.of();
             } catch (RuntimeException exception) {
                 log.warn("Pending transfer scan failed productLine={}", productLine, exception);
                 continue;
@@ -115,17 +121,31 @@ public final class ProductTransferService {
     private ProductTransferResult forward(ProductTransferOperationRequest operation,
                                           ProductTransferCommand command,
                                           Instant startedAt) {
-        ProductAccountAdjustment credit = accountClient.transferIn(
-                providerAccountType(operation.targetAccountType()), operation);
-        if (credit.status() != ProductAccountAdjustment.Status.APPLIED) {
+        try {
+            products.requireEnabled(operation.sourceProductLine());
+            products.requireEnabled(operation.targetProductLine());
+            products.service(operation.targetProductLine(), AccountCommandGateway.class).transferIn(operation);
+        } catch (AccountCommandRejectedException ex) {
             return result(operation.transferId(), command, ProductTransferStatus.SOURCE_DEBITED,
-                    "TARGET_CREDIT_PENDING", credit.errorMessage(), startedAt);
+                    "TARGET_CREDIT_PENDING", ex.errorCode(), startedAt);
+        } catch (IllegalArgumentException ex) {
+            return result(operation.transferId(), command, ProductTransferStatus.SOURCE_DEBITED,
+                    "TARGET_CREDIT_PENDING", ex.getMessage(), startedAt);
+        } catch (RuntimeException ex) {
+            return result(operation.transferId(), command, ProductTransferStatus.SOURCE_DEBITED,
+                    "TARGET_CREDIT_PENDING", "account transfer outcome is unknown", startedAt);
         }
-        ProductAccountAdjustment completion = accountClient.completeTransfer(
-                providerAccountType(operation.sourceAccountType()), operation);
-        if (completion.status() != ProductAccountAdjustment.Status.APPLIED) {
+        try {
+            products.service(operation.sourceProductLine(), AccountCommandGateway.class).completeTransfer(operation);
+        } catch (AccountCommandRejectedException ex) {
             return result(operation.transferId(), command, ProductTransferStatus.SOURCE_DEBITED,
-                    "SOURCE_COMPLETION_PENDING", completion.errorMessage(), startedAt);
+                    "SOURCE_COMPLETION_PENDING", ex.errorCode(), startedAt);
+        } catch (IllegalArgumentException ex) {
+            return result(operation.transferId(), command, ProductTransferStatus.SOURCE_DEBITED,
+                    "SOURCE_COMPLETION_PENDING", ex.getMessage(), startedAt);
+        } catch (RuntimeException ex) {
+            return result(operation.transferId(), command, ProductTransferStatus.SOURCE_DEBITED,
+                    "SOURCE_COMPLETION_PENDING", "account transfer outcome is unknown", startedAt);
         }
         return result(operation.transferId(), command, ProductTransferStatus.COMPLETED, null, null, startedAt);
     }
@@ -163,10 +183,6 @@ public final class ProductTransferService {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
-    }
-
-    private String providerAccountType(AccountType accountType) {
-        return accountType == AccountType.FUNDING ? AccountType.SPOT.name() : accountType.name();
     }
 
     static ProductLine productLine(AccountType accountType) {

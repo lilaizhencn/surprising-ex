@@ -1,8 +1,8 @@
 package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.client.CustodyWalletClient;
-import com.surprising.gateway.provider.client.SpotAccountClient;
 import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import java.math.BigDecimal;
 import java.util.Map;
 import java.util.Set;
@@ -14,12 +14,12 @@ import tools.jackson.databind.ObjectMapper;
 @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NEVER)
 public class CustodyWithdrawalRefundService {
     private final CustodyWithdrawalStateService states;
-    private final SpotAccountClient spotAccountClient;
+    private final GatewayProductServices products;
     private final ObjectMapper mapper;
 
-    public CustodyWithdrawalRefundService(CustodyWithdrawalStateService states, SpotAccountClient spotAccountClient,
+    public CustodyWithdrawalRefundService(CustodyWithdrawalStateService states, GatewayProductServices products,
                                           ObjectMapper mapper) {
-        this.states=states; this.spotAccountClient=spotAccountClient; this.mapper=mapper;
+        this.states=states; this.products=products; this.mapper=mapper;
     }
 
     public void refund(CustodyWithdrawalModels.WithdrawalRecord record,String spotReason,String stateReason) {
@@ -32,7 +32,7 @@ public class CustodyWithdrawalRefundService {
         if (!authorized(record,evidence)) throw new IllegalStateException("withdrawal refund has no matching permanent refusal or principal-release receipt");
         var pending=states.markRefundPending(record.withdrawalId(),stateReason,evidence);
         if (pending==null || !"REFUND_PENDING".equals(pending.status())) return;
-        spotAccountClient.adjustBalance(pending.userId(),pending.assetSymbol(),pending.amountUnits(),
+        CustodyWithdrawalService.adjustSpotBalance(products,pending.userId(),pending.assetSymbol(),pending.amountUnits(),
                 pending.spotDebitReference()+":refund",spotReason);
         states.markRefunded(pending.withdrawalId(),pending.walletResponse(),stateReason);
     }

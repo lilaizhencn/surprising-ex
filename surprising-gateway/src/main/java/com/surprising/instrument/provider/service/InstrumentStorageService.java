@@ -142,7 +142,7 @@ public class InstrumentStorageService {
         return json.writeValueAsString(tree);
     }
 
-    public List<InstrumentChangeLogRepository.Entry> changes(ProductLine line,int instrumentId,long beforeId,int limit) {
+    public List<com.surprising.instrument.api.model.InstrumentChangeEntry> changes(ProductLine line,int instrumentId,long beforeId,int limit) {
         return changeLog.list(line,instrumentId,beforeId,limit);
     }
     public Optional<InstrumentResponse> firstTrading(ProductLine line) {

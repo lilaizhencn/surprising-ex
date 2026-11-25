@@ -8,11 +8,11 @@ import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
-import com.surprising.gateway.c2c.service.C2cAds;
-import com.surprising.gateway.c2c.service.C2cOrders;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cAdService;
+import com.surprising.gateway.c2c.service.C2cOrderService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
-import com.surprising.gateway.c2c.service.C2cSettlement;
+import com.surprising.gateway.c2c.service.C2cSettlementService;
 
 import com.surprising.gateway.c2c.config.C2cRuntime;
 
@@ -39,8 +39,8 @@ class C2cHttpPostgresTest {
     @AfterEach void cleanup() {if(fixture!=null)fixture.close();}
 
     @Test void fullHttpOrderFlowUsesRealTransactionsAndKeepsImmutablePaymentSnapshot() throws Exception {
-        assertThat(AopUtils.isAopProxy(fixture.bean(C2cAds.class))).isTrue();
-        assertThat(AopUtils.isAopProxy(fixture.bean(C2cOrders.class))).isTrue();
+        assertThat(AopUtils.isAopProxy(fixture.bean(C2cAdService.class))).isTrue();
+        assertThat(AopUtils.isAopProxy(fixture.bean(C2cOrderService.class))).isTrue();
         var publish=fixture.call(HttpMethod.POST,"/api/v1/c2c/ads",11,new C2cController.PublishRequest(
                 "qa-publish-"+UUID.randomUUID(),fixture.payload("SELL"),new C2cVerification("123456","")),200);
         assertThat(((Map<?,?>)publish.get("result")).get("status")).isEqualTo("RESERVING");
@@ -52,8 +52,8 @@ class C2cHttpPostgresTest {
         UUID order=UUID.fromString((String)create.get("resultId"));
         assertThat(((Map<?,?>)create.get("result")).get("quantityUnits")).isEqualTo("200000000");
         assertThat(((Map<?,?>)create.get("result")).get("buyerReceivesUnits")).isEqualTo("199800000");
-        var account=fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false);
-        fixture.bean(C2cPaymentAccounts.class).save(11,account.id(),account.revision(),"CNY","BANK_TRANSFER",
+        var account=fixture.bean(C2cPaymentAccountService.class).get(11,fixture.makerAccount,false);
+        fixture.bean(C2cPaymentAccountService.class).save(11,account.id(),account.revision(),"CNY","BANK_TRANSFER",
                 C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Changed","123456789012","QA Test Bank",null)));
         var detail=fixture.call(HttpMethod.GET,"/api/v1/c2c/orders/"+order,12,null,200);
         var payment=(Map<?,?>)detail.get("payment");
@@ -61,7 +61,7 @@ class C2cHttpPostgresTest {
         assertThat(payment.get("accountNumber")).isEqualTo("qa-maker-account");
         assertThat(detail).doesNotContainKeys("paymentCiphertext","payment_details_ciphertext");
         fixture.call(HttpMethod.POST,"/api/v1/c2c/orders/"+order+"/paid",12,new C2cController.PaidRequest(null),200);
-        verify(fixture.core,times(1)).transferOut(any(),any());
+        verify(fixture.core,times(1)).transferOut(any());
         var release=fixture.call(HttpMethod.POST,"/api/v1/c2c/orders/"+order+"/release",11,new C2cVerification("123456",""),200);
         assertThat(release.get("status")).isEqualTo("RELEASE_PENDING");
         fixture.settle();
@@ -149,7 +149,7 @@ class C2cHttpPostgresTest {
     @Test void runtimeOffDoesNotCreateControllersWorkersOrRequireTheNewTables() {
         try(var context=new AnnotationConfigApplicationContext()) {
             context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test",Map.of("surprising.c2c.enabled","false")));
-            context.register(C2cController.class,C2cRuntime.class,C2cSettlement.class);context.refresh();
+            context.register(C2cController.class,C2cRuntime.class,C2cSettlementService.class);context.refresh();
             assertThat(context.getBeansOfType(C2cController.class)).isEmpty();
             assertThat(context.containsBean("c2cSettlementScheduler")).isFalse();
         }

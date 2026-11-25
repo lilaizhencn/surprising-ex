@@ -24,17 +24,28 @@ public class LocalMakerAccountSeeder implements SmartInitializingSingleton {
 
     private record SeedTarget(long userId, String asset, long targetUnits, long minThreshold) {}
 
+    private static final long TESTUSER_USDT_TARGET_UNITS = 10_000_000_000_000L; // 100,000 USDT (1e8)
+    private static final long TESTUSER_USDT_MIN_THRESHOLD = 1_000_000_000_000L; // 10,000 USDT
+
     private static final List<SeedTarget> PERP_TARGETS = List.of(
+            new SeedTarget(7L, "USDT", TESTUSER_USDT_TARGET_UNITS, TESTUSER_USDT_MIN_THRESHOLD),
             new SeedTarget(101L, "USDT", USDT_TARGET_UNITS, USDT_MIN_THRESHOLD),
             new SeedTarget(102L, "USDT", USDT_TARGET_UNITS, USDT_MIN_THRESHOLD),
             new SeedTarget(103L, "USDT", USDT_TARGET_UNITS, USDT_MIN_THRESHOLD)
     );
 
+    private static final long ETH_TARGET_UNITS = 8_000_000_000_000_000_000L; // 8 ETH (1e18, within Long.MAX_VALUE)
+    private static final long ETH_MIN_THRESHOLD = 1_000_000_000_000_000_000L; // 1 ETH
+
     private static final List<SeedTarget> SPOT_TARGETS = List.of(
+            new SeedTarget(7L, "USDT", TESTUSER_USDT_TARGET_UNITS, TESTUSER_USDT_MIN_THRESHOLD),
+            new SeedTarget(7L, "BTC", 100_000_000L, 10_000_000L), // 1 BTC (1e8)
+            new SeedTarget(7L, "ETH", 5_000_000_000_000_000_000L, 500_000_000_000_000_000L), // 5 ETH (1e18)
+            new SeedTarget(7L, "SOL", 10_000_000_000L, 1_000_000_000L), // 100 SOL (1e8)
             new SeedTarget(201L, "USDT", USDT_TARGET_UNITS, USDT_MIN_THRESHOLD),
             new SeedTarget(201L, "BTC", 10_000_000_000L, 1_000_000_000L), // 100 BTC (1e8)
             new SeedTarget(202L, "USDT", USDT_TARGET_UNITS, USDT_MIN_THRESHOLD),
-            new SeedTarget(202L, "ETH", 2_000_000_000_000_000_000L, 200_000_000_000_000_000L), // 2 ETH (1e18)
+            new SeedTarget(202L, "ETH", ETH_TARGET_UNITS, ETH_MIN_THRESHOLD),
             new SeedTarget(203L, "USDT", USDT_TARGET_UNITS, USDT_MIN_THRESHOLD),
             new SeedTarget(203L, "SOL", 1_000_000_000_000L, 100_000_000_000L) // 10,000 SOL (1e8)
     );

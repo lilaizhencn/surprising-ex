@@ -22,9 +22,9 @@ class MarketSummaryPostgresTest {
         new TransactionTemplate(new DataSourceTransactionManager(source)).executeWithoutResult(tx -> {
             tx.setRollbackOnly();
             int id = jdbc.queryForObject("SELECT min(instrument_id) FROM instruments", Integer.class);
-            jdbc.update("DELETE FROM candlestick_candles WHERE instrument_id = ?", String.valueOf(id));
+            jdbc.update("DELETE FROM market_candles WHERE instrument_id = ?", String.valueOf(id));
             jdbc.update("""
-                    INSERT INTO candlestick_candles(instrument_id,period,open_time,close_time,
+                    INSERT INTO market_candles(instrument_id,period,open_time,close_time,
                       open_price,high_price,low_price,close_price,base_volume,quote_volume,trade_count,status,updated_at)
                     VALUES (?,'1m','2026-01-01 00:00Z','2026-01-01 00:01Z',100,100,100,100,9,900,1,'CLOSED',now()),
                            (?,'1m','2026-01-02 12:00Z','2026-01-02 12:01Z',105,105,105,105,2,210,1,'CLOSED',now())
@@ -50,11 +50,11 @@ class MarketSummaryPostgresTest {
             tx.setRollbackOnly();
             jdbc.execute("""
                     CREATE TEMP TABLE instruments(instrument_id int,product_line text) ON COMMIT DROP;
-                    CREATE TEMP TABLE candlestick_candles(instrument_id text,period text,open_time timestamptz,
+                    CREATE TEMP TABLE market_candles(instrument_id text,period text,open_time timestamptz,
                       close_time timestamptz,open_price numeric,high_price numeric,low_price numeric,
                       close_price numeric,base_volume numeric,quote_volume numeric,status text) ON COMMIT DROP;
                     INSERT INTO instruments VALUES(7,'SPOT'),(7,'LINEAR_PERPETUAL'),(8,'SPOT');
-                    INSERT INTO candlestick_candles VALUES
+                    INSERT INTO market_candles VALUES
                       ('7','1m','2026-01-02 12:00Z','2026-01-02 12:01Z',100,100,100,100,1,100,'CLOSED'),
                       ('8','1m','2026-01-02 12:00Z','2026-01-02 12:01Z',100,100,100,100,1,100,'CLOSED'),
                       ('8','1m','2026-01-02 23:59Z','2026-01-03 00:00Z',999,999,999,999,999,999,'OPEN'),

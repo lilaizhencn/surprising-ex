@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.awaitility.Awaitility.await;
 
-import com.surprising.gateway.provider.auth.port.CurrentAuthClient;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.auth.repository.GatewayApiKeyRepository;
 import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.config.*;
@@ -49,7 +49,7 @@ class WebSocketLimitsRedisTest {
         factory.afterPropertiesSet(); factory.start(); redis = new StringRedisTemplate(factory);
         try (var connection = factory.getConnection()) { connection.ping(); }
         var properties = new GatewayProperties(); var totp = new TotpService(properties);
-        keys = new GatewayApiKeyService(rows, auth, totp, null, properties, mock(CurrentAuthClient.class), fixture.state);
+        keys = new GatewayApiKeyService(rows, auth, totp, null, properties, mock(AuthClientMetadataBinding.class), fixture.state);
         fixture.putApiKey(new GatewayApiKeyRepository.ApiKeyRecord(UUID.randomUUID(), 42, key,
                 totp.encryptSecret("secret"), "bot", "READ", "192.0.2.0/24", "ACTIVE", Instant.now(), null));
     }

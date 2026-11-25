@@ -16,6 +16,9 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class AffiliateService {
 
+  private static final String CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  private static final java.security.SecureRandom CODE_RANDOM = new java.security.SecureRandom();
+
   private final AffiliateRepository repository;
   private final AffiliateProperties properties;
   private final Semaphore reads;
@@ -33,15 +36,34 @@ public class AffiliateService {
   public Profile register(long userId, String code) {
     if (code == null || code.isBlank()) {
       var existing = repository.findProfile(userId);
-      if (existing.isPresent()) return existing.get();
+      if (existing.isPresent()) {
+        if (existing.get().inviteCode().length() > 12) {
+          repository.lock();
+          repository.shortenInviteCodeIfLong(userId, nextShortCode());
+          return repository.profile(userId);
+        }
+        return existing.get();
+      }
     }
     repository.lock();
-    repository.ensureProfile(
-      userId,
-      UUID.randomUUID().toString().replace("-", "").toUpperCase(Locale.ROOT)
-    );
+    repository.ensureProfile(userId, nextShortCode());
+    repository.shortenInviteCodeIfLong(userId, nextShortCode());
     if (code != null && !code.isBlank()) accept(userId, code);
     return repository.profile(userId);
+  }
+
+  private String nextShortCode() {
+    for (int attempt = 0; attempt < 16; attempt++) {
+      var sb = new StringBuilder(8);
+      for (int i = 0; i < 8; i++) {
+        sb.append(CODE_ALPHABET.charAt(CODE_RANDOM.nextInt(CODE_ALPHABET.length())));
+      }
+      String candidate = sb.toString();
+      if (repository.codeOwner(candidate).isEmpty()) {
+        return candidate;
+      }
+    }
+    throw new IllegalStateException("unable to allocate unique short invite code");
   }
 
   public Settings settings() {
@@ -146,10 +168,7 @@ public class AffiliateService {
         "该用户已加入团队，请调整现有直属比例"
       );
     }
-    String token = UUID.randomUUID()
-      .toString()
-      .replace("-", "")
-      .toUpperCase(Locale.ROOT);
+    String token = nextShortCode();
     repository.createInvitation(token, parent, target, input.sharePpm());
     repository.audit(
       parent,

@@ -6,7 +6,7 @@ import org.springframework.stereotype.Repository;
 
 /** 仅访问core_funding_settlement_projection；Service确认游标链完整后发布结算汇总。 */
 @Repository
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedFundingSettlementRepository {
     private final JdbcTemplate jdbc;
 
@@ -14,10 +14,10 @@ public class CommittedFundingSettlementRepository {
         this.jdbc = jdbc;
     }
 
-    public void persist(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page, FundingTotals totals) {
+    public void persist(com.surprising.aeron.protocol.export.CommittedFundingPage page, FundingTotals totals) {
         var command = page.command();
         jdbc.update("""
-            INSERT INTO core_funding_settlement_projection(product_line,settlement_id,export_sequence,
+            INSERT INTO funding_settlements(product_line,settlement_id,export_sequence,
               instrument_id,funding_rate_ppm,command_status,result_code,total_long_payment_units,
               total_short_payment_units,position_count,occurred_at_epoch_ms)
             VALUES (?,?,?,?,?,'APPLIED',?,?,?,?,?)

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth.controller;
 
+
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.model.AuthModels;

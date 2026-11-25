@@ -1,12 +1,12 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cChatController;
-import com.surprising.gateway.c2c.controller.advice.C2cHttpErrors;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cConversations;
-import com.surprising.gateway.c2c.service.C2cMessages;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cConversationService;
+import com.surprising.gateway.c2c.service.C2cMessageService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 import com.surprising.gateway.c2c.storage.C2cR2Storage;
 
 import com.surprising.gateway.c2c.config.C2cR2Properties;
@@ -40,12 +40,12 @@ class C2cR2GatewayLiveTest {
         var credentials=StaticCredentialsProvider.create(AwsBasicCredentials.create(properties.getAccessKeyId(),properties.getSecretAccessKey()));
         try(var client=S3Client.builder().endpointOverride(URI.create(properties.getEndpoint())).region(Region.of(properties.getRegion()))
                 .credentialsProvider(credentials).forcePathStyle(true).build();var storage=new C2cR2Storage(properties);var fixture=new C2cHttpFixture()) {
-            var attachments=C2cDatabaseFixture.attachments(fixture.db.jdbc,fixture.bean(C2cConversations.class),fixture.bean(C2cOrdersRepository.class),
-                    fixture.bean(C2cPaymentAccounts.class),storage,fixture.db.transactions.getTransactionManager());
-            var mvc=MockMvcBuilders.standaloneSetup(new C2cChatController(fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),
-                    fixture.bean(C2cMessages.class),attachments)).setControllerAdvice(new C2cHttpErrors()).build();
+            var attachments=C2cDatabaseFixture.attachments(fixture.db.jdbc,fixture.bean(C2cConversationService.class),fixture.bean(C2cOrdersRepository.class),
+                    fixture.bean(C2cPaymentAccountService.class),storage,fixture.db.transactions.getTransactionManager());
+            var mvc=MockMvcBuilders.standaloneSetup(new C2cChatController(fixture.bean(C2cAccessService.class),fixture.bean(C2cConversationService.class),
+                    fixture.bean(C2cMessageService.class),attachments)).setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
             fixture.db.jdbc.update("UPDATE c2c_profiles SET receive_strangers=true");
-            UUID conversation=UUID.fromString((String)fixture.bean(C2cConversations.class).start(12,null,11L).get("conversationId"));
+            UUID conversation=UUID.fromString((String)fixture.bean(C2cConversationService.class).start(12,null,11L).get("conversationId"));
             var upload=new C2cChatController.Upload("MESSAGE",null,conversation,"qa-evidence.png","image/png",bytes.length,
                     HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)));
             String path="/api/v1/c2c/attachments/"+id;
@@ -56,14 +56,14 @@ class C2cR2GatewayLiveTest {
                 var signed=fixture.json.readValue(response.getContentAsString(),Map.class);
                 assertThat(signed.get("status")).isEqualTo("UPLOADING");
                 assertThat(mvc.perform(MockMvcRequestBuilders.post(path+"/confirm").header("Authorization","Bearer qa-13")).andReturn().getResponse().getStatus()).isEqualTo(403);
-                assertThatThrownBy(()->fixture.bean(C2cMessages.class).send(12,conversation,UUID.randomUUID(),"尚未确认",id)).isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(()->fixture.bean(C2cMessageService.class).send(12,conversation,UUID.randomUUID(),"尚未确认",id)).isInstanceOf(IllegalArgumentException.class);
                 var http=HttpClient.newHttpClient();var put=HttpRequest.newBuilder(URI.create((String)signed.get("uploadUrl"))).timeout(Duration.ofSeconds(20));
                 ((Map<String,String>)signed.get("headers")).forEach((name,value)->{if(!name.equalsIgnoreCase("content-length"))put.header(name,value);});
                 assertThat(http.send(put.PUT(HttpRequest.BodyPublishers.ofByteArray(bytes)).build(),HttpResponse.BodyHandlers.discarding()).statusCode()).isIn(200,201);
                 var confirmed=mvc.perform(MockMvcRequestBuilders.post(path+"/confirm").header("Authorization","Bearer qa-12")).andReturn().getResponse();
                 assertThat(confirmed.getStatus()).isEqualTo(200);
                 assertThat(fixture.json.readValue(confirmed.getContentAsString(),Map.class).get("status")).isEqualTo("READY");
-                fixture.bean(C2cMessages.class).send(12,conversation,UUID.randomUUID(),"实际 R2 图片凭证",id);
+                fixture.bean(C2cMessageService.class).send(12,conversation,UUID.randomUUID(),"实际 R2 图片凭证",id);
                 var download=mvc.perform(MockMvcRequestBuilders.get(path+"/content").header("Authorization","Bearer qa-11")).andReturn().getResponse();
                 assertThat(download.getStatus()).isEqualTo(200);assertThat(download.getContentAsByteArray()).isEqualTo(bytes);
                 assertThat(download.getHeader("Cache-Control")).isEqualTo("no-store");

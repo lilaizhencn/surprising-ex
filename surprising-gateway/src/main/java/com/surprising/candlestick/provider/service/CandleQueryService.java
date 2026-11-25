@@ -50,6 +50,7 @@ public class CandleQueryService {
         this.hotCache = hotCache;
         if (meterRegistry != null) {
             Gauge.builder("surprising.candlestick.query.database-fallbacks", databaseFallbacks, LongAdder::sum)
+                    .tag("productLine", properties.getProductLine().name())
                     .description("K 线查询回退数据库次数")
                     .register(meterRegistry);
         }

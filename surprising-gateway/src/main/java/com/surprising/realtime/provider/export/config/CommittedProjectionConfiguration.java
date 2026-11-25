@@ -15,7 +15,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Configuration(proxyBeanMethods = false)
 @ComponentScan(basePackageClasses = {CommittedOrderRepository.class, CommittedOrderProjectionService.class})
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedProjectionConfiguration {
     /** 离线修复也使用相同的单表Repository、事务与代理配置，不另建写入路径。 */
     public static AnnotationConfigApplicationContext openPersistence(DataSource source) {

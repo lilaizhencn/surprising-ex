@@ -8,7 +8,7 @@ import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.provider.exception.InstrumentOperationException;
 import com.surprising.instrument.provider.model.InstrumentPageQuery;
-import com.surprising.instrument.provider.repository.InstrumentChangeLogRepository;
+import com.surprising.instrument.api.model.InstrumentChangeEntry;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.instrument.provider.utils.InstrumentConfigurationFormats;
 import com.surprising.product.api.ProductLine;
@@ -199,7 +199,7 @@ public class InstrumentController {
     }
 
     @GetMapping("/admin/{instrumentId}/changes")
-    public List<InstrumentChangeLogRepository.Entry> changes(
+    public List<InstrumentChangeEntry> changes(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("instrumentId") int instrumentId,
             @RequestParam("productLine") ProductLine productLine,

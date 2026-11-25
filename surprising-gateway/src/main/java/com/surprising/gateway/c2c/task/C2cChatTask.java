@@ -11,6 +11,6 @@ import org.springframework.stereotype.Component;
 public class C2cChatTask {
     private final C2cChatRealtime realtime;
     public C2cChatTask(C2cChatRealtime realtime) {this.realtime=realtime;}
-    @Scheduled(fixedDelay=1000,scheduler="c2cChatScheduler")
+    @Scheduled(fixedDelay=3000,scheduler="c2cChatScheduler")
     public void poll() {realtime.poll();}
 }

@@ -7,7 +7,8 @@ import com.surprising.gateway.provider.auth.controller.*;
 import com.surprising.gateway.provider.auth.model.AuthModels.*;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.service.*;
-import com.surprising.gateway.provider.controller.GatewayLimitRequestBinding;
+import com.surprising.gateway.provider.support.GatewayLimitRequestBinding;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.interceptor.*;
 import com.surprising.gateway.provider.service.GatewayRequestLimits;
 import com.surprising.websocket.provider.config.WebSocketProperties;
@@ -179,7 +180,7 @@ class GatewaySecurityBoundaryTest {
     @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
     @EnableWebMvc
     @Import({GatewaySecurityConfiguration.class, GatewayCorsConfig.class, AdminIpWhitelistFilter.class, AdminPermissionFilter.class,
-            AdminAuthController.class, AuthController.class, AuthClientMetadataBinding.class, BrowserSessionController.class, BrowserSessionResponse.class})
+            AdminAuthController.class, AuthController.class, AuthClientMetadataBinding.class, BrowserSessionController.class, com.surprising.gateway.provider.auth.controller.advice.BrowserSessionResponseAdvice.class})
     static class Configuration {
         @Bean GatewayProperties properties() { var p = new GatewayProperties(); p.getSecurity().setBrowserCookieSecure(false); return p; }
         @Bean WebSocketProperties websocket() { return new WebSocketProperties(); }
@@ -194,6 +195,9 @@ class GatewaySecurityBoundaryTest {
         @Bean AuthService auth(GatewayProperties p, com.surprising.gateway.provider.auth.state.AuthStateFixture fixture, AuthPersistenceService rows, JwtTokenService jwt, AuthClientMetadataBinding client) {
             return spy(new AuthService(p, rows, mock(PasswordHasher.class), jwt, mock(EmailVerificationService.class),
                     mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class), client, mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
+        }
+        @Bean AdminAuthService adminAuth(GatewayProperties p, AuthPersistenceService rows, AuthService auth) {
+            return new AdminAuthService(p, rows, auth);
         }
     }
 }

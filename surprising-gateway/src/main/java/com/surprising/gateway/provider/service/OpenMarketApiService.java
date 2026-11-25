@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 /**
  * 公开 Open API 行情与基础端点处理（ping、time、exchangeInfo、depth、bookTicker）。
  */
+@Service
 public class OpenMarketApiService {
 
     private final GatewayProperties properties;
@@ -26,7 +27,7 @@ public class OpenMarketApiService {
 
     public OpenMarketApiService(GatewayProperties properties,
                                 InstrumentService instrumentService,
-                                MatchingMarketDataService marketDataService,
+                                @org.springframework.beans.factory.annotation.Autowired(required = false) MatchingMarketDataService marketDataService,
                                 OpenApiSupport support) {
         this.properties = properties;
         this.instrumentService = instrumentService;

@@ -1,8 +1,8 @@
 package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
-import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedDeliveryPage;
-import com.surprising.aeron.service.replay.CommittedTradeReplay.DeliveryCashFlow;
+import com.surprising.aeron.protocol.export.CommittedDeliveryPage;
+import com.surprising.aeron.protocol.export.CommittedDeliveryPage.DeliveryCashFlow;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import java.util.List;

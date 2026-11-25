@@ -5,7 +5,6 @@ import com.surprising.trading.api.model.LeverageSettingRequest;
 import com.surprising.trading.api.model.LeverageSettingResponse;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.repository.OrderLeverageMath;
 import java.time.Instant;
 import java.util.UUID;
@@ -22,12 +21,12 @@ public class LeverageService {
 
     private static final long MIN_LEVERAGE_PPM = 1_000_000L;
 
-    private final InstrumentRuleLookup instrumentRuleLookup;
+    private final InstrumentSnapshotRuleLookup instrumentRuleLookup;
     private final OrderAeronGateway aeron;
     private final ValkeyUserQueries realtimeQueries;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public LeverageService(InstrumentRuleLookup instrumentRuleLookup,
+    public LeverageService(InstrumentSnapshotRuleLookup instrumentRuleLookup,
                            OrderAeronGateway aeron, ValkeyUserQueries realtimeQueries) {
         this.instrumentRuleLookup = instrumentRuleLookup;
         this.aeron = aeron;

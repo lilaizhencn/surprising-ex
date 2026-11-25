@@ -806,7 +806,7 @@ class SixProductLineContractLiveTest {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);
         CoreAlgoOrderView last=null;
         do {
-            var rows=jdbc.queryForList("SELECT raw_algo_state FROM core_algo_order_projection WHERE product_line='SPOT' AND algo_order_id=?",byte[].class,id);
+            var rows=jdbc.queryForList("SELECT raw_algo_state FROM trading_algo_orders WHERE product_line='SPOT' AND algo_order_id=?",byte[].class,id);
             if(!rows.isEmpty()) {
                 last=CoreAlgoOrderCodec.decode(rows.getFirst());
                 if(last.statusCode()==status && last.executedQuantitySteps()==executed && last.activeQuantitySteps()==active)return last;

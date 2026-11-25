@@ -61,9 +61,9 @@ class TradeProjectionPostgresTest {
         assertThatThrownBy(() -> fills(ProductLine.SPOT, 7, null, null, null, null, 10, null))
                 .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         ready(ProductLine.SPOT); add(ProductLine.SPOT, 10, 0, 1000, 7, 8);
-        jdbc.update("UPDATE core_execution_projection SET taker_side='INVALID'");
+        jdbc.update("UPDATE trading_trades SET taker_side='INVALID'");
         assertThatThrownBy(() -> fills(ProductLine.SPOT, 7, null, null, null, null, 10, null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
-        jdbc.execute("DROP TABLE core_execution_projection");
+        jdbc.execute("DROP TABLE trading_trades");
         assertThatThrownBy(() -> fills(ProductLine.SPOT, 7, null, null, null, null, 10, null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
     private JdbcTemplate jdbc;
@@ -73,7 +73,7 @@ class TradeProjectionPostgresTest {
         var admin=new JdbcTemplate(new DriverManagerDataSource(url,user,password));
         admin.execute("CREATE SCHEMA trade_query_it");
         jdbc=new JdbcTemplate(new DriverManagerDataSource(url+"?currentSchema=trade_query_it",user,password));
-        jdbc.execute("CREATE TABLE core_execution_projection (LIKE public.core_execution_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE trading_trades (LIKE public.trading_trades INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_execution_projection_initialization (LIKE public.core_execution_projection_initialization INCLUDING ALL)");
         repository=new TradeProjectionRepository(jdbc);
     }
@@ -81,7 +81,7 @@ class TradeProjectionPostgresTest {
     private void ready(ProductLine line) { jdbc.update("INSERT INTO core_execution_projection_initialization(product_line,snapshot_log_position) VALUES (?,32)",line.name()); }
     private void add(ProductLine line,long position,int index,long time,long takerUser,long makerUser) {
         jdbc.update("""
-                INSERT INTO core_execution_projection(product_line,export_sequence,execution_index,trade_id,taker_order_id,maker_order_id,
+                INSERT INTO trading_trades(product_line,export_sequence,execution_index,trade_id,taker_order_id,maker_order_id,
                   taker_user_id,maker_user_id,instrument_id,taker_side,taker_position_side,maker_position_side,
                   taker_fee_rate_ppm,maker_fee_rate_ppm,price_ticks,quantity_steps,occurred_at_epoch_ms)
                 VALUES (?,?,?,?,?,?,?,?,?,'BUY','NET','NET',500,-100,100,2,?)
@@ -91,7 +91,7 @@ class TradeProjectionPostgresTest {
     @Test void missingInitializationAndDatabaseFailureAre503RatherThanSuccessfulEmptyLists() {
         assertThatThrownBy(() -> search(ProductLine.OPTION,null,null,null,10,null,null))
                 .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
-        ready(ProductLine.OPTION);jdbc.execute("DROP TABLE core_execution_projection");
+        ready(ProductLine.OPTION);jdbc.execute("DROP TABLE trading_trades");
         assertThatThrownBy(() -> search(ProductLine.OPTION,null,null,null,10,null,null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
     @Test void bothSortDirectionsTraverseEqualTimesAndFullInt64PositionsWithoutDuplicates() {

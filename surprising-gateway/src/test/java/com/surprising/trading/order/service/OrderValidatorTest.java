@@ -10,7 +10,6 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -508,15 +507,26 @@ class OrderValidatorTest {
                 1_000_000L);
     }
 
-    private InstrumentRuleLookup lookup(InstrumentRule rule) {
-        return instrumentId -> Optional.of(rule);
+    private InstrumentSnapshotRuleLookup lookup(InstrumentRule rule) {
+        InstrumentSnapshotRuleLookup mock = org.mockito.Mockito.mock(InstrumentSnapshotRuleLookup.class);
+        org.mockito.Mockito.when(mock.currentRule(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(Optional.of(rule));
+        return mock;
+    }
+
+    private com.surprising.trading.order.repository.OrderMarkPriceRepository markPriceLookup(OptionalLong ticks) {
+        var mock = org.mockito.Mockito.mock(com.surprising.trading.order.repository.OrderMarkPriceRepository.class);
+        org.mockito.Mockito.when(mock.latestMarkPriceTicks(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong())).thenReturn(ticks);
+        return mock;
     }
 
     private OrderValidator validator(InstrumentRule rule, OptionalLong markPriceTicks, long maxSlippagePpm) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getRisk().setMarketMaxSlippagePpm(maxSlippagePpm);
-        return new OrderValidator(lookup(rule), properties,
-                (instrumentId, instrumentChangeId, maxAgeMs) -> markPriceTicks);
+        return new OrderValidator(lookup(rule), properties, markPriceLookup(markPriceTicks));
     }
 
     private OrderValidator limitPriceBandValidator(InstrumentRule rule,
@@ -525,7 +535,6 @@ class OrderValidatorTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getRisk().setLimitPriceProtectionEnabled(true);
         properties.getRisk().setLimitPriceBandPpm(limitPriceBandPpm);
-        return new OrderValidator(lookup(rule), properties,
-                (instrumentId, instrumentChangeId, maxAgeMs) -> markPriceTicks);
+        return new OrderValidator(lookup(rule), properties, markPriceLookup(markPriceTicks));
     }
 }

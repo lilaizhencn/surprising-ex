@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.interceptor;
 
-import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
+import com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
 import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;

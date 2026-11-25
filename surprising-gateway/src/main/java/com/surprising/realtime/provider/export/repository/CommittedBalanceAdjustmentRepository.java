@@ -1,6 +1,6 @@
 package com.surprising.realtime.provider.export.repository;
 
-import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedBalanceFlow;
+import com.surprising.aeron.protocol.export.CommittedBalanceFlow;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.sql.Timestamp;
@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
 /** 只补齐 account_balance_adjustments；调用方与订单/回执/水位使用同一投影事务。 */
 @Repository
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-        prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+        prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedBalanceAdjustmentRepository {
     private final JdbcTemplate jdbc;
 

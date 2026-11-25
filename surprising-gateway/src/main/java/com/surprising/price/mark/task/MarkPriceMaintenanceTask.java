@@ -26,9 +26,4 @@ public class MarkPriceMaintenanceTask {
     public void publishMarkPrices() {
         markPriceService.publishMarkPrices();
     }
-
-    @Scheduled(fixedDelayString = "${surprising.price.mark.audit.cleanup-delay-ms:60000}")
-    public void cleanupAudit() {
-        auditRetentionService.deleteExpiredAuditRows();
-    }
 }

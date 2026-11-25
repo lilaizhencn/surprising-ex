@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth.controller;
 
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
+import com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.model.ApiKeyModels.*;
 import com.surprising.gateway.provider.config.GatewayProperties;
 

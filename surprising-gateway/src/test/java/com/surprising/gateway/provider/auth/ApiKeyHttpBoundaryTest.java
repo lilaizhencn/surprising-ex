@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.auth;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
+import com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.model.ApiKeyAuthenticationRequest;
 import com.surprising.gateway.provider.auth.repository.GatewayApiKeyRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
@@ -11,6 +11,7 @@ import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.TotpService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.controller.OpenApiController;
+import com.surprising.gateway.provider.controller.OpenApiTestSupport;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,7 +28,7 @@ class ApiKeyHttpBoundaryTest {
     GatewayApiKeyRepository repository=mock(GatewayApiKeyRepository.class);
     AuthService auth=mock(AuthService.class);
     TotpService totp=new TotpService(properties);
-    GatewayApiKeyService service=new GatewayApiKeyService(repository,auth,totp,null,properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
+    GatewayApiKeyService service=new GatewayApiKeyService(repository,auth,totp,null,properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding.class), fixture.state);
 
     @Test
     void blockedIpMapsToOriginal403WithoutMarkingTheKeyUsed() {
@@ -122,6 +123,6 @@ class ApiKeyHttpBoundaryTest {
     }
     private OpenApiController controller(GatewayApiKeyService business) {
         properties.getBinanceApi().setEnabled(true);
-        return new OpenApiController(properties, null, null, null, null, business, null, auth, null, null, null, new ObjectMapper());
+        return OpenApiTestSupport.controller(properties, null, null, null, null, business, null, auth, null, null, null, new ObjectMapper());
     }
 }

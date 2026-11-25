@@ -188,11 +188,14 @@ surprising:
         private-route: true
   websocket:
     kafka:
-      # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。
-      group-id: surprising-websocket-${random.uuid}
+      # 合并部署后每个实例组名随主机名固定，避免每次重启产生随机孤儿 Consumer Group。
+      group-id: surprising-websocket-${HOSTNAME:local}
     security:
       allowed-origins:
-        - "*"
+        - "http://localhost:*"
+        - "http://127.0.0.1:*"
+        - "https://ex.tokdou.com"
+        - "https://ex-api.tokdou.com"
     netty:
       enabled: true
       port: 8081
@@ -224,21 +227,13 @@ surprising:
     kafka:
       application-id-override: ""
     stream:
-      threads: 2
+      threads: 1
       state-dir: data/kafka-streams
   realtime:
     router:
       enabled: true
       directory: ${SURPRISING_REALTIME_ROUTER_DIRECTORY:${SURPRISING_REALTIME_DIRECTORY:/dev/shm/aeron-router}}
       channel: "aeron:udp?endpoint=0.0.0.0:21010"
-  trade-export:
-    enabled: ${TRADE_EXPORT_ENABLED:false}
-    cluster-directory: ${TRADE_EXPORT_CLUSTER_DIR:}
-    aeron-directory: ${TRADE_EXPORT_AERON_DIR:}
-    archive-control-channel: ${TRADE_EXPORT_ARCHIVE_CHANNEL:}
-    checkpoint: ${TRADE_EXPORT_CHECKPOINT:}
-    cluster-id: ${TRADE_EXPORT_CLUSTER_ID:0}
-    kafka-config: ${TRADE_EXPORT_KAFKA_CONFIG:}
 
 telegram:
   login:
@@ -246,12 +241,12 @@ telegram:
     client-secret: ""
     redirect-uri: ""
   bot:
-    token: "8346418637:AAH6bA3FgFhPKGUndtVcJ4OOjv_ji8QZ9Rw"
+    token: ""
     username: leelz_openClaw_bot
     webhook-url: ""
-    webhook-secret: surprising_webhook_sec_8346418637
+    webhook-secret: ""
     webapp-url: https://app.surprising.exchange
-    alert-chat-id: 8458892560
+    alert-chat-id: ""
 
 # Google Identity Services / native Google Sign-In. Empty IDs keep the provider disabled.
 google:

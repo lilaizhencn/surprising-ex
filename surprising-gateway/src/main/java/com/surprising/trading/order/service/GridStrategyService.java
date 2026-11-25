@@ -188,7 +188,7 @@ public class GridStrategyService {
     /**
      * 定时巡检运行中的网格策略：检测已成交挂单并自动在相邻档位补挂反向单。
      */
-    @Scheduled(fixedDelay = 2000)
+    @Scheduled(fixedDelay = 5000)
     public void reconcileActiveGrids() {
         for (GridStrategyRecord record : strategies.values()) {
             if (!"ACTIVE".equalsIgnoreCase(record.status()) && !"RUNNING".equalsIgnoreCase(record.status())) {

@@ -66,9 +66,9 @@ public class CandlestickProperties {
     @Getter
     @Setter
     public static class Stream {
-        private int threads = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+        private int threads = 1;
         private String stateDir = "data/kafka-streams";
-        private Duration commitInterval = Duration.ofSeconds(1);
+        private Duration commitInterval = Duration.ofMillis(250);
         private Duration dedupeRetention = Duration.ofDays(3);
         private int dedupeCleanupMaxEntries = 10000;
 
@@ -92,12 +92,12 @@ public class CandlestickProperties {
     @Getter
     @Setter
     public static class Rocksdb {
-        private DataSize blockCacheSize = DataSize.ofMegabytes(256);
-        private DataSize writeBufferSize = DataSize.ofMegabytes(64);
-        private DataSize writeBufferManagerSize = DataSize.ofMegabytes(256);
+        private DataSize blockCacheSize = DataSize.ofMegabytes(32);
+        private DataSize writeBufferSize = DataSize.ofMegabytes(8);
+        private DataSize writeBufferManagerSize = DataSize.ofMegabytes(32);
         private int maxWriteBufferNumber = 3;
         private DataSize blockSize = DataSize.ofKilobytes(16);
-        private int maxBackgroundJobs = Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
+        private int maxBackgroundJobs = 2;
         private DataSize targetFileSizeBase = DataSize.ofMegabytes(64);
         private DataSize bytesPerSync = DataSize.ofMegabytes(1);
         private String compressionType = "LZ4_COMPRESSION";

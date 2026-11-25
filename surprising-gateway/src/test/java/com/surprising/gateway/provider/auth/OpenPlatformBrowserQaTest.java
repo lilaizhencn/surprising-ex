@@ -3,9 +3,12 @@ package com.surprising.gateway.provider.auth;
 import static org.mockito.Mockito.*;
 
 import com.surprising.gateway.provider.auth.controller.*;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.support.GatewayLimitRequestBinding;
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.repository.*;
 import com.surprising.gateway.provider.auth.service.*;
+import com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.config.*;
 import com.surprising.gateway.provider.controller.*;
 import com.surprising.gateway.provider.interceptor.*;

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.candlestick.api.model.*;
 import com.surprising.candlestick.provider.aggregation.*;
 import com.surprising.candlestick.provider.repository.CandleQueryRepository;
+import com.surprising.candlestick.provider.repository.PostgresCandleSink;
 import com.surprising.candlestick.provider.service.*;
 import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
@@ -148,7 +149,7 @@ class CandlestickLiveRollupTopologyTest {
             var p=new CandlestickProperties();p.getKafka().setProductLine(product);
             p.setPeriods(Arrays.stream(CandlePeriod.values()).map(CandlePeriod::code).toList());
             var builder=new StreamsBuilder();new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder,p,
-                    mock(CandleSink.class),mock(SymbolRegistryService.class),mock(PublicTradeEventMapper.class),hot,minutes);
+                    mock(PostgresCandleSink.class),mock(SymbolRegistryService.class),mock(PublicTradeEventMapper.class),hot,minutes);
             var config=new Properties();config.put(StreamsConfig.APPLICATION_ID_CONFIG,"live-rollup-"+product);
             config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG,"unused:9092");
             driver=new TopologyTestDriver(builder.build(),config,START.plusSeconds(1));

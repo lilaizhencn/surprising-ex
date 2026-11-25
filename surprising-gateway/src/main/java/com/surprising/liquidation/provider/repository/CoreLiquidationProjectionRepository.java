@@ -32,7 +32,7 @@ public class CoreLiquidationProjectionRepository {
                        signed_quantity_steps, close_quantity_steps,
                        execution_price_ticks, liquidation_fee_rate_ppm,
                        liquidation_fee_units, status, updated_at_epoch_ms
-                  FROM core_liquidation_projection
+                  FROM trading_liquidations
                  WHERE product_line = ?
                 """);
         List<Object> args = new ArrayList<>();
@@ -76,7 +76,7 @@ public class CoreLiquidationProjectionRepository {
                        signed_quantity_steps, close_quantity_steps,
                        execution_price_ticks, liquidation_fee_rate_ppm,
                        liquidation_fee_units, status, updated_at_epoch_ms
-                  FROM core_liquidation_projection
+                  FROM trading_liquidations
                  WHERE product_line = ? AND liquidation_id = ?
                 """, "liquidation_id", (rs, rowNum) -> new CoreLiquidationProjection(rs.getLong("liquidation_id"),
                 rs.getLong("user_id"), rs.getString("instrument_id"), rs.getString("asset"),
@@ -89,20 +89,11 @@ public class CoreLiquidationProjectionRepository {
                 Instant.ofEpochMilli(rs.getLong("updated_at_epoch_ms"))), productLine, liquidationId);
     }
 
-    /** 就绪标记与结果在同一 SQL 快照读取，空页不能掩盖未初始化。 */
+    /** 直接查询强平读表。 */
     private List<CoreLiquidationProjection> readAssociated(String product, String sql, String orderBy,
             org.springframework.jdbc.core.RowMapper<CoreLiquidationProjection> mapper, Object... values) {
-        var args = new ArrayList<Object>(); args.add(product); args.addAll(java.util.Arrays.asList(values));
-        String associated = """
-                SELECT initialized.__ready, projection_rows.*
-                  FROM (SELECT count(*)=1 AS __ready FROM core_liquidation_projection_initialization WHERE product_line=?) initialized
-                  LEFT JOIN LATERAL (
-                """ + sql + ") projection_rows ON initialized.__ready ORDER BY " + orderBy;
         try {
-            return jdbcTemplate.query(associated, (rs, row) -> {
-                if (!rs.getBoolean("__ready")) throw new ReadViewUnavailableException("LIQUIDATION_READ_VIEW_NOT_READY");
-                return rs.getObject("liquidation_id") == null ? null : mapper.mapRow(rs, row);
-            }, args.toArray()).stream().filter(java.util.Objects::nonNull).toList();
+            return jdbcTemplate.query(sql + " ORDER BY " + orderBy, mapper, values);
         } catch (DataAccessException failure) {
             throw new ReadViewUnavailableException("LIQUIDATION_READ_VIEW_UNAVAILABLE", failure);
         } catch (IllegalArgumentException invalid) {

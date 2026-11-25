@@ -4,7 +4,7 @@ import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.controller.C2cMeController;
 import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
-import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cAccessService;
 
 import com.surprising.gateway.c2c.service.C2cNotificationService;
 
@@ -38,7 +38,7 @@ class C2cMeHttpPostgresTest {
         assertThat(fixture.db.jdbc.queryForObject("SELECT attempts FROM c2c_otp_attempts",Integer.class)).isEqualTo(1);
         var changed=fixture.call(HttpMethod.PUT,"/api/v1/c2c/me",12,new C2cMeController.Settings("1","QA Buyer",false,5,new C2cVerification("123456","")),200);
         assertThat(changed.get("revision")).isEqualTo("2");
-        fixture.bean(C2cAccess.class).verifyFunds(C2cHttpFixture.principal(12),"Bearer qa-12","123456","");
+        fixture.bean(C2cAccessService.class).verifyFunds(C2cHttpFixture.principal(12),"Bearer qa-12","123456","");
         assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_security_grants WHERE user_id=12",Integer.class)).isEqualTo(1);
         fixture.call(HttpMethod.PUT,"/api/v1/c2c/me",12,new C2cMeController.Settings("2","QA Buyer",false,15,new C2cVerification("123456","")),200);
         assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_security_grants WHERE user_id=12",Integer.class)).isZero();

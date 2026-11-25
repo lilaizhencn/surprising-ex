@@ -7,14 +7,15 @@ import com.surprising.gateway.c2c.controller.C2cMerchantController;
 import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
-import com.surprising.gateway.c2c.service.C2cAdminReview;
-import com.surprising.gateway.c2c.service.C2cFunds;
-import com.surprising.gateway.c2c.service.C2cMerchantBonds;
+import com.surprising.gateway.c2c.service.C2cAdminReviewService;
+import com.surprising.gateway.c2c.service.C2cFundService;
+import com.surprising.gateway.c2c.service.C2cMerchantBondService;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import com.surprising.gateway.provider.model.ProductAccountAdjustment;
+import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -35,9 +36,9 @@ class C2cMerchantBondPostgresTest {
     }
     private Map<?,?> bond(Map<String,Object> response) {return (Map<?,?>)response.get("bond");}
     private void settle() {
-        var intents=f.bean(C2cFundsRepository.class);var funds=f.bean(C2cFunds.class);
+        var intents=f.bean(C2cFundsRepository.class);var funds=f.bean(C2cFundService.class);
         for(var i:intents.due(64)) funds.resume(i.id());
-        f.bean(C2cMerchantBonds.class).confirm();
+        f.bean(C2cMerchantBondService.class).confirm();
     }
 
     @Test void unavailableSpotReturnsNativeProductFailureBeforeCreatingAnyFundsIntent() throws Exception {
@@ -74,23 +75,23 @@ class C2cMerchantBondPostgresTest {
         f.call(HttpMethod.POST,"/api/v1/admin/c2c/merchants/12/review",9,
                 new C2cAdminReviewModels.MerchantRequest("1","APPROVE","VERIFIED","Check committed merchant bond"),200);
         assertThat(f.db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE owner_type='MERCHANT'",Integer.class)).isEqualTo(1);
-        verify(f.core,times(1)).transferOut(any(),any());
+        verify(f.core,times(1)).transferOut(any());
     }
 
     @Test void unknownDebitKeepsTheOriginalTransferAndCannotUnlockOrCreateAnotherDeposit() throws Exception {
         apply();UUID request=UUID.randomUUID();var first=deposit(request);
-        when(f.core.transferOut(any(),any())).thenReturn(new ProductAccountAdjustment(ProductAccountAdjustment.Status.UNKNOWN,"RESULT_UNKNOWN"));
+        when(f.core.transferOut(any())).thenThrow(new IllegalStateException("RESULT_UNKNOWN"));
         settle();
         assertThat(bond(deposit(request)).get("status")).isEqualTo("RESERVING");
         f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bond",12,
                 new C2cMerchantController.Deposit(UUID.randomUUID(),"1",new C2cVerification("123456","")),409);
         f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bonds/"+bond(first).get("bondId")+"/withdraw",12,null,409);
         f.db.jdbc.update("UPDATE c2c_fund_intents SET retry_after=now() WHERE owner_type='MERCHANT'");
-        when(f.core.transferOut(any(),any())).thenReturn(new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null));
+        when(f.core.transferOut(any())).thenReturn((ProductBalanceResponse) null);
         settle();
         assertThat(bond(deposit(request)).get("status")).isEqualTo("LOCKED");
         var commands=org.mockito.ArgumentCaptor.forClass(com.surprising.account.api.model.ProductTransferOperationRequest.class);
-        verify(f.core,times(2)).transferOut(any(),commands.capture());
+        verify(f.core,times(2)).transferOut(commands.capture());
         assertThat(commands.getAllValues().get(0).transferId()).isEqualTo(commands.getAllValues().get(1).transferId());
     }
 
@@ -110,7 +111,7 @@ class C2cMerchantBondPostgresTest {
         assertThat(refund.get("amount_units")).isEqualTo(100000000L);
         assertThat(refund.get("asset")).isEqualTo("USDT");
         f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bonds/"+id+"/withdraw",12,null,200);
-        verify(f.core,times(2)).transferOut(any(),any());
+        verify(f.core,times(2)).transferOut(any());
     }
 
     @Test void openAdsAndOrdersAndRiskSuspensionPreventDepositWithdrawal() throws Exception {
@@ -131,7 +132,7 @@ class C2cMerchantBondPostgresTest {
         var policy=new C2cMerchantController.Policy("1","USDT","2","Change policy while existing merchant bond is locked");
         f.call(HttpMethod.PUT,"/api/v1/admin/c2c/merchant-bond-policy",12,policy,403);
         f.call(HttpMethod.PUT,"/api/v1/admin/c2c/merchant-bond-policy",9,policy,409);
-        assertThat(f.bean(C2cMerchantBonds.class).policy().get("amountUnits")).isEqualTo("100000000");
+        assertThat(f.bean(C2cMerchantBondService.class).policy().get("amountUnits")).isEqualTo("100000000");
         assertThatThrownBy(()->f.db.jdbc.update("UPDATE c2c_merchant_bonds SET amount_units=1 WHERE user_id=11"))
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
@@ -141,12 +142,12 @@ class C2cMerchantBondPostgresTest {
         f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bond",12,
                 new C2cMerchantController.Deposit(UUID.randomUUID(),"1",new C2cVerification("000000","")),409);
         assertThat(f.db.jdbc.queryForObject("SELECT count(*) FROM c2c_merchant_bonds WHERE user_id=12",Integer.class)).isZero();
-        when(f.core.transferOut(any(),any())).thenReturn(new ProductAccountAdjustment(ProductAccountAdjustment.Status.REJECTED,"INSUFFICIENT_BALANCE"));
+        when(f.core.transferOut(any())).thenThrow(new AccountCommandRejectedException("INSUFFICIENT_BALANCE","INSUFFICIENT_BALANCE"));
         UUID request=UUID.randomUUID();deposit(request);settle();
         assertThat(bond(deposit(request)).get("status")).isEqualTo("FAILED");
         f.call(HttpMethod.POST,"/api/v1/admin/c2c/merchants/12/review",9,
                 new C2cAdminReviewModels.MerchantRequest("1","APPROVE","VERIFIED","Rejected bond cannot qualify merchant"),409);
-        verify(f.core,never()).transferIn(any(),any());
+        verify(f.core,never()).transferIn(any());
     }
 
     @Test void simultaneousDepositRequestsCannotDoubleChargeAndOldReceiptsStayOnTheirOwnCycle() throws Exception {

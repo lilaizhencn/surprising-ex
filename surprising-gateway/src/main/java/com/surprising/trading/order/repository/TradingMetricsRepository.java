@@ -15,7 +15,7 @@ public class TradingMetricsRepository {
     public TradingMetricsRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
     public Optional<StoredTradingMetrics> find(ProductLine product, int windowMinutes) {
         try {
-            return jdbc.query("SELECT cluster_position,generated_at_epoch_ms,metrics::text FROM core_trading_statistics_snapshot WHERE product_line=? AND window_minutes=?",
+            return jdbc.query("SELECT cluster_position,generated_at_epoch_ms,metrics::text FROM trading_stats_snapshots WHERE product_line=? AND window_minutes=?",
                     (rs, row) -> new StoredTradingMetrics(rs.getLong(1), rs.getLong(2), rs.getString(3)), product.name(), windowMinutes)
                     .stream().findFirst();
         } catch (DataAccessException unavailable) {

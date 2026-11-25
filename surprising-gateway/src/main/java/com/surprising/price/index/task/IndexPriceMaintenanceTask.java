@@ -43,11 +43,6 @@ public class IndexPriceMaintenanceTask {
         exchangeRateService.refreshStableCoinRate();
     }
 
-    @Scheduled(fixedDelayString = "${surprising.price.index.audit.cleanup-delay-ms:60000}")
-    public void cleanupAudit() {
-        auditRetentionService.deleteExpiredAuditRows();
-    }
-
     public void calculateAndPublish() {
         indexPriceService.pollAndPublish();
     }

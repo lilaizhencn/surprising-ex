@@ -4,7 +4,7 @@ import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -88,7 +88,7 @@ class C2cSubmissionBoundaryPostgresTest {
         fixture.call(HttpMethod.POST,"/api/v1/c2c/payment-accounts/"+fixture.makerAccount+"/disable",11,
                 new C2cController.PaymentDisable("1",new C2cVerification("123456","")),409);
         assertThat(fixture.bean(C2cAdsRepository.class).get(ad,false)).isEqualTo(before);
-        assertThat(fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false).status()).isEqualTo("APPROVED");
+        assertThat(fixture.bean(C2cPaymentAccountService.class).get(11,fixture.makerAccount,false).status()).isEqualTo("APPROVED");
     }
     @Test void internalStateFailureKeepsOriginalProcessingReceiptAndCanResumeWithoutDuplicateIntent() throws Exception {
         String key="qa-internal-state-"+UUID.randomUUID();var payload=fixture.payload("SELL");

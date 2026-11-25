@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth;
 
-import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
@@ -36,7 +36,7 @@ class OperatingAccountSessionTest {
             mock(LoginVerificationService.class), mock(GatewayUserAccessBlockRepository.class),
             new AuthClientMetadataBinding(new GatewayProperties(),
                     mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class),
-                    mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)),
+                    mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)),
             mock(com.surprising.affiliate.service.AffiliateService.class),
             mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class),
             fixture.state, mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));

@@ -1,8 +1,8 @@
 package com.surprising.gateway.c2c.service;
 
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAds;
-import com.surprising.gateway.c2c.service.C2cOrders;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAdService;
+import com.surprising.gateway.c2c.service.C2cOrderService;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
 import com.surprising.gateway.c2c.model.C2cAdPublish;
@@ -18,12 +18,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
 public class C2cSubmissionService {
     private final C2cSubmissions submissions;
-    private final C2cAds ads;
-    private final C2cOrders orders;
-    private final C2cAccess access;
+    private final C2cAdService ads;
+    private final C2cOrderService orders;
+    private final C2cAccessService access;
     private final C2cQueryService queries;
 
-    public C2cSubmissionService(C2cSubmissions submissions,C2cAds ads,C2cOrders orders,C2cAccess access,C2cQueryService queries) {
+    public C2cSubmissionService(C2cSubmissions submissions,C2cAdService ads,C2cOrderService orders,C2cAccessService access,C2cQueryService queries) {
         this.submissions=submissions;this.ads=ads;this.orders=orders;this.access=access;this.queries=queries;
     }
     public Map<String,Object> publish(JwtPrincipal user,String authorization,String key,String hash,C2cAdPublish payload,String email,String totp) {

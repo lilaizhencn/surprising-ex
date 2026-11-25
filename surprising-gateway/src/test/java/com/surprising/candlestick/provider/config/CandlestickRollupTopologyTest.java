@@ -13,7 +13,7 @@ import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.api.model.TradeEvent;
 import com.surprising.candlestick.api.model.TradeSide;
-import com.surprising.candlestick.provider.aggregation.CandleSink;
+import com.surprising.candlestick.provider.repository.PostgresCandleSink;
 import com.surprising.candlestick.provider.service.CandleHotCache;
 import com.surprising.candlestick.provider.service.PublicTradeEventMapper;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
@@ -45,7 +45,7 @@ class CandlestickRollupTopologyTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenAnswer(call -> List.copyOf(durable.subMap(call.getArgument(2), true, call.getArgument(3), false).values()));
         var builder = new StreamsBuilder();
-        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(CandleSink.class),
+        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(PostgresCandleSink.class),
                 mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), repository);
         var config = new Properties();
         config.put(StreamsConfig.APPLICATION_ID_CONFIG, "all-period-replacement-test");
@@ -101,7 +101,7 @@ class CandlestickRollupTopologyTest {
         when(repository.findRange("1", "1m", week.floor(first.openTime()),
                 week.closeTime(week.floor(first.openTime())), 10080)).thenReturn(rows);
         var builder = new StreamsBuilder();
-        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(CandleSink.class),
+        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(PostgresCandleSink.class),
                 mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), repository);
         var config = new Properties();
         config.put(StreamsConfig.APPLICATION_ID_CONFIG, "expired-weekly-minute-test");
@@ -148,7 +148,7 @@ class CandlestickRollupTopologyTest {
         var repository = mock(com.surprising.candlestick.provider.repository.CandleQueryRepository.class);
         when(repository.findRange("1", "1m", open, week.closeTime(open), 10080)).thenReturn(rows);
         var builder = new StreamsBuilder();
-        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(CandleSink.class),
+        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(PostgresCandleSink.class),
                 mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), repository);
         var config = new Properties();
         config.put(StreamsConfig.APPLICATION_ID_CONFIG, "weekly-replacement-test");
@@ -180,7 +180,7 @@ class CandlestickRollupTopologyTest {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
         properties.getFlush().setInterval(Duration.ofSeconds(1));
-        CandleSink sink = mock(CandleSink.class);
+        PostgresCandleSink sink = mock(PostgresCandleSink.class);
         doThrow(new IllegalStateException("database unavailable")).doNothing()
                 .when(sink).upsertBatch(org.mockito.ArgumentMatchers.anyList());
         SymbolRegistryService symbols = mock(SymbolRegistryService.class);
@@ -242,7 +242,7 @@ class CandlestickRollupTopologyTest {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
         StreamsBuilder builder = new StreamsBuilder();
-        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(CandleSink.class),
+        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(PostgresCandleSink.class),
                 mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), minutes());
 
         Properties streams = new Properties();
@@ -288,7 +288,7 @@ class CandlestickRollupTopologyTest {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
         StreamsBuilder builder = new StreamsBuilder();
-        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(CandleSink.class),
+        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(PostgresCandleSink.class),
                 mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), minutes());
 
         Properties streams = new Properties();
@@ -318,7 +318,7 @@ class CandlestickRollupTopologyTest {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
         StreamsBuilder builder = new StreamsBuilder();
-        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(CandleSink.class),
+        new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder, properties, mock(PostgresCandleSink.class),
                 mock(SymbolRegistryService.class), mock(PublicTradeEventMapper.class), new CandleHotCache(), minutes());
 
         Properties streams = new Properties();
@@ -347,7 +347,7 @@ class CandlestickRollupTopologyTest {
         CandlestickProperties properties = new CandlestickProperties();
         properties.setPeriods(List.of("1m", "5m"));
         properties.getFlush().setInterval(Duration.ofSeconds(1));
-        CandleSink sink = mock(CandleSink.class);
+        PostgresCandleSink sink = mock(PostgresCandleSink.class);
         SymbolRegistryService symbols = mock(SymbolRegistryService.class);
         when(symbols.isEnabled("1")).thenReturn(true);
         PublicTradeEventMapper mapper = mock(PublicTradeEventMapper.class);

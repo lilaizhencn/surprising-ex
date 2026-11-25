@@ -29,7 +29,7 @@ public class GatewayApiKeyService {
     private final TotpService totpService;
     private final SensitiveActionVerificationService verificationService;
     private final ClientIpResolver clientIpResolver;
-    private final com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient;
+    private final com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding currentClient;
     private final com.surprising.gateway.provider.auth.state.AuthState authState;
     private com.surprising.gateway.provider.subaccount.repository.SubAccountRepository subAccountRepository;
 
@@ -43,7 +43,7 @@ public class GatewayApiKeyService {
                                 TotpService totpService,
                                 SensitiveActionVerificationService verificationService,
                                 com.surprising.gateway.provider.config.GatewayProperties properties,
-                                com.surprising.gateway.provider.auth.port.CurrentAuthClient currentClient,
+                                com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding currentClient,
                                 com.surprising.gateway.provider.auth.state.AuthState authState) {
         this.authState = authState;
         this.repository = repository;

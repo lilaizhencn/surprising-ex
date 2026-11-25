@@ -1,7 +1,6 @@
 package com.surprising.realtime.provider.export.service;
 
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
-import com.surprising.aeron.service.replay.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.repository.*;
 import java.util.ArrayList;
@@ -11,31 +10,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Rebuildable algo read state; invoked only by the committed replay export worker. */
 @org.springframework.stereotype.Service
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedAlgoProjectionService {
     private final TransactionTemplate transaction;
     private final CommittedAlgoRepository algoRows;
-    private final AlgoInitializationRepository initialization;
 
-    public CommittedAlgoProjectionService(CommittedAlgoRepository algoRows, AlgoInitializationRepository initialization,
+    public CommittedAlgoProjectionService(CommittedAlgoRepository algoRows,
             @org.springframework.beans.factory.annotation.Qualifier("committedProjectionTransactions") TransactionTemplate transaction) {
-        this.algoRows = algoRows; this.initialization = initialization; this.transaction = transaction;
-    }
-
-    public void initialize(ProductLine product, CommittedTradeReplay replay, long checkpointPosition) {
-        if (initialization.initialized(product)) return;
-        var page = new ArrayList<CoreAlgoOrderView>(256);
-        replay.forEachRetainedAlgo(value -> {
-            page.add(value);
-            if (page.size() == 256) {
-                transaction.executeWithoutResult(tx -> persist(product, page, replay.exportSequence()));
-                page.clear();
-            }
-        });
-        transaction.executeWithoutResult(tx -> {
-            persist(product, page, replay.exportSequence());
-            initialization.initialize(product, checkpointPosition);
-        });
+        this.algoRows = algoRows; this.transaction = transaction;
     }
 
     /** Caller owns the transaction shared with order changes and the visibility watermark. */

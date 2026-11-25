@@ -52,7 +52,8 @@ class CustodyWalletControllerTest {
         when(withdrawalService.submit(eq(42L),eq("withdraw-1"),org.mockito.ArgumentMatchers.argThat(value -> forgedSource.equals(value.custodyAddressId()))))
                 .thenThrow(new IllegalArgumentException("withdrawal source differs from funded source"));
         CustodyWalletController controller = new CustodyWalletController(
-                authService, walletClient, verificationService, complianceService, withdrawalService);
+                authService, walletClient, verificationService, complianceService, withdrawalService,
+                mock(com.surprising.gateway.provider.service.WalletFundingService.class));
 
         assertThatThrownBy(() -> controller.createWithdrawal("Bearer token", "withdraw-1", null, null,
                 new CustodyWalletController.CreateWithdrawalRequest(
@@ -80,7 +81,8 @@ class CustodyWalletControllerTest {
         when(walletClient.chains()).thenReturn(List.of(Map.of("chain", "ETH", "enabled", true)));
         CustodyWalletController controller = new CustodyWalletController(
                 authService, walletClient, mock(SensitiveActionVerificationService.class),
-                mock(ComplianceService.class), mock(CustodyWithdrawalService.class));
+                mock(ComplianceService.class), mock(CustodyWithdrawalService.class),
+                mock(com.surprising.gateway.provider.service.WalletFundingService.class));
 
         assertThat(controller.chains("Bearer token"))
                 .containsExactly(Map.of("chain", "ETH", "enabled", true));
@@ -94,7 +96,8 @@ class CustodyWalletControllerTest {
         com.surprising.gateway.provider.repository.UserDepositAddressRepository repo = mock(com.surprising.gateway.provider.repository.UserDepositAddressRepository.class);
         CustodyWalletController controller = new CustodyWalletController(
                 authService, walletClient, mock(SensitiveActionVerificationService.class),
-                mock(ComplianceService.class), mock(CustodyWithdrawalService.class), repo);
+                mock(ComplianceService.class), mock(CustodyWithdrawalService.class),
+                new com.surprising.gateway.provider.service.WalletFundingService(null, null, walletClient, repo));
         when(authService.authenticateBearer("Bearer token"))
                 .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of(), Instant.now().plusSeconds(600)));
         when(repo.find(42L, "ETH", 1L)).thenReturn(java.util.Optional.of(
@@ -112,7 +115,7 @@ class CustodyWalletControllerTest {
                 mock(com.surprising.gateway.provider.service.WalletFundingService.class);
         CustodyWalletController controller = new CustodyWalletController(
                 authService, mock(CustodyWalletClient.class), mock(SensitiveActionVerificationService.class),
-                mock(ComplianceService.class), mock(CustodyWithdrawalService.class), null, fundingService);
+                mock(ComplianceService.class), mock(CustodyWithdrawalService.class), fundingService);
         when(authService.authenticateBearer("Bearer token"))
                 .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of(), Instant.now().plusSeconds(600)));
         var expectedAddress = new com.surprising.gateway.provider.service.WalletFundingService.DepositAddress(

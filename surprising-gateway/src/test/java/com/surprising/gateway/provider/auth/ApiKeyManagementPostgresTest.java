@@ -61,7 +61,7 @@ class ApiKeyManagementPostgresTest {
                 .thenReturn(new JwtPrincipal(id, "user_" + id, "NORMAL", List.of("USER"), Instant.now().plusSeconds(300)));
         when(verification.verify(anyLong(), eq("SECURITY_SETTINGS"), any(), any(), any())).thenReturn(true);
         totp = new TotpService(properties);
-        service = new GatewayApiKeyService(keyRepository(jdbc), auth, totp, verification, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
+        service = new GatewayApiKeyService(keyRepository(jdbc), auth, totp, verification, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding.class), fixture.state);
         mvc = MockMvcBuilders.standaloneSetup(new UserApiKeyController(service, properties)).build();
     }
     @AfterEach void cleanup() { if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }

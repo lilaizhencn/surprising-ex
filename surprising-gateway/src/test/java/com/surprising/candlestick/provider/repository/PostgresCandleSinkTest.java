@@ -29,7 +29,7 @@ class PostgresCandleSinkTest {
         verify(jdbc).batchUpdate(sql.capture(),
                 org.mockito.ArgumentMatchers.any(BatchPreparedStatementSetter.class));
         assertThat(sql.getValue()).contains("ON CONFLICT (instrument_id, period, open_time) DO UPDATE",
-                "EXCLUDED.trade_count > candlestick_candles.trade_count");
+                "EXCLUDED.trade_count > market_candles.trade_count");
     }
 
     private CandleSnapshot snapshot(String period, CandleStatus status) {

@@ -34,7 +34,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -56,11 +55,10 @@ public class AdminComplianceController {
     private final ProofOfReservesService porService;
     private final AuthService authService;
     private final AdminApprovalService approvalService;
-    private final JdbcTemplate jdbcTemplate;
 
     public AdminComplianceController(ComplianceService complianceService,
                                      ObjectMapper objectMapper) {
-        this(complianceService, objectMapper, null, null, null, null);
+        this(complianceService, objectMapper, null, null, null);
     }
 
     @Autowired
@@ -68,14 +66,12 @@ public class AdminComplianceController {
                                      ObjectMapper objectMapper,
                                      @Autowired(required = false) ProofOfReservesService porService,
                                      @Autowired(required = false) AuthService authService,
-                                     @Autowired(required = false) AdminApprovalService approvalService,
-                                     @Autowired(required = false) JdbcTemplate jdbcTemplate) {
+                                     @Autowired(required = false) AdminApprovalService approvalService) {
         this.complianceService = complianceService;
         this.objectMapper = objectMapper;
         this.porService = porService;
         this.authService = authService;
         this.approvalService = approvalService;
-        this.jdbcTemplate = jdbcTemplate;
     }
 
     @GetMapping("/users")
@@ -312,7 +308,7 @@ public class AdminComplianceController {
             } else if (authService != null) {
                 authService.requireAdminPermission(authorization, "admin.compliance.write");
             }
-            PorSnapshotSummary created = porService.triggerSnapshotFromDatabase(jdbcTemplate);
+            PorSnapshotSummary created = porService.triggerSnapshotFromDatabase();
             Map<String, Object> res = new LinkedHashMap<>(mapPorSummary(created));
             res.put("ok", true);
             return res;

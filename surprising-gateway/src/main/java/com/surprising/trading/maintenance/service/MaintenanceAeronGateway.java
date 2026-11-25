@@ -1,24 +1,19 @@
 package com.surprising.trading.maintenance.service;
 
 import com.surprising.aeron.client.AeronClientPool;
-import io.aeron.driver.MediaDriver;
-import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.protocol.*;
-import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.service.OrderAeronGateway;
 import java.util.List;
+import java.util.Objects;
 import org.springframework.stereotype.Service;
 
-/** Dedicated ingress queue and source identity; never shares user order/trigger client capacity. */
 @Service
-public class MaintenanceAeronGateway implements AutoCloseable {
+public class MaintenanceAeronGateway {
     private final AeronClientPool clients;
     private final OrderAeronGateway views;
-    public MaintenanceAeronGateway(TradingOrderProperties properties,
-            @Qualifier("productCommandMediaDriver")
-            MediaDriver driver) {
-        clients=clients(properties, driver);
-        views=new OrderAeronGateway(clients);
+    public MaintenanceAeronGateway(AeronClientPool clients) {
+        this.clients = Objects.requireNonNull(clients, "clients");
+        this.views = new OrderAeronGateway(this.clients);
     }
     public CoreMaintenanceCodec.Page maintenance(String instrumentId,long afterUserId,int limit) { return views.maintenance(instrumentId,afterUserId,limit); }
     public CoreUserStateView userState(long userId) { return views.userState(userId); }
@@ -27,11 +22,6 @@ public class MaintenanceAeronGateway implements AutoCloseable {
     public CoreSettlementProgressView settlementProgress(String instrumentId) { return views.settlementProgress(instrumentId); }
     public CoreResponse command(CoreMessageType type,java.util.UUID id,long userId,byte[] payload) { return views.command(type,id,userId,payload); }
     public com.surprising.aeron.client.CoreCommandOutcome commandOutcome(CoreMessageType type,java.util.UUID id,long userId,byte[] payload) { return clients.commandOutcome(type,id,userId,payload); }
-    private static AeronClientPool clients(TradingOrderProperties properties, MediaDriver driver) {
-        var config=properties.getAeron(); var line=properties.getProductLine();
-        return new AeronClientPool("maintenance",line,config.getHostnames(),config.getEgressHostname(),
-                config.getResponseTimeout(),1,"maintenance-"+line.name()+"-node-"+config.getNodeId(),driver);
-    }
     public List<CoreTriggerOrderStateView> openTriggers(long userId,String instrumentId,long before,int limit) {
         return triggerQuery(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY,userId,new CoreTriggerOrderQuery(0,instrumentId,before,limit));
     }
@@ -44,5 +34,4 @@ public class MaintenanceAeronGateway implements AutoCloseable {
         if(response.status()!=ResponseStatus.OK) throw new IllegalStateException(response.resultCode()+": maintenance trigger query failed");
         return CoreTriggerOrderCodec.decodeList(response.data());
     }
-    @Override @jakarta.annotation.PreDestroy public void close() { clients.close(); }
 }

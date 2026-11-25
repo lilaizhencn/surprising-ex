@@ -112,8 +112,8 @@ public class GatewaySecurityConfiguration {
         if (SAFE_METHODS.contains(request.getMethod())) return false;
         if (request.getHeader("Authorization") != null || request.getHeader("X-API-Key") != null
                 || request.getHeader("X-MBX-APIKEY") != null) return false;
-        if (com.surprising.gateway.provider.auth.controller.BrowserSessionCookies.client(request) == null) return false;
-        return com.surprising.gateway.provider.auth.controller.BrowserSessionCookies.sessionToken(request) != null
+        if (com.surprising.gateway.provider.auth.support.BrowserSessionCookies.client(request) == null) return false;
+        return com.surprising.gateway.provider.auth.support.BrowserSessionCookies.sessionToken(request) != null
                 || "cookie".equals(request.getHeader("X-Auth-Transport"));
     }
 

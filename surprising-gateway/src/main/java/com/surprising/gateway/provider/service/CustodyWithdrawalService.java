@@ -1,9 +1,12 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.exception.SpotAccountRejectedException;
-import com.surprising.gateway.provider.client.SpotAccountClient;
+import com.surprising.account.api.model.BalanceAdjustmentRequest;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
+import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.client.WithdrawalValuationClient;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.product.api.ProductLine;
 
 import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +41,7 @@ public class CustodyWithdrawalService {
     private final CustodyWithdrawalRepository repository;
     private final CustodyWithdrawalStateService states;
     private final CustodyWalletClient walletClient;
-    private final SpotAccountClient spotAccountClient;
+    private final GatewayProductServices products;
     private final WithdrawalValuationClient valuationClient;
     private final CustodyWithdrawalRefundService refundService;
     private final CustodyWithdrawalReconciliationService reconciliationService;
@@ -51,12 +54,12 @@ public class CustodyWithdrawalService {
                                     CustodyWithdrawalRepository repository,
                                     CustodyWithdrawalStateService states,
                                     CustodyWalletClient walletClient,
-                                    SpotAccountClient spotAccountClient,
+                                    GatewayProductServices products,
                                     WithdrawalValuationClient valuationClient,
                                     CustodyWithdrawalRefundService refundService,
                                     CustodyWithdrawalReconciliationService reconciliationService,
                                     ObjectMapper objectMapper, com.surprising.asset.service.AssetConfigurationService assets) {
-        this(properties, repository, states, walletClient, spotAccountClient, valuationClient,
+        this(properties, repository, states, walletClient, products, valuationClient,
                 refundService, reconciliationService, objectMapper, assets, null);
     }
 
@@ -64,14 +67,14 @@ public class CustodyWithdrawalService {
                                     CustodyWithdrawalRepository repository,
                                     CustodyWithdrawalStateService states,
                                     CustodyWalletClient walletClient,
-                                    SpotAccountClient spotAccountClient,
+                                    GatewayProductServices products,
                                     WithdrawalValuationClient valuationClient,
                                     CustodyWithdrawalRefundService refundService,
                                     CustodyWithdrawalReconciliationService reconciliationService,
                                     ObjectMapper objectMapper,
                                     com.surprising.asset.service.AssetConfigurationService assets,
                                     com.surprising.gateway.provider.reconciliation.EmergencyWithdrawalCircuitBreaker circuitBreaker) {
-        this(properties, repository, states, walletClient, spotAccountClient, valuationClient,
+        this(properties, repository, states, walletClient, products, valuationClient,
                 refundService, reconciliationService, objectMapper, assets, circuitBreaker, null);
     }
 
@@ -80,7 +83,7 @@ public class CustodyWithdrawalService {
                                     CustodyWithdrawalRepository repository,
                                     CustodyWithdrawalStateService states,
                                     CustodyWalletClient walletClient,
-                                    SpotAccountClient spotAccountClient,
+                                    GatewayProductServices products,
                                     WithdrawalValuationClient valuationClient,
                                     CustodyWithdrawalRefundService refundService,
                                     CustodyWithdrawalReconciliationService reconciliationService,
@@ -93,7 +96,7 @@ public class CustodyWithdrawalService {
         this.repository = repository;
         this.states = states;
         this.walletClient = walletClient;
-        this.spotAccountClient = spotAccountClient;
+        this.products = products;
         this.valuationClient = valuationClient;
         this.refundService = refundService;
         this.reconciliationService = reconciliationService;
@@ -421,12 +424,12 @@ public class CustodyWithdrawalService {
 
     private void debit(CustodyWithdrawalModels.WithdrawalRecord record) {
         try {
-            spotAccountClient.adjustBalance(record.userId(), record.assetSymbol(), -record.amountUnits(),
+            adjustSpotBalance(products, record.userId(), record.assetSymbol(), -record.amountUnits(),
                     record.spotDebitReference(), "custody wallet withdrawal");
-        } catch (SpotAccountRejectedException ex) {
-            if (!ex.isCoreDecision()) {
-                states.markDebitUnknown(record.withdrawalId(),"local validation cannot establish the original Core outcome");
-                throw new WithdrawalUnknownException("spot adjustment outcome is unverified",ex);
+        } catch (AccountCommandRejectedException ex) {
+            if ("IDEMPOTENCY_CONFLICT".equals(ex.errorCode())) {
+                states.markDebitUnknown(record.withdrawalId(), "spot adjustment reference conflicts with an existing command");
+                throw new WithdrawalUnknownException("spot adjustment outcome is unverified", ex);
             }
             states.markRejected(record.withdrawalId(), "SPOT_REJECTED", message(ex));
             throw new WithdrawalRejectedException("spot account rejected withdrawal", ex);
@@ -434,6 +437,17 @@ public class CustodyWithdrawalService {
             states.markDebitUnknown(record.withdrawalId(), message(ex));
             throw new WithdrawalUnknownException("spot account debit status is unknown", ex);
         }
+    }
+
+    static void adjustSpotBalance(GatewayProductServices products, long userId, String asset,
+                                  long amountUnits, String referenceId, String reason) {
+        if (userId <= 0L || asset == null || asset.isBlank() || referenceId == null || referenceId.isBlank()) {
+            throw new IllegalArgumentException("spot balance adjustment request is invalid");
+        }
+        products.service(ProductLine.SPOT, AccountCommandGateway.class).adjustBalance(
+                new BalanceAdjustmentRequest(userId, asset.trim().toUpperCase(Locale.ROOT),
+                        amountUnits, referenceId, reason == null ? "" : reason),
+                null, null);
     }
 
     private void refund(CustodyWithdrawalModels.WithdrawalRecord record,

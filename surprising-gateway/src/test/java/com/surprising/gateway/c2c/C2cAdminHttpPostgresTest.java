@@ -12,9 +12,9 @@ import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
-import com.surprising.gateway.c2c.service.C2cAdminReview;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminReviewService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -114,7 +114,7 @@ class C2cAdminHttpPostgresTest {
     @Test void selfApprovalAndRevokedApproverPermissionAreRejected() throws Exception {
         var dispute=dispute();String path=decisionPath(dispute.appeal());var body=new C2cAdminReviewModels.AppealDecision("REFUND","Synthetic payment verification");
         var service=fixture.bean(AdminApprovalService.class);
-        var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval reason");
+        var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,C2cAdminAccessService.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval reason");
         var pending=service.create("Bearer qa-9",request);
         assertThatThrownBy(()->service.approve("Bearer qa-9",pending.approvalId(),"Not independent")).isInstanceOf(IllegalStateException.class);
         long approval=approve(path,body,9,10);
@@ -124,12 +124,12 @@ class C2cAdminHttpPostgresTest {
     }
 
     @Test void manualPaymentReviewRequiresAttestationAndSensitiveReadsRequireAnAuditWrite() throws Exception {
-        var account=fixture.bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Review Holder","qa-review-account","",null)));
+        var account=fixture.bean(C2cPaymentAccountService.class).save(11,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Review Holder","qa-review-account","",null)));
         var list=fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/payment-accounts?status=PENDING",9,null,200);
         assertThat(fixture.json.writeValueAsString(list)).doesNotContain("qa-review-account","holderName","ciphertext");
         String path="/api/v1/admin/c2c/payment-accounts/"+account.id()+"/review";
         fixture.call(HttpMethod.POST,path,9,new C2cAdminReviewModels.PaymentRequest("1","APPROVE",false,"Synthetic manual identity check"),400);
-        assertThat(fixture.bean(C2cPaymentAccounts.class).get(11,account.id(),false).status()).isEqualTo("PENDING");
+        assertThat(fixture.bean(C2cPaymentAccountService.class).get(11,account.id(),false).status()).isEqualTo("PENDING");
         fixture.call(HttpMethod.POST,path,9,new C2cAdminReviewModels.PaymentRequest("1","APPROVE",true,"Synthetic manual identity check"),200);
         var details=fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/payment-accounts/"+account.id(),9,null,200);
         assertThat(((Map<?,?>)details.get("details")).get("accountNumber")).isEqualTo("qa-review-account");
@@ -281,7 +281,7 @@ class C2cAdminHttpPostgresTest {
     private String decisionPath(UUID id) {return "/api/v1/admin/c2c/appeals/"+id+"/decision";}
     private long approve(String path,Object body,long requester,long reviewer) {
         var service=fixture.bean(AdminApprovalService.class);
-        var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval");
+        var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,C2cAdminAccessService.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval");
         var approval=service.create("Bearer qa-"+requester,request);
         service.approve("Bearer qa-"+reviewer,approval.approvalId(),"Synthetic evidence checked");return approval.approvalId();
     }

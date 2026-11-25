@@ -6,9 +6,9 @@ import com.surprising.gateway.c2c.controller.C2cMerchantController;
 import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
-import com.surprising.gateway.c2c.service.C2cFunds;
-import com.surprising.gateway.c2c.service.C2cMerchantBonds;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cFundService;
+import com.surprising.gateway.c2c.service.C2cMerchantBondService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -43,12 +43,12 @@ class C2cConfigurationTransactionPostgresTest {
 
     @Test void missingAuditRollsBackMethodAccountReviewAndAdPause() throws Exception {
         UUID ad=fixture.publish("SELL");var before=fixture.bean(C2cAdsRepository.class).get(ad,false);
-        var account=fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false);
+        var account=fixture.bean(C2cPaymentAccountService.class).get(11,fixture.makerAccount,false);
         fixture.db.jdbc.execute("DROP TABLE gateway_admin_operation_logs");
         fixture.call(HttpMethod.POST,"/api/v1/admin/c2c/payment-methods",9,
                 new C2cAdminController.MethodInput("ALIPAY","1","Changed method",true,List.of("CNY"),true,false,"Synthetic failed method audit"),503);
         assertThat(fixture.bean(C2cAdsRepository.class).get(ad,false)).isEqualTo(before);
-        assertThat(fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false)).isEqualTo(account);
+        assertThat(fixture.bean(C2cPaymentAccountService.class).get(11,fixture.makerAccount,false)).isEqualTo(account);
         assertThat(fixture.db.jdbc.queryForObject("SELECT revision FROM c2c_payment_methods WHERE code='ALIPAY'",Long.class)).isEqualTo(1);
         assertThat(fixture.db.jdbc.queryForObject("SELECT requires_bank_name FROM c2c_payment_methods WHERE code='ALIPAY'",Boolean.class)).isFalse();
     }
@@ -62,10 +62,10 @@ class C2cConfigurationTransactionPostgresTest {
 
     @Test void missingAuditRollsBackBondPolicyAmountAndRevision() throws Exception {
         fixture.db.jdbc.update("UPDATE c2c_merchant_bonds SET status='RETURNED' WHERE user_id=11");
-        var before=fixture.bean(C2cMerchantBonds.class).policy();fixture.db.jdbc.execute("DROP TABLE gateway_admin_operation_logs");
+        var before=fixture.bean(C2cMerchantBondService.class).policy();fixture.db.jdbc.execute("DROP TABLE gateway_admin_operation_logs");
         fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/merchant-bond-policy",9,
                 new C2cMerchantController.Policy("1","USDT","2","Synthetic failed policy audit"),503);
-        assertThat(fixture.bean(C2cMerchantBonds.class).policy()).isEqualTo(before);
+        assertThat(fixture.bean(C2cMerchantBondService.class).policy()).isEqualTo(before);
     }
 
     @Test void failedDepositIntentDoesNotLeaveAPendingBond() throws Exception {
@@ -95,7 +95,7 @@ class C2cConfigurationTransactionPostgresTest {
                 END IF; RETURN NEW; END $$
                 """);
         fixture.db.jdbc.execute("CREATE TRIGGER reject_second_bond BEFORE UPDATE ON c2c_merchant_bonds FOR EACH ROW EXECUTE FUNCTION reject_second_bond()");
-        var task=new C2cMerchantBondTask(fixture.bean(C2cMerchantBonds.class));
+        var task=new C2cMerchantBondTask(fixture.bean(C2cMerchantBondService.class));
         assertThatThrownBy(task::confirm).isInstanceOf(DataIntegrityViolationException.class);
         assertThat(fixture.db.jdbc.queryForList("SELECT status FROM c2c_merchant_bonds WHERE user_id IN(12,13)",String.class)).containsOnly("RESERVING");
         assertThat(fixture.db.jdbc.queryForList("SELECT status FROM c2c_fund_intents",String.class)).containsOnly("APPLIED");
@@ -114,13 +114,13 @@ class C2cConfigurationTransactionPostgresTest {
             }));
             try {
                 assertThat(locked.await(3,TimeUnit.SECONDS)).isTrue();
-                threads.submit(() -> fixture.bean(C2cMerchantBonds.class).confirm()).get(3,TimeUnit.SECONDS);
+                threads.submit(() -> fixture.bean(C2cMerchantBondService.class).confirm()).get(3,TimeUnit.SECONDS);
                 assertThat(fixture.db.jdbc.queryForObject("SELECT status FROM c2c_merchant_bonds WHERE user_id=13",String.class)).isEqualTo("LOCKED");
                 assertThat(fixture.db.jdbc.queryForObject("SELECT status FROM c2c_merchant_bonds WHERE user_id=12",String.class)).isEqualTo("RESERVING");
             } finally {release.countDown();}
             holder.get(3,TimeUnit.SECONDS);
         }
-        fixture.bean(C2cMerchantBonds.class).confirm();
+        fixture.bean(C2cMerchantBondService.class).confirm();
         assertThat(fixture.db.jdbc.queryForObject("SELECT status FROM c2c_merchant_bonds WHERE user_id=12",String.class)).isEqualTo("LOCKED");verifyNoInteractions(fixture.core);
     }
 
@@ -132,7 +132,7 @@ class C2cConfigurationTransactionPostgresTest {
             apply(user);fixture.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bond",user,
                     new C2cMerchantController.Deposit(UUID.randomUUID(),"1",new C2cVerification("123456","")),200);
         }
-        for(var intent:fixture.bean(C2cFundsRepository.class).due(64)) fixture.bean(C2cFunds.class).resume(intent.id());
+        for(var intent:fixture.bean(C2cFundsRepository.class).due(64)) fixture.bean(C2cFundService.class).resume(intent.id());
         fixture.db.jdbc.update("UPDATE c2c_merchant_bonds SET updated_at='2000-01-01'::timestamptz+user_id*interval '1 second' WHERE user_id IN(12,13)");
         clearInvocations(fixture.core);
     }

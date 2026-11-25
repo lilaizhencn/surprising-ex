@@ -58,7 +58,7 @@ public class AffiliateDeferredFeeRepository {
     return jdbc.query(
       """
       SELECT d.*,f.user_id AS fact_user,f.asset AS fact_asset,f.fee_units AS fact_units,f.occurred_at AS fact_time
-      FROM affiliate_deferred_fees d JOIN core_trade_fee_facts f
+      FROM affiliate_deferred_fees d JOIN trade_fee_facts f
         ON f.product_line=d.product_line AND f.order_id=d.order_id AND f.cluster_position=d.cluster_position
       WHERE d.product_line=? AND d.resolved_at IS NULL AND d.next_attempt_at<=clock_timestamp()
       ORDER BY d.next_attempt_at,d.cluster_position,d.order_id LIMIT ?

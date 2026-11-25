@@ -4,10 +4,10 @@ import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
 import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
 
 import com.surprising.gateway.c2c.model.C2cVerification;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAds;
-import com.surprising.gateway.c2c.service.C2cOrders;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAdService;
+import com.surprising.gateway.c2c.service.C2cOrderService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 import com.surprising.gateway.c2c.utils.C2cViews;
 
 import com.surprising.gateway.c2c.utils.C2cMoney;
@@ -45,17 +45,17 @@ public class C2cController {
     public record PaymentSave(UUID accountId,String revision,String fiat,String methodCode,C2cPaymentAccountInput.Details details,C2cVerification verification) { }
     public record PaymentDisable(String revision,C2cVerification verification) { }
 
-    private final C2cAccess access;
-    private final C2cAds ads;
-    private final C2cOrders orders;
+    private final C2cAccessService access;
+    private final C2cAdService ads;
+    private final C2cOrderService orders;
     private final C2cSubmissionService submissions;
     private final C2cQueryService queries;
     private final C2cQuickQuoteService quickQuotes;
-    private final C2cPaymentAccounts payments;
+    private final C2cPaymentAccountService payments;
     private final ObjectMapper json;
 
-    public C2cController(C2cAccess access,C2cAds ads,C2cOrders orders,C2cSubmissionService submissions,
-                         C2cQueryService queries,C2cQuickQuoteService quickQuotes,C2cPaymentAccounts payments,ObjectMapper json) {
+    public C2cController(C2cAccessService access,C2cAdService ads,C2cOrderService orders,C2cSubmissionService submissions,
+                         C2cQueryService queries,C2cQuickQuoteService quickQuotes,C2cPaymentAccountService payments,ObjectMapper json) {
         this.access=access;this.ads=ads;this.orders=orders;this.submissions=submissions;this.queries=queries;
         this.quickQuotes=quickQuotes;this.payments=payments;this.json=json;
     }

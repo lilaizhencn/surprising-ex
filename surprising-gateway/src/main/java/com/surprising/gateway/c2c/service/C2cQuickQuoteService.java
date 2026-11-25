@@ -2,8 +2,8 @@ package com.surprising.gateway.c2c.service;
 
 import com.surprising.gateway.c2c.exception.C2cProblem;
 
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cOrders;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cOrderService;
 import com.surprising.gateway.c2c.model.C2cOfferFilter;
 import com.surprising.gateway.c2c.model.C2cQuickQuoteSpec;
 import com.surprising.gateway.c2c.model.C2cQuote;
@@ -15,10 +15,10 @@ import org.springframework.stereotype.Service;
 public class C2cQuickQuoteService {
     private final C2cQueryService queries;
     private final C2cMarketService markets;
-    private final C2cAccess access;
-    private final C2cOrders orders;
+    private final C2cAccessService access;
+    private final C2cOrderService orders;
 
-    public C2cQuickQuoteService(C2cQueryService queries,C2cMarketService markets,C2cAccess access,C2cOrders orders) {
+    public C2cQuickQuoteService(C2cQueryService queries,C2cMarketService markets,C2cAccessService access,C2cOrderService orders) {
         this.queries=queries;this.markets=markets;this.access=access;this.orders=orders;
     }
 

@@ -40,7 +40,7 @@ class GatewayApiKeySubAccountPermissionTest {
     void setUp() {
         service = new GatewayApiKeyService(repository, authService, new TotpService(new GatewayProperties()),
                 verification, new GatewayProperties(),
-                org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class),
+                org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding.class),
                 fixture.state);
         service.setSubAccountRepository(subAccounts);
         when(authService.authenticateBearer("Bearer parent")).thenReturn(

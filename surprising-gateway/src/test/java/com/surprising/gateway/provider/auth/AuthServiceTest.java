@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.auth;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 
-import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.config.GatewayProperties;
 
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
@@ -59,7 +59,7 @@ class AuthServiceTest {
     private final com.surprising.affiliate.service.AffiliateService affiliate = mock(com.surprising.affiliate.service.AffiliateService.class);
     private final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
     private final AuthService service = new AuthService(new GatewayProperties(), repository,
-            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)), affiliate, legal, fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
+            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)), affiliate, legal, fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
 
     @Test void registrationWithoutCurrentAcknowledgementsHasNoAccountOrReferralSideEffects() {
         org.mockito.Mockito.doThrow(new com.surprising.gateway.provider.legal.exception.LegalProblem(
@@ -105,7 +105,7 @@ class AuthServiceTest {
         var challenge = new LoginVerificationModels.ChallengeResponse(true, "challenge", Instant.now().plusSeconds(300),
                 List.of(new LoginVerificationModels.Method("TOTP", null)), false);
         when(loginVerification.begin(eq(42L), org.mockito.ArgumentMatchers.isNull(), any())).thenReturn(challenge);
-        assertThat(service.loginTelegram(42, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()))).isSameAs(challenge);
+        assertThat(service.loginTelegram(42, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()))).isSameAs(challenge);
         verifyNoInteractions(passwordHasher, jwtTokenService);
     }
 
@@ -113,7 +113,7 @@ class AuthServiceTest {
     void frozenTelegramAccountCannotLogin() {
         when(repository.user(42)).thenReturn(Optional.of(new AuthenticatedUser(
                 42, null, null, "FROZEN", List.of("USER"), Instant.now(), "小李")));
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.loginTelegram(42, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest())))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.loginTelegram(42, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest())))
                 .isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(loginVerification, jwtTokenService);
     }
@@ -320,7 +320,7 @@ class AuthServiceTest {
         var challenge = new LoginVerificationModels.ChallengeResponse(true,"challenge",now.plusSeconds(300),
                 List.of(new LoginVerificationModels.Method("TOTP",null)), false);
         when(loginVerification.begin(eq(7L),eq("hash"),any())).thenReturn(challenge);
-        assertThat(service.login(new LoginRequest("admin","password"),new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()))).isSameAs(challenge);
+        assertThat(service.login(new LoginRequest("admin","password"),new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()))).isSameAs(challenge);
         verifyNoInteractions(jwtTokenService);
         verify(repository,org.mockito.Mockito.never()).createSession(anyLong(),any(),any(),any(),any(),any());
     }
@@ -336,7 +336,7 @@ class AuthServiceTest {
         when(jwtTokenService.createSessionToken(eq(42L), eq("user"), eq(List.of("USER")), anyLong(), any()))
                 .thenReturn("access");
 
-        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user", "password"), new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
+        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user", "password"), new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
 
         assertThat(response.accessToken()).isEqualTo("access");
         verifyNoInteractions(totpService);
@@ -366,7 +366,7 @@ class AuthServiceTest {
                 .thenReturn("access");
 
         var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user@example.com", "password"),
-                new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
+                new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
 
         assertThat(response.user().email()).isEqualTo("user@example.com");
         verify(repository).credentialByEmail("user@example.com");
@@ -387,7 +387,7 @@ class AuthServiceTest {
 
         var response = service.register(
                 new RegisterRequest(null, "StrongPassword1!", "user@example.com"),
-                new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
+                new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
 
         assertThat(response.user().email()).isEqualTo("user@example.com");
         assertThat(response.user().username()).isNull();
@@ -397,7 +397,7 @@ class AuthServiceTest {
     void phoneRegistrationRemainsDisabledByDefault() {
         assertThatThrownBy(() -> service.register(
                 new RegisterRequest(null, "StrongPassword1!", null, "+8613800138000"),
-                new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest())))
+                new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest())))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("phone registration is not enabled");
         verifyNoInteractions(passwordHasher, repository);

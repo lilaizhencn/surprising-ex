@@ -1,11 +1,13 @@
 package com.surprising.gateway.provider.controller;
 
+import com.surprising.gateway.provider.support.GatewayLimitRequestBinding;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.auth.model.AuthModels.*;
 import com.surprising.gateway.provider.auth.repository.*;
 import com.surprising.gateway.provider.auth.service.*;
@@ -98,7 +100,7 @@ class GatewayLimitHttpTest {
                 mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class));
         keys = new GatewayApiKeyService(keyRows, auth, totp, mock(SensitiveActionVerificationService.class), gateway, clients, fixture.state);
         var testController = new LimitTestEndpointController();
-        var compatibility = new OpenApiController(gateway, mock(com.surprising.instrument.provider.service.InstrumentService.class),
+        var compatibility = OpenApiTestSupport.controller(gateway, mock(com.surprising.instrument.provider.service.InstrumentService.class),
                 mock(com.surprising.trading.order.service.OrderService.class),
                 mock(com.surprising.account.provider.service.AccountService.class),
                 mock(com.surprising.trading.matching.service.MatchingMarketDataService.class),
@@ -257,8 +259,8 @@ class GatewayLimitHttpTest {
     }
 
     @RestController class LimitTestEndpointController {
-        private final com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding apiKeyBinding =
-                new com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding(new GatewayProperties());
+        private final com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding apiKeyBinding =
+                new com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding(new GatewayProperties());
 
         @RequestMapping(path = {"/api/v1/gateway/**", "/api/v1/accounts/**", "/api/v1/trading/**"})
         public ResponseEntity<byte[]> handle(HttpServletRequest request, @RequestBody(required = false) byte[] body) {

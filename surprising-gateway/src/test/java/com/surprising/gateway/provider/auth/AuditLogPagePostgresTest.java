@@ -63,11 +63,11 @@ class AuditLogPagePostgresTest {
                 logins,mock(GatewayUserMfaRepository.class),mock(LoginSessionRepository.class));
         var properties=new GatewayProperties();
         var auth=spy(new AuthService(properties,persistence,mock(PasswordHasher.class),mock(JwtTokenService.class),
-                mock(EmailVerificationService.class),mock(LoginVerificationService.class),mock(GatewayUserAccessBlockRepository.class),mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
+                mock(EmailVerificationService.class),mock(LoginVerificationService.class),mock(GatewayUserAccessBlockRepository.class),mock(com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding.class), mock(com.surprising.affiliate.service.AffiliateService.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.legal.service.LegalConsentService.class), fixture.state, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.state.AuthStateSync.class)));
         doReturn(new JwtPrincipal(7,"user","NORMAL",List.of("USER"),now.plusSeconds(3600))).when(auth).authenticateBearer("Bearer user");
         doReturn(new JwtPrincipal(99,"admin","NORMAL",List.of("ADMIN"),now.plusSeconds(3600))).when(auth).authenticateAdminBearer("Bearer admin");
         var approvals=new AdminApprovalService(auth,audits,mock(AdminApprovalRepository.class),properties);
-        mvc=MockMvcBuilders.standaloneSetup(new AdminAuthController(auth,approvals,json),
+        mvc=MockMvcBuilders.standaloneSetup(new AdminAuthController(new AdminAuthService(auth.properties(),auth.persistence(),auth),approvals,json),
                 new UserSecurityController(auth,mock(UserSecurityService.class),mock(LoginVerificationService.class),
                         mock(SensitiveActionVerificationService.class),persistence,mock(UserAccessService.class),properties)).build();
     }

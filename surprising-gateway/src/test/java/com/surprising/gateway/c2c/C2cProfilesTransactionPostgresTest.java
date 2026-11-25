@@ -2,7 +2,7 @@ package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cMeController;
 import com.surprising.gateway.c2c.model.C2cVerification;
-import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cAccessService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -26,7 +26,7 @@ class C2cProfilesTransactionPostgresTest {
     @Test void failedGrantCleanupRollsBackSettingsButRetainsConsumedVerification() throws Exception {
         fixture.call(HttpMethod.PUT,"/api/v1/c2c/me",12,
                 new C2cMeController.Settings("1","QA Buyer",false,5,new C2cVerification("123456","")),200);
-        fixture.bean(C2cAccess.class).verifyFunds(C2cHttpFixture.principal(12),"Bearer qa-12","123456","");
+        fixture.bean(C2cAccessService.class).verifyFunds(C2cHttpFixture.principal(12),"Bearer qa-12","123456","");
         fixture.db.jdbc.execute("CREATE TABLE c2c_verification_consumptions(consumed INTEGER NOT NULL)");
         fixture.db.jdbc.update("INSERT INTO c2c_verification_consumptions VALUES(0)");
         when(fixture.security.verify(anyLong(),anyString(),any(),any(),any())).thenAnswer(call -> {

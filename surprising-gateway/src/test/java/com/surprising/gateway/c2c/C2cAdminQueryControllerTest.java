@@ -1,11 +1,11 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cAdminController;
-import com.surprising.gateway.c2c.controller.advice.C2cHttpErrors;
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
-import com.surprising.gateway.c2c.service.C2cAdminInitialization;
-import com.surprising.gateway.c2c.service.C2cAdminMarkets;
-import com.surprising.gateway.c2c.service.C2cAdminReview;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminInitializationService;
+import com.surprising.gateway.c2c.service.C2cAdminMarketService;
+import com.surprising.gateway.c2c.service.C2cAdminReviewService;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -21,9 +21,9 @@ import tools.jackson.databind.ObjectMapper;
 class C2cAdminQueryControllerTest {
     @Test void rejectsMalformedPageStateAndUserBeforeAnyBusinessQuery() throws Exception {
         var queries = mock(C2cAdminQueryService.class);
-        var controller = new C2cAdminController(mock(C2cAdminAccess.class), mock(C2cAdminMarkets.class),
-                mock(C2cAdminReview.class), queries, mock(C2cAdminInitialization.class), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.c2c.controller.C2cAdminRequestBinding.class));
-        var http = standaloneSetup(controller).setControllerAdvice(new C2cHttpErrors()).build();
+        var controller = new C2cAdminController(mock(C2cAdminAccessService.class), mock(C2cAdminMarketService.class),
+                mock(C2cAdminReviewService.class), queries, mock(C2cAdminInitializationService.class), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.c2c.controller.C2cAdminRequestBinding.class));
+        var http = standaloneSetup(controller).setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
         for (String path : List.of("merchants", "payment-accounts", "ads", "orders", "fund-intents", "appeals", "reports")) {
             for (String query : List.of("limit=0", "limit=101", "offset=-1", "offset=10001", "status=UNKNOWN")) {
                 http.perform(get("/api/v1/admin/c2c/" + path + "?" + query)).andExpect(status().isBadRequest());

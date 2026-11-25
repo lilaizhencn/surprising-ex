@@ -8,6 +8,6 @@ import org.springframework.stereotype.Component;
 public class MaintenanceTaskRunner {
     private final MaintenanceService service;
     public MaintenanceTaskRunner(MaintenanceService service) { this.service = service; }
-    @Scheduled(fixedDelayString = "${surprising.trading.maintenance.step-delay-ms:1000}")
+    @Scheduled(fixedDelayString = "${surprising.trading.maintenance.step-delay-ms:5000}")
     public void run() { service.tick(); }
 }

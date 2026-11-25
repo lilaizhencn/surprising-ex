@@ -1,6 +1,9 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.client.SpotAccountClient;
+import com.surprising.account.api.model.BalanceAdjustmentRequest;
+import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.product.api.ProductLine;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.client.WithdrawalValuationClient;
 
@@ -53,7 +56,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     private CustodyWithdrawalRepository repository;
     private CustodyWithdrawalStateService states;
     private CustodyWalletClient walletClient;
-    private SpotAccountClient spotAccountClient;
+    private AccountCommandGateway spotAccountClient;
     private CustodyWithdrawalReconciliationService reconciliationService;
     private CustodyWithdrawalService withdrawalService;
     private UUID withdrawalId;
@@ -63,7 +66,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         DataSource dataSource = dataSource();
         jdbcTemplate = new JdbcTemplate(dataSource);
         walletClient = Mockito.mock(CustodyWalletClient.class);
-        spotAccountClient = Mockito.mock(SpotAccountClient.class);
+        spotAccountClient = Mockito.mock(AccountCommandGateway.class);
         createSchema();
         applicationContext = new AnnotationConfigApplicationContext();
         applicationContext.register(TransactionConfig.class);
@@ -72,7 +75,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 () -> new DataSourceTransactionManager(dataSource));
         applicationContext.registerBean(JdbcTemplate.class, () -> jdbcTemplate);
         applicationContext.registerBean(CustodyWalletClient.class, () -> walletClient);
-        applicationContext.registerBean(SpotAccountClient.class, () -> spotAccountClient);
+        var products = Mockito.mock(GatewayProductServices.class);
+        Mockito.when(products.service(ProductLine.SPOT, AccountCommandGateway.class)).thenReturn(spotAccountClient);
+        applicationContext.registerBean(GatewayProductServices.class, () -> products);
         applicationContext.registerBean(GatewayProperties.class, GatewayProperties::new);
         applicationContext.registerBean(WithdrawalValuationClient.class,
                 () -> Mockito.mock(WithdrawalValuationClient.class));
@@ -195,7 +200,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThat(record.custodyAddressId()).isNull();
         assertThat(record.fundingSource()).isEqualTo("TENANT_POOL");
         assertThat(record.fees().receivedAmount()).isEqualTo("22.5");
-        Mockito.verify(spotAccountClient).adjustBalance(43L,"USDT",-25_000_000L,record.spotDebitReference(),"custody wallet withdrawal");
+        Mockito.verify(spotAccountClient).adjustBalance(new BalanceAdjustmentRequest(43L,"USDT",-25_000_000L,record.spotDebitReference(),"custody wallet withdrawal"),null,null);
         var body=CustodyWithdrawalModels.custodyRequest(record);
         assertThat(body).containsEntry("custodyAddressId",null).containsEntry("subject","user:43")
                 .containsEntry("fundingSource","TENANT_POOL").containsEntry("amount","22.5");
@@ -206,7 +211,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThat(repository.find(record.withdrawalId()).status()).isEqualTo("COMPLETED");
         assertThat(jdbcTemplate.queryForObject("select fee_units from gateway_wallet_withdrawal_fees where withdrawal_id=?",Long.class,record.withdrawalId())).isEqualTo(2_500_000L);
         assertThat(jdbcTemplate.queryForObject("select count(*) from gateway_wallet_withdrawal_fees where withdrawal_id=?",Integer.class,record.withdrawalId())).isEqualTo(1);
-        Mockito.verify(spotAccountClient,Mockito.never()).adjustBalance(Mockito.eq(43L),Mockito.eq("USDT"),Mockito.eq(25_000_000L),Mockito.anyString(),Mockito.anyString());
+        Mockito.verify(spotAccountClient,Mockito.never()).adjustBalance(Mockito.argThat(req -> req != null && req.userId() == 43L && "USDT".equals(req.asset()) && req.amountUnits() == 25_000_000L),Mockito.any(),Mockito.any());
     }
 
     @Test
@@ -220,7 +225,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         reconciliationService.reconcile(record);
         reconciliationService.reconcile(repository.find(record.withdrawalId()));
         assertThat(repository.find(record.withdrawalId()).status()).isEqualTo("REFUNDED");
-        Mockito.verify(spotAccountClient).adjustBalance(43L,"USDT",25_000_000L,record.spotDebitReference()+":refund","custody wallet withdrawal failed");
+        Mockito.verify(spotAccountClient).adjustBalance(new BalanceAdjustmentRequest(43L,"USDT",25_000_000L,record.spotDebitReference()+":refund","custody wallet withdrawal failed"),null,null);
         assertThat(jdbcTemplate.queryForObject("select count(*) from gateway_wallet_withdrawal_fees where withdrawal_id=?",Integer.class,record.withdrawalId())).isZero();
     }
 
@@ -236,7 +241,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         Mockito.when(walletClient.withdrawalsByExternalReference(record.externalReference(),"ETH","USDT",2)).thenReturn(List.of(wrong));
         reconciliationService.reconcile(record);
         assertThat(repository.find(record.withdrawalId()).status()).isEqualTo("SUBMITTED");
-        Mockito.verify(spotAccountClient,Mockito.never()).adjustBalance(Mockito.eq(43L),Mockito.eq("USDT"),Mockito.eq(25_000_000L),Mockito.anyString(),Mockito.anyString());
+        Mockito.verify(spotAccountClient,Mockito.never()).adjustBalance(Mockito.argThat(req -> req != null && req.userId() == 43L && "USDT".equals(req.asset()) && req.amountUnits() == 25_000_000L),Mockito.any(),Mockito.any());
         assertThat(jdbcTemplate.queryForObject("select count(*) from gateway_wallet_withdrawal_fees where withdrawal_id=?",Integer.class,record.withdrawalId())).isZero();
     }
 
@@ -286,8 +291,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
         reconciliation.get(5, TimeUnit.SECONDS);
 
         verify(spotAccountClient, never()).adjustBalance(
-                42L, "USDT", 25_000_000L,
-                "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
+                Mockito.eq(new BalanceAdjustmentRequest(42L, "USDT", 25_000_000L,
+                        "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed")),
+                Mockito.any(), Mockito.any());
         assertThat(repository.find(withdrawalId).status()).isEqualTo("COMPLETED");
     }
 
@@ -312,9 +318,10 @@ class CustodyWithdrawalReconciliationPostgresTest {
         allowCustodyRead.countDown();
         assertThatThrownBy(() -> reconciliation.get(5,TimeUnit.SECONDS)).hasCauseInstanceOf(IllegalStateException.class);
 
-        verify(spotAccountClient,never()).adjustBalance(
-                42L, "USDT", 25_000_000L,
-                "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
+        verify(spotAccountClient, never()).adjustBalance(
+                Mockito.eq(new BalanceAdjustmentRequest(42L, "USDT", 25_000_000L,
+                        "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed")),
+                Mockito.any(), Mockito.any());
         assertThat(repository.find(withdrawalId).status()).isEqualTo("COMPLETED");
     }
 
@@ -414,8 +421,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
         reconciliationService.reconcile(repository.find(withdrawalId));
 
         verify(spotAccountClient, never()).adjustBalance(
-                42L, "USDT", 25_000_000L,
-                "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
+                Mockito.eq(new BalanceAdjustmentRequest(42L, "USDT", 25_000_000L,
+                        "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed")),
+                Mockito.any(), Mockito.any());
         assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
         assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-integration");
     }
@@ -437,8 +445,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
         reconciliationService.reconcile(repository.find(withdrawalId));
 
         verify(spotAccountClient, never()).adjustBalance(
-                42L, "USDT", 25_000_000L,
-                "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
+                Mockito.eq(new BalanceAdjustmentRequest(42L, "USDT", 25_000_000L,
+                        "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed")),
+                Mockito.any(), Mockito.any());
         assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
     }
 
@@ -451,8 +460,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
         reconciliationService.reconcile(repository.find(withdrawalId));
 
         verify(spotAccountClient, never()).adjustBalance(
-                42L, "USDT", 25_000_000L,
-                "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed");
+                Mockito.eq(new BalanceAdjustmentRequest(42L, "USDT", 25_000_000L,
+                        "custody-wallet-withdrawal:integration:refund", "custody wallet withdrawal failed")),
+                Mockito.any(), Mockito.any());
         assertThat(repository.find(withdrawalId).status()).isEqualTo("FAILED_PENDING");
     }
 
@@ -689,14 +699,15 @@ class CustodyWithdrawalReconciliationPostgresTest {
             var persisted=repository.find(withdrawalId);
             assertThat(persisted.status()).isEqualTo("REFUND_PENDING");
             assertThat(persisted.walletResponse()).contains("PRINCIPAL_RELEASED","user:42");
-            String reference=call.getArgument(3);
-            if(applied.add(reference)) credited.addAndGet(call.getArgument(2,Long.class));
-            if(calls.getAndIncrement()==0) throw new com.surprising.gateway.provider.exception.SpotAccountUnknownException("ack lost",null);
+            BalanceAdjustmentRequest req=call.getArgument(0);
+            String reference=req.referenceId();
+            if(applied.add(reference)) credited.addAndGet(req.amountUnits());
+            if(calls.getAndIncrement()==0) throw new IllegalStateException("ack lost");
             return null;
-        }).when(spotAccountClient).adjustBalance(Mockito.eq(42L),Mockito.eq("USDT"),Mockito.eq(25_000_000L),Mockito.anyString(),Mockito.anyString());
+        }).when(spotAccountClient).adjustBalance(Mockito.argThat(req -> req != null && req.userId() == 42L && "USDT".equals(req.asset()) && req.amountUnits() == 25_000_000L),Mockito.any(),Mockito.any());
         String evidence=new ObjectMapper().writeValueAsString(Map.of("kind","PRINCIPAL_RELEASED","receipt",walletRow("FAILED")));
         assertThatThrownBy(() -> refunds.refund(repository.find(withdrawalId),"refund","failed",evidence))
-                .isInstanceOf(com.surprising.gateway.provider.exception.SpotAccountUnknownException.class);
+                .isInstanceOf(IllegalStateException.class);
         assertThat(repository.find(withdrawalId).status()).isEqualTo("REFUND_PENDING");
         refunds.refund(repository.find(withdrawalId),"refund","resume");
         assertThat(repository.find(withdrawalId).status()).isEqualTo("REFUNDED");

@@ -16,11 +16,8 @@ final class ProjectionTestFixtures {
                 new CommittedExecutionRepository(jdbc),
                 new CommittedTriggerRepository(jdbc),
                 new CommittedLiquidationRepository(jdbc),
-                new LiquidationInitializationRepository(jdbc),
                 new CommittedCommandResultRepository(jdbc),
                 new ProjectionWatermarkRepository(jdbc),
-                new ExecutionInitializationRepository(jdbc),
-                new TriggerInitializationRepository(jdbc),
                 new MarketMakerProjectionAccountsRepository(jdbc),
                 new CommittedDeliveryLedgerRepository(jdbc),
                 new CommittedFundingPageRepository(jdbc),
@@ -29,16 +26,16 @@ final class ProjectionTestFixtures {
                 statistics(jdbc, transaction), portfolio(jdbc, transaction), algos(jdbc, transaction), new CommittedFeeRepository(jdbc));
     }
     static CommittedTradingStatisticsService statistics(JdbcTemplate jdbc, TransactionTemplate transaction) {
-        return new CommittedTradingStatisticsService(new StatisticsInitializationRepository(jdbc),
+        return new CommittedTradingStatisticsService(
                 new StatisticsCursorRepository(jdbc), new CommandStatisticsRepository(jdbc),
                 new StatisticsSnapshotRepository(jdbc), new CommittedExecutionRepository(jdbc), transaction);
     }
     static CommittedPortfolioHistoryService portfolio(JdbcTemplate jdbc, TransactionTemplate transaction) {
-        return new CommittedPortfolioHistoryService(new PortfolioStartRepository(jdbc), new PortfolioCutoffRepository(jdbc),
+        return new CommittedPortfolioHistoryService(new PortfolioCutoffRepository(jdbc),
                 new PortfolioCashFlowRepository(jdbc), new PortfolioEquityRepository(jdbc),
                 new CommittedBalanceAdjustmentRepository(jdbc), transaction);
     }
     static CommittedAlgoProjectionService algos(JdbcTemplate jdbc, TransactionTemplate transaction) {
-        return new CommittedAlgoProjectionService(new CommittedAlgoRepository(jdbc), new AlgoInitializationRepository(jdbc), transaction);
+        return new CommittedAlgoProjectionService(new CommittedAlgoRepository(jdbc), transaction);
     }
 }

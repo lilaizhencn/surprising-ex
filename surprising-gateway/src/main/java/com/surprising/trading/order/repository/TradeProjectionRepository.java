@@ -27,12 +27,12 @@ public class TradeProjectionRepository {
                   SELECT trade_id,instrument_id,price_ticks,quantity_steps,occurred_at_epoch_ms,export_sequence,execution_index,
                          taker_order_id AS order_id,taker_side AS side,taker_position_side AS position_side,
                          taker_fee_rate_ppm AS fee_rate_ppm,'TAKER' AS liquidity_role
-                    FROM core_execution_projection WHERE product_line=? AND taker_user_id=?
+                    FROM trading_trades WHERE product_line=? AND taker_user_id=?
                   UNION ALL
                   SELECT trade_id,instrument_id,price_ticks,quantity_steps,occurred_at_epoch_ms,export_sequence,execution_index,
                          maker_order_id AS order_id,CASE taker_side WHEN 'BUY' THEN 'SELL' WHEN 'SELL' THEN 'BUY' END AS side,
                          maker_position_side AS position_side,maker_fee_rate_ppm AS fee_rate_ppm,'MAKER' AS liquidity_role
-                    FROM core_execution_projection WHERE product_line=? AND maker_user_id=?
+                    FROM trading_trades WHERE product_line=? AND maker_user_id=?
                 ) own_fills WHERE true
                 """);
         var args = new ArrayList<Object>(List.of(product.name(), userId, product.name(), userId));
@@ -83,7 +83,7 @@ public class TradeProjectionRepository {
             Long orderId, int limit, TradeReadCursor.Execution after, boolean ascending) {
         String ordering = ascending ? "eventTime.asc" : "eventTime.desc";
         String scope = TradeReadCursors.executionScope(product,userId,instrumentId,orderId,ascending);
-        var sql = new StringBuilder("SELECT * FROM core_execution_projection WHERE product_line=?");
+        var sql = new StringBuilder("SELECT * FROM trading_trades WHERE product_line=?");
         var args = new ArrayList<Object>(); args.add(product.name());
         if (userId != null && orderId != null) {
             // User and order must identify the same execution side.
@@ -135,31 +135,15 @@ public class TradeProjectionRepository {
     public long sumUserVolumeUsdSince(long userId, long sinceEpochMs) {
         Number sum = jdbc.queryForObject("""
                 SELECT COALESCE(SUM((price_ticks::numeric * quantity_steps::numeric) / 10000.0), 0)
-                FROM core_execution_projection
+                FROM trading_trades
                 WHERE (taker_user_id = ? OR maker_user_id = ?)
                   AND occurred_at_epoch_ms >= ?
                 """, Number.class, userId, userId, sinceEpochMs);
         return sum != null ? sum.longValue() : 0L;
     }
 
-    /** 必要关联只读：core_execution_projection_initialization按同产品确认本投影已完整初始化。
-     * 标记与数据必须由同一SQL快照读取，避免重建时把旧READY与新空数据混合；
-     * LEFT JOIN保留未就绪/已就绪但无数据的区别。仅关联完成性标记，不聚合业务或写其他表。 */
     private <T> List<T> readAssociated(ProductLine product, String sql, String orderBy,
             org.springframework.jdbc.core.RowMapper<T> mapper, Object... values) {
-        String associated = """
-                SELECT initialized.__projection_ready, projection_rows.*
-                  FROM (SELECT count(*)=1 AS __projection_ready FROM core_execution_projection_initialization WHERE product_line=?) initialized
-                  LEFT JOIN LATERAL (%s) projection_rows ON initialized.__projection_ready
-                 ORDER BY %s
-                """.formatted(sql, orderBy);
-        Object[] arguments = new Object[values.length + 1];
-        arguments[0] = product.name();
-        System.arraycopy(values, 0, arguments, 1, values.length);
-        return jdbc.query(associated, (rs, row) -> {
-            if (!rs.getBoolean("__projection_ready")) throw new ReadViewUnavailableException("TRADE_READ_VIEW_INITIALIZING");
-            if (rs.getObject("trade_id") == null) return null;
-            return mapper.mapRow(rs, row);
-        }, arguments).stream().filter(Objects::nonNull).toList();
+        return jdbc.query(sql + " ORDER BY " + orderBy, mapper, values);
     }
 }

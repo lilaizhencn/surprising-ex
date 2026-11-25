@@ -1,10 +1,14 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.client.SpotAccountClient;
+import com.surprising.account.api.model.BalanceAdjustmentRequest;
+import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.product.api.ProductLine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,15 +28,17 @@ class CustodyWalletWebhookServiceTest {
     private final CustodyWalletWebhookRepository repository = mock(CustodyWalletWebhookRepository.class);
     private final com.surprising.asset.service.AssetConfigurationService assets = mock(com.surprising.asset.service.AssetConfigurationService.class);
     private final CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
-    private final SpotAccountClient spotAccountClient = mock(SpotAccountClient.class);
+    private final AccountCommandGateway accountCommands = mock(AccountCommandGateway.class);
+    private final GatewayProductServices products = mock(GatewayProductServices.class);
     private final CustodyWalletWebhookService service = new CustodyWalletWebhookService(
-            properties, repository, withdrawalService, spotAccountClient, new ObjectMapper(), assets);
+            properties, repository, withdrawalService, products, new ObjectMapper(), assets);
 
     @BeforeEach
     void setUp() {
         GatewayProperties.CustodyWallet wallet = properties.getCustodyWallet();
         wallet.setEnabled(true);
         wallet.setWebhookSecret("webhook-secret");
+        when(products.service(ProductLine.SPOT, AccountCommandGateway.class)).thenReturn(accountCommands);
     }
 
     @Test
@@ -48,8 +54,8 @@ class CustodyWalletWebhookServiceTest {
         service.handle("precision-event", "DEPOSIT.CONFIRMED", Long.toString(timestamp),
                 service.signature("webhook-secret", "precision-event", "DEPOSIT.CONFIRMED", timestamp, body), body);
 
-        verify(spotAccountClient).adjustBalance(42L, "USDT", 100_000_000_000_000_001L,
-                "custody-wallet:precision-event:deposit.confirmed", "custody wallet DEPOSIT.CONFIRMED");
+        verify(accountCommands).adjustBalance(eq(new BalanceAdjustmentRequest(42L, "USDT", 100_000_000_000_000_001L,
+                "custody-wallet:precision-event:deposit.confirmed", "custody wallet DEPOSIT.CONFIRMED")), isNull(), isNull());
     }
 
     @Test
@@ -64,8 +70,8 @@ class CustodyWalletWebhookServiceTest {
         service.handle("event-1", "DEPOSIT.CONFIRMED", Long.toString(timestamp),
                 service.signature("webhook-secret", "event-1", "DEPOSIT.CONFIRMED", timestamp, body), body);
 
-        verify(spotAccountClient).adjustBalance(42L, "USDT", 1_250_000L,
-                "custody-wallet:event-1:deposit.confirmed", "custody wallet DEPOSIT.CONFIRMED");
+        verify(accountCommands).adjustBalance(eq(new BalanceAdjustmentRequest(42L, "USDT", 1_250_000L,
+                "custody-wallet:event-1:deposit.confirmed", "custody wallet DEPOSIT.CONFIRMED")), isNull(), isNull());
         verify(repository).markProcessed(eq("event-1"), any());
     }
 

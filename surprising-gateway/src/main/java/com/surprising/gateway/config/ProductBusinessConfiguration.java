@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
         type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
         classes = {
                 com.surprising.realtime.provider.RealtimeRouter.class,
-                com.surprising.realtime.provider.RealtimeApplication.class,
                 com.surprising.price.index.controller.ExchangeRateController.class,
                 com.surprising.price.index.service.ExchangeRateService.class,
                 com.surprising.price.index.repository.ExchangeRateRepository.class,
@@ -42,10 +41,23 @@ public class ProductBusinessConfiguration {
                 .bind("surprising.websocket", org.springframework.boot.context.properties.bind.Bindable.of(WebSocketProperties.class))
                 .orElseThrow(() -> new IllegalArgumentException("missing WebSocket configuration"));
     }
+    @Bean(name = "productAeronClientPool", destroyMethod = "close")
+    public com.surprising.aeron.client.AeronClientPool productAeronClientPool(
+            AccountProperties properties,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            @org.springframework.beans.factory.annotation.Qualifier("productCommandMediaDriver")
+            io.aeron.driver.MediaDriver driver) {
+        var aeron = properties.getAeron();
+        return new com.surprising.aeron.client.AeronClientPool(
+                "gateway", properties.getProductLine(), aeron.getHostnames(),
+                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
+                aeron.getSourceIdentity(), driver);
+    }
+
     @org.springframework.context.annotation.Bean("taskScheduler")
     org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler productScheduler(
             AccountProperties properties,
-            @org.springframework.beans.factory.annotation.Value("${surprising.gateway.product-scheduler-pool-size:2}") int poolSize) {
+            @org.springframework.beans.factory.annotation.Value("${surprising.gateway.product-scheduler-pool-size:1}") int poolSize) {
         var scheduler = new org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler();
         scheduler.setPoolSize(Math.max(1, poolSize));
         scheduler.setThreadNamePrefix("gateway-" + properties.getProductLine() + "-scheduled-");

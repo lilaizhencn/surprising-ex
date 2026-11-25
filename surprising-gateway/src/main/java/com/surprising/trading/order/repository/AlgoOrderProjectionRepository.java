@@ -17,7 +17,7 @@ public class AlgoOrderProjectionRepository {
 
     public List<CoreAlgoOrderView> openOrders(ProductLine product, long userId, String instrumentId, int limit) {
         var args = new ArrayList<Object>(List.of(product.name(), userId));
-        var sql = new StringBuilder("SELECT * FROM core_algo_order_projection WHERE product_line=? AND user_id=? AND status_code IN (0,1,2)");
+        var sql = new StringBuilder("SELECT * FROM trading_algo_orders WHERE product_line=? AND user_id=? AND status_code IN (0,1,2)");
         if (instrumentId != null) {
             sql.append(" AND instrument_id=?"); args.add(instrumentId);
         }
@@ -39,7 +39,7 @@ public class AlgoOrderProjectionRepository {
 
     private CoreAlgoOrderView one(ProductLine product, long userId, String column, Object identity) {
         try {
-            var rows = readAssociated(product, "SELECT * FROM core_algo_order_projection WHERE product_line=? AND user_id=? AND "
+            var rows = readAssociated(product, "SELECT * FROM trading_algo_orders WHERE product_line=? AND user_id=? AND "
                     + column + "=?", "created_at_epoch_ms DESC,algo_order_id DESC", this::decode, product.name(), userId, identity);
             return rows.isEmpty() ? null : rows.getFirst();
         } catch (DataAccessException unavailable) {
@@ -65,24 +65,8 @@ public class AlgoOrderProjectionRepository {
         }
     }
 
-    /** 必要关联只读：core_algo_projection_initialization按同产品确认本投影已完整初始化。
-     * 标记与数据必须由同一SQL快照读取，避免重建时把旧READY与新空数据混合；
-     * LEFT JOIN保留未就绪/已就绪但无数据的区别。仅关联完成性标记，不聚合业务或写其他表。 */
     private <T> List<T> readAssociated(ProductLine product, String sql, String orderBy,
             org.springframework.jdbc.core.RowMapper<T> mapper, Object... values) {
-        String associated = """
-                SELECT initialized.__projection_ready, projection_rows.*
-                  FROM (SELECT count(*)=1 AS __projection_ready FROM core_algo_projection_initialization WHERE product_line=?) initialized
-                  LEFT JOIN LATERAL (%s) projection_rows ON initialized.__projection_ready
-                 ORDER BY %s
-                """.formatted(sql, orderBy);
-        Object[] arguments = new Object[values.length + 1];
-        arguments[0] = product.name();
-        System.arraycopy(values, 0, arguments, 1, values.length);
-        return jdbc.query(associated, (rs, row) -> {
-            if (!rs.getBoolean("__projection_ready")) throw new ReadViewUnavailableException("ALGO_READ_VIEW_INITIALIZING");
-            if (rs.getObject("algo_order_id") == null) return null;
-            return mapper.mapRow(rs, row);
-        }, arguments).stream().filter(Objects::nonNull).toList();
+        return jdbc.query(sql + " ORDER BY " + orderBy, mapper, values);
     }
 }

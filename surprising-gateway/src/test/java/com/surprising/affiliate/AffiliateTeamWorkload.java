@@ -1,11 +1,12 @@
 package com.surprising.affiliate;
 
 import com.surprising.account.api.model.ProductTransferOperationRequest;
+import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.affiliate.config.*;
 import com.surprising.affiliate.repository.*;
 import com.surprising.affiliate.service.*;
-import com.surprising.gateway.provider.model.ProductAccountAdjustment;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.gateway.provider.service.*;
 import com.surprising.product.api.ProductLine;
 import com.zaxxer.hikari.*;
@@ -78,7 +79,7 @@ public final class AffiliateTeamWorkload {
         new DataSourceTransactionManager(pool)
       );
       context.registerBean(ProductTransferService.class, () ->
-        new ProductTransferService(funds, null)
+        new ProductTransferService(funds.products(), null)
       );
       context.register(
         AffiliatePostgresTest.Transactions.class,
@@ -113,27 +114,25 @@ public final class AffiliateTeamWorkload {
     }
 
     @Override
-    synchronized ProductAccountAdjustment apply(
+    synchronized void apply(
       CoreMessageType type,
       long user,
       UUID id,
       byte[] payload
     ) {
-      var result = super.apply(type, user, id, payload);
-      if (replay.balanceFlow() != null) {
-        if (type == CoreMessageType.TRANSFER_OUT) debits++;
-        if (type == CoreMessageType.TRANSFER_IN) credits++;
-      }
-      return result;
+      super.apply(type, user, id, payload);
+      if (type == CoreMessageType.TRANSFER_OUT) debits++;
+      if (type == CoreMessageType.TRANSFER_IN) credits++;
     }
 
     synchronized Map<
       Long,
-      com.surprising.aeron.service.replay.CommittedPortfolioSnapshot.UserEquity
+      com.surprising.aeron.protocol.export.CommittedPortfolioSnapshot.UserEquity
     > portfolio() {
-      return replay
-        .portfolioSnapshot(1793180000000L + sequence, 1_000_000)
-        .users();
+      return balances.entrySet().stream().collect(java.util.stream.Collectors.toMap(
+          Map.Entry::getKey,
+          e -> new com.surprising.aeron.protocol.export.CommittedPortfolioSnapshot.UserEquity(
+              true, Map.of("USDT", String.valueOf(e.getValue())))));
     }
   }
 
@@ -177,30 +176,21 @@ public final class AffiliateTeamWorkload {
       });
     }
 
-    ProductAccountAdjustment transferOut(
-      String account,
-      ProductTransferOperationRequest value
-    ) {
-      return call(() -> core.transferOut(account, value));
+    void transferOut(ProductTransferOperationRequest value) {
+      call(() -> { core.transferOut(value); return null; });
     }
 
-    ProductAccountAdjustment transferIn(
-      String account,
-      ProductTransferOperationRequest value
-    ) {
-      return call(() -> core.transferIn(account, value));
+    void transferIn(ProductTransferOperationRequest value) {
+      call(() -> { core.transferIn(value); return null; });
     }
 
-    ProductAccountAdjustment completeTransfer(
-      String account,
-      ProductTransferOperationRequest value
-    ) {
-      return call(() -> core.completeTransfer(account, value));
+    void completeTransfer(ProductTransferOperationRequest value) {
+      call(() -> { core.completeTransfer(value); return null; });
     }
 
     Map<
       Long,
-      com.surprising.aeron.service.replay.CommittedPortfolioSnapshot.UserEquity
+      com.surprising.aeron.protocol.export.CommittedPortfolioSnapshot.UserEquity
     > portfolio() {
       return call(core::portfolio);
     }
@@ -240,7 +230,7 @@ public final class AffiliateTeamWorkload {
     }
   }
 
-  static final class Funds implements ProductAccountClient, AutoCloseable {
+  static final class Funds implements AutoCloseable {
 
     final EnumMap<ProductLine, ProductCore> cores = new EnumMap<>(
       ProductLine.class
@@ -260,64 +250,51 @@ public final class AffiliateTeamWorkload {
       }
     }
 
-    public ProductAccountAdjustment transferOut(
-      String account,
-      ProductTransferOperationRequest value
-    ) {
+    public void transferOut(ProductTransferOperationRequest value) {
       requests.increment();
       var p = value.sourceProductLine();
-      var result = cores.get(p).transferOut(account, value);
+      cores.get(p).transferOut(value);
       if (
-        result.status() == ProductAccountAdjustment.Status.APPLIED &&
         hold &&
         (firstDebit.add(p) ||
           value.recipientUserId() % 97 == 0 ||
           heldOut.contains(value.transferId()))
       ) {
         heldOut.add(value.transferId());
-        return ProductAccountAdjustment.unknown(
-          "test: committed debit response unavailable"
-        );
+        throw new IllegalStateException("test: committed debit response unavailable");
       }
-      return result;
     }
 
-    public ProductAccountAdjustment transferIn(
-      String account,
-      ProductTransferOperationRequest value
-    ) {
+    public void transferIn(ProductTransferOperationRequest value) {
       requests.increment();
-      var result = cores
-        .get(value.targetProductLine())
-        .transferIn(account, value);
-      if (
-        result.status() == ProductAccountAdjustment.Status.APPLIED &&
-        hold &&
-        value.recipientUserId() % 131 == 0
-      ) {
+      cores.get(value.targetProductLine()).transferIn(value);
+      if (hold && value.recipientUserId() % 131 == 0) {
         heldIn.add(value.transferId());
-        return ProductAccountAdjustment.unknown(
-          "test: committed credit response unavailable"
-        );
+        throw new IllegalStateException("test: committed credit response unavailable");
       }
-      return result;
     }
 
-    public ProductAccountAdjustment completeTransfer(
-      String account,
-      ProductTransferOperationRequest value
-    ) {
+    public void completeTransfer(ProductTransferOperationRequest value) {
       requests.increment();
-      return cores
-        .get(value.sourceProductLine())
-        .completeTransfer(account, value);
+      cores.get(value.sourceProductLine()).completeTransfer(value);
     }
 
-    public List<ProductTransferOperationRequest> pendingTransfers(
-      ProductLine p,
-      int limit
-    ) {
-      return List.of();
+    GatewayProductServices products() {
+      var products = org.mockito.Mockito.mock(GatewayProductServices.class);
+      org.mockito.Mockito.when(products.enabled()).thenReturn(List.of(ProductLine.values()));
+      for (var p : ProductLine.values()) {
+        var gateway = org.mockito.Mockito.mock(AccountCommandGateway.class);
+        org.mockito.Mockito.when(gateway.transferOut(org.mockito.ArgumentMatchers.any()))
+            .thenAnswer(inv -> { transferOut(inv.getArgument(0)); return null; });
+        org.mockito.Mockito.when(gateway.transferIn(org.mockito.ArgumentMatchers.any()))
+            .thenAnswer(inv -> { transferIn(inv.getArgument(0)); return null; });
+        org.mockito.Mockito.doAnswer(inv -> { completeTransfer(inv.getArgument(0)); return null; })
+            .when(gateway).completeTransfer(org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.when(gateway.pendingTransfers(org.mockito.ArgumentMatchers.anyInt()))
+            .thenReturn(List.of());
+        org.mockito.Mockito.when(products.service(p, AccountCommandGateway.class)).thenReturn(gateway);
+      }
+      return products;
     }
 
     int restart() {
@@ -417,7 +394,7 @@ public final class AffiliateTeamWorkload {
     var occurred = Timestamp.from(f.repository.now().minusSeconds(172800));
     for (var p : ProductLine.values())
       if(selected==null || selected==p) f.jdbc.update(
-        "INSERT INTO core_trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at) SELECT ?,t+1,?+t*?+512,'TEAM-FIXTURE',CASE WHEN t%2=0 THEN 'USDT' ELSE 'BTC' END,CASE WHEN part=0 THEN 5003 ELSE 4997 END,CASE WHEN part=0 THEN 5003 ELSE 10000 END,(part*?+t+1)*64,?::timestamptz+part*interval '1 second' FROM generate_series(0,?-1)t CROSS JOIN generate_series(0,1)part",
+        "INSERT INTO trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at) SELECT ?,t+1,?+t*?+512,'TEAM-FIXTURE',CASE WHEN t%2=0 THEN 'USDT' ELSE 'BTC' END,CASE WHEN part=0 THEN 5003 ELSE 4997 END,CASE WHEN part=0 THEN 5003 ELSE 10000 END,(part*?+t+1)*64,?::timestamptz+part*interval '1 second' FROM generate_series(0,?-1)t CROSS JOIN generate_series(0,1)part",
         p.name(),
         BASE,
         STRIDE,
@@ -657,7 +634,7 @@ public final class AffiliateTeamWorkload {
     int teams,ProductLine selected
   ) {
     long facts = f.jdbc.queryForObject(
-        "SELECT count(*) FROM core_trade_fee_facts",
+        "SELECT count(*) FROM trade_fee_facts",
         Long.class
       ),
       receipts = f.jdbc.queryForObject(

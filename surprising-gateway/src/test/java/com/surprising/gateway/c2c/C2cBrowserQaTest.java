@@ -8,20 +8,20 @@ import com.surprising.gateway.c2c.controller.C2cChatController;
 import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.controller.C2cMeController;
 import com.surprising.gateway.c2c.controller.C2cStatusController;
-import com.surprising.gateway.c2c.controller.advice.C2cHttpErrors;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
-import com.surprising.gateway.c2c.service.C2cAdminChat;
-import com.surprising.gateway.c2c.service.C2cAdminInitialization;
-import com.surprising.gateway.c2c.service.C2cAdminMarkets;
-import com.surprising.gateway.c2c.service.C2cAdminReview;
-import com.surprising.gateway.c2c.service.C2cAds;
-import com.surprising.gateway.c2c.service.C2cAttachments;
-import com.surprising.gateway.c2c.service.C2cConversations;
-import com.surprising.gateway.c2c.service.C2cMessages;
-import com.surprising.gateway.c2c.service.C2cOrders;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
-import com.surprising.gateway.c2c.service.C2cProfiles;
+import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminChatService;
+import com.surprising.gateway.c2c.service.C2cAdminInitializationService;
+import com.surprising.gateway.c2c.service.C2cAdminMarketService;
+import com.surprising.gateway.c2c.service.C2cAdminReviewService;
+import com.surprising.gateway.c2c.service.C2cAdService;
+import com.surprising.gateway.c2c.service.C2cAttachmentService;
+import com.surprising.gateway.c2c.service.C2cConversationService;
+import com.surprising.gateway.c2c.service.C2cMessageService;
+import com.surprising.gateway.c2c.service.C2cOrderService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
+import com.surprising.gateway.c2c.service.C2cProfileService;
 import com.surprising.gateway.c2c.websocket.C2cChatRealtime;
 
 import com.surprising.gateway.c2c.service.C2cQueryService;
@@ -56,15 +56,15 @@ class C2cBrowserQaTest {
     @Configuration
     @EnableWebMvc
     static class Web {
-        @Bean C2cChatController chat() {return new C2cChatController(fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),fixture.bean(C2cAttachments.class));}
+        @Bean C2cChatController chat() {return new C2cChatController(fixture.bean(C2cAccessService.class),fixture.bean(C2cConversationService.class),fixture.bean(C2cMessageService.class),fixture.bean(C2cAttachmentService.class));}
         @Bean C2cStatusController status() {return new C2cStatusController(true,fixture.bean(C2cMarketService.class),fixture.products);}
-        @Bean C2cMeController me() {return new C2cMeController(fixture.bean(C2cAccess.class),fixture.bean(C2cProfiles.class));}
-        @Bean C2cController orders() {return new C2cController(fixture.bean(C2cAccess.class),fixture.bean(C2cAds.class),fixture.bean(C2cOrders.class),fixture.bean(C2cSubmissionService.class),fixture.bean(C2cQueryService.class),fixture.bean(C2cQuickQuoteService.class),fixture.bean(C2cPaymentAccounts.class),fixture.json);}
-        @Bean C2cHttpErrors errors() {return new C2cHttpErrors();}
-        @Bean C2cAdminChatController adminChat() {return new C2cAdminChatController(fixture.bean(C2cAdminAccess.class),fixture.bean(C2cAdminChat.class),fixture.json, new com.surprising.gateway.c2c.controller.C2cAdminRequestBinding(fixture.bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class)));}
-        @Bean C2cAdminController admin() {return new C2cAdminController(fixture.bean(C2cAdminAccess.class),fixture.bean(C2cAdminMarkets.class),fixture.bean(C2cAdminReview.class),fixture.bean(C2cAdminQueryService.class),fixture.bean(C2cAdminInitialization.class),fixture.json, new com.surprising.gateway.c2c.controller.C2cAdminRequestBinding(fixture.bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class)));}
+        @Bean C2cMeController me() {return new C2cMeController(fixture.bean(C2cAccessService.class),fixture.bean(C2cProfileService.class));}
+        @Bean C2cController orders() {return new C2cController(fixture.bean(C2cAccessService.class),fixture.bean(C2cAdService.class),fixture.bean(C2cOrderService.class),fixture.bean(C2cSubmissionService.class),fixture.bean(C2cQueryService.class),fixture.bean(C2cQuickQuoteService.class),fixture.bean(C2cPaymentAccountService.class),fixture.json);}
+        @Bean GlobalGatewayExceptionHandler errors() {return new GlobalGatewayExceptionHandler();}
+        @Bean C2cAdminChatController adminChat() {return new C2cAdminChatController(fixture.bean(C2cAdminAccessService.class),fixture.bean(C2cAdminChatService.class),fixture.json, new com.surprising.gateway.c2c.controller.C2cAdminRequestBinding(fixture.bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class)));}
+        @Bean C2cAdminController admin() {return new C2cAdminController(fixture.bean(C2cAdminAccessService.class),fixture.bean(C2cAdminMarketService.class),fixture.bean(C2cAdminReviewService.class),fixture.bean(C2cAdminQueryService.class),fixture.bean(C2cAdminInitializationService.class),fixture.json, new com.surprising.gateway.c2c.controller.C2cAdminRequestBinding(fixture.bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class)));}
         @Bean StandardServletMultipartResolver multipartResolver() {return new StandardServletMultipartResolver();}
-        @Bean C2cChatRealtime realtime() {return new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),10);}
+        @Bean C2cChatRealtime realtime() {return new C2cChatRealtime(fixture.json,fixture.bean(C2cAccessService.class),fixture.bean(C2cConversationService.class),fixture.bean(C2cMessageService.class),10);}
         @Bean SubscriptionRegistry registry() {return new SubscriptionRegistry(fixture.json,new WebSocketProperties());}
         @Bean ClientWebSocketHandler handler() {return new ClientWebSocketHandler(fixture.json,registry(),new WebSocketProperties(),new WebSocketAuthenticator(fixture.auth, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.service.GatewayApiKeyService.class)),fixture.products, disabledLimits());}
         @Bean NettyWebSocketServer nettyWebSocketServer() {

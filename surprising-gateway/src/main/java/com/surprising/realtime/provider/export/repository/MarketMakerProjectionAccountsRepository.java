@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 
 /** 必要关联读取例外：合并策略表market_maker_strategies及设置表market_maker_business_settings中的做市账号。包含停用策略以避免历史普通用户成交被重分类；本批一次读取，无写入。 */
 @Repository
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class MarketMakerProjectionAccountsRepository {
     private final JdbcTemplate jdbc;
     private final Set<Long> configuredMakerAccounts;

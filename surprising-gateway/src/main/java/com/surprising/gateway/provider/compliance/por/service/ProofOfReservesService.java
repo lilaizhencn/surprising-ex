@@ -19,9 +19,16 @@ public class ProofOfReservesService {
 
     private final Map<String, PorSnapshotSummary> snapshots = new ConcurrentHashMap<>();
     private final Map<Long, UserPorProofResponse> userProofs = new ConcurrentHashMap<>();
+    private final JdbcTemplate jdbcTemplate;
     private volatile String latestSnapshotId;
 
     public ProofOfReservesService() {
+        this(null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProofOfReservesService(@org.springframework.beans.factory.annotation.Autowired(required = false) @Nullable JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
         // 初始化一个基线储备证明快照
         Map<Long, Long> baselineUsers = Map.of(
                 1001L, 150_000L,
@@ -122,6 +129,13 @@ public class ProofOfReservesService {
 
     /**
      * 基于数据库当前资金投影与用户目录触发一次全新的 PoR 默克尔树快照。
+     */
+    public synchronized PorSnapshotSummary triggerSnapshotFromDatabase() {
+        return triggerSnapshotFromDatabase(this.jdbcTemplate);
+    }
+
+    /**
+     * 基于指定 JdbcTemplate 的资金投影触发 PoR 默克尔树快照。
      */
     public synchronized PorSnapshotSummary triggerSnapshotFromDatabase(@Nullable JdbcTemplate jdbc) {
         Map<Long, Long> userBalancesUsd = new LinkedHashMap<>();

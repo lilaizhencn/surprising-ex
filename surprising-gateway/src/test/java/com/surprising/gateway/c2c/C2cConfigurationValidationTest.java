@@ -2,10 +2,10 @@ package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cAdminController;
 import com.surprising.gateway.c2c.controller.C2cMerchantController;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
-import com.surprising.gateway.c2c.service.C2cAdminMarkets;
-import com.surprising.gateway.c2c.service.C2cMerchantBonds;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminMarketService;
+import com.surprising.gateway.c2c.service.C2cMerchantBondService;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -20,15 +20,15 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 
 class C2cConfigurationValidationTest {
-    private C2cAdminMarkets markets;
-    private C2cMerchantBonds bonds;
+    private C2cAdminMarketService markets;
+    private C2cMerchantBondService bonds;
     private C2cAdminController controller;
     private C2cMerchantController merchant;
     private ObjectMapper json;
     private MockHttpServletRequest http;
     @BeforeEach void setup() {
-        markets=mock(C2cAdminMarkets.class);bonds=mock(C2cMerchantBonds.class);json=new ObjectMapper();http=new MockHttpServletRequest();
-        var admin=mock(C2cAdminAccess.class);var access=mock(C2cAccess.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));
+        markets=mock(C2cAdminMarketService.class);bonds=mock(C2cMerchantBondService.class);json=new ObjectMapper();http=new MockHttpServletRequest();
+        var admin=mock(C2cAdminAccessService.class);var access=mock(C2cAccessService.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));
         controller=new C2cAdminController(admin,markets,null,null,null,json, org.mockito.Mockito.mock(com.surprising.gateway.c2c.controller.C2cAdminRequestBinding.class));merchant=new C2cMerchantController(bonds,access,admin,json, org.mockito.Mockito.mock(com.surprising.gateway.c2c.controller.C2cAdminRequestBinding.class));
     }
 

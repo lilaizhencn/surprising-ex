@@ -31,7 +31,7 @@ class AffiliateTeamIsolationPostgresTest {
 
   void fact(Fee fee) {
     f.jdbc.update(
-      "INSERT INTO core_trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at) VALUES(?,?,?,'TEAM-TEST',?,?,?,?,?)",
+      "INSERT INTO trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at) VALUES(?,?,?,'TEAM-TEST',?,?,?,?,?)",
       fee.productLine(),
       fee.orderId(),
       fee.userId(),
@@ -241,7 +241,7 @@ class AffiliateTeamIsolationPostgresTest {
       )
     ).isInstanceOf(org.springframework.dao.DataAccessException.class);
     f.jdbc.update(
-      "UPDATE core_trade_fee_facts SET fee_units=10001 WHERE cluster_position=1"
+      "UPDATE trade_fee_facts SET fee_units=10001 WHERE cluster_position=1"
     );
     f.jdbc.update(
       "UPDATE affiliate_deferred_fees SET next_attempt_at='-infinity'"

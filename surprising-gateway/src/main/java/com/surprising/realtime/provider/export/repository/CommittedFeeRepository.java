@@ -13,7 +13,8 @@ import org.springframework.stereotype.Repository;
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
   prefix = "surprising.trade-export",
   name = "enabled",
-  havingValue = "true"
+  havingValue = "true",
+  matchIfMissing = true
 )
 public class CommittedFeeRepository {
 
@@ -25,7 +26,7 @@ public class CommittedFeeRepository {
 
   public void baseline(ProductLine product, CoreTradeFeeObservation value) {
     jdbc.update(
-      "INSERT INTO core_trade_fee_progress(product_line,order_id,cluster_position,cumulative_fee_units) VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
+      "INSERT INTO trade_fee_progress(product_line,order_id,cluster_position,cumulative_fee_units) VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
       product.name(),
       value.orderId(),
       value.clusterPosition(),
@@ -39,7 +40,7 @@ public class CommittedFeeRepository {
     CoreOrderStateView baseline
   ) {
     var previous = jdbc.queryForList(
-      "SELECT cluster_position,cumulative_fee_units FROM core_trade_fee_progress WHERE product_line=? AND order_id=? FOR UPDATE",
+      "SELECT cluster_position,cumulative_fee_units FROM trade_fee_progress WHERE product_line=? AND order_id=? FOR UPDATE",
       product.name(),
       value.orderId()
     );
@@ -66,7 +67,7 @@ public class CommittedFeeRepository {
     if (delta != 0) {
       jdbc.update(
         """
-        INSERT INTO core_trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at)
+        INSERT INTO trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at)
         VALUES(?,?,?,?,?,?,?,?,?)
         """,
         product.name(),
@@ -82,7 +83,7 @@ public class CommittedFeeRepository {
     }
     jdbc.update(
       """
-      INSERT INTO core_trade_fee_progress(product_line,order_id,cluster_position,cumulative_fee_units) VALUES(?,?,?,?)
+      INSERT INTO trade_fee_progress(product_line,order_id,cluster_position,cumulative_fee_units) VALUES(?,?,?,?)
       ON CONFLICT(product_line,order_id) DO UPDATE SET cluster_position=EXCLUDED.cluster_position,cumulative_fee_units=EXCLUDED.cumulative_fee_units
       """,
       product.name(),

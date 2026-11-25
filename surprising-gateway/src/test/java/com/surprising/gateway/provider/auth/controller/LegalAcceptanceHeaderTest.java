@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth.controller;
 
+import com.surprising.gateway.provider.auth.support.LegalAcceptanceHeader;
+
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.gateway.provider.legal.exception.LegalProblem;
 import com.surprising.gateway.provider.legal.model.LegalModels.Acceptance;

@@ -6,7 +6,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
@@ -16,7 +15,6 @@ import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.gateway.provider.service.LiquidityOperationsService;
-import com.surprising.gateway.provider.service.ProductAccountAccess;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
@@ -32,8 +30,7 @@ class ProductUnavailableHttpBoundaryTest {
         var settings=mock(GatewayProductSettings.class);when(settings.list()).thenReturn(List.of());
         var products=new GatewayProductServices(null,null,settings);
         var accountType=AccountType.valueOf(line.accountTypeCode());
-        var operation=new ProductTransferOperationRequest(1,42,line,line,accountType,accountType,"USDT",100,"operation:1","test");
-        assertThatThrownBy(()->new ProductAccountAccess(products).transferOut(line.accountTypeCode(),operation))
+        assertThatThrownBy(()->products.requireEnabled(line))
                 .isInstanceOfSatisfying(ProductUnavailableException.class, failure->assertThat(failure.product()).isEqualTo(line));
         var auth=mock(AuthService.class);when(auth.authenticateBearer("Bearer own")).thenReturn(
                 new JwtPrincipal(42,"user","NORMAL",List.of(),Instant.now().plusSeconds(60)));

@@ -22,7 +22,7 @@ class TriggerOrderProjectionPostgresTest {
         var admin=new JdbcTemplate(new DriverManagerDataSource(url,user,password));
         admin.execute("CREATE SCHEMA trigger_query_it");
         jdbc=new JdbcTemplate(new DriverManagerDataSource(url+"?currentSchema=trigger_query_it",user,password));
-        jdbc.execute("CREATE TABLE core_trigger_order_projection (LIKE public.core_trigger_order_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE trading_trigger_orders (LIKE public.trading_trigger_orders INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_trigger_projection_initialization (LIKE public.core_trigger_projection_initialization INCLUDING ALL)");
         repository=new TriggerOrderProjectionRepository(jdbc);
     }
@@ -33,7 +33,7 @@ class TriggerOrderProjectionPostgresTest {
                 CoreTriggerOrderType.TAKE_PROFIT,CoreTriggerCondition.GREATER_OR_EQUAL,120,0,0,0,0,0,
                 CoreOrderType.MARKET,CoreTimeInForce.IOC,0,1,CoreMarginMode.CROSS,CorePositionSide.NET,status,
                 0,0,0,"",0,0,time,time+1,2,CoreTriggerPriceSource.LAST);
-        jdbc.update("INSERT INTO core_trigger_order_projection VALUES (?,?,?,?,?,?,?,?,?,?,?)", "OPTION",id,user,v.clientTriggerOrderId(),"74",status.name(),time,time+1,2,20,CoreTriggerOrderCodec.encodeList(List.of(v)));
+        jdbc.update("INSERT INTO trading_trigger_orders VALUES (?,?,?,?,?,?,?,?,?,?,?)", "OPTION",id,user,v.clientTriggerOrderId(),"74",status.name(),time,time+1,2,20,CoreTriggerOrderCodec.encodeList(List.of(v)));
     }
     @Test void absentInitializationIs503RatherThanAnEmptyHistory() {
         assertThatThrownBy(()->repository.get(ProductLine.OPTION,7L,99)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
@@ -68,9 +68,9 @@ class TriggerOrderProjectionPostgresTest {
     }
     @Test void corruptRowsAndUnavailableStorageAre503() {
         ready();add(1,7,1000,CoreTriggerOrderStatus.CANCELED);
-        jdbc.update("UPDATE core_trigger_order_projection SET user_id=8");
+        jdbc.update("UPDATE trading_trigger_orders SET user_id=8");
         assertThatThrownBy(()->repository.get(ProductLine.OPTION,null,1)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
-        jdbc.execute("DROP TABLE core_trigger_order_projection");
+        jdbc.execute("DROP TABLE trading_trigger_orders");
         assertThatThrownBy(()->repository.get(ProductLine.OPTION,null,1)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
     private com.surprising.trading.api.model.TriggerOrderQueryResponse search(ProductLine product,Long user,String instrument,

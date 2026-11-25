@@ -47,7 +47,7 @@ class RiskBoundaryPostgresTest {
         admin = new JdbcTemplate(new DriverManagerDataSource(url, user, password));
         schema = "risk_boundary_" + UUID.randomUUID().toString().replace("-", ""); admin.execute("CREATE SCHEMA " + schema);
         jdbc = new JdbcTemplate(new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema, user, password));
-        String init = Files.readString(Path.of("../..", "init.sql")); int start = init.indexOf("CREATE TABLE IF NOT EXISTS core_liquidation_projection (");
+        String init = Files.readString(Path.of("../..", "init.sql")); int start = init.indexOf("CREATE TABLE IF NOT EXISTS trading_liquidations (");
         jdbc.execute(init.substring(start, init.indexOf("\n);", start) + 3));
         start = init.indexOf("CREATE TABLE IF NOT EXISTS core_liquidation_projection_initialization (");
         jdbc.execute(init.substring(start, init.indexOf("\n);", start) + 3));
@@ -74,7 +74,7 @@ class RiskBoundaryPostgresTest {
 
     @Test void candidateUsesStoredMarginModeAndDoesNotInventAnInstrumentVersion() throws Exception {
         seed(ProductLine.LINEAR_PERPETUAL, LiquidationCandidateStatus.NEW);
-        jdbc.update("UPDATE core_liquidation_projection SET margin_mode='ISOLATED'");
+        jdbc.update("UPDATE trading_liquidations SET margin_mode='ISOLATED'");
         var candidate = candidates(LiquidationCandidateStatus.NEW, "asc", null).get("candidates").get(0);
         assertThat(candidate.get("marginMode").asString()).isEqualTo("ISOLATED");
         assertThat(candidate.has("instrumentChangeId")).isFalse();
@@ -204,8 +204,8 @@ class RiskBoundaryPostgresTest {
         for(int i=0;i<3;i++) {
             String state=status==LiquidationCandidateStatus.PROCESSING ? List.of("ORDERED","INSURANCE_REQUIRED","ADL_REQUIRED").get(i)
                     : status==LiquidationCandidateStatus.NEW ? "PLANNED" : status.name();
-            jdbc.update("INSERT INTO core_liquidation_projection VALUES(?,?,42,'1','USDT','CROSS','NET',1,1,1,0,0,?,1,?)",line.name(),id+i,state,NOW+i);
+            jdbc.update("INSERT INTO trading_liquidations VALUES(?,?,42,'1','USDT','CROSS','NET',1,1,1,0,0,?,1,?)",line.name(),id+i,state,NOW+i);
         }
-        jdbc.update("INSERT INTO core_liquidation_projection VALUES(?,?,42,'1','USDT','CROSS','NET',1,1,1,0,0,?,1,?)",line.name(),id+9,status==LiquidationCandidateStatus.NEW ? "CANCELED" : "PLANNED",NOW);
+        jdbc.update("INSERT INTO trading_liquidations VALUES(?,?,42,'1','USDT','CROSS','NET',1,1,1,0,0,?,1,?)",line.name(),id+9,status==LiquidationCandidateStatus.NEW ? "CANCELED" : "PLANNED",NOW);
     }
 }

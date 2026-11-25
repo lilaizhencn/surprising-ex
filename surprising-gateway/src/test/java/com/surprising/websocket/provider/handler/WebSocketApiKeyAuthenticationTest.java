@@ -28,7 +28,7 @@ class WebSocketApiKeyAuthenticationTest {
     final TotpService totp = new TotpService(new GatewayProperties());
     final GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
     final AuthService auth = mock(AuthService.class);
-    final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
+    final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding.class), fixture.state);
     final WebSocketProperties properties = new WebSocketProperties();
     final SubscriptionRegistry registry = new SubscriptionRegistry(json, properties);
     final WebSocketAuthenticator authenticator = new WebSocketAuthenticator(auth, keys);

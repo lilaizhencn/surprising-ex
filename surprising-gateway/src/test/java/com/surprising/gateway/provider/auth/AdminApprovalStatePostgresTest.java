@@ -72,7 +72,8 @@ class AdminApprovalStatePostgresTest {
         context.registerBean(AdminApprovalService.class, () -> new AdminApprovalService(auth, mock(AdminAuditRepository.class), rows, properties));
         context.refresh();
         service = context.getBean(AdminApprovalService.class);
-        mvc = MockMvcBuilders.standaloneSetup(new AdminAuthController(auth, service, json)).build();
+        mvc = MockMvcBuilders.standaloneSetup(new AdminAuthController(
+                new AdminAuthService(auth.properties(), auth.persistence(), auth), service, json)).build();
     }
 
     @AfterEach void cleanup() {

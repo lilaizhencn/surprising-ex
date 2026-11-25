@@ -48,6 +48,14 @@ public class AffiliateRepository {
     );
   }
 
+  public void shortenInviteCodeIfLong(long userId, String shortCode) {
+    jdbc.update(
+      "UPDATE affiliate_profiles SET invite_code=? WHERE user_id=? AND length(invite_code) > 12",
+      shortCode,
+      userId
+    );
+  }
+
   public Profile profile(long userId) {
     return findProfile(userId).orElseThrow(() ->
       new IllegalArgumentException("用户不存在")

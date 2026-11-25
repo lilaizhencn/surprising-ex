@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.client.SpotAccountClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.gateway.provider.repository.CustodyWalletWebhookRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,20 +27,20 @@ public class CustodyWalletWebhookService {
     private final GatewayProperties properties;
     private final CustodyWalletWebhookRepository repository;
     private final CustodyWithdrawalService withdrawalService;
-    private final SpotAccountClient spotAccountClient;
+    private final GatewayProductServices products;
     private final ObjectMapper objectMapper;
     private final com.surprising.asset.service.AssetConfigurationService assets;
 
     public CustodyWalletWebhookService(GatewayProperties properties,
                                        CustodyWalletWebhookRepository repository,
                                        CustodyWithdrawalService withdrawalService,
-                                       SpotAccountClient spotAccountClient,
+                                       GatewayProductServices products,
                                        ObjectMapper objectMapper, com.surprising.asset.service.AssetConfigurationService assets) {
         this.properties = properties;
         this.assets = assets;
         this.repository = repository;
         this.withdrawalService = withdrawalService;
-        this.spotAccountClient = spotAccountClient;
+        this.products = products;
         this.objectMapper = objectMapper;
     }
 
@@ -157,7 +157,7 @@ public class CustodyWalletWebhookService {
             units = Math.negateExact(units);
         }
         String referenceId = "custody-wallet:" + eventId + ":" + eventType.toLowerCase(Locale.ROOT);
-        spotAccountClient.adjustBalance(userId, asset, units, referenceId,
+        CustodyWithdrawalService.adjustSpotBalance(products, userId, asset, units, referenceId,
                 "custody wallet " + eventType);
     }
 

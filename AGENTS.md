@@ -15,10 +15,23 @@
 - `model/dto/event`：数据与契约；`support/utils`：必要的共享能力；`*-api`：共享模型、契约和纯公式。
 - 入口 → service → repository/client，禁止反向或循环依赖；共享 API 不依赖应用实现，框架适配依赖按需设为 `optional`。
 
+## 命名与结构规范
+
+- **标准分层命名**：
+  - 入口层：`*Controller`（REST）、`*WsHandler` / `*Endpoint`（WebSocket），禁止包含业务逻辑或 SQL。
+  - 业务层：`*Service`（仅在确实存在多个实现或需要跨模块契约时才拆接口 + `*ServiceImpl`；单一实现直接写类，不机械造接口）。
+  - 数据与外部调用：`*Repository` / `*Mapper`（数据库）、`*Client`（外部调用）。
+  - 数据模型：`*Req` / `*Request`（入参）、`*Resp` / `*Response` / `*VO`（出参）、`*DTO`（内部传输）、`*Entity` / `*PO`（表映射）、`*Converter`（模型转换）。
+- **禁止过度设计命名与套娃**：
+  - 严禁无实际职责的 `*Orchestrator`、`*Coordinator`、`*Facade`、`*Pipeline`、`*Executor`、`*Processor`、`*Context`、`*BootstrapHelper`、`*Delegate` 套娃封装；Aeron/撮合核心中确有协议或线程边界职责的命名除外。
+  - 仅 1 个实现类的 `*Strategy` / `*Factory` / 注册表 `Map<Type, Handler>` 一律视为过度设计，直接合并或用简单 `switch`/`if` 替代。
+  - 仅做字段透传、纯转发调用的包装类或单行转发方法直接打平；重命名类名与内部方法时，不得擅自修改 REST JSON 字段、WebSocket 事件名、Aeron 协议字段及数据库列名。
+
 ## 编码约束
 
 - 面向对象、职责单一；类、变量、方法使用直白的业务用语。主流程顺着读，不过度设计，不机械拆类、加接口或层层包装传参。
 - 构造器注入、`final` 依赖；配置统一从 `application.yml` / `application.yaml` 绑定。一般不使用环境变量、`${ENV:...}` 占位符或 `System.getenv()` 配置应用；仅用户明确要求或部署平台强制时例外。`proxyBeanMethods=false` 时不直接调用 `@Bean` 方法。
+- **严防配置参数爆炸**：核心能力默认开启，不为常规功能新增多余开关、`enabled` 标志或无意义的调优参数；非密钥、非部署环境地址参数不暴露为环境变量占位符。
 - 公开仓库的真实密钥不得写入受版本控制的 YAML、示例或日志。R2 上传凭据当前按用户要求作为环境变量例外：保存在仓库外的 `.env`（权限 `0600`），运行时注入；普通非敏感配置仍默认使用 YAML，不将真实凭据提交远端。
 - Lombok 只简化样板；校验、复制、状态转换显式实现，可变交易对象不用 `@Data`。区分业务拒绝和系统故障，不吞异常，不记录敏感信息。
 - 六产品线隔离；状态只有一个权威来源，保持 Owner/Lane 所有权。保留整数单位、舍入、溢出、冻结、幂等、事务、事件顺序和恢复语义。

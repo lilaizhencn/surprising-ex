@@ -1,21 +1,18 @@
 package com.surprising.trading.order.repository;
 
-import com.surprising.trading.order.model.MarkPriceLookup;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import java.time.Duration;
 import java.util.OptionalLong;
 import org.springframework.stereotype.Component;
 
 @Component
-public class OrderMarkPriceRepository implements MarkPriceLookup {
+public class OrderMarkPriceRepository {
 
     private final LatestMarkPriceCache cache;
 
     public OrderMarkPriceRepository(LatestMarkPriceCache cache) {
         this.cache = cache;
     }
-
-    @Override
     public OptionalLong latestMarkPriceTicks(String instrumentId, long instrumentChangeId, long maxAgeMs) {
         var event = cache.fresh(instrumentId, Duration.ofMillis(Math.max(1L, maxAgeMs)))
                 .filter(value -> value.instrumentChangeId() == instrumentChangeId)

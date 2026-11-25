@@ -27,7 +27,7 @@ public class PortfolioIncomeCutoffRepository {
     public List<Cut> cuts(long userId, long opening, long oldestCurrent, long newestCurrent) {
         return jdbc.query("""
                 SELECT c.*,e.user_id AS account_user,e.complete,e.net_asset_units::text
-                  FROM core_portfolio_cutoff c LEFT JOIN core_portfolio_equity e
+                  FROM portfolio_cutoffs c LEFT JOIN portfolio_equities e
                     ON e.product_line=c.product_line AND e.cutoff_epoch_ms=c.cutoff_epoch_ms AND e.user_id=?
                  WHERE (c.cutoff_epoch_ms=? OR c.cutoff_epoch_ms>=?) AND c.cutoff_epoch_ms<=?
                 """, (rs, row) -> {

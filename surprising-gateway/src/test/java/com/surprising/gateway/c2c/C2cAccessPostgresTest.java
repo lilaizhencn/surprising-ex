@@ -6,7 +6,7 @@ import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 
-import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cAccessService;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -26,7 +26,7 @@ class C2cAccessPostgresTest {
     private C2cDatabaseFixture db;
     private ComplianceService compliance;
     private SensitiveActionVerificationService security;
-    private C2cAccess access;
+    private C2cAccessService access;
     private static JwtPrincipal user() {
         return new JwtPrincipal(11,"c2c_security_qa","NORMAL",List.of(),Instant.now().plusSeconds(600));
     }
@@ -37,7 +37,7 @@ class C2cAccessPostgresTest {
         db.jdbc.update("INSERT INTO c2c_otp_attempts VALUES(0)");
         compliance = mock(ComplianceService.class);
         security = mock(SensitiveActionVerificationService.class);
-        access = new C2cAccess(mock(AuthService.class), compliance, security, new com.surprising.gateway.c2c.repository.C2cProfileRepository(db.jdbc),
+        access = new C2cAccessService(mock(AuthService.class), compliance, security, new com.surprising.gateway.c2c.repository.C2cProfileRepository(db.jdbc),
                 new com.surprising.gateway.c2c.repository.C2cSecurityGrantRepository(db.jdbc),
                 mock(GatewayUserRepository.class), db.transactions.getTransactionManager(),
                 C2cDatabaseFixture.markets(db.jdbc),mock(com.surprising.gateway.provider.product.GatewayProductServices.class));

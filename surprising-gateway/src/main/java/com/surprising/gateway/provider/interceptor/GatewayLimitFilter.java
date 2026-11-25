@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.interceptor;
 
 import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.controller.GatewayLimitRequestBinding;
+import com.surprising.gateway.provider.support.GatewayLimitRequestBinding;
 import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.gateway.provider.service.GatewayRequestLimits;
 import jakarta.servlet.*;

@@ -3,7 +3,7 @@ package com.surprising.gateway.c2c;
 import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
 import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
 import com.surprising.gateway.c2c.controller.C2cChatController;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
 import static org.assertj.core.api.Assertions.*;
 import java.io.ByteArrayOutputStream;
@@ -91,13 +91,13 @@ class C2cAttachmentsPostgresTest {
     @Test void qrReadUsesTheOriginalOrderSnapshotAfterPaymentAccountChanges() throws Exception {
         UUID original=UUID.randomUUID(),newQr=UUID.randomUUID();
         upload(11,original,"PAYMENT_QR",null,null,png(),"image/png",200);
-        var account=fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false);
-        fixture.bean(C2cPaymentAccounts.class).save(11,account.id(),account.revision(),"CNY","ALIPAY",
+        var account=fixture.bean(C2cPaymentAccountService.class).get(11,fixture.makerAccount,false);
+        fixture.bean(C2cPaymentAccountService.class).save(11,account.id(),account.revision(),"CNY","ALIPAY",
                 C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Maker","qa-maker-account","",original)));
         fixture.db.jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
         UUID order=order();upload(11,newQr,"PAYMENT_QR",null,null,png(),"image/png",200);
-        account=fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false);
-        fixture.bean(C2cPaymentAccounts.class).save(11,account.id(),account.revision(),"CNY","ALIPAY",
+        account=fixture.bean(C2cPaymentAccountService.class).get(11,fixture.makerAccount,false);
+        fixture.bean(C2cPaymentAccountService.class).save(11,account.id(),account.revision(),"CNY","ALIPAY",
                 C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Maker","qa-new-account","",newQr)));
         var response=fixture.perform(HttpMethod.GET,"/api/v1/c2c/attachments/"+original+"/content?orderId="+order,12,null).getResponse();
         assertThat(response.getStatus()).isEqualTo(200);

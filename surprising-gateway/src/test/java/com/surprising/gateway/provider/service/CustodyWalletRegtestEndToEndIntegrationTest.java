@@ -9,7 +9,10 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.asset.service.AssetConfigurationService;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
-import com.surprising.gateway.provider.client.SpotAccountClient;
+import com.surprising.account.api.model.BalanceAdjustmentRequest;
+import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.product.api.ProductLine;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.CustodyWalletWebhookRepository;
 import java.nio.charset.StandardCharsets;
@@ -37,7 +40,8 @@ class CustodyWalletRegtestEndToEndIntegrationTest {
     private final CustodyWalletWebhookRepository repository = mock(CustodyWalletWebhookRepository.class);
     private final AssetConfigurationService assets = mock(AssetConfigurationService.class);
     private final CustodyWithdrawalService withdrawalService = mock(CustodyWithdrawalService.class);
-    private final SpotAccountClient spotAccountClient = mock(SpotAccountClient.class);
+    private final AccountCommandGateway accountCommands = mock(AccountCommandGateway.class);
+    private final GatewayProductServices products = mock(GatewayProductServices.class);
     private final RestClientStub walletHttp = RestClientStub.create();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -56,8 +60,9 @@ class CustodyWalletRegtestEndToEndIntegrationTest {
         wallet.setWebhookSecret("mpc-wallet-webhook-secret-2026");
         wallet.setBaseUrl("https://custody-api.tokdou.com");
 
+        when(products.service(ProductLine.SPOT, AccountCommandGateway.class)).thenReturn(accountCommands);
         webhookService = new CustodyWalletWebhookService(
-                properties, repository, withdrawalService, spotAccountClient, objectMapper, assets);
+                properties, repository, withdrawalService, products, objectMapper, assets);
         walletClient = new CustodyWalletClient(properties, walletHttp.client(), objectMapper);
 
         // 设置资产精度：BTC 8 位小数（1 BTC = 100,000,000 satoshis）
@@ -65,12 +70,11 @@ class CustodyWalletRegtestEndToEndIntegrationTest {
         when(assets.amountUnits(eq("BTC"), eq("0.50000000"))).thenReturn(50_000_000L);
 
         // 模拟现货记账回调
-        org.mockito.Mockito.doAnswer(invocation -> {
-            long uid = invocation.getArgument(0);
-            long delta = invocation.getArgument(2);
-            userBtcBalances.computeIfAbsent(uid, k -> new AtomicLong(0)).addAndGet(delta);
+        when(accountCommands.adjustBalance(any(BalanceAdjustmentRequest.class), any(), any())).thenAnswer(invocation -> {
+            BalanceAdjustmentRequest req = invocation.getArgument(0);
+            userBtcBalances.computeIfAbsent(req.userId(), k -> new AtomicLong(0)).addAndGet(req.amountUnits());
             return null;
-        }).when(spotAccountClient).adjustBalance(any(Long.class), eq("BTC"), any(Long.class), any(), any());
+        });
     }
 
     @Test
@@ -127,10 +131,11 @@ class CustodyWalletRegtestEndToEndIntegrationTest {
 
         // 验证用户资金账户状态：从 0 变更为 150,000,000 satoshis (1.5 BTC)
         assertThat(userBtcBalances.get(userId).get()).isEqualTo(150_000_000L);
-        verify(spotAccountClient).adjustBalance(
-                eq(userId), eq("BTC"), eq(150_000_000L),
-                eq("custody-wallet:evt-regtest-deposit-001:deposit.confirmed"),
-                eq("custody wallet DEPOSIT.CONFIRMED")
+        verify(accountCommands).adjustBalance(
+                eq(new BalanceAdjustmentRequest(userId, "BTC", 150_000_000L,
+                        "custody-wallet:evt-regtest-deposit-001:deposit.confirmed",
+                        "custody wallet DEPOSIT.CONFIRMED")),
+                any(), any()
         );
         verify(repository).markProcessed(eq(eventId), any());
 

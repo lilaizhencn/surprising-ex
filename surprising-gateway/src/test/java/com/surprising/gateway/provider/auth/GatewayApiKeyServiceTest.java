@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
-import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
+import com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.utils.ApiSignatureFormats;
 import com.surprising.gateway.provider.auth.service.TotpService;
 
@@ -18,7 +18,7 @@ class GatewayApiKeyServiceTest {
     final com.surprising.gateway.provider.auth.state.AuthStateFixture fixture = new com.surprising.gateway.provider.auth.state.AuthStateFixture();
 
     private final GatewayApiKeyService service = new GatewayApiKeyService(
-            null, null, new TotpService(new GatewayProperties()), null, new com.surprising.gateway.provider.config.GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
+            null, null, new TotpService(new GatewayProperties()), null, new com.surprising.gateway.provider.config.GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding.class), fixture.state);
 
     @Test
     void removesOnlySignatureFromBinanceCanonicalQuery() {

@@ -1,8 +1,8 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cMeController;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cProfiles;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cProfileService;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,10 +13,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class C2cProfileValidationTest {
-    private C2cProfiles profiles;
+    private C2cProfileService profiles;
     private C2cMeController controller;
     @BeforeEach void setup() {
-        profiles=mock(C2cProfiles.class);var access=mock(C2cAccess.class);
+        profiles=mock(C2cProfileService.class);var access=mock(C2cAccessService.class);
         when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));controller=new C2cMeController(access,profiles);
     }
     @Test void invalidSettingsAndTextAreRejectedBeforeBusinessAccess() {

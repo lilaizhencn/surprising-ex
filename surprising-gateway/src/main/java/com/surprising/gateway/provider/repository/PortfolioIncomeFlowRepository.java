@@ -18,7 +18,7 @@ public class PortfolioIncomeFlowRepository {
 
     public List<Flow> flows(long userId, long opening) {
         return jdbc.query("""
-                SELECT * FROM core_portfolio_cash_flow WHERE user_id=?
+                SELECT * FROM portfolio_cash_flows WHERE user_id=?
                   AND (occurred_at_epoch_ms>=? OR (transfer_id IS NOT NULL AND source_user_id=? AND target_user_id=?))
                 ORDER BY product_line,cluster_position
                 """, (rs, row) -> {

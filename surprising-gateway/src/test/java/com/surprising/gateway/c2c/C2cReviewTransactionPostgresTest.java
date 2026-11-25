@@ -6,8 +6,8 @@ import com.surprising.gateway.c2c.model.C2cAdminReviewModels;
 import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
-import com.surprising.gateway.c2c.service.C2cAdminReview;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cAdminReviewService;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,7 +43,7 @@ class C2cReviewTransactionPostgresTest {
     @Test void stalePaymentRevisionRollsBackTheEarlierAdPauseAndKeepsOriginalDetails() throws Exception {
         UUID adId = fixture.publish("SELL");
         var adBefore = fixture.bean(C2cAdsRepository.class).get(adId, false);
-        var payments = fixture.bean(C2cPaymentAccounts.class);
+        var payments = fixture.bean(C2cPaymentAccountService.class);
         var accountBefore = payments.get(11, fixture.makerAccount, false);
 
         fixture.call(HttpMethod.POST, "/api/v1/c2c/payment-accounts", 11,
@@ -58,7 +58,7 @@ class C2cReviewTransactionPostgresTest {
     }
 
     @Test void paymentApprovalRollsBackWhenRequiredAuditFails() throws Exception {
-        var payments = fixture.bean(C2cPaymentAccounts.class);
+        var payments = fixture.bean(C2cPaymentAccountService.class);
         var pending = payments.save(13, null, 0, "CNY", "ALIPAY",
                 C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Pending", "qa-pending-account", "", null)));
         fixture.db.jdbc.execute("DROP TABLE gateway_admin_operation_logs");

@@ -36,32 +36,21 @@ class MarketApplicationContextTest {
         });
     }
 
-    @org.junit.jupiter.api.Test
-    void exportRequiresExplicitStorageConfiguration() {
-        context(ProductLine.LINEAR_PERPETUAL, false)
-                .withPropertyValues("surprising.trade-export.enabled=true")
-                .run(ctx -> assertThat(ctx).hasFailed());
-    }
-
     @ParameterizedTest @EnumSource(ProductLine.class)
     void exportEnabledWithoutRouterDoesNotStartCore(ProductLine line) {
-        context(line, false).withPropertyValues("surprising.trade-export.enabled=true",
-                "surprising.trade-export.cluster-directory=" + temp,
-                "surprising.trade-export.aeron-directory=" + temp.resolve("driver"),
-                "surprising.trade-export.archive-control-channel=aeron:ipc",
-                "surprising.trade-export.checkpoint=" + temp.resolve("checkpoint"))
+        context(line, false).withPropertyValues("surprising.trade-export.enabled=true")
             .withBean("disableExportWorker", BeanPostProcessor.class, () -> new BeanPostProcessor() {
                 @Override public Object postProcessAfterInitialization(Object bean, String name) {
-                    if (bean instanceof com.surprising.realtime.provider.export.TradeExportService)
-                        return mock(com.surprising.realtime.provider.export.TradeExportService.class);
+                    if (bean instanceof com.surprising.realtime.provider.export.CoreProjectionKafkaConsumer)
+                        return mock(com.surprising.realtime.provider.export.CoreProjectionKafkaConsumer.class);
                     return bean;
                 }
             }).run(ctx -> {
                 assertThat(ctx).hasNotFailed()
-                    .hasSingleBean(com.surprising.realtime.provider.export.TradeExportService.class)
-                    .hasSingleBean(com.surprising.realtime.provider.export.config.TradeExportProperties.class)
-                    .doesNotHaveBean(com.surprising.aeron.bootstrap.AeronCoreLifecycle.class)
+                    .hasSingleBean(com.surprising.realtime.provider.export.CoreProjectionKafkaConsumer.class)
                     .doesNotHaveBean(RealtimeRouter.class);
+                assertThat(org.springframework.util.ClassUtils.isPresent(
+                        "com.surprising.aeron.bootstrap.AeronCoreLifecycle", ctx.getClassLoader())).isFalse();
                 assertThat(ctx.getBean(com.surprising.candlestick.provider.config.CandlestickProperties.class)
                     .getProductLine()).isEqualTo(line);
             });
@@ -72,9 +61,10 @@ class MarketApplicationContextTest {
         context(line, false).run(ctx -> {
             assertThat(ctx).hasNotFailed().hasSingleBean(CandleQueryService.class)
                     .doesNotHaveBean(RealtimeRouter.class).doesNotHaveBean(RealtimeJsonPublisher.class)
-                    .doesNotHaveBean(com.surprising.realtime.provider.export.TradeExportService.class)
-                    .doesNotHaveBean(com.surprising.realtime.provider.export.service.CommittedOrderProjectionService.class)
-                    .doesNotHaveBean(com.surprising.aeron.bootstrap.AeronCoreLifecycle.class);
+                    .doesNotHaveBean(com.surprising.realtime.provider.export.CoreProjectionKafkaConsumer.class)
+                    .doesNotHaveBean(com.surprising.realtime.provider.export.service.CommittedOrderProjectionService.class);
+            assertThat(org.springframework.util.ClassUtils.isPresent(
+                    "com.surprising.aeron.bootstrap.AeronCoreLifecycle", ctx.getClassLoader())).isFalse();
             if (line == ProductLine.OPTION) {
                 assertThat(ctx).hasSingleBean(com.surprising.realtime.provider.option.service.OptionQuoteService.class)
                         .hasSingleBean(com.surprising.realtime.provider.option.controller.OptionQuoteController.class)
@@ -94,19 +84,22 @@ class MarketApplicationContextTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void enabledRouterSharesProcessWithoutLoopbackPublisher(ProductLine line) {
-        context(line, true).withBean("realtimeRouter", RealtimeRouter.class, () -> mock(RealtimeRouter.class))
+        context(line, true)
+                .withBean("appMediaDriver", Object.class, Object::new)
+                .withBean("realtimeRouter", RealtimeRouter.class, () -> mock(RealtimeRouter.class))
                 .run(ctx -> assertThat(ctx).hasNotFailed().hasSingleBean(CandleQueryService.class)
                         .hasSingleBean(RealtimeRouter.class).doesNotHaveBean(RealtimeJsonPublisher.class));
     }
 
     private WebApplicationContextRunner context(ProductLine line, boolean routing) {
         return new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
-                .withUserConfiguration(TestRealtimeAppConfig.class, RealtimeApplication.class)
+                .withUserConfiguration(TestRealtimeAppConfig.class)
                 .withPropertyValues("spring.config.name=application",
                         "management.endpoint.health.group.readiness.include=readinessState",
                         "spring.data.redis.lettuce.pool.max-active=4",
                         "surprising.candlestick.kafka.product-line=" + line,
                         "surprising.realtime.router.enabled=" + routing,
+                        "surprising.trade-export.enabled=false",
                         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration")
                 .withBean("symbolRegistryService", SymbolRegistryService.class, () -> mock(SymbolRegistryService.class))
                 .withBean(InstrumentSnapshotCache.class, InstrumentSnapshotCache::new)
@@ -127,6 +120,10 @@ class MarketApplicationContextTest {
 
     @org.springframework.boot.autoconfigure.SpringBootApplication(scanBasePackages = {
             "com.surprising.realtime.provider", "com.surprising.candlestick.provider"
+    })
+    @org.springframework.boot.context.properties.EnableConfigurationProperties({
+            com.surprising.realtime.provider.config.RealtimeRouterProperties.class,
+            com.surprising.candlestick.provider.config.CandlestickProperties.class
     })
     @org.springframework.scheduling.annotation.EnableScheduling
     @org.springframework.kafka.annotation.EnableKafka

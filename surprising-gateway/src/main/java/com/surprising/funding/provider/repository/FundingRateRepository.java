@@ -40,7 +40,7 @@ public class FundingRateRepository {
                     to_timestamp(p.settlement_id/1000.0) AS funding_time,
                     f.premium_rate_ppm, f.interest_rate_ppm, f.funding_interval_hours,
                     'FINAL' AS status, to_timestamp(p.occurred_at_epoch_ms/1000.0) AS event_time
-                  FROM core_funding_settlement_projection p
+                  FROM funding_settlements p
                   LEFT JOIN funding_settlement_rates f ON f.product_line=p.product_line
                     AND f.instrument_id=p.instrument_id AND f.settlement_id=p.settlement_id
                     AND f.funding_rate_ppm=p.funding_rate_ppm

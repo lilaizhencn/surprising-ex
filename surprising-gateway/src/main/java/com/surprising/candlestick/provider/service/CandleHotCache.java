@@ -35,25 +35,37 @@ public class CandleHotCache {
     private final LongAdder latestMisses = new LongAdder();
 
     public CandleHotCache() {
-        this(null);
+        this(null, null);
+    }
+
+    public CandleHotCache(MeterRegistry meterRegistry) {
+        this(meterRegistry, null);
     }
 
     @Autowired
-    public CandleHotCache(MeterRegistry meterRegistry) {
+    public CandleHotCache(
+            @Autowired(required = false) MeterRegistry meterRegistry,
+            @Autowired(required = false) com.surprising.candlestick.provider.config.CandlestickProperties properties) {
         if (meterRegistry != null) {
+            String productLine = properties == null ? "SHARED" : properties.getProductLine().name();
             Gauge.builder("surprising.candlestick.hot-cache.entries", entryCount, AtomicInteger::get)
+                    .tag("productLine", productLine)
                     .description("K 线热缓存当前条目数")
                     .register(meterRegistry);
             Gauge.builder("surprising.candlestick.hot-cache.range.hits", rangeHits, LongAdder::sum)
+                    .tag("productLine", productLine)
                     .description("K 线区间查询命中热缓存次数")
                     .register(meterRegistry);
             Gauge.builder("surprising.candlestick.hot-cache.range.misses", rangeMisses, LongAdder::sum)
+                    .tag("productLine", productLine)
                     .description("K 线区间查询未命中热缓存次数")
                     .register(meterRegistry);
             Gauge.builder("surprising.candlestick.hot-cache.latest.hits", latestHits, LongAdder::sum)
+                    .tag("productLine", productLine)
                     .description("K 线最新查询命中热缓存次数")
                     .register(meterRegistry);
             Gauge.builder("surprising.candlestick.hot-cache.latest.misses", latestMisses, LongAdder::sum)
+                    .tag("productLine", productLine)
                     .description("K 线最新查询未命中热缓存次数")
                     .register(meterRegistry);
         }

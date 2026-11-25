@@ -3,12 +3,14 @@ package com.surprising.affiliate;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
+import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.affiliate.config.*;
 import com.surprising.affiliate.model.AffiliateModels.*;
 import com.surprising.affiliate.repository.*;
 import com.surprising.affiliate.service.*;
 import com.surprising.gateway.provider.model.*;
-import com.surprising.gateway.provider.model.ProductAccountAdjustment;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.gateway.provider.service.ProductTransferService;
 import java.nio.file.*;
 import java.time.Instant;
@@ -416,7 +418,7 @@ class AffiliatePostgresTest {
     // One committed command settles both sides. Insert order deliberately differs from log/order sorting.
     for (long order : new long[] { 43, 42 })
       jdbc.update(
-        "INSERT INTO core_trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at) VALUES('LINEAR_PERPETUAL',?,2,'TEST','USDT',10000,10000,64,?)",
+        "INSERT INTO trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at) VALUES('LINEAR_PERPETUAL',?,2,'TEST','USDT',10000,10000,64,?)",
         order,
         java.sql.Timestamp.from(now)
       );
@@ -719,7 +721,7 @@ class AffiliatePostgresTest {
       var settlement = new AffiliateSettlementService(
         repository,
         ledger,
-        new ProductTransferService(accounts, null),
+        new ProductTransferService(accounts.products(), null),
         manager,
         context.getBean(AffiliateProperties.class)
       );
@@ -746,15 +748,10 @@ class AffiliatePostgresTest {
     }
   }
 
-  /** Transport adapter to the real deterministic Core. Only the first debit response is lost. */
-  static class ReplayAccounts
-    implements
-      com.surprising.gateway.provider.service.ProductAccountClient,
-      AutoCloseable
-  {
+  /** In-memory idempotent ledger adapter for affiliate transfer tests. */
+  static class ReplayAccounts implements AutoCloseable {
 
     final com.surprising.product.api.ProductLine product;
-    com.surprising.aeron.service.replay.CommittedTradeReplay replay;
 
     ReplayAccounts() {
       this(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
@@ -762,13 +759,10 @@ class AffiliatePostgresTest {
 
     ReplayAccounts(com.surprising.product.api.ProductLine product) {
       this.product = product;
-      replay = new com.surprising.aeron.service.replay.CommittedTradeReplay(
-        product,
-        null
-      );
     }
 
     final Map<Long, Long> balances = new HashMap<>();
+    final Set<UUID> appliedCommands = new HashSet<>();
     long sequence;
     boolean loseDebitResponse = true;
 
@@ -777,66 +771,41 @@ class AffiliatePostgresTest {
     }
 
     void adjust(long user, String asset, long amount) {
-      apply(
-        com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE,
-        user,
-        UUID.randomUUID(),
-        com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(
-          new com.surprising.aeron.protocol.BalanceAdjustmentCommand(
-            asset,
-            amount
-          )
-        )
-      );
+      long current = balances.getOrDefault(user, 0L);
+      if (amount < 0 && current + amount < 0) {
+        throw new AccountCommandRejectedException("INSUFFICIENT_BALANCE", "INSUFFICIENT_BALANCE");
+      }
+      balances.put(user, current + amount);
     }
 
     void restart() {
-      byte[] snapshot = replay.snapshot();
-      replay.close();
-      replay = new com.surprising.aeron.service.replay.CommittedTradeReplay(
-        product,
-        snapshot
-      );
+      // State persists in-memory across simulated gateway retries.
     }
 
-    ProductAccountAdjustment apply(
+    void apply(
       com.surprising.aeron.protocol.CoreMessageType type,
       long user,
       UUID id,
       byte[] payload
     ) {
-      long n = ++sequence,
-        now = 1793180000000L + n;
-      var header = com.surprising.aeron.protocol.CoreMessageHeader.command(
-        type,
-        id,
-        product,
-        com.surprising.aeron.protocol.CommandSource.GATEWAY,
-        71428,
-        n,
-        user,
-        now,
-        0
-      );
-      replay.apply(
-        com.surprising.aeron.protocol.CoreMessageCodec.encode(
-          new com.surprising.aeron.protocol.CoreMessage(header, payload)
-        ),
-        now,
-        n * 64
-      );
-      if (replay.balanceFlow() != null) balances.put(
-        replay.balanceFlow().userId(),
-        Long.parseLong(replay.balanceFlow().balanceAfterUnits())
-      );
-      var receipt = replay.commandResult();
-      return receipt.status() ==
-        com.surprising.aeron.protocol.ResponseStatus.APPLIED
-        ? ProductAccountAdjustment.applied("committed")
-        : ProductAccountAdjustment.rejected(receipt.code().name());
+      ++sequence;
+      if (!appliedCommands.add(id)) return;
+      if (type == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_OUT) {
+        var cmd = com.surprising.aeron.protocol.TradingCommandCodec.decodeTransferFunds(payload);
+        long current = balances.getOrDefault(user, 0L);
+        if (current < cmd.amountUnits()) {
+          appliedCommands.remove(id);
+          throw new AccountCommandRejectedException("INSUFFICIENT_BALANCE", "INSUFFICIENT_BALANCE");
+        }
+        balances.put(user, current - cmd.amountUnits());
+      } else if (type == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN) {
+        var cmd = com.surprising.aeron.protocol.TradingCommandCodec.decodeTransferFunds(payload);
+        long current = balances.getOrDefault(user, 0L);
+        balances.put(user, current + cmd.amountUnits());
+      }
     }
 
-    ProductAccountAdjustment transfer(
+    void transfer(
       com.surprising.aeron.protocol.CoreMessageType type,
       com.surprising.account.api.model.ProductTransferOperationRequest value,
       long user,
@@ -855,7 +824,7 @@ class AffiliatePostgresTest {
         value.userId(),
         value.recipientUserId()
       );
-      return apply(
+      apply(
         type,
         user,
         UUID.nameUUIDFromBytes(
@@ -869,33 +838,25 @@ class AffiliatePostgresTest {
       );
     }
 
-    @Override
-    public ProductAccountAdjustment transferOut(
-      String account,
+    public void transferOut(
       com.surprising.account.api.model.ProductTransferOperationRequest value
     ) {
-      var result = transfer(
+      transfer(
         com.surprising.aeron.protocol.CoreMessageType.TRANSFER_OUT,
         value,
         value.userId(),
         "out"
       );
-      if (
-        loseDebitResponse &&
-        result.status() == ProductAccountAdjustment.Status.APPLIED
-      ) {
+      if (loseDebitResponse) {
         loseDebitResponse = false;
-        return ProductAccountAdjustment.unknown("lost response");
+        throw new IllegalStateException("lost response");
       }
-      return result;
     }
 
-    @Override
-    public ProductAccountAdjustment transferIn(
-      String account,
+    public void transferIn(
       com.surprising.account.api.model.ProductTransferOperationRequest value
     ) {
-      return transfer(
+      transfer(
         com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN,
         value,
         value.recipientUserId(),
@@ -903,12 +864,10 @@ class AffiliatePostgresTest {
       );
     }
 
-    @Override
-    public ProductAccountAdjustment completeTransfer(
-      String account,
+    public void completeTransfer(
       com.surprising.account.api.model.ProductTransferOperationRequest value
     ) {
-      return apply(
+      apply(
         com.surprising.aeron.protocol.CoreMessageType.COMPLETE_TRANSFER,
         value.userId(),
         UUID.nameUUIDFromBytes(
@@ -924,17 +883,20 @@ class AffiliatePostgresTest {
       );
     }
 
-    @Override
-    public List<com.surprising.account.api.model.ProductTransferOperationRequest> pendingTransfers(
-      com.surprising.product.api.ProductLine product,
-      int limit
-    ) {
-      return List.of();
+    GatewayProductServices products() {
+      var products = mock(GatewayProductServices.class);
+      var gateway = mock(AccountCommandGateway.class);
+      when(products.enabled()).thenReturn(List.of(product));
+      when(products.service(product, AccountCommandGateway.class)).thenReturn(gateway);
+      when(gateway.transferOut(any())).thenAnswer(inv -> { transferOut(inv.getArgument(0)); return null; });
+      when(gateway.transferIn(any())).thenAnswer(inv -> { transferIn(inv.getArgument(0)); return null; });
+      doAnswer(inv -> { completeTransfer(inv.getArgument(0)); return null; }).when(gateway).completeTransfer(any());
+      when(gateway.pendingTransfers(anyInt())).thenReturn(List.of());
+      return products;
     }
 
     @Override
     public void close() {
-      replay.close();
     }
   }
 }

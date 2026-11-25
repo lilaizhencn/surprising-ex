@@ -5,9 +5,9 @@ import com.surprising.websocket.provider.session.WsCloseStatus;
 import com.surprising.websocket.provider.session.WsTransportSession;
 
 import com.surprising.gateway.c2c.exception.C2cProblem;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cConversations;
-import com.surprising.gateway.c2c.service.C2cMessages;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cConversationService;
+import com.surprising.gateway.c2c.service.C2cMessageService;
 import com.surprising.gateway.c2c.websocket.C2cChatRealtime;
 
 import static org.assertj.core.api.Assertions.*;
@@ -27,7 +27,7 @@ class C2cChatRealtimePostgresTest {
     private final List<String> frames=new CopyOnWriteArrayList<>();
     @BeforeEach void setup() throws Exception {
         fixture=new C2cHttpFixture();fixture.db.jdbc.update("UPDATE c2c_profiles SET receive_strangers=true");
-        socket=new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),2);
+        socket=new C2cChatRealtime(fixture.json,fixture.bean(C2cAccessService.class),fixture.bean(C2cConversationService.class),fixture.bean(C2cMessageService.class),2);
     }
     @AfterEach void cleanup() {if(socket!=null)socket.stop();for(var wire:wires.values())wire.close();if(fixture!=null)fixture.close();}
     private WsTransportSession session(String suffix) throws Exception {
@@ -54,25 +54,25 @@ class C2cChatRealtimePostgresTest {
         assertThat(frames.stream().anyMatch(frame->frame.contains(value))).withFailMessage("Expected frame containing %s, received %s",value,frames).isTrue();
     }
     @Test void onlyTradingAuthenticationCanAuthorizeTheSocketAndHistoryReplaysFromTheOriginalCursor() throws Exception {
-        var conversation=fixture.bean(C2cConversations.class).start(12,null,11L);UUID id=UUID.fromString((String)conversation.get("conversationId"));
-        var original=fixture.bean(C2cMessages.class).send(11,id,UUID.randomUUID(),"断线前的消息",null);
+        var conversation=fixture.bean(C2cConversationService.class).start(12,null,11L);UUID id=UUID.fromString((String)conversation.get("conversationId"));
+        var original=fixture.bean(C2cMessageService.class).send(11,id,UUID.randomUUID(),"断线前的消息",null);
         var session=session("first");command(session,Map.of("op","authenticate","token","qa-12"));
         command(session,Map.of("op","c2c.watch","conversationId",id.toString(),"after","0","afterEvent","0"));
         awaitFrame("断线前的消息");assertThat(frames.stream().anyMatch(frame->frame.contains("\"userId\":\"12\""))).isTrue();
         socket.closed(session.id());wires.remove(session.id()).close();frames.clear();
-        var second=fixture.bean(C2cMessages.class).send(11,id,UUID.randomUUID(),"断线后的消息",null);
+        var second=fixture.bean(C2cMessageService.class).send(11,id,UUID.randomUUID(),"断线后的消息",null);
         var resumed=session("resumed");command(resumed,Map.of("op","authenticate","token","qa-12"));
         command(resumed,Map.of("op","c2c.watch","conversationId",id.toString(),"after",Long.toString(original.messageId()),"afterEvent","0"));
         awaitFrame("断线后的消息");assertThat(frames.stream().noneMatch(frame->frame.contains("断线前的消息"))).isTrue();
         assertThat(Long.toString(second.messageId())).isNotEqualTo(Long.toString(original.messageId()));
     }
     @Test void committedMessagesFromAnotherNodeAndReadReceiptsAreObservedFromSharedStorage() throws Exception {
-        UUID id=UUID.fromString((String)fixture.bean(C2cConversations.class).start(12,null,11L).get("conversationId"));
+        UUID id=UUID.fromString((String)fixture.bean(C2cConversationService.class).start(12,null,11L).get("conversationId"));
         var session=session("buyer");command(session,Map.of("op","authenticate","token","qa-12"));
         command(session,Map.of("op","c2c.watch","conversationId",id.toString()));awaitFrame("messages");
-        var sent=fixture.bean(C2cMessages.class).send(11,id,UUID.randomUUID(),"另一进程写入的消息",null);
+        var sent=fixture.bean(C2cMessageService.class).send(11,id,UUID.randomUUID(),"另一进程写入的消息",null);
         socket.poll();awaitFrame("另一进程写入的消息");
-        frames.clear();fixture.bean(C2cMessages.class).markRead(11,id,sent.messageId(),0);
+        frames.clear();fixture.bean(C2cMessageService.class).markRead(11,id,sent.messageId(),0);
         socket.poll();awaitFrame("\"revision\":\"1\"");
     }
     @Test void logoutOrRevocationClosesTheConnectionBeforeAnyFurtherPrivateDelivery() throws Exception {
@@ -83,7 +83,7 @@ class C2cChatRealtimePostgresTest {
         verify(fixture.auth,times(3)).authenticateBearer("Bearer qa-12");
     }
     @Test void forgedHandshakeIdentityAndForeignConversationNeverGrantAccess() throws Exception {
-        UUID id=UUID.fromString((String)fixture.bean(C2cConversations.class).start(12,null,11L).get("conversationId"));
+        UUID id=UUID.fromString((String)fixture.bean(C2cConversationService.class).start(12,null,11L).get("conversationId"));
         var unauthenticated=session("without-token");assertThatThrownBy(()->command(unauthenticated,Map.of("op","c2c.watch","conversationId",id.toString()))).isInstanceOf(C2cProblem.class);
         verify(unauthenticated,timeout(1000)).close(WsCloseStatus.POLICY_VIOLATION);
         var stranger=session("stranger");command(stranger,Map.of("op","authenticate","token","qa-13"));
@@ -101,9 +101,9 @@ class C2cChatRealtimePostgresTest {
         assertThatThrownBy(()->command(session,Map.of("op","authenticate","token","qa-13"))).isInstanceOf(IllegalArgumentException.class);
     }
     @Test void aChatStorageFailureStopsOnlyChatAndKeepsTheMarketQueueOpen() throws Exception {
-        var conversations=mock(C2cConversations.class);
+        var conversations=mock(C2cConversationService.class);
         when(conversations.signal(12)).thenThrow(new org.springframework.dao.TransientDataAccessResourceException("synthetic storage outage"));
-        socket=new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),conversations,fixture.bean(C2cMessages.class),2);
+        socket=new C2cChatRealtime(fixture.json,fixture.bean(C2cAccessService.class),conversations,fixture.bean(C2cMessageService.class),2);
         var session=session("storage-outage");command(session,Map.of("op","authenticate","token","qa-12"));
         command(session,Map.of("op","c2c.inbox"));socket.poll();awaitFrame("c2c.error");
         verify(session,never()).close(any(WsCloseStatus.class));

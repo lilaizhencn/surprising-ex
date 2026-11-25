@@ -20,8 +20,8 @@ import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
-import com.surprising.gateway.provider.client.SpotAccountClient;
 import com.surprising.gateway.provider.client.WithdrawalValuationClient;
+import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.gateway.provider.compliance.por.service.ProofOfReservesService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.model.CustodyWithdrawalModels.CreateRequest;
@@ -126,7 +126,7 @@ class AdminStandardizationEndpointsTest {
         when(valuation.toUsdt("USDT", new BigDecimal("80"))).thenReturn(new BigDecimal("80"));
 
         CustodyWithdrawalService service = new CustodyWithdrawalService(
-                properties, repo, states, mock(CustodyWalletClient.class), mock(SpotAccountClient.class),
+                properties, repo, states, mock(CustodyWalletClient.class), mock(GatewayProductServices.class),
                 valuation, mock(CustodyWithdrawalRefundService.class),
                 mock(CustodyWithdrawalReconciliationService.class), new ObjectMapper(), assets);
 
@@ -226,7 +226,7 @@ class AdminStandardizationEndpointsTest {
                 .thenReturn(new JwtPrincipal(9L, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60)));
         ProofOfReservesService por = new ProofOfReservesService();
         AdminComplianceController controller = new AdminComplianceController(
-                compliance, new ObjectMapper(), por, auth, approvals, null);
+                compliance, new ObjectMapper(), por, auth, approvals);
 
         var initialLatest = controller.latestPor("Bearer admin");
         assertThat(initialLatest.get("merkleRoot")).isNotNull();

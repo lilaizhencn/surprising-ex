@@ -8,8 +8,7 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
-import com.surprising.trading.order.model.MarkPriceLookup;
+import com.surprising.trading.order.repository.OrderMarkPriceRepository;
 import com.surprising.trading.order.model.ValidationResult;
 import java.util.OptionalLong;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,21 +17,27 @@ import org.springframework.stereotype.Component;
 @Component
 public class OrderValidator {
 
-    private final InstrumentRuleLookup instrumentRuleLookup;
+    private final InstrumentSnapshotRuleLookup instrumentRuleLookup;
     private final TradingOrderProperties properties;
-    private final MarkPriceLookup markPriceLookup;
+    private final OrderMarkPriceRepository markPriceLookup;
 
-    public OrderValidator(InstrumentRuleLookup instrumentRuleLookup) {
-        this(instrumentRuleLookup, new TradingOrderProperties(), (instrumentId, instrumentChangeId, maxAgeMs) -> OptionalLong.empty());
+    public OrderValidator(InstrumentSnapshotRuleLookup instrumentRuleLookup) {
+        this(instrumentRuleLookup, new TradingOrderProperties(), null);
     }
 
     @Autowired
-    public OrderValidator(InstrumentRuleLookup instrumentRuleLookup,
+    public OrderValidator(InstrumentSnapshotRuleLookup instrumentRuleLookup,
                           TradingOrderProperties properties,
-                          MarkPriceLookup markPriceLookup) {
+                          OrderMarkPriceRepository markPriceLookup) {
         this.instrumentRuleLookup = instrumentRuleLookup;
         this.properties = properties;
         this.markPriceLookup = markPriceLookup;
+    }
+
+    private OptionalLong latestMarkPriceTicks(String instrumentId, long changeId, long maxAgeMs) {
+        return markPriceLookup == null
+                ? OptionalLong.empty()
+                : markPriceLookup.latestMarkPriceTicks(instrumentId, changeId, maxAgeMs);
     }
 
     public ValidationResult validate(PlaceOrderRequest request) {
@@ -108,7 +113,7 @@ public class OrderValidator {
         }
         long referencePriceTicks = request.priceTicks();
         if (referencePriceTicks <= 0) {
-            OptionalLong markOpt = markPriceLookup.latestMarkPriceTicks(request.instrumentId(), rule.changeId(), properties.getRisk().getMarketMaxMarkAgeMs());
+            OptionalLong markOpt = latestMarkPriceTicks(request.instrumentId(), rule.changeId(), properties.getRisk().getMarketMaxMarkAgeMs());
             if (markOpt.isPresent()) {
                 referencePriceTicks = markOpt.getAsLong();
             }
@@ -163,7 +168,7 @@ public class OrderValidator {
         // SPOT protection is sourced from realtime when building the command. Core checks its
         // bound, notional, fee-inclusive reservation and actual matching result authoritatively.
         if (rule.spot()) return ValidationResult.ok(rule.changeId(), rule.instrumentType());
-        OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.instrumentId(), rule.changeId(),
+        OptionalLong markPriceTicks = latestMarkPriceTicks(request.instrumentId(), rule.changeId(),
                 properties.getRisk().getMarketMaxMarkAgeMs());
         if (markPriceTicks.isEmpty()) {
             return ValidationResult.reject("mark price unavailable", rule.changeId(), rule.instrumentType());
@@ -205,7 +210,7 @@ public class OrderValidator {
         if (!properties.getRisk().isLimitPriceProtectionEnabled()) {
             return ValidationResult.ok(rule.changeId(), rule.instrumentType(), rule.contractType());
         }
-        OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.instrumentId(), rule.changeId(),
+        OptionalLong markPriceTicks = latestMarkPriceTicks(request.instrumentId(), rule.changeId(),
                 properties.getRisk().getLimitPriceMaxMarkAgeMs());
         if (markPriceTicks.isEmpty()) {
             if (softFallbackOnMissingPrice) {

@@ -24,10 +24,10 @@ class CommittedCommandResultQueryPostgresTest {
         var source = new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?") + "currentSchema=receipt_query_it",
                 System.getenv("INSTRUMENT_TEST_DB_USER"), System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
         jdbc = new JdbcTemplate(source);
-        jdbc.execute("CREATE TABLE core_command_result_projection (LIKE public.core_command_result_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE trading_command_results (LIKE public.trading_command_results INCLUDING ALL)");
         repository = new AeronOrderProjectionRepository(jdbc);
         jdbc.update("""
-                INSERT INTO core_command_result_projection(product_line,command_id,user_id,command_type,client_order_id,instrument_id,command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms) VALUES ('SPOT',?,7,'PLACE_ORDER','lost-reply','1',
+                INSERT INTO trading_command_results(product_line,command_id,user_id,command_type,client_order_id,instrument_id,command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms) VALUES ('SPOT',?,7,'PLACE_ORDER','lost-reply','1',
                   'REJECTED','ORDER_NOT_FOUND',1,32,1700000000000)
                 """, id);
     }
@@ -53,7 +53,7 @@ class CommittedCommandResultQueryPostgresTest {
         var cancel = StableOrderIdentity.commandId(ProductLine.SPOT, 7, "cancel:91");
         assertThat(repository.cancellation(ProductLine.SPOT, 7, 91, cancel).outcome()).isEqualTo("RESULT_UNKNOWN");
         jdbc.update("""
-                INSERT INTO core_command_result_projection(product_line,command_id,user_id,command_type,client_order_id,instrument_id,command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms) VALUES ('SPOT',?,7,'CANCEL_ORDER',null,null,
+                INSERT INTO trading_command_results(product_line,command_id,user_id,command_type,client_order_id,instrument_id,command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms) VALUES ('SPOT',?,7,'CANCEL_ORDER',null,null,
                   'APPLIED','NONE',2,64,1700000000001)
                 """, cancel);
         assertThat(repository.cancellation(ProductLine.SPOT, 7, 91, cancel)).satisfies(result -> {
@@ -64,7 +64,7 @@ class CommittedCommandResultQueryPostgresTest {
         });
         assertThat(repository.cancellation(ProductLine.SPOT, 8, 91, cancel).outcome()).isEqualTo("RESULT_UNKNOWN");
         assertThat(repository.cancellation(ProductLine.OPTION, 7, 91, cancel).outcome()).isEqualTo("RESULT_UNKNOWN");
-        jdbc.update("UPDATE core_command_result_projection SET command_type='PLACE_ORDER' WHERE command_id=?", cancel);
+        jdbc.update("UPDATE trading_command_results SET command_type='PLACE_ORDER' WHERE command_id=?", cancel);
         assertThatThrownBy(() -> repository.cancellation(ProductLine.SPOT, 7, 91, cancel))
                 .isInstanceOf(IllegalStateException.class);
     }
@@ -73,7 +73,7 @@ class CommittedCommandResultQueryPostgresTest {
         var amend = StableOrderIdentity.replacementCommandId(ProductLine.SPOT, 7, "edit-91");
         assertThat(repository.amendment(ProductLine.SPOT, 7, amend).outcome()).isEqualTo("RESULT_UNKNOWN");
         jdbc.update("""
-                INSERT INTO core_command_result_projection(product_line,command_id,user_id,command_type,client_order_id,instrument_id,command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms) VALUES ('SPOT',?,7,'AMEND_ORDER',null,null,
+                INSERT INTO trading_command_results(product_line,command_id,user_id,command_type,client_order_id,instrument_id,command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms) VALUES ('SPOT',?,7,'AMEND_ORDER',null,null,
                   'APPLIED','NONE',3,96,1700000000002)
                 """, amend);
         assertThat(repository.amendment(ProductLine.SPOT, 7, amend).code()).isEqualTo("NONE");
@@ -85,7 +85,7 @@ class CommittedCommandResultQueryPostgresTest {
     @Test void cancellationBatchReturnsCountsAndOriginalIdsOnlyFromCommittedItemFacts() {
         var key = StableOrderIdentity.commandId(ProductLine.SPOT, 7, "batch:cancel:plan-1");
         jdbc.update("""
-                INSERT INTO core_command_result_projection(product_line,command_id,user_id,command_type,
+                INSERT INTO trading_command_results(product_line,command_id,user_id,command_type,
                   command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms,cancel_batch_results)
                 VALUES ('SPOT',?,7,'CANCEL_ORDER_BATCH','APPLIED','NONE',4,128,1700000000003,
                   '[{"index":0,"orderId":91,"success":true,"code":"NONE"},{"index":1,"orderId":92,"success":false,"code":"ORDER_NOT_FOUND"}]'::jsonb)
@@ -100,11 +100,11 @@ class CommittedCommandResultQueryPostgresTest {
         for (var malformed : List.of("[null]",
                 "[{\"index\":3,\"orderId\":91,\"success\":true,\"code\":\"NONE\"}]",
                 "[{\"index\":0,\"orderId\":91,\"success\":true,\"code\":\"ORDER_NOT_FOUND\"}]")) {
-            jdbc.update("UPDATE core_command_result_projection SET cancel_batch_results=?::jsonb WHERE command_id=?", malformed, key);
+            jdbc.update("UPDATE trading_command_results SET cancel_batch_results=?::jsonb WHERE command_id=?", malformed, key);
             assertThatThrownBy(() -> repository.cancellationBatch(ProductLine.SPOT, 7, key))
                     .isInstanceOf(IllegalStateException.class);
         }
-        jdbc.update("UPDATE core_command_result_projection SET cancel_batch_results=NULL WHERE command_id=?", key);
+        jdbc.update("UPDATE trading_command_results SET cancel_batch_results=NULL WHERE command_id=?", key);
         assertThat(repository.cancellationBatch(ProductLine.SPOT, 7, key).outcome()).isEqualTo("RESULT_UNKNOWN");
         assertThatThrownBy(() -> repository.cancellationBatch(ProductLine.SPOT, 7, id)).isInstanceOf(IllegalStateException.class);
     }
@@ -115,7 +115,7 @@ class CommittedCommandResultQueryPostgresTest {
         assertThat(repository.submission(ProductLine.SPOT, 7, "new-request", UUID.randomUUID()).outcome()).isEqualTo("RESULT_UNKNOWN");
         assertThatThrownBy(() -> repository.submission(ProductLine.SPOT, 7, "different-key", id))
                 .isInstanceOf(IllegalStateException.class);
-        jdbc.update("UPDATE core_command_result_projection SET result_code='NOT_A_CORE_CODE'");
+        jdbc.update("UPDATE trading_command_results SET result_code='NOT_A_CORE_CODE'");
         assertThatThrownBy(() -> repository.commandResult(ProductLine.SPOT, 7, id))
                 .isInstanceOf(org.springframework.dao.DataRetrievalFailureException.class);
     }

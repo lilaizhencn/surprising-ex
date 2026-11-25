@@ -2,10 +2,7 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.account.provider.exception.AccountStateUnavailableException;
-import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.aeron.client.AeronClientPool;
-import io.aeron.driver.MediaDriver;
-import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOpenInterestCodec;
@@ -15,8 +12,6 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.product.api.ProductLine;
-import jakarta.annotation.PreDestroy;
 import java.util.UUID;
 import java.util.List;
 import java.util.Objects;
@@ -26,22 +21,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
-public class AccountAeronGateway implements AutoCloseable {
+public class AccountAeronGateway {
 
     private final AeronClientPool clients;
 
     @Autowired
-    public AccountAeronGateway(AccountProperties properties,
-            @Qualifier("productCommandMediaDriver")
-            MediaDriver driver) {
-        ProductLine productLine = properties.getProductLine();
-        AccountProperties.Aeron aeron = properties.getAeron();
-        this.clients = new AeronClientPool("account", productLine, aeron.getHostnames(),
-                aeron.getEgressHostname(), aeron.getResponseTimeout(), aeron.getClientConnections(),
-                aeron.getSourceIdentity(), driver);
-    }
-
-    AccountAeronGateway(AeronClientPool clients) {
+    public AccountAeronGateway(AeronClientPool clients) {
         this.clients = Objects.requireNonNull(clients, "clients");
     }
 
@@ -105,12 +90,6 @@ public class AccountAeronGateway implements AutoCloseable {
         public OpenInterestState {
             values = List.copyOf(values);
         }
-    }
-
-    @Override
-    @PreDestroy
-    public void close() {
-        clients.close();
     }
 
     private static CoreResponse requireApplied(CoreResponse response) {

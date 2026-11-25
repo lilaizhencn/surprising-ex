@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 import com.surprising.gateway.c2c.config.C2cRuntime;
-import com.surprising.gateway.c2c.service.C2cSettlement;
+import com.surprising.gateway.c2c.service.C2cSettlementService;
 import com.surprising.gateway.c2c.task.C2cSettlementTask;
 import com.surprising.trading.order.service.InstrumentCoreSyncService;
 import com.surprising.trading.order.task.InstrumentCoreSyncTask;
@@ -31,7 +31,7 @@ class ScheduledBusinessTasksContextTest {
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     void actualSchedulerInvokesBusinessOwnersOnlyWhenEnabled(boolean enabled) throws Exception {
-        var settlement = mock(C2cSettlement.class);
+        var settlement = mock(C2cSettlementService.class);
         var instruments = mock(InstrumentCoreSyncService.class);
         var openInterest = mock(OpenInterestPublisher.class);
         var bridge = mock(RealtimeWebSocketBridge.class);
@@ -49,7 +49,7 @@ class ScheduledBusinessTasksContextTest {
             context.registerBean("appMediaDriver", Object.class, Object::new);
             context.registerBean(io.micrometer.core.instrument.MeterRegistry.class,
                     io.micrometer.core.instrument.simple.SimpleMeterRegistry::new);
-            context.registerBean(C2cSettlement.class, () -> settlement);
+            context.registerBean(C2cSettlementService.class, () -> settlement);
             context.registerBean(InstrumentCoreSyncService.class, () -> instruments);
             context.registerBean(OpenInterestPublisher.class, () -> openInterest);
             context.registerBean(RealtimeWebSocketBridge.class, () -> bridge);

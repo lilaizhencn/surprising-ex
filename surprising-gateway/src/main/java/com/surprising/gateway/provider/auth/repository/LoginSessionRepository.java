@@ -101,7 +101,7 @@ public class LoginSessionRepository {
     }
 
     private volatile long cleanupRetryAt;
-    @Scheduled(fixedDelay=1000)
+    @Scheduled(fixedDelay=60000)
     public void cleanupExpired() {
         long now=System.nanoTime();
         if(now<cleanupRetryAt) return;

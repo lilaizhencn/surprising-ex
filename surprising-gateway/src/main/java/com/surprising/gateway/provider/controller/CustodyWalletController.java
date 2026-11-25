@@ -9,7 +9,6 @@ import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.interceptor.GatewayAccessSupport;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import com.surprising.gateway.provider.service.WalletFundingService;
-import com.surprising.gateway.provider.repository.UserDepositAddressRepository;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -39,40 +38,6 @@ public class CustodyWalletController {
     private final CustodyWithdrawalService withdrawalService;
     private final WalletFundingService fundingService;
 
-    public CustodyWalletController(AuthService authService,
-                                   CustodyWalletClient walletClient,
-                                   SensitiveActionVerificationService verificationService,
-                                   ComplianceService complianceService,
-                                   CustodyWithdrawalService withdrawalService) {
-        this(authService, walletClient, verificationService, complianceService, withdrawalService, null, null);
-    }
-
-    public CustodyWalletController(AuthService authService,
-                                   CustodyWalletClient walletClient,
-                                   SensitiveActionVerificationService verificationService,
-                                   ComplianceService complianceService,
-                                   CustodyWithdrawalService withdrawalService,
-                                   UserDepositAddressRepository addressRepository) {
-        this(authService, walletClient, verificationService, complianceService, withdrawalService, addressRepository, null);
-    }
-
-    public CustodyWalletController(AuthService authService,
-                                   CustodyWalletClient walletClient,
-                                   SensitiveActionVerificationService verificationService,
-                                   ComplianceService complianceService,
-                                   CustodyWithdrawalService withdrawalService,
-                                   UserDepositAddressRepository addressRepository,
-                                   WalletFundingService fundingService) {
-        this.authService = authService;
-        this.walletClient = walletClient;
-        this.verificationService = verificationService;
-        this.complianceService = complianceService;
-        this.withdrawalService = withdrawalService;
-        this.fundingService = fundingService != null
-                ? fundingService
-                : new WalletFundingService(null, null, walletClient, addressRepository);
-    }
-
     @Autowired
     public CustodyWalletController(AuthService authService,
                                    CustodyWalletClient walletClient,
@@ -80,7 +45,12 @@ public class CustodyWalletController {
                                    ComplianceService complianceService,
                                    CustodyWithdrawalService withdrawalService,
                                    WalletFundingService fundingService) {
-        this(authService, walletClient, verificationService, complianceService, withdrawalService, null, fundingService);
+        this.authService = authService;
+        this.walletClient = walletClient;
+        this.verificationService = verificationService;
+        this.complianceService = complianceService;
+        this.withdrawalService = withdrawalService;
+        this.fundingService = fundingService;
     }
 
     @GetMapping("/assets")

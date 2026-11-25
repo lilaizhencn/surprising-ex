@@ -4,14 +4,13 @@ import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /** 直接从本地合约 JVM 快照读取下单规则。 */
 @Service
-public class InstrumentSnapshotRuleLookup implements InstrumentRuleLookup {
+public class InstrumentSnapshotRuleLookup {
 
     private final TradingOrderProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
@@ -21,8 +20,6 @@ public class InstrumentSnapshotRuleLookup implements InstrumentRuleLookup {
         this.properties = properties;
         this.snapshotCache = snapshotCache;
     }
-
-    @Override
     public Optional<InstrumentRule> currentRule(String instrumentId) {
         var productLine = properties.getProductLine();
         if (!snapshotCache.initialized(productLine)) {

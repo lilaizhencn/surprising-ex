@@ -10,7 +10,7 @@ import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRep
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
-import com.surprising.gateway.provider.auth.port.CurrentAuthClient;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
@@ -56,7 +56,7 @@ public class AuthService {
     private final EmailVerificationService emailVerificationService;
     private final LoginVerificationService loginVerification;
     private final GatewayUserAccessBlockRepository accessBlocks;
-    private final CurrentAuthClient currentClient;
+    private final AuthClientMetadataBinding currentClient;
     private final com.surprising.gateway.provider.legal.service.LegalConsentService legal;
     private final AuthState authState;
     private final AuthStateSync authStateSync;
@@ -67,7 +67,7 @@ public class AuthService {
                        JwtTokenService jwtTokenService,
                        EmailVerificationService emailVerificationService,
                        LoginVerificationService loginVerification,
-                       GatewayUserAccessBlockRepository accessBlocks, CurrentAuthClient currentClient,
+                       GatewayUserAccessBlockRepository accessBlocks, AuthClientMetadataBinding currentClient,
                        com.surprising.affiliate.service.AffiliateService affiliates,
                        com.surprising.gateway.provider.legal.service.LegalConsentService legal,
                        AuthState authState, AuthStateSync authStateSync) {

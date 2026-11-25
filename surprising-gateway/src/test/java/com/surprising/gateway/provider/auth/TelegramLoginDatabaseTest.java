@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth;
 
-import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.config.GatewayProperties;
 
 import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
@@ -126,7 +126,7 @@ class TelegramLoginDatabaseTest {
     AuthModels.AuthResponse complete(TelegramLoginService.Started flow, String device) {
         var http = new MockHttpServletRequest();
         http.addHeader("X-Device-Id", device);
-        return (AuthModels.AuthResponse) login.complete(flow.flowId(), flow.verifier(), device, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(http));
+        return (AuthModels.AuthResponse) login.complete(flow.flowId(), flow.verifier(), device, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(http));
     }
 
     @Test
@@ -145,7 +145,7 @@ class TelegramLoginDatabaseTest {
     void cannotRedeemOnDifferentDeviceWithWrongVerifierOrAfterConsumption() {
         var flow = authorize();
         assertThatThrownBy(() -> complete(flow, "other-device")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> login.complete(flow.flowId(), "x".repeat(43), device, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.controller.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest())))
+        assertThatThrownBy(() -> login.complete(flow.flowId(), "x".repeat(43), device, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest())))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(complete(flow, device).accessToken()).isEqualTo("access");
         assertThatThrownBy(() -> complete(flow, device)).isInstanceOf(IllegalArgumentException.class);

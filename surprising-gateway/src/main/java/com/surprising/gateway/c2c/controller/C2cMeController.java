@@ -1,8 +1,8 @@
 package com.surprising.gateway.c2c.controller;
 
 import com.surprising.gateway.c2c.model.C2cVerification;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cProfiles;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cProfileService;
 
 import com.surprising.gateway.c2c.utils.C2cMoney;
 
@@ -25,10 +25,10 @@ public class C2cMeController {
     public record Report(UUID reportId,String targetUserId,UUID orderId,String reason) { }
     public record Alert(UUID alertId,String revision,UUID marketId,String side,String targetPrice,boolean enabled) { }
     public record ReadNotifications(String throughId) { }
-    private final C2cAccess access;
-    private final C2cProfiles profiles;
+    private final C2cAccessService access;
+    private final C2cProfileService profiles;
 
-    public C2cMeController(C2cAccess access,C2cProfiles profiles) {this.access=access;this.profiles=profiles;}
+    public C2cMeController(C2cAccessService access,C2cProfileService profiles) {this.access=access;this.profiles=profiles;}
 
     @GetMapping("/me")
     public Map<String,Object> me(@RequestHeader(value="Authorization",required=false) String authorization) {

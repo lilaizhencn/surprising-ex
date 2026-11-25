@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.interceptor;
 
-import com.surprising.gateway.provider.auth.controller.BrowserSessionCookies;
+import com.surprising.gateway.provider.auth.support.BrowserSessionCookies;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;

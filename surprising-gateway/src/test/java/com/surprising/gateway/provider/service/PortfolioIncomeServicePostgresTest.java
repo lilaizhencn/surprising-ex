@@ -54,12 +54,12 @@ class PortfolioIncomeServicePostgresTest {
                 INSERT INTO assets(asset_id,asset,scale_units) VALUES(1,'USDT',1000000),(2,'BTC',100000000);
                 CREATE TABLE instruments(product_line text,instrument_id bigint,base_asset_id int,quote_asset_id int,price_tick_units bigint);
                 INSERT INTO instruments VALUES('SPOT',91,2,1,10000),('LINEAR_PERPETUAL',91,2,1,100000000);
-                CREATE TABLE core_execution_projection(product_line text,instrument_id text,export_sequence bigint,
+                CREATE TABLE trading_trades(product_line text,instrument_id text,export_sequence bigint,
                   execution_index int,price_ticks bigint,occurred_at_epoch_ms bigint);
                 CREATE TABLE core_execution_projection_initialization(product_line text,snapshot_log_position bigint);
-                CREATE TABLE core_projection_watermark(product_line text,last_export_sequence bigint);
+                CREATE TABLE projection_watermarks(product_line text,last_export_sequence bigint);
                 INSERT INTO core_execution_projection_initialization VALUES('SPOT',0);
-                INSERT INTO core_projection_watermark VALUES('SPOT',30);
+                INSERT INTO projection_watermarks VALUES('SPOT',30);
                 """);
         for (var product : ProductLine.values()) {
             cut(product, OPEN, 100, 10, true);
@@ -114,7 +114,7 @@ class PortfolioIncomeServicePostgresTest {
             var income = future.get(10, TimeUnit.SECONDS).groups().get("overview");
             assertTrue(income.available());
             assertEquals("0", income.amountUsdt());
-            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM core_portfolio_cash_flow", Integer.class));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM portfolio_cash_flows", Integer.class));
         }
     }
 
@@ -181,23 +181,23 @@ class PortfolioIncomeServicePostgresTest {
         equity(ProductLine.SPOT, CURRENT, 7, "BTC", "100000000");
         assertFalse(service.income(7).groups().get("funding").available());
         assertNull(service.income(7).groups().get("funding").currentEquityUsdt());
-        jdbc.update("UPDATE core_portfolio_equity SET complete=false");
+        jdbc.update("UPDATE portfolio_equities SET complete=false");
         assertFalse(service.income(7).groups().get("funding").available());
     }
 
     @Test void missingOpeningPreservesCurrentEquityWithoutInventingIncome() {
         equity(ProductLine.SPOT, CURRENT, 7, "USDT", "120000000");
-        jdbc.update("DELETE FROM core_portfolio_cutoff WHERE product_line='SPOT' AND cutoff_epoch_ms=?", OPEN);
+        jdbc.update("DELETE FROM portfolio_cutoffs WHERE product_line='SPOT' AND cutoff_epoch_ms=?", OPEN);
         var income = service.income(7).groups().get("funding");
         assertFalse(income.available()); assertEquals("HISTORY_UNAVAILABLE", income.status());
         assertEquals("120", income.currentEquityUsdt()); assertNull(income.amountUsdt());
     }
 
     @Test void staleAndMissingProductCutsDoNotCertifyAnOverview() {
-        jdbc.update("DELETE FROM core_portfolio_cutoff WHERE product_line='OPTION' AND cutoff_epoch_ms=?", CURRENT);
+        jdbc.update("DELETE FROM portfolio_cutoffs WHERE product_line='OPTION' AND cutoff_epoch_ms=?", CURRENT);
         assertFalse(service.income(7).groups().get("overview").available());
         assertTrue(service.income(7).groups().get("funding").available());
-        jdbc.update("DELETE FROM core_portfolio_cutoff WHERE cutoff_epoch_ms=?", CURRENT);
+        jdbc.update("DELETE FROM portfolio_cutoffs WHERE cutoff_epoch_ms=?", CURRENT);
         assertFalse(service.income(7).groups().get("funding").available());
     }
 
@@ -205,7 +205,7 @@ class PortfolioIncomeServicePostgresTest {
         equity(ProductLine.SPOT, CURRENT, 7, "BTC", "100000000");
         price("SPOT", 290, CURRENT - 1, 12000);
         assertEquals("120", service.income(7).groups().get("funding").currentEquityUsdt());
-        jdbc.update("UPDATE core_projection_watermark SET last_export_sequence=29");
+        jdbc.update("UPDATE projection_watermarks SET last_export_sequence=29");
         assertFalse(service.income(7).groups().get("funding").available());
         jdbc.update("UPDATE core_execution_projection_initialization SET snapshot_log_position=300");
         assertEquals("120", service.income(7).groups().get("funding").currentEquityUsdt());
@@ -226,10 +226,10 @@ class PortfolioIncomeServicePostgresTest {
 
     @Test void malformedUnitsAndUncoveredCashHistoryFailClosed() {
         equity(ProductLine.SPOT, CURRENT, 7, "USDT", "100000000");
-        jdbc.update("UPDATE core_portfolio_equity SET net_asset_units='{\"USDT\":100}'::jsonb");
+        jdbc.update("UPDATE portfolio_equities SET net_asset_units='{\"USDT\":100}'::jsonb");
         assertFalse(service.income(7).groups().get("funding").available());
-        jdbc.update("UPDATE core_portfolio_equity SET net_asset_units='{\"USDT\":\"100000000\"}'::jsonb");
-        jdbc.update("UPDATE core_portfolio_cutoff SET flow_covered_from_epoch_ms=? WHERE product_line='SPOT'", OPEN + 1);
+        jdbc.update("UPDATE portfolio_equities SET net_asset_units='{\"USDT\":\"100000000\"}'::jsonb");
+        jdbc.update("UPDATE portfolio_cutoffs SET flow_covered_from_epoch_ms=? WHERE product_line='SPOT'", OPEN + 1);
         assertEquals("HISTORY_UNAVAILABLE", service.income(7).groups().get("funding").status());
     }
 
@@ -242,19 +242,19 @@ class PortfolioIncomeServicePostgresTest {
     }
 
     private void cut(ProductLine product, long time, long position, long sequence, boolean opening) {
-        jdbc.update("INSERT INTO core_portfolio_cutoff VALUES(?,?,?,?,?,?,?)",
+        jdbc.update("INSERT INTO portfolio_cutoffs VALUES(?,?,?,?,?,?,?)",
                 product.name(), time, position, sequence, time - 1, 0, opening);
     }
     private void equity(ProductLine product, long time, long user, String asset, String units) {
-        jdbc.update("INSERT INTO core_portfolio_equity VALUES(?,?,?,true,?::jsonb)",
+        jdbc.update("INSERT INTO portfolio_equities VALUES(?,?,?,true,?::jsonb)",
                 product.name(), time, user, "{\"" + asset + "\":\"" + units + "\"}");
     }
     private void price(String product, long position, long time, long ticks) {
-        jdbc.update("INSERT INTO core_execution_projection VALUES(?,'91',?,0,?,?)", product, position, ticks, time);
+        jdbc.update("INSERT INTO trading_trades VALUES(?,'91',?,0,?,?)", product, position, ticks, time);
     }
     private void flow(ProductLine product, long user, long position, long time, String asset, String amount,
                       Long transfer, ProductLine source, ProductLine target, long sourceUser, long targetUser) {
-        jdbc.update("INSERT INTO core_portfolio_cash_flow VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        jdbc.update("INSERT INTO portfolio_cash_flows VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 product.name(), UUID.randomUUID(), user, position, time, asset, new BigDecimal(amount), transfer,
                 source == null ? null : source.name(), target == null ? null : target.name(),
                 transfer == null ? null : sourceUser, transfer == null ? null : targetUser);

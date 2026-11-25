@@ -63,7 +63,7 @@ class AffiliateSafetyPostgresTest {
 
   void fact(Fee fee) {
     f.jdbc.update(
-      "INSERT INTO core_trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at) VALUES(?,?,?,'TEST',?,?,?,?,?)",
+      "INSERT INTO trade_fee_facts(product_line,order_id,user_id,instrument_id,asset,fee_units,cumulative_fee_units,cluster_position,occurred_at) VALUES(?,?,?,'TEST',?,?,?,?,?)",
       fee.productLine(),
       fee.orderId(),
       fee.userId(),
@@ -587,7 +587,7 @@ class AffiliateSafetyPostgresTest {
       accounts.loseDebitResponse = false;
       accounts.adjust(9, 1000);
       accounts.adjust(1, 0);
-      var worker = settlement(new ProductTransferService(accounts, null));
+      var worker = settlement(new ProductTransferService(accounts.products(), null));
       worker.prepare(true, 10);
       worker.send();
       assertThat(accounts.balances.get(9L)).isEqualTo(1000);

@@ -1,9 +1,9 @@
 package com.surprising.gateway.c2c.controller;
 
 import com.surprising.gateway.c2c.model.C2cVerification;
-import com.surprising.gateway.c2c.service.C2cAccess;
-import com.surprising.gateway.c2c.service.C2cAdminAccess;
-import com.surprising.gateway.c2c.service.C2cMerchantBonds;
+import com.surprising.gateway.c2c.service.C2cAccessService;
+import com.surprising.gateway.c2c.service.C2cAdminAccessService;
+import com.surprising.gateway.c2c.service.C2cMerchantBondService;
 
 import com.surprising.gateway.c2c.utils.C2cMoney;
 
@@ -23,12 +23,12 @@ import tools.jackson.databind.ObjectMapper;
 public class C2cMerchantController {
     public record Deposit(UUID requestId,String policyRevision,C2cVerification verification) { }
     public record Policy(String revision,String asset,String amount,String reason) { }
-    private final C2cMerchantBonds bonds;
-    private final C2cAccess access;
-    private final C2cAdminAccess admin;
+    private final C2cMerchantBondService bonds;
+    private final C2cAccessService access;
+    private final C2cAdminAccessService admin;
     private final ObjectMapper json;
     private final C2cAdminRequestBinding requestBinding;
-    public C2cMerchantController(C2cMerchantBonds bonds,C2cAccess access,C2cAdminAccess admin,ObjectMapper json,C2cAdminRequestBinding requestBinding) {
+    public C2cMerchantController(C2cMerchantBondService bonds,C2cAccessService access,C2cAdminAccessService admin,ObjectMapper json,C2cAdminRequestBinding requestBinding) {
         this.bonds=bonds;this.access=access;this.admin=admin;this.json=json;this.requestBinding=requestBinding;
     }
     @GetMapping("/c2c/me/merchant-bond")

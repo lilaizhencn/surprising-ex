@@ -1,9 +1,9 @@
 package com.surprising.gateway.c2c.service;
 
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
-import com.surprising.gateway.c2c.service.C2cOrders;
+import com.surprising.gateway.c2c.service.C2cOrderService;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
-import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
 import com.surprising.gateway.c2c.utils.C2cViews;
@@ -27,7 +27,7 @@ public class C2cQueryService {
     private final C2cOrdersRepository orders;
     private final C2cMarketService markets;
     private final C2cMarketRepository marketRows;
-    private final C2cPaymentAccounts payments;
+    private final C2cPaymentAccountService payments;
     private final C2cMerchantRepository merchants;
     private final C2cPaymentMethodRepository methods;
     private final C2cPaymentAccountRepository accounts;
@@ -36,7 +36,7 @@ public class C2cQueryService {
     private final C2cSubmissions submissions;
 
     public C2cQueryService(C2cAdsRepository ads,C2cOrdersRepository orders,C2cMarketService markets,
-                           C2cMarketRepository marketRows,C2cPaymentAccounts payments,C2cMerchantRepository merchants,
+                           C2cMarketRepository marketRows,C2cPaymentAccountService payments,C2cMerchantRepository merchants,
                            C2cPaymentMethodRepository methods,C2cPaymentAccountRepository accounts,
                            C2cOrderEventRepository events,C2cAppealRepository appeals,C2cSubmissions submissions) {
         this.ads=ads;this.orders=orders;this.markets=markets;this.marketRows=marketRows;this.payments=payments;
@@ -134,7 +134,7 @@ public class C2cQueryService {
 
     public Map<String,Object> order(long userId,UUID id) {
         var order=orders.get(id,false);
-        C2cOrders.requireParticipant(userId,order);
+        C2cOrderService.requireParticipant(userId,order);
         return orderDetails(order,true);
     }
 

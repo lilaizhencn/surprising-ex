@@ -6,8 +6,8 @@ import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
-import com.surprising.gateway.c2c.service.C2cFunds;
-import com.surprising.gateway.c2c.service.C2cOrders;
+import com.surprising.gateway.c2c.service.C2cFundService;
+import com.surprising.gateway.c2c.service.C2cOrderService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -88,8 +88,8 @@ class C2cOrderEventTransactionPostgresTest {
         rejectEvent("COMPLETED");
 
         // Core确认先独立提交；直接验证业务事务失败，随后再交给正常调度入口重试。
-        for (var intent : fixture.bean(C2cFundsRepository.class).due(64)) fixture.bean(C2cFunds.class).resume(intent.id());
-        assertThatThrownBy(() -> fixture.bean(C2cOrders.class).finishFunding(orderId)).isInstanceOf(DataIntegrityViolationException.class);
+        for (var intent : fixture.bean(C2cFundsRepository.class).due(64)) fixture.bean(C2cFundService.class).resume(intent.id());
+        assertThatThrownBy(() -> fixture.bean(C2cOrderService.class).finishFunding(orderId)).isInstanceOf(DataIntegrityViolationException.class);
 
         var order = fixture.bean(C2cOrdersRepository.class).get(orderId, false);
         assertThat(order.status()).isEqualTo(C2cOrderStatus.RELEASE_PENDING);
@@ -112,7 +112,7 @@ class C2cOrderEventTransactionPostgresTest {
     @Test void quoteKeepsDatabaseClockLifetimeVersionsAndOwnership() throws Exception {
         UUID adId = fixture.publish("SELL");
         UUID quoteId = fixture.quote(adId, 12, "2");
-        var quote = fixture.bean(C2cOrders.class).ownedQuote(12, quoteId);
+        var quote = fixture.bean(C2cOrderService.class).ownedQuote(12, quoteId);
         assertThat(quote.quantityUnits()).isEqualTo(200_000_000L);
         assertThat(quote.feeUnits()).isEqualTo(200_000L);
         assertThat(quote.adRevision()).isEqualTo(fixture.bean(C2cAdsRepository.class).get(adId, false).revision());

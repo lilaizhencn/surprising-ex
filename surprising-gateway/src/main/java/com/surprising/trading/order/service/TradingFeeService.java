@@ -11,7 +11,6 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
 import com.surprising.trading.order.model.FeeSchedulePageQuery;
 import com.surprising.trading.order.repository.OrderFeeRepository;
@@ -23,7 +22,7 @@ import org.springframework.stereotype.Service;
 public class TradingFeeService {
 
     private final OrderFeeRepository orderFeeRepository;
-    private final InstrumentRuleLookup instrumentRuleLookup;
+    private final InstrumentSnapshotRuleLookup instrumentRuleLookup;
     private final OrderFeeSnapshotLookup feeSnapshotLookup;
     private final FeeScheduleEventPublisher eventPublisher;
     private final FeeScheduleSnapshotCache feeScheduleSnapshotCache;
@@ -32,7 +31,7 @@ public class TradingFeeService {
 
     @org.springframework.beans.factory.annotation.Autowired
     public TradingFeeService(OrderFeeRepository orderFeeRepository,
-                             InstrumentRuleLookup instrumentRuleLookup,
+                             InstrumentSnapshotRuleLookup instrumentRuleLookup,
                              OrderFeeSnapshotLookup feeSnapshotLookup,
                              FeeScheduleEventPublisher eventPublisher,
                              FeeScheduleSnapshotCache feeScheduleSnapshotCache,

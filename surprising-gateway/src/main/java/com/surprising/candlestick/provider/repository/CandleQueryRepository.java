@@ -13,7 +13,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 /**
- * 只负责 {@code candlestick_candles} 表的只读查询。
+ * 只负责 {@code market_candles} 表的只读查询。
  */
 @Repository
 public class CandleQueryRepository {
@@ -41,7 +41,7 @@ public class CandleQueryRepository {
         }
         String sql = """
                 SELECT %s
-                  FROM candlestick_candles
+                  FROM market_candles
                  WHERE instrument_id = ?
                    AND period = ?
                    AND status = 'CLOSED'
@@ -57,7 +57,7 @@ public class CandleQueryRepository {
     /** Last completed real minute before a query window; only its close seeds empty periods. */
     public Optional<CandleResponse> findBefore(String instrumentId, Instant before) {
         String sql = """
-                SELECT %s FROM candlestick_candles
+                SELECT %s FROM market_candles
                  WHERE instrument_id = ? AND period = '1m' AND status = 'CLOSED'
                    AND close_time <= ?
                  ORDER BY open_time DESC LIMIT 1
@@ -73,7 +73,7 @@ public class CandleQueryRepository {
         }
         String sql = """
                 SELECT %s
-                  FROM candlestick_candles
+                  FROM market_candles
                  WHERE instrument_id = ?
                    AND period = ?
                    AND status = 'CLOSED'
@@ -109,7 +109,7 @@ public class CandleQueryRepository {
         return """
                 WITH bucketed AS (
                     SELECT *, to_timestamp(floor(extract(epoch FROM open_time) / ?) * ?) AS bucket_open
-                      FROM candlestick_candles
+                      FROM market_candles
                      WHERE instrument_id = ?
                        AND period = '1m'
                        AND status = 'CLOSED'

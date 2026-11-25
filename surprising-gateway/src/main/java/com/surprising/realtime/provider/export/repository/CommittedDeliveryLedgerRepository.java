@@ -8,7 +8,7 @@ import com.surprising.realtime.provider.export.model.CommittedProjectionRows.Del
 
 /** 仅访问account_product_ledger_entries；提交交割/行权现金事实的幂等落账与冲突校验。 */
 @Repository
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedDeliveryLedgerRepository {
     private final JdbcTemplate jdbc;
 

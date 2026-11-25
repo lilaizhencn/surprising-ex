@@ -21,7 +21,7 @@ class TradingMetricsPostgresTest {
         String url=System.getenv("INSTRUMENT_TEST_JDBC_URL"),user=System.getenv("INSTRUMENT_TEST_DB_USER"),password=System.getenv("INSTRUMENT_TEST_DB_PASSWORD");
         var admin=new JdbcTemplate(new DriverManagerDataSource(url,user,password));admin.execute("CREATE SCHEMA metrics_query_it");
         jdbc=new JdbcTemplate(new DriverManagerDataSource(url+"?currentSchema=metrics_query_it",user,password));
-        jdbc.execute("CREATE TABLE core_trading_statistics_snapshot (LIKE public.core_trading_statistics_snapshot INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE trading_stats_snapshots (LIKE public.trading_stats_snapshots INCLUDING ALL)");
         repository=new TradingMetricsRepository(jdbc);
         service=new com.surprising.trading.order.service.TradingMetricsService(repository,json);
     }
@@ -34,16 +34,16 @@ class TradingMetricsPostgresTest {
         data.put("trades",Map.of("trades",1,"uniqueParticipants",2));data.put("triggerOrders",Map.of("pending",0,"expiredPending",0));
         var symbols=List.of(Map.of("instrumentId","1"),Map.of("instrumentId","2"));data.put("symbols",symbols);
         data.put("positions",Map.of("usersWithPositions",2,"openPositions",2,"symbolCount",2,"symbols",symbols));
-        jdbc.update("INSERT INTO core_trading_statistics_snapshot VALUES (?,60,?,?,?::jsonb)",product.name(),Long.MAX_VALUE,now,json.writeValueAsString(data));
+        jdbc.update("INSERT INTO trading_stats_snapshots VALUES (?,60,?,?,?::jsonb)",product.name(),Long.MAX_VALUE,now,json.writeValueAsString(data));
     }
     @Test void absentStaleCorruptAndFailedDatabaseReadsNeverBecomeSuccessfulZeroStatistics() {
         assertThatThrownBy(()->service.require(ProductLine.OPTION,60,20)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         add(ProductLine.OPTION,System.currentTimeMillis()-181000);
         assertThatThrownBy(()->service.require(ProductLine.OPTION,60,20)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("STALE");
-        jdbc.update("DELETE FROM core_trading_statistics_snapshot");add(ProductLine.OPTION,System.currentTimeMillis());
-        jdbc.update("UPDATE core_trading_statistics_snapshot SET metrics=metrics-'positions'");
+        jdbc.update("DELETE FROM trading_stats_snapshots");add(ProductLine.OPTION,System.currentTimeMillis());
+        jdbc.update("UPDATE trading_stats_snapshots SET metrics=metrics-'positions'");
         assertThatThrownBy(()->service.require(ProductLine.OPTION,60,20)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("INVALID");
-        jdbc.execute("DROP TABLE core_trading_statistics_snapshot");
+        jdbc.execute("DROP TABLE trading_stats_snapshots");
         assertThatThrownBy(()->service.require(ProductLine.OPTION,60,20)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("UNAVAILABLE");
     }
     @Test void sixProductsKeepTheirOwnSnapshotsAndLimitOnlyRankedRowsWithoutChangingTotals() {
@@ -58,7 +58,7 @@ class TradingMetricsPostgresTest {
     @Test void storedRowAndNativeDocumentKeepBigIntegersAndUnknownVersionedFields() {
         long now=System.currentTimeMillis();add(ProductLine.SPOT,now);
         String huge="92233720368547758081234567890";
-        jdbc.update("UPDATE core_trading_statistics_snapshot SET metrics=jsonb_set(metrics,'{orders,submittedCommands}',?::jsonb) || ?::jsonb",
+        jdbc.update("UPDATE trading_stats_snapshots SET metrics=jsonb_set(metrics,'{orders,submittedCommands}',?::jsonb) || ?::jsonb",
                 huge,"{\"futureCounter\":"+huge+"}");
         var row=repository.find(ProductLine.SPOT,60).orElseThrow();
         assertThat(row.clusterPosition()).isEqualTo(Long.MAX_VALUE);
@@ -75,7 +75,7 @@ class TradingMetricsPostgresTest {
     @org.junit.jupiter.params.provider.MethodSource("wrongIdentity")
     void persistedPayloadMustMatchEverySnapshotIdentity(String field,String value) {
         add(ProductLine.SPOT,System.currentTimeMillis());
-        jdbc.update("UPDATE core_trading_statistics_snapshot SET metrics=jsonb_set(metrics,ARRAY[?]::text[],?::jsonb)",field,value);
+        jdbc.update("UPDATE trading_stats_snapshots SET metrics=jsonb_set(metrics,ARRAY[?]::text[],?::jsonb)",field,value);
         assertThatThrownBy(()->service.require(ProductLine.SPOT,60,1))
                 .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("INVALID");
     }

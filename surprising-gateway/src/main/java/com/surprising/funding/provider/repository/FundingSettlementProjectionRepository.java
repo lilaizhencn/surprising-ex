@@ -22,7 +22,7 @@ public class FundingSettlementProjectionRepository {
         return jdbcTemplate.query("""
                 SELECT settlement_id, instrument_id, funding_rate_ppm, total_long_payment_units,
                        total_short_payment_units, position_count, command_status, occurred_at_epoch_ms
-                  FROM core_funding_settlement_projection
+                  FROM funding_settlements
                  WHERE product_line = ? AND instrument_id = ?
                  ORDER BY settlement_id DESC
                  LIMIT 1

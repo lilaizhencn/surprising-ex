@@ -1,8 +1,8 @@
 package com.surprising.realtime.provider.export.service;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.query.CommittedTradingActivity;
-import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult;
+import com.surprising.aeron.protocol.export.CommittedCommandResult;
+import com.surprising.aeron.protocol.export.CommittedTradingActivity;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.model.CommandStatisticsBucket;
 import com.surprising.realtime.provider.export.repository.*;
@@ -20,10 +20,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Realtime export-thread-owned statistics. Buckets retain attempts, snapshots publish one consistent prefix. */
 @org.springframework.stereotype.Service
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class CommittedTradingStatisticsService {
     private final TransactionTemplate transaction;
-    private final StatisticsInitializationRepository initialization;
     private final StatisticsCursorRepository cursors;
     private final CommandStatisticsRepository commandStatistics;
     private final StatisticsSnapshotRepository snapshots;
@@ -31,15 +30,13 @@ public class CommittedTradingStatisticsService {
 
     public static final List<Integer> WINDOWS = List.of(60,360,1440,10080);
 
-    public CommittedTradingStatisticsService(StatisticsInitializationRepository initialization,
+    public CommittedTradingStatisticsService(
             StatisticsCursorRepository cursors, CommandStatisticsRepository commandStatistics,
             StatisticsSnapshotRepository snapshots, CommittedExecutionRepository executions,
             @org.springframework.beans.factory.annotation.Qualifier("committedProjectionTransactions") TransactionTemplate transaction) {
-        this.initialization = initialization; this.cursors = cursors; this.commandStatistics = commandStatistics;
+        this.cursors = cursors; this.commandStatistics = commandStatistics;
         this.snapshots = snapshots; this.executions = executions; this.transaction = transaction;
     }
-    public boolean initialized(ProductLine product) { return initialization.initialized(product); }
-    public void initialize(ProductLine product, long position) { initialization.initialize(product, position); }
 
     /** Caller supplies the same transaction as order/trade projection persistence. */
     public void persist(ProductLine product,List<CommittedCommandResult> results) {
@@ -60,7 +57,6 @@ public class CommittedTradingStatisticsService {
         commandStatistics.add(product, buckets);
         if(ordered.lastKey()>cursor)cursors.advance(product, ordered.lastKey());
     }
-    public void repair(ProductLine product,List<CommittedCommandResult> results) { transaction.executeWithoutResult(tx->persist(product,results)); }
 
     public void publish(ProductLine product,CommittedTradingActivity activity,long position,long now) {
         transaction.executeWithoutResult(tx->{

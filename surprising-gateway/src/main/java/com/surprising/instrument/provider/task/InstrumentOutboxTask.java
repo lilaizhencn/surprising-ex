@@ -14,7 +14,7 @@ public class InstrumentOutboxTask {
         this.outboxPublisher = outboxPublisher;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.instrument.outbox.publish-delay-ms:1000}")
+    @Scheduled(fixedDelayString = "${surprising.instrument.outbox.publish-delay-ms:5000}")
     public void publishPending() {
         outboxPublisher.publishPending();
     }

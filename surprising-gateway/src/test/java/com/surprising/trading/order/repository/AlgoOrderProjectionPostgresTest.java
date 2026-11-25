@@ -18,7 +18,7 @@ class AlgoOrderProjectionPostgresTest {
         var admin=new JdbcTemplate(new DriverManagerDataSource(url,System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD")));
         admin.execute("DROP SCHEMA IF EXISTS algo_query_it CASCADE");admin.execute("CREATE SCHEMA algo_query_it");
         jdbc=new JdbcTemplate(new DriverManagerDataSource(url+(url.contains("?")?"&":"?")+"currentSchema=algo_query_it",System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD")));
-        for(String table:List.of("core_algo_order_projection","core_algo_projection_initialization","core_command_result_projection"))jdbc.execute("CREATE TABLE "+table+" (LIKE public."+table+" INCLUDING ALL)");
+        for(String table:List.of("trading_algo_orders","trading_command_results"))jdbc.execute("CREATE TABLE "+table+" (LIKE public."+table+" INCLUDING ALL)");
         projection=new AlgoOrderProjectionRepository(jdbc);
     }
     @AfterEach void clean() {if(jdbc!=null)jdbc.execute("DROP SCHEMA algo_query_it CASCADE");}
@@ -26,7 +26,7 @@ class AlgoOrderProjectionPostgresTest {
     private void add(ProductLine line,long id,long user,String instrument,int status) {
         var value=new CoreAlgoOrderView(id,user,"client-"+id,instrument,0,CoreOrderSide.BUY,100,4,2,5,20,
                 CoreMarginMode.CROSS,CorePositionSide.NET,false,CoreTimeInForce.GTC,status,0,"",1000,6000,1000,1001,1,List.of(),1,1,0, 0);
-        jdbc.update("INSERT INTO core_algo_order_projection VALUES (?,?,?,?,?,?,?,?,?,?,?)",line.name(),id,user,value.clientAlgoOrderId(),instrument,status,1000,1001,1,2,CoreAlgoOrderCodec.encode(value));
+        jdbc.update("INSERT INTO trading_algo_orders VALUES (?,?,?,?,?,?,?,?,?,?,?)",line.name(),id,user,value.clientAlgoOrderId(),instrument,status,1000,1001,1,2,CoreAlgoOrderCodec.encode(value));
     }
     @Test void exactParentReadsIncludeTerminalStatesAndRemainScopedAcrossEveryProduct() {
         for (var line : ProductLine.values()) {
@@ -41,11 +41,11 @@ class AlgoOrderProjectionPostgresTest {
         var receipts = new AeronOrderProjectionRepository(jdbc);
         var command = UUID.randomUUID();
         assertThat(receipts.algoSubmission(ProductLine.SPOT,7,command).outcome()).isEqualTo("RESULT_UNKNOWN");
-        jdbc.update("INSERT INTO core_command_result_projection(product_line,command_id,user_id,command_type,command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms) VALUES ('SPOT',?,7,'UPSERT_ALGO_ORDER','REJECTED','INVALID_ALGO_CHILD',1,1,1000)",command);
+        jdbc.update("INSERT INTO trading_command_results(product_line,command_id,user_id,command_type,command_status,result_code,applied_command_count,cluster_position,occurred_at_epoch_ms) VALUES ('SPOT',?,7,'UPSERT_ALGO_ORDER','REJECTED','INVALID_ALGO_CHILD',1,1,1000)",command);
         assertThat(receipts.algoSubmission(ProductLine.SPOT,7,command).code()).isEqualTo("INVALID_ALGO_CHILD");
         assertThat(receipts.algoSubmission(ProductLine.SPOT,8,command).outcome()).isEqualTo("RESULT_UNKNOWN");
         assertThat(receipts.algoSubmission(ProductLine.OPTION,7,command).outcome()).isEqualTo("RESULT_UNKNOWN");
-        jdbc.update("UPDATE core_command_result_projection SET command_type='PLACE_ORDER'");
+        jdbc.update("UPDATE trading_command_results SET command_type='PLACE_ORDER'");
         assertThatThrownBy(()->receipts.algoSubmission(ProductLine.SPOT,7,command)).isInstanceOf(IllegalStateException.class);
     }
     @Test void openFilterPrecedesLimitAndKeepsProductUserInstrumentAndInt64Ordering() {
@@ -60,9 +60,9 @@ class AlgoOrderProjectionPostgresTest {
     @Test void initializingUnavailableAndCorruptDataAre503RatherThanEmptySuccess() {
         assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("ALGO_READ_VIEW_INITIALIZING");
         ready(ProductLine.SPOT);add(ProductLine.SPOT,701,7,"604",0);
-        jdbc.update("UPDATE core_algo_order_projection SET revision=99");
+        jdbc.update("UPDATE trading_algo_orders SET revision=99");
         assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("ALGO_READ_VIEW_INVALID");
-        jdbc.execute("DROP TABLE core_algo_order_projection");
+        jdbc.execute("DROP TABLE trading_algo_orders");
         assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("ALGO_READ_VIEW_UNAVAILABLE");
     }
 

@@ -1,7 +1,7 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.controller.C2cController;
-import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cAccessService;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,7 +22,7 @@ class C2cQueryValidationTest {
     private UUID market;
     @BeforeEach void setup() {
         queries=mock(C2cQueryService.class);quick=mock(C2cQuickQuoteService.class);
-        var access=mock(C2cAccess.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));
+        var access=mock(C2cAccessService.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));
         controller=new C2cController(access,null,null,null,queries,quick,null,null);market=UUID.randomUUID();
     }
 

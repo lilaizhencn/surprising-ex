@@ -37,7 +37,7 @@ class ApiKeyOrderPermissionTest {
     final TotpService totp = new TotpService(properties);
     final GatewayApiKeyRepository repository = mock(GatewayApiKeyRepository.class);
     final AuthService auth = mock(AuthService.class);
-    final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.port.CurrentAuthClient.class), fixture.state);
+    final GatewayApiKeyService keys = new GatewayApiKeyService(repository, auth, totp, null, properties, org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding.class), fixture.state);
     final OrderService orderService = mock(OrderService.class);
 
     @Test void readOnlyKeyCannotEnterTheCancellationBusiness() {
@@ -77,7 +77,7 @@ class ApiKeyOrderPermissionTest {
     }
 
     private OpenApiController controller() {
-        return new OpenApiController(properties,
+        return com.surprising.gateway.provider.controller.OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class),
                 orderService,
                 mock(AccountService.class),

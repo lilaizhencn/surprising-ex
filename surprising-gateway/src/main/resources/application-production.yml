@@ -15,17 +15,17 @@ surprising:
     deployment-profile: production
     upload-security:
       scan-enabled: true
-      scanner-host: ${GATEWAY_UPLOAD_SCANNER_HOST:127.0.0.1}
-      scanner-port: ${GATEWAY_UPLOAD_SCANNER_PORT:3310}
+      scanner-host: 127.0.0.1
+      scanner-port: 3310
     withdrawal:
       single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT}
       daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT}
-      valuation-max-age: ${GATEWAY_WITHDRAWAL_VALUATION_MAX_AGE:30s}
-      failure-reconciliation-delay: ${GATEWAY_WITHDRAWAL_FAILURE_RECONCILIATION_DELAY:30s}
+      valuation-max-age: 30s
+      failure-reconciliation-delay: 30s
     product-transfer:
       verification-threshold-usdt: ${GATEWAY_PRODUCT_TRANSFER_VERIFICATION_THRESHOLD_USDT}
-      reconciliation-delay: ${GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_DELAY:5s}
-      reconciliation-batch-size: ${GATEWAY_PRODUCT_TRANSFER_RECONCILIATION_BATCH_SIZE:100}
+      reconciliation-delay: 5s
+      reconciliation-batch-size: 100
     custody-wallet:
       enabled: ${GATEWAY_CUSTODY_WALLET_ENABLED:true}
       base-url: ${GATEWAY_CUSTODY_WALLET_BASE_URL}
@@ -41,8 +41,8 @@ surprising:
       access-key: ${GATEWAY_KYC_DOCUMENTS_ACCESS_KEY}
       secret-key: ${GATEWAY_KYC_DOCUMENTS_SECRET_KEY}
     kyc:
-      provider: ${GATEWAY_KYC_PROVIDER:SUMSUB}
-      validity: ${GATEWAY_KYC_VALIDITY:365d}
+      provider: SUMSUB
+      validity: 365d
       simulation-enabled: false
       sumsub:
         app-token: ${GATEWAY_KYC_SUMSUB_APP_TOKEN:}
@@ -55,12 +55,12 @@ surprising:
           BUSINESS_BASIC: ${GATEWAY_KYC_SUMSUB_BUSINESS_BASIC_LEVEL_NAME:}
           BUSINESS_STANDARD: ${GATEWAY_KYC_SUMSUB_BUSINESS_STANDARD_LEVEL_NAME:}
           BUSINESS_ENHANCED: ${GATEWAY_KYC_SUMSUB_BUSINESS_ENHANCED_LEVEL_NAME:}
-        base-url: ${GATEWAY_KYC_SUMSUB_BASE_URL:https://api.sumsub.com}
+        base-url: https://api.sumsub.com
       veriff:
-        kyc-level: ${GATEWAY_KYC_VERIFF_LEVEL:BASIC}
+        kyc-level: BASIC
         api-key: ${GATEWAY_KYC_VERIFF_API_KEY:}
         shared-secret: ${GATEWAY_KYC_VERIFF_SHARED_SECRET:}
-        base-url: ${GATEWAY_KYC_VERIFF_BASE_URL:https://stationapi.veriff.com}
+        base-url: https://stationapi.veriff.com
         callback-url: ${GATEWAY_KYC_VERIFF_CALLBACK_URL:}
     security:
       admin-browser-allowed-origins: ${GATEWAY_ADMIN_BROWSER_ALLOWED_ORIGINS:https://ex-api.tokdou.com}
@@ -75,14 +75,14 @@ surprising:
       require-email-verification: true
       resend-api-key: ${RESEND_API_KEY}
       resend-from: ${RESEND_FROM}
-      resend-base-url: ${RESEND_BASE_URL:https://api.resend.com}
+      resend-base-url: https://api.resend.com
       verification-code-pepper: ${GATEWAY_VERIFICATION_CODE_PEPPER}
       mfa-secret-encryption-key: ${GATEWAY_MFA_SECRET_ENCRYPTION_KEY}
-      issuer: ${GATEWAY_JWT_ISSUER:surprising-ex-gateway}
+      issuer: surprising-ex-gateway
       jwt-secret: ${GATEWAY_JWT_SECRET}
   websocket:
     kafka:
-      bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS}
+      bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
       group-id: ${SURPRISING_WEBSOCKET_GROUP_ID}
     security:
       jwt-secret: ${GATEWAY_JWT_SECRET}

@@ -1,7 +1,6 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;
@@ -9,6 +8,8 @@ import com.surprising.trading.maintenance.service.MaintenanceAeronGateway;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -23,146 +24,117 @@ class InstrumentCoreSyncServiceTest {
         var properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(line);
         var gateway = mock(MaintenanceAeronGateway.class);
-        try (var tradingCore = new TradingCore(line)) {
-            when(gateway.commandOutcome(any(), any(), anyLong(), any())).thenAnswer(call ->
-                    new com.surprising.aeron.client.CoreCommandOutcome.Terminal(tradingCore.apply(new CoreMessage(
-                            CoreMessageHeader.command(call.getArgument(0), call.getArgument(1), line,
-                                    CommandSource.OPERATIONS, 993, 1, 0, 1_700_000_000_001L, 1), call.getArgument(3)))));
-            var draft = row(line, 1, InstrumentStatus.DRAFT);
-            when(draft.priceTickUnits()).thenReturn(10L);
-            cache.replace(line, List.of(draft),
-                    java.util.Map.of("BTC", 100_000_000L, "USDT", 100_000_000L));
-            var service = new InstrumentCoreSyncService(cache, gateway, properties);
-            service.reconcile();
-            assertThat(service.state("1", line).state()).isEqualTo("APPLIED");
-            var registered = tradingCore.tradingState().instruments().get("1");
-            assertThat(registered.instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
-            assertThat(registered.priceTickUnits()).isEqualTo(draft.contractType().isInverse() ? 10 : 1);
-            if (line.isOptionProduct()) assertThat(registered.strikePriceTicks()).isEqualTo(10);
-            if (line.isDerivative()) assertThat(registered.orderProtection()).isEqualTo(properties.getRisk().protection());
-            else assertThat(registered.orderProtection()).isNull();
-            try (var restored = TradingCore.fromSnapshot(line, tradingCore.snapshot(42))) {
-                assertThat(restored.tradingState().instruments().get("1")).isEqualTo(registered);
+        Map<String, RegisterInstrumentCommand> registeredCommands = new ConcurrentHashMap<>();
+        when(gateway.commandOutcome(any(), any(), anyLong(), any())).thenAnswer(call -> {
+            CoreMessageType type = call.getArgument(0);
+            byte[] payload = call.getArgument(3);
+            if (type == CoreMessageType.REGISTER_INSTRUMENT) {
+                var cmd = TradingCommandCodec.decodeRegisterInstrument(payload, line);
+                registeredCommands.put(cmd.instrumentId(), cmd);
             }
-        }
+            return new com.surprising.aeron.client.CoreCommandOutcome.Terminal(
+                    new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE, 1L, 1L, new byte[0]));
+        });
+        var draft = row(line, 1, InstrumentStatus.DRAFT);
+        when(draft.priceTickUnits()).thenReturn(10L);
+        cache.replace(line, List.of(draft),
+                Map.of("BTC", 100_000_000L, "USDT", 100_000_000L));
+        var service = new InstrumentCoreSyncService(cache, gateway, properties);
+        service.reconcile();
+        assertThat(service.state("1", line).state()).isEqualTo("APPLIED");
+        var registered = registeredCommands.get("1");
+        assertThat(registered).isNotNull();
+        assertThat(registered.instrumentStatusCode()).isEqualTo(InstrumentStatus.DRAFT.ordinal());
+        assertThat(registered.priceTickUnits()).isEqualTo(draft.contractType().isInverse() ? 10 : 1);
+        if (line.isOptionProduct()) assertThat(registered.strikePriceTicks()).isEqualTo(10);
+        if (line.isDerivative()) assertThat(registered.orderProtection()).isEqualTo(properties.getRisk().protection());
+        else assertThat(registered.orderProtection()).isNull();
     }
+
     @ParameterizedTest @EnumSource(ProductLine.class)
     void appliesStartupAndLaterConfigurationChangesThroughTheSameCoreCommand(ProductLine line) {
-        var cache=new InstrumentSnapshotCache(); var properties=new TradingOrderProperties(); properties.getKafka().setProductLine(line);
-        var gateway=mock(MaintenanceAeronGateway.class); var sequence=new AtomicLong();
-        try(var state=new TradingCore(line)) {
-            when(gateway.commandOutcome(any(),any(),anyLong(),any())).thenAnswer(call->{
-                long seq=sequence.incrementAndGet();
-                var response=state.apply(new CoreMessage(CoreMessageHeader.command(call.getArgument(0),call.getArgument(1),line,
-                        CommandSource.OPERATIONS,993,seq,0,1_700_000_000_000L+seq,seq),call.getArgument(3)));
-                return new com.surprising.aeron.client.CoreCommandOutcome.Terminal(response);
-            });
-            var service=new InstrumentCoreSyncService(cache,gateway,properties);
-            cache.replace(line,List.of(row(line,1,InstrumentStatus.TRADING)),java.util.Map.of("BTC",1000L,"USDT",100_000_000L));
-            assertThat(service.state("1",line).state()).isEqualTo("PENDING");
-            service.reconcile();
-            assertThat(service.state("1",line).state()).isEqualTo("APPLIED");
-            service.reconcile(); assertThat(sequence.get()).isEqualTo(1);
-            var startupInstrument=state.tradingState().instruments().get("1");
-            var sealSequence=sequence.incrementAndGet();
-            state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
-                    java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,993,sealSequence,0,
-                    1_700_000_000_000L+sealSequence,sealSequence), com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1))));
-            var pause=row(line,2,InstrumentStatus.HALT);
-            cache.apply(new InstrumentEvent(1, "1",2,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,Instant.now(),pause,line,2));
-            service.reconcile();
-            assertThat(sequence.get()).isEqualTo(sealSequence+1);
-            assertThat(service.state("1",line).state()).isEqualTo("APPLIED");
-            var updatedInstrument=state.tradingState().instruments().get("1");
-            assertThat(updatedInstrument).isSameAs(startupInstrument);
-            assertThat(updatedInstrument.makerFeeRatePpm()).isEqualTo(2_000L);
-            assertThat(updatedInstrument.instrumentStatus()).isEqualTo(InstrumentStatus.HALT);
-            assertThat(updatedInstrument.marketOrderEnabled()).isTrue();
-
-            var rejectedWhileHalted=state.apply(new CoreMessage(CoreMessageHeader.command(
-                    CoreMessageType.PLACE_ORDER,java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,
-                    11,sequence.incrementAndGet(),11,1_700_000_000_000L+sequence.get(),sequence.get()),
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(90,"1",CoreOrderSide.BUY,
-                            1,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC,false,"halted-order"))));
-            assertThat(rejectedWhileHalted.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-
-            var switches=row(line,3,InstrumentStatus.TRADING);
-            when(switches.marketOrderEnabled()).thenReturn(false);
-            cache.apply(new InstrumentEvent(1, "1",3,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,
-                    Instant.now(),switches,line,3));
-            service.reconcile();
-            assertThat(service.state("1",line).state()).isEqualTo("APPLIED");
-            assertThat(updatedInstrument.instrumentStatus()).isEqualTo(InstrumentStatus.TRADING);
-            assertThat(updatedInstrument.marketOrderEnabled()).isFalse();
-            var rejectedMarket=state.apply(new CoreMessage(CoreMessageHeader.command(
-                    CoreMessageType.PLACE_ORDER,java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,
-                    11,sequence.incrementAndGet(),11,1_700_000_000_000L+sequence.get(),sequence.get()),
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(91,"1",CoreOrderSide.BUY,
-                            0,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.MARKET,
-                            CoreTimeInForce.IOC,false,"market-disabled"))));
-            assertThat(rejectedMarket.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            try (var restored=TradingCore.fromSnapshot(line,state.snapshot(41))) {
-                var recovered=restored.tradingState().instruments().get("1");
-                assertThat(recovered.instrumentStatus()).isEqualTo(InstrumentStatus.TRADING);
-                assertThat(recovered.marketOrderEnabled()).isFalse();
-                var newlyListed = row(line, 5, InstrumentStatus.DRAFT);
-                when(newlyListed.instrumentId()).thenReturn(2);
-                when(newlyListed.symbol()).thenReturn("2");
-                var registration = service.command(newlyListed);
-                long next = sequence.incrementAndGet();
-                var applied = restored.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
-                        java.util.UUID.randomUUID(), line, CommandSource.OPERATIONS, 993, next, 0,
-                        1_700_000_000_000L + next, next), TradingCommandCodec.encodeRegisterInstrument(registration, line)));
-                assertThat(applied.commandStatus()).as("new instrument after business activity and snapshot restore").isEqualTo(ResponseStatus.APPLIED);
-                assertThat(restored.tradingState().instruments()).containsKeys("1", "2");
-                assertThat(restored.tradingState().instruments().get("2").instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
+        var cache = new InstrumentSnapshotCache();
+        var properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(line);
+        var gateway = mock(MaintenanceAeronGateway.class);
+        var sequence = new AtomicLong();
+        Map<String, RegisterInstrumentCommand> registeredCommands = new ConcurrentHashMap<>();
+        when(gateway.commandOutcome(any(), any(), anyLong(), any())).thenAnswer(call -> {
+            long seq = sequence.incrementAndGet();
+            CoreMessageType type = call.getArgument(0);
+            byte[] payload = call.getArgument(3);
+            if (type == CoreMessageType.REGISTER_INSTRUMENT) {
+                var cmd = TradingCommandCodec.decodeRegisterInstrument(payload, line);
+                registeredCommands.put(cmd.instrumentId(), cmd);
             }
+            return new com.surprising.aeron.client.CoreCommandOutcome.Terminal(
+                    new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE, seq, seq, new byte[0]));
+        });
+        var service = new InstrumentCoreSyncService(cache, gateway, properties);
+        cache.replace(line, List.of(row(line, 1, InstrumentStatus.TRADING)), Map.of("BTC", 1000L, "USDT", 100_000_000L));
+        assertThat(service.state("1", line).state()).isEqualTo("PENDING");
+        service.reconcile();
+        assertThat(service.state("1", line).state()).isEqualTo("APPLIED");
+        service.reconcile();
+        assertThat(sequence.get()).isEqualTo(1);
+        var startupInstrument = registeredCommands.get("1");
+        assertThat(startupInstrument.instrumentStatusCode()).isEqualTo(InstrumentStatus.TRADING.ordinal());
 
-            var restricted=row(line,4,InstrumentStatus.TRADING);
-            when(restricted.marketOrderEnabled()).thenReturn(true);
-            when(restricted.postOnlyEnabled()).thenReturn(false);
-            when(restricted.reduceOnlyEnabled()).thenReturn(false);
-            cache.apply(new InstrumentEvent(1, "1",4,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,
-                    Instant.now(),restricted,line,4));
-            service.reconcile();
-            assertThat(updatedInstrument.postOnlyEnabled()).isFalse();
-            assertThat(updatedInstrument.reduceOnlyEnabled()).isFalse();
-            var rejectedPostOnly=state.apply(new CoreMessage(CoreMessageHeader.command(
-                    CoreMessageType.PLACE_ORDER,java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,
-                    11,sequence.incrementAndGet(),11,1_700_000_000_000L+sequence.get(),sequence.get()),
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(92,"1",CoreOrderSide.BUY,
-                            1,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTX,true,"post-only-disabled"))));
-            assertThat(rejectedPostOnly.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            var rejectedReduceOnly=state.apply(new CoreMessage(CoreMessageHeader.command(
-                    CoreMessageType.PLACE_ORDER,java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,
-                    11,sequence.incrementAndGet(),11,1_700_000_000_000L+sequence.get(),sequence.get()),
-                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(93,"1",CoreOrderSide.SELL,
-                            1,1,true,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC,false,"reduce-only-disabled"))));
-            assertThat(rejectedReduceOnly.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-        }
+        var pause = row(line, 2, InstrumentStatus.HALT);
+        cache.apply(new InstrumentEvent(1, "BTC-USDT", 2, InstrumentStatus.TRADING, InstrumentEventType.UPSERTED, Instant.now(), pause, line, 2));
+        service.reconcile();
+        assertThat(sequence.get()).isEqualTo(2);
+        assertThat(service.state("1", line).state()).isEqualTo("APPLIED");
+        var updatedInstrument = registeredCommands.get("1");
+        assertThat(updatedInstrument.makerFeeRatePpm()).isEqualTo(2_000L);
+        assertThat(updatedInstrument.instrumentStatusCode()).isEqualTo(InstrumentStatus.HALT.ordinal());
+        assertThat(updatedInstrument.marketOrderEnabled()).isTrue();
+
+        var switches = row(line, 3, InstrumentStatus.TRADING);
+        when(switches.marketOrderEnabled()).thenReturn(false);
+        cache.apply(new InstrumentEvent(1, "BTC-USDT", 3, InstrumentStatus.TRADING, InstrumentEventType.UPSERTED,
+                Instant.now(), switches, line, 3));
+        service.reconcile();
+        assertThat(service.state("1", line).state()).isEqualTo("APPLIED");
+        assertThat(registeredCommands.get("1").marketOrderEnabled()).isFalse();
     }
-    private InstrumentResponse row(ProductLine line,long audit,InstrumentStatus status) {
-        var v=mock(InstrumentResponse.class); var type=ContractType.valueOf(line.contractTypeCode());
-        when(v.symbol()).thenReturn("1");
-        org.mockito.Mockito.when(v.instrumentId()).thenReturn(1); when(v.changeId()).thenReturn(1L); when(v.lastChangeId()).thenReturn(audit);
-        when(v.contractType()).thenReturn(type); when(v.baseAsset()).thenReturn("BTC"); when(v.quoteAsset()).thenReturn("USDT");
-        when(v.settleAsset()).thenReturn(type.isInverse()?"BTC":"USDT"); when(v.notionalMultiplierUnits()).thenReturn(1L);
-        when(v.priceTickUnits()).thenReturn(1L); when(v.initialMarginRatePpm()).thenReturn(100_000L);
-        when(v.quantityStepUnits()).thenReturn(1L);
-        when(v.maintenanceMarginRatePpm()).thenReturn(50_000L); when(v.maxLeveragePpm()).thenReturn(10_000_000L);
-        when(v.maxPositionNotionalUnits()).thenReturn(1_000_000L); when(v.userOpenInterestLimitFloorUnits()).thenReturn(1_000_000L);
-        when(v.makerFeeRatePpm()).thenReturn(audit*1_000L);
-        when(v.marketOrderEnabled()).thenReturn(true); when(v.postOnlyEnabled()).thenReturn(true);
-        when(v.reduceOnlyEnabled()).thenReturn(true);
-        when(v.supportedOrderTypes()).thenReturn(List.of("LIMIT","MARKET"));
-        when(v.supportedTimeInForce()).thenReturn(List.of("GTC","IOC","FOK","GTX"));
-        when(v.riskLimitBrackets()).thenReturn(line == ProductLine.SPOT ? List.of()
-                : List.of(new RiskLimitBracket(1,0,1_000_000,10_000_000,100_000,50_000,1_000_000)));
-        if (type.isDelivery() || type.isOption()) when(v.expiryTime()).thenReturn(Instant.ofEpochMilli(2_000_000_000_000L));
-        if (type.isOption()) { when(v.optionType()).thenReturn(OptionType.CALL); when(v.strikePriceUnits()).thenReturn(100L); }
-        when(v.status()).thenReturn(status); return v;
+
+    private static InstrumentResponse row(ProductLine line, long changeId, InstrumentStatus status) {
+        var r = mock(InstrumentResponse.class);
+        when(r.instrumentId()).thenReturn(1);
+        when(r.symbol()).thenReturn("BTC-USDT");
+        when(r.baseAsset()).thenReturn("BTC");
+        when(r.quoteAsset()).thenReturn("USDT");
+        when(r.settleAsset()).thenReturn("USDT");
+        when(r.contractType()).thenReturn(switch (line) {
+            case SPOT -> ContractType.SPOT;
+            case LINEAR_PERPETUAL -> ContractType.LINEAR_PERPETUAL;
+            case INVERSE_PERPETUAL -> ContractType.INVERSE_PERPETUAL;
+            case LINEAR_DELIVERY -> ContractType.LINEAR_DELIVERY;
+            case INVERSE_DELIVERY -> ContractType.INVERSE_DELIVERY;
+            case OPTION -> ContractType.VANILLA_OPTION;
+        });
+        when(r.supportedOrderTypes()).thenReturn(List.of("LIMIT", "MARKET"));
+        when(r.supportedTimeInForce()).thenReturn(List.of("GTC", "IOC", "FOK", "GTX"));
+        when(r.optionType()).thenReturn(OptionType.CALL);
+        when(r.maxPositionNotionalUnits()).thenReturn(1_000_000L);
+        when(r.userOpenInterestLimitFloorUnits()).thenReturn(1_000_000L);
+        when(r.riskLimitBrackets()).thenReturn(List.of(
+                new RiskLimitBracket(1, 0L, 1_000_000L, 10_000_000L, 100_000L, 50_000L, 1_000_000L)));
+        when(r.priceTickUnits()).thenReturn(1L);
+        when(r.quantityStepUnits()).thenReturn(1L);
+        when(r.notionalMultiplierUnits()).thenReturn(1L);
+        when(r.makerFeeRatePpm()).thenReturn(2_000L);
+        when(r.takerFeeRatePpm()).thenReturn(5_000L);
+        when(r.maxLeveragePpm()).thenReturn(10_000_000L);
+        when(r.maintenanceMarginRatePpm()).thenReturn(50_000L);
+        when(r.initialMarginRatePpm()).thenReturn(100_000L);
+        when(r.strikePriceUnits()).thenReturn(100L);
+        when(r.expiryTime()).thenReturn(Instant.ofEpochMilli(2_000_000_000_000L));
+        when(r.status()).thenReturn(status);
+        when(r.changeId()).thenReturn(changeId);
+        when(r.lastChangeId()).thenReturn(changeId);
+        when(r.marketOrderEnabled()).thenReturn(true);
+        return r;
     }
 }

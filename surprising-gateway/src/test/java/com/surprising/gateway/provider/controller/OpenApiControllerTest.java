@@ -74,7 +74,7 @@ class OpenApiControllerTest {
         when(accountRequests.transfer(any(ProductTransferRequest.class)))
                 .thenReturn(new ProductTransferResponse(7123L, 42L, AccountType.SPOT, AccountType.USDT_PERPETUAL, "USDT", 1_250_000L, "ref", "COMPLETED", null, null, Instant.now()));
 
-        OpenApiController controller = new OpenApiController(properties,
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
@@ -111,7 +111,7 @@ class OpenApiControllerTest {
         when(accountRequests.transfer(any(ProductTransferRequest.class)))
                 .thenReturn(new ProductTransferResponse(7124L, 42L, AccountType.SPOT, AccountType.COIN_PERPETUAL, "USDT", 1_000_000L, "ref", "COMPLETED", null, null, Instant.now()));
 
-        OpenApiController controller = new OpenApiController(properties,
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), bearerAuth(),
@@ -171,7 +171,7 @@ class OpenApiControllerTest {
                         withdrawalId, "SUBMITTED", "wallet-withdrawal-1", BigDecimal.ONE, now, now, "25", "0", "25", 0L));
         CustodyWalletClient custodyWalletClient = mock(CustodyWalletClient.class);
 
-        OpenApiController controller = new OpenApiController(properties,
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,
@@ -224,7 +224,7 @@ class OpenApiControllerTest {
         request.setParameter("orderId", "1");
         request.setParameter("startTime", "1754006400000");
 
-        OpenApiController controller = new OpenApiController(properties,
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class), orderRequests,
                 mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
@@ -250,7 +250,7 @@ class OpenApiControllerTest {
         ComplianceService compliance = mock(ComplianceService.class);
         when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "STANDARD", "PENDING", "US",
                 "PASSPORT", "SELF", null, null, null, null, null, null, null));
-        OpenApiController controller = new OpenApiController(properties,
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 accountRequests, mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), bearerAuth(),
@@ -282,7 +282,7 @@ class OpenApiControllerTest {
                         "assetSymbols", List.of("USDT")),
                 Map.of("chain", "ETH", "enabled", true, "withdrawalEnabled", false,
                         "assetSymbols", List.of("USDT"))));
-        OpenApiController controller = new OpenApiController(properties,
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
@@ -323,7 +323,7 @@ class OpenApiControllerTest {
                         List.of(new OrderBookLevel(12345L, 2000L, 1L)),
                         List.of(new OrderBookLevel(12355L, 3000L, 1L)),
                         Instant.now()));
-        OpenApiController controller = new OpenApiController(properties,
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 mock(AccountService.class), marketData,
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class),
@@ -347,7 +347,7 @@ class OpenApiControllerTest {
         ComplianceService compliance = mock(ComplianceService.class);
         when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "BASIC", "VERIFIED", "US",
                 "PASSPORT", "self", null, null, null, null, null, null, null));
-        return new OpenApiController(properties,
+        return OpenApiTestSupport.controller(properties,
                 mock(InstrumentService.class), mock(OrderService.class),
                 mock(AccountService.class), mock(MatchingMarketDataService.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,

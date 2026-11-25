@@ -16,7 +16,7 @@ public class InstrumentLifecycleTask {
         this.lifecycleService = lifecycleService;
     }
 
-    @Scheduled(fixedDelayString = "${surprising.instrument.lifecycle.poll-delay-ms:1000}")
+    @Scheduled(fixedDelayString = "${surprising.instrument.lifecycle.poll-delay-ms:5000}")
     public void advanceLifecycle() {
         lifecycleService.advanceLifecycle();
     }
