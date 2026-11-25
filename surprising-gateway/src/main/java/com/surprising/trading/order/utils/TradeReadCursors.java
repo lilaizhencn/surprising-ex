@@ -10,9 +10,6 @@ import java.util.Set;
 
 /** 稳定游标格式转换；请求入口验证作用域，SQL只使用原生坐标。 */
 public final class TradeReadCursors {
-    private static final ThreadLocal<MessageDigest> SHA_256 =
-            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
-
     private TradeReadCursors() {}
 
     public static String fillScope(ProductLine product, long user, String instrument, Long order, Long start, Long end) {
@@ -71,8 +68,6 @@ public final class TradeReadCursors {
     }
 
     private static String digest(String value) {
-        MessageDigest md = SHA_256.get();
-        md.reset();
-        return HexFormat.of().formatHex(md.digest(value.getBytes(StandardCharsets.UTF_8)));
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(value);
     }
 }

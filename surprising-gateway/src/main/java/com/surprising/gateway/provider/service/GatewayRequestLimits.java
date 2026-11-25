@@ -118,9 +118,6 @@ public final class GatewayRequestLimits {
         consume(List.of(requestCharge, new Charge(actor + "login", properties.getLoginIp(), 1)), "IP");
     }
 
-    private static final ThreadLocal<MessageDigest> SHA_256 =
-            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
-
     public void checkLoginAccount(String identifier) {
         if (!properties.isEnabled()) return;
         String digest = digest(identifier.strip().toLowerCase(Locale.ROOT));
@@ -167,9 +164,7 @@ public final class GatewayRequestLimits {
     }
 
     private static String digest(String value) {
-        MessageDigest md = SHA_256.get();
-        md.reset();
-        return HexFormat.of().formatHex(md.digest(value.getBytes(StandardCharsets.UTF_8)));
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(value);
     }
 
     public void checkUser(long user, String apiKey, Group group, ProductLine product, int cost) {

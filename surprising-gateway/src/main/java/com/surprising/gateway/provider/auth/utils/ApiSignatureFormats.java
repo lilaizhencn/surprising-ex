@@ -34,13 +34,8 @@ public final class ApiSignatureFormats {
         return sb.toString();
     }
 
-    private static final ThreadLocal<java.security.MessageDigest> SHA256 =
-            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
-
     public static String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap, byte[] body) {
-        java.security.MessageDigest digest = SHA256.get();
-        digest.reset();
-        String hash = java.util.HexFormat.of().formatHex(digest.digest(body == null ? new byte[0] : body));
+        String hash = com.surprising.gateway.provider.support.Sha256Digests.hex(body == null ? new byte[0] : body);
         return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + canonicalParameters(parameterMap) + "\n" + hash;
     }
 

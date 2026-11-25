@@ -10,17 +10,12 @@ import java.util.HexFormat;
 
 /** 条件单历史游标的稳定协议格式；无业务状态或SQL职责。 */
 public final class TriggerReadCursors {
-    private static final ThreadLocal<MessageDigest> SHA_256 =
-            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
-
     private TriggerReadCursors() {}
 
     public static String scope(ProductLine product, Long user, String instrument, CoreTriggerOrderStatus status,
             Long trigger, boolean ascending) {
         String text = product.name() + '|' + user + '|' + instrument + '|' + status + '|' + trigger + '|' + (ascending ? "createdAt.asc" : "createdAt.desc");
-        MessageDigest md = SHA_256.get();
-        md.reset();
-        return HexFormat.of().formatHex(md.digest(text.getBytes(StandardCharsets.UTF_8)));
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(text);
     }
 
     public static TriggerReadCursor decode(String cursor, String scope) {

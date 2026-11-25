@@ -30,8 +30,6 @@ import org.springframework.web.server.ResponseStatusException;
 public final class GatewayAccessSupport {
     private static final Pattern ADMIN_SERVICE_PATTERN = Pattern.compile("[a-z0-9][a-z0-9_-]{0,63}");
     private static final byte[] EMPTY_BYTES = new byte[0];
-    private static final ThreadLocal<MessageDigest> SHA_256 =
-            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
 
     public record GatewayIdentity(String userId, String username, String status, List<String> roles, boolean admin) {
         public static GatewayIdentity user(String userId) {
@@ -218,10 +216,7 @@ public final class GatewayAccessSupport {
         if ((body == null || body.length == 0) && !hashEmptyWhenNull) {
             return null;
         }
-        MessageDigest md = SHA_256.get();
-        md.reset();
-        byte[] digest = md.digest(body == null ? EMPTY_BYTES : body);
-        return HexFormat.of().formatHex(digest);
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(body == null ? EMPTY_BYTES : body);
     }
 
     public static Long parseLong(String value) {
