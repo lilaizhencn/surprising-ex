@@ -151,9 +151,9 @@ class InternalLiquidityOperationsControllerTest {
         var order = inOrder(audit, accounts);
         order.verify(audit).recordRequired(argThat(r -> r.responseStatus() == 202
                 && r.queryString().contains("referenceId=" + body.referenceId())
-                && r.requestBodySha256().length() == 64));
+                && r.requestBodySha256() == null));
         order.verify(accounts).adjustProductBalance(body, null, "SYSTEM:LIQUIDITY_OPERATIONS");
-        order.verify(audit).recordRequired(argThat(r -> r.success() && r.requestBodySha256().length() == 64));
+        order.verify(audit).recordRequired(argThat(r -> r.success() && r.requestBodySha256() == null));
     }
 
     @Test void leverageRequiresExplicitMatchingProduct() {

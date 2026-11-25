@@ -10,7 +10,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.HexFormat;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -80,9 +79,6 @@ public class InternalLiquidityOperationsController {
         if (reference == null || reference.isBlank() || reference.length() > 128
                 || reason == null || reason.isBlank() || reason.length() > 128)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"operation reference and reason are required (max 128)");
-        try {
-            String hash=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(mapper.writeValueAsBytes(body)));
-            return new LiquidityOperationMetadata(reference,reason,request.getRequestURI(),request.getRemoteAddr(),hash);
-        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        return new LiquidityOperationMetadata(reference,reason,request.getRequestURI(),request.getRemoteAddr(),null);
     }
 }

@@ -17,10 +17,7 @@ import com.surprising.instrument.provider.model.InstrumentPageQuery;
 import com.surprising.instrument.provider.model.InstrumentCatalog;
 import com.surprising.instrument.provider.exception.InstrumentOperationException;
 import static com.surprising.instrument.provider.exception.InstrumentOperationException.Reason.*;
-import java.nio.charset.StandardCharsets;
 import java.math.BigInteger;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.Map;
@@ -165,8 +162,7 @@ public class InstrumentService {
         var rows = configuration.instruments().stream().map(InstrumentResponse::immutableCopy).toList();
         var scales = Map.copyOf(configuration.assetScales());
         long sequence = rows.stream().mapToLong(InstrumentResponse::lastChangeId).max().orElse(0L);
-        var response = new InstrumentSnapshotResponse(productLine, sequence,
-                snapshotChecksum(productLine, rows, scales), rows, scales);
+        var response = new InstrumentSnapshotResponse(productLine, sequence, "", rows, scales);
         catalogSnapshots.put(productLine, new CatalogSnapshot(configuration.version(), response, now));
         return response;
     }
@@ -413,26 +409,5 @@ public class InstrumentService {
 
     private String normalizeSymbol(String symbol) {
         return symbol.trim().toUpperCase(java.util.Locale.ROOT);
-    }
-
-    private String snapshotChecksum(ProductLine productLine,
-                                    java.util.List<InstrumentResponse> rows,
-                                    java.util.Map<String, Long> assetScales) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(productLine.name().getBytes(StandardCharsets.UTF_8));
-            rows.stream()
-                    .sorted(Comparator.comparingInt(InstrumentResponse::instrumentId)
-                            .thenComparingLong(InstrumentResponse::changeId))
-                    .forEach(row -> digest.update((row.instrumentId() + "|" + row.symbol() + "|" + row.lastChangeId() + "|"
-                            + row.status() + "|" + row.updatedAt() + "\n").getBytes(StandardCharsets.UTF_8)));
-            assetScales.entrySet().stream()
-                    .sorted(java.util.Map.Entry.comparingByKey())
-                    .forEach(entry -> digest.update((entry.getKey() + "=" + entry.getValue() + "\n")
-                            .getBytes(StandardCharsets.UTF_8)));
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("JVM 不支持 SHA-256", ex);
-        }
     }
 }

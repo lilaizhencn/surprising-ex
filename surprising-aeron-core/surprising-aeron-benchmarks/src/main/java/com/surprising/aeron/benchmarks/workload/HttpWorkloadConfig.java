@@ -1,9 +1,7 @@
 package com.surprising.aeron.benchmarks.workload;
 
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.EnumMap;
 import java.util.Locale;
@@ -108,17 +106,11 @@ public record HttpWorkloadConfig(
     }
 
     public String fingerprint() {
-        String canonical = baseUri.normalize() + "\n" + runId + "\n" + seed + "\n" + ratePerSecond + "\n"
-                + duration + "\n" + maxInFlight + "\n" + requestTimeout + "\n" + pollInterval + "\n"
-                + maxPolls + "\n" + limitPriceTicks + "\n" + triggerPriceTicks + "\n"
-                + java.util.Arrays.toString(users) + "\n"
-                + java.util.Arrays.toString(symbols) + "\n" + skew + "\n" + canonicalTraffic();
-        try {
-            return java.util.HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
+        return baseUri.normalize() + "|" + runId + "|" + seed + "|" + ratePerSecond + "|"
+                + duration + "|" + maxInFlight + "|" + requestTimeout + "|" + pollInterval + "|"
+                + maxPolls + "|" + limitPriceTicks + "|" + triggerPriceTicks + "|"
+                + java.util.Arrays.toString(users) + "|"
+                + java.util.Arrays.toString(symbols) + "|" + skew + "|" + canonicalTraffic();
     }
 
     private String canonicalTraffic() {
