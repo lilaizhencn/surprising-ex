@@ -641,9 +641,9 @@ INSERT INTO instrument_index_sources (
 ((SELECT instrument_id FROM instruments WHERE product_line='LINEAR_PERPETUAL' AND symbol='BTC-USDT'), 'LINEAR_PERPETUAL', 'OKX', TRUE, 'https://www.okx.com', '/api/v5/market/index-tickers?instId=BTC-USDT', 'BTC-USDT', 'OKX_INDEX_TICKER',
  'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
  TRUE, 'wss://ws.okx.com:8443/ws/v5/public', '{"op":"subscribe","args":[{"channel":"index-tickers","instId":"BTC-USDT"}]}', 'OKX_INDEX_TICKER', 1000000),
-((SELECT instrument_id FROM instruments WHERE product_line='LINEAR_PERPETUAL' AND symbol='BTC-USDT'), 'LINEAR_PERPETUAL', 'BINANCE', TRUE, 'https://api.binance.com', '/api/v3/ticker/bookTicker?symbol=BTCUSDT', 'BTCUSDT', 'BINANCE_BOOK_TICKER',
+((SELECT instrument_id FROM instruments WHERE product_line='LINEAR_PERPETUAL' AND symbol='BTC-USDT'), 'LINEAR_PERPETUAL', 'BINANCE', TRUE, 'https://data-api.binance.vision', '/api/v3/ticker/bookTicker?symbol=BTCUSDT', 'BTCUSDT', 'BINANCE_BOOK_TICKER',
  'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
- TRUE, 'wss://stream.binance.com:443/ws', '{"method":"SUBSCRIBE","params":["btcusdt@ticker"],"id":1}', 'BINANCE_BOOK_TICKER', 1000000),
+ TRUE, 'wss://data-stream.binance.vision:9443/ws', '{"method":"SUBSCRIBE","params":["btcusdt@ticker"],"id":1}', 'BINANCE_BOOK_TICKER', 1000000),
 ((SELECT instrument_id FROM instruments WHERE product_line='LINEAR_PERPETUAL' AND symbol='BTC-USDT'), 'LINEAR_PERPETUAL', 'BYBIT', TRUE, 'https://api.bybit.com', '/v5/market/tickers?category=spot&symbol=BTCUSDT', 'BTCUSDT', 'BYBIT_TICKER',
  'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
  TRUE, 'wss://stream.bybit.com/v5/public/spot', '{"op":"subscribe","args":["tickers.BTCUSDT"]}', 'BYBIT_TICKER', 1000000)
@@ -679,7 +679,7 @@ SET CONSTRAINTS ALL IMMEDIATE;
 
 -- 02. Public market data, candles, index and mark-price history.
 
-CREATE TABLE IF NOT EXISTS candlestick_candles (
+CREATE TABLE IF NOT EXISTS market_candles (
     instrument_id              TEXT NOT NULL,
     period              TEXT NOT NULL,
     open_time           TIMESTAMPTZ NOT NULL,
@@ -716,50 +716,16 @@ CREATE TABLE IF NOT EXISTS candlestick_candles (
 );
 
 CREATE INDEX IF NOT EXISTS candlestick_candles_query_desc_idx
-    ON candlestick_candles (instrument_id, period, open_time DESC);
+    ON market_candles (instrument_id, period, open_time DESC);
 
 CREATE INDEX IF NOT EXISTS candlestick_candles_updated_idx
-    ON candlestick_candles (updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS price_index_ticks (
-    instrument_id                  TEXT NOT NULL,
-    sequence                BIGINT NOT NULL,
-    index_price             NUMERIC(38, 18),
-    status                  TEXT NOT NULL,
-    component_count         INTEGER NOT NULL,
-    valid_component_count   INTEGER NOT NULL,
-    total_configured_weight NUMERIC(38, 18) NOT NULL,
-    event_time              TIMESTAMPTZ NOT NULL,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (instrument_id, sequence),
-    CONSTRAINT price_index_ticks_symbol_format CHECK (instrument_id ~ '^[1-9][0-9]{0,9}$' AND instrument_id::numeric <= 2147483647),
-    CONSTRAINT price_index_ticks_status CHECK (status IN ('HEALTHY', 'DEGRADED', 'STALE', 'INSUFFICIENT_SOURCES', 'CLAMPED'))
-);
+    ON market_candles (updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS price_index_ticks_query_idx
     ON price_index_ticks (instrument_id, event_time DESC);
 
 CREATE INDEX IF NOT EXISTS price_index_ticks_event_time_brin
     ON price_index_ticks USING BRIN (event_time);
-
-CREATE TABLE IF NOT EXISTS price_index_components (
-    instrument_id              TEXT NOT NULL,
-    sequence            BIGINT NOT NULL,
-    source              TEXT NOT NULL,
-    source_symbol       TEXT NOT NULL,
-    price               NUMERIC(38, 18),
-    bid_price           NUMERIC(38, 18),
-    ask_price           NUMERIC(38, 18),
-    configured_weight   NUMERIC(38, 18) NOT NULL,
-    effective_weight    NUMERIC(38, 18) NOT NULL,
-    status              TEXT NOT NULL,
-    reason              TEXT,
-    source_time         TIMESTAMPTZ,
-    received_at         TIMESTAMPTZ,
-    latency_millis      BIGINT,
-    PRIMARY KEY (instrument_id, sequence, source),
-    CONSTRAINT price_index_components_status CHECK (status IN ('HEALTHY', 'DISABLED', 'STALE', 'OUTLIER', 'ERROR'))
-);
 
 CREATE INDEX IF NOT EXISTS price_index_components_query_idx
     ON price_index_components (instrument_id, sequence);
@@ -807,45 +773,6 @@ CREATE INDEX IF NOT EXISTS price_exchange_rates_base_idx
 CREATE INDEX IF NOT EXISTS price_exchange_rates_updated_idx
     ON price_exchange_rates (updated_at DESC);
 
-CREATE TABLE IF NOT EXISTS price_mark_ticks (
-    product_line                TEXT NOT NULL,
-    instrument_id                      TEXT NOT NULL,
-    instrument_change_id          BIGINT NOT NULL,
-    sequence                    BIGINT NOT NULL,
-    mark_price                  NUMERIC(38, 18) NOT NULL,
-    mark_price_units            BIGINT NOT NULL,
-    mark_price_ticks            BIGINT NOT NULL,
-    index_price                 NUMERIC(38, 18) NOT NULL,
-    price1                      NUMERIC(38, 18) NOT NULL,
-    price2                      NUMERIC(38, 18),
-    last_trade_price            NUMERIC(38, 18),
-    best_bid_price              NUMERIC(38, 18),
-    best_ask_price              NUMERIC(38, 18),
-    funding_rate                NUMERIC(38, 18) NOT NULL,
-    next_funding_time           TIMESTAMPTZ,
-    time_until_funding_seconds  BIGINT NOT NULL,
-    basis_average               NUMERIC(38, 18),
-    basis_window_seconds        BIGINT NOT NULL,
-    clamp_low                   NUMERIC(38, 18) NOT NULL,
-    clamp_high                  NUMERIC(38, 18) NOT NULL,
-    status                      TEXT NOT NULL,
-    event_time                  TIMESTAMPTZ NOT NULL,
-    published_at                TIMESTAMPTZ NOT NULL,
-    calculation_inputs          JSONB NOT NULL,
-    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (instrument_id, sequence),
-    CONSTRAINT price_mark_ticks_symbol_format CHECK (instrument_id ~ '^[1-9][0-9]{0,9}$' AND instrument_id::numeric <= 2147483647),
-    CONSTRAINT price_mark_ticks_status CHECK (status IN ('HEALTHY', 'DEGRADED', 'STALE', 'INSUFFICIENT_SOURCES', 'CLAMPED')),
-    CONSTRAINT price_mark_ticks_positive_units CHECK (mark_price_units > 0),
-    CONSTRAINT price_mark_ticks_positive_ticks CHECK (mark_price_ticks > 0),
-    CONSTRAINT price_mark_ticks_complete_inputs CHECK (
-        status = 'DEGRADED' OR (price2 IS NOT NULL AND last_trade_price IS NOT NULL
-        AND best_bid_price IS NOT NULL AND best_ask_price IS NOT NULL AND basis_average IS NOT NULL)
-    ),
-    CONSTRAINT price_mark_ticks_valid_book CHECK (best_bid_price <= best_ask_price),
-    CONSTRAINT price_mark_ticks_valid_clamp CHECK (clamp_low <= mark_price AND mark_price <= clamp_high)
-);
-
 CREATE INDEX IF NOT EXISTS price_mark_ticks_query_idx
     ON price_mark_ticks (instrument_id, event_time DESC);
 
@@ -853,23 +780,6 @@ CREATE INDEX IF NOT EXISTS price_mark_ticks_retention_idx
     ON price_mark_ticks USING BRIN (event_time) WITH (pages_per_range = 64);
 
 -- 03. Funding-rate history.
-
-CREATE TABLE IF NOT EXISTS funding_rate_ticks (
-    instrument_id                  TEXT NOT NULL,
-    sequence                BIGINT NOT NULL,
-    funding_time            TIMESTAMPTZ NOT NULL,
-    funding_interval_hours  INTEGER NOT NULL,
-    premium_rate_ppm        BIGINT NOT NULL,
-    interest_rate_ppm       BIGINT NOT NULL,
-    funding_rate_ppm        BIGINT NOT NULL,
-    status                  TEXT NOT NULL,
-    event_time              TIMESTAMPTZ NOT NULL,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (instrument_id, sequence),
-    CONSTRAINT funding_rate_ticks_symbol_format CHECK (instrument_id ~ '^[1-9][0-9]{0,9}$' AND instrument_id::numeric <= 2147483647),
-    CONSTRAINT funding_rate_ticks_interval_positive CHECK (funding_interval_hours > 0),
-    CONSTRAINT funding_rate_ticks_status_check CHECK (status IN ('PREDICTED', 'FINAL'))
-);
 
 CREATE INDEX IF NOT EXISTS funding_rate_ticks_symbol_time_idx
     ON funding_rate_ticks (instrument_id, funding_time DESC, sequence DESC);
@@ -1473,40 +1383,6 @@ DROP INDEX IF EXISTS market_maker_strategy_overrides_updated_idx;
 CREATE INDEX IF NOT EXISTS market_maker_strategy_overrides_updated_idx
     ON market_maker_strategy_overrides (product_line, updated_at DESC);
 
-CREATE TABLE IF NOT EXISTS market_maker_strategy_run_events (
-    event_id                    BIGSERIAL PRIMARY KEY,
-    product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    strategy_id                 TEXT NOT NULL,
-    instrument_id                      TEXT,
-    account_id                  BIGINT,
-    node_id                     TEXT NOT NULL,
-    cycle_sequence              BIGINT NOT NULL DEFAULT 0,
-    event_type                  TEXT NOT NULL,
-    submitted_orders            BIGINT NOT NULL DEFAULT 0,
-    canceled_orders             BIGINT NOT NULL DEFAULT 0,
-    rejected_orders             BIGINT NOT NULL DEFAULT 0,
-    skipped_reason              TEXT,
-    error_message               TEXT,
-    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT market_maker_run_events_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT market_maker_run_events_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
-    CONSTRAINT market_maker_run_events_symbol_format CHECK (
-        instrument_id IS NULL OR instrument_id ~ '^[1-9][0-9]{0,9}$' AND instrument_id::numeric <= 2147483647
-    ),
-    CONSTRAINT market_maker_run_events_account_positive CHECK (account_id IS NULL OR account_id > 0),
-    CONSTRAINT market_maker_run_events_node_present CHECK (length(node_id) > 0),
-    CONSTRAINT market_maker_run_events_cycle_non_negative CHECK (cycle_sequence >= 0),
-    CONSTRAINT market_maker_run_events_type_check CHECK (
-        event_type IN ('CYCLE_SUCCESS', 'CYCLE_FAILED', 'QUOTE_RECONCILED', 'TRADE_SUBMITTED', 'TRADE_EXECUTED', 'TRADE_NO_FILL', 'TRADE_REJECTED', 'SKIPPED', 'STRATEGY_DRAINING')
-    ),
-    CONSTRAINT market_maker_run_events_counts_non_negative CHECK (
-        submitted_orders >= 0 AND canceled_orders >= 0 AND rejected_orders >= 0
-    )
-);
-
 DROP INDEX IF EXISTS market_maker_run_events_strategy_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_run_events_strategy_time_idx
     ON market_maker_strategy_run_events (product_line, strategy_id, created_at DESC);
@@ -1520,40 +1396,6 @@ DROP INDEX IF EXISTS market_maker_run_events_account_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_run_events_account_time_idx
     ON market_maker_strategy_run_events (product_line, account_id, created_at DESC)
     WHERE account_id IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS market_maker_reference_samples (
-    sample_id                   BIGSERIAL PRIMARY KEY,
-    product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    strategy_id                 TEXT NOT NULL,
-    instrument_id                      TEXT NOT NULL,
-    node_id                     TEXT NOT NULL,
-    cycle_sequence              BIGINT NOT NULL DEFAULT 0,
-    source_name                 TEXT NOT NULL,
-    transport                   TEXT NOT NULL,
-    bid_levels                  INTEGER NOT NULL,
-    ask_levels                  INTEGER NOT NULL,
-    best_bid_ticks              BIGINT NOT NULL,
-    best_ask_ticks              BIGINT NOT NULL,
-    mid_price_ticks             BIGINT NOT NULL,
-    spread_ticks                BIGINT NOT NULL,
-    received_at                 TIMESTAMPTZ NOT NULL,
-    sampled_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT market_maker_reference_samples_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT market_maker_reference_samples_strategy_format CHECK (strategy_id ~ '^[A-Za-z0-9_.:-]{1,64}$'),
-    CONSTRAINT market_maker_reference_samples_symbol_format CHECK (instrument_id ~ '^[1-9][0-9]{0,9}$' AND instrument_id::numeric <= 2147483647),
-    CONSTRAINT market_maker_reference_samples_node_present CHECK (length(node_id) > 0),
-    CONSTRAINT market_maker_reference_samples_cycle_non_negative CHECK (cycle_sequence >= 0),
-    CONSTRAINT market_maker_reference_samples_source_present CHECK (length(source_name) > 0),
-    CONSTRAINT market_maker_reference_samples_transport_check CHECK (transport IN ('REST', 'WEBSOCKET', 'UNKNOWN')),
-    CONSTRAINT market_maker_reference_samples_depth_positive CHECK (bid_levels > 0 AND ask_levels > 0),
-    CONSTRAINT market_maker_reference_samples_prices_valid CHECK (
-        best_bid_ticks > 0 AND best_ask_ticks > best_bid_ticks
-        AND mid_price_ticks > 0 AND spread_ticks > 0
-    )
-);
 
 DO $$
 BEGIN
@@ -1585,26 +1427,7 @@ BEGIN
                              'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
         );
 
-    ALTER TABLE market_maker_strategy_run_events
-        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-    ALTER TABLE market_maker_strategy_run_events
-        DROP CONSTRAINT IF EXISTS market_maker_run_events_product_line_check;
-    ALTER TABLE market_maker_strategy_run_events
-        ADD CONSTRAINT market_maker_run_events_product_line_check CHECK (
-            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-        );
-
-    ALTER TABLE market_maker_reference_samples
-        ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-    ALTER TABLE market_maker_reference_samples
-        DROP CONSTRAINT IF EXISTS market_maker_reference_samples_product_line_check;
-    ALTER TABLE market_maker_reference_samples
-        ADD CONSTRAINT market_maker_reference_samples_product_line_check CHECK (
-            product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                             'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-        );
-END $$;
+                        END $$;
 
 DROP INDEX IF EXISTS market_maker_reference_samples_strategy_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_reference_samples_strategy_time_idx
@@ -1627,6 +1450,8 @@ CREATE TABLE IF NOT EXISTS gateway_users (
     phone               TEXT,
     password_hash       TEXT NOT NULL,
     status              TEXT NOT NULL DEFAULT 'NORMAL',
+    status_reason       TEXT,
+    frozen_until        TIMESTAMPTZ,
     withdrawal_restricted_until TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1642,7 +1467,11 @@ ALTER TABLE gateway_users ALTER COLUMN username DROP NOT NULL;
 ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
 ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS withdrawal_restricted_until TIMESTAMPTZ;
+ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS status_reason TEXT;
+ALTER TABLE gateway_users ADD COLUMN IF NOT EXISTS frozen_until TIMESTAMPTZ;
 COMMENT ON COLUMN gateway_users.withdrawal_restricted_until IS '安全设置变更后禁止提现的截止时间；为空表示无临时限制。';
+COMMENT ON COLUMN gateway_users.status_reason IS '账户封禁或限制原因；恢复 NORMAL 后清空。';
+COMMENT ON COLUMN gateway_users.frozen_until IS '账户封禁截止时间；为空表示永久封禁，到期后自动恢复 NORMAL。';
 
 CREATE UNIQUE INDEX IF NOT EXISTS gateway_users_username_uidx
     ON gateway_users (lower(username));
@@ -2515,57 +2344,13 @@ CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_service_time_idx
 
 -- 09. Aeron Core audit, history projections and WebSocket delivery audit.
 
-CREATE TABLE IF NOT EXISTS core_event_projection (
-    product_line VARCHAR(32) NOT NULL,
-    export_sequence BIGINT NOT NULL,
-    applied_command_count BIGINT NOT NULL,
-    business_state_hash BIGINT NOT NULL,
-    command_id UUID NOT NULL,
-    command_type VARCHAR(64) NOT NULL,
-    command_status VARCHAR(16) NOT NULL,
-    result_code VARCHAR(64) NOT NULL,
-    user_id BIGINT NOT NULL,
-    before_business_state_hash BIGINT NOT NULL,
-    before_funds_state_hash BIGINT NOT NULL,
-    funds_state_hash BIGINT NOT NULL,
-    matcher_sequence_before BIGINT NOT NULL,
-    matcher_sequence BIGINT NOT NULL,
-    matcher_prefix_before BIGINT NOT NULL,
-    matcher_prefix_after BIGINT NOT NULL,
-    cluster_position BIGINT NOT NULL,
-    raw_event BYTEA NOT NULL,
-    projected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (product_line, export_sequence)
-);
-
 CREATE INDEX IF NOT EXISTS idx_core_event_projection_command
     ON core_event_projection (product_line, command_id);
-
-CREATE TABLE IF NOT EXISTS core_funds_posting_projection (
-    product_line VARCHAR(32) NOT NULL,
-    export_sequence BIGINT NOT NULL,
-    posting_index INTEGER NOT NULL,
-    asset VARCHAR(20) NOT NULL,
-    owner_kind VARCHAR(16) NOT NULL,
-    owner_id BIGINT NOT NULL,
-    subledger VARCHAR(32) NOT NULL,
-    units BIGINT NOT NULL,
-    PRIMARY KEY (product_line, export_sequence, posting_index)
-);
 
 CREATE INDEX IF NOT EXISTS idx_core_funds_posting_owner
     ON core_funds_posting_projection (product_line, owner_kind, owner_id, asset, export_sequence);
 
-CREATE TABLE IF NOT EXISTS core_user_fact_projection (
-    product_line VARCHAR(32) NOT NULL,
-    export_sequence BIGINT NOT NULL,
-    user_id BIGINT NOT NULL,
-    user_revision BIGINT NOT NULL,
-    raw_user_delta BYTEA NOT NULL,
-    PRIMARY KEY (product_line, export_sequence, user_id)
-);
-
-CREATE TABLE IF NOT EXISTS core_order_projection (
+CREATE TABLE IF NOT EXISTS trading_orders (
     product_line VARCHAR(32) NOT NULL,
     order_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
@@ -2583,12 +2368,12 @@ CREATE TABLE IF NOT EXISTS core_order_projection (
 );
 
 CREATE INDEX IF NOT EXISTS idx_core_order_projection_user_status
-    ON core_order_projection (product_line, user_id, status, order_id DESC);
+    ON trading_orders (product_line, user_id, status, order_id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_core_order_projection_symbol_status
-    ON core_order_projection (product_line, instrument_id, status, order_id DESC);
+    ON trading_orders (product_line, instrument_id, status, order_id DESC);
 
-CREATE TABLE IF NOT EXISTS core_execution_projection (
+CREATE TABLE IF NOT EXISTS trading_trades (
     product_line VARCHAR(32) NOT NULL,
     export_sequence BIGINT NOT NULL,
     execution_index INTEGER NOT NULL,
@@ -2607,13 +2392,13 @@ CREATE TABLE IF NOT EXISTS core_execution_projection (
 );
 
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_taker
-    ON core_execution_projection (product_line, taker_user_id, export_sequence DESC);
+    ON trading_trades (product_line, taker_user_id, export_sequence DESC);
 
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_maker
-    ON core_execution_projection (product_line, maker_user_id, export_sequence DESC);
+    ON trading_trades (product_line, maker_user_id, export_sequence DESC);
 
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_symbol_time
-    ON core_execution_projection (product_line, instrument_id, occurred_at_epoch_ms DESC, export_sequence DESC);
+    ON trading_trades (product_line, instrument_id, occurred_at_epoch_ms DESC, export_sequence DESC);
 
 CREATE TABLE IF NOT EXISTS funding_settlement_rates (
     product_line VARCHAR(32) NOT NULL,
@@ -2630,7 +2415,7 @@ CREATE TABLE IF NOT EXISTS funding_settlement_rates (
 );
 COMMENT ON TABLE funding_settlement_rates IS '提交Core之前冻结的结算输入；已完成历史以Core提交投影为准';
 
-CREATE TABLE IF NOT EXISTS core_funding_page_projection (
+CREATE TABLE IF NOT EXISTS funding_settlement_pages (
     product_line VARCHAR(32) NOT NULL,
     cluster_position BIGINT NOT NULL CHECK (cluster_position>0),
     instrument_id VARCHAR(64) NOT NULL,
@@ -2644,10 +2429,10 @@ CREATE TABLE IF NOT EXISTS core_funding_page_projection (
     UNIQUE (product_line,instrument_id,settlement_id,cursor_user_id),
     CHECK (NOT complete OR next_cursor_user_id=0)
 );
-COMMENT ON TABLE core_funding_page_projection IS '只保存Archive已提交的真实结算页；幂等页与流水同事务持久化';
-COMMENT ON COLUMN core_funding_page_projection.complete IS '处理本页后该合约本次资金费结算是否已完成；仅末页为true且下一用户游标为0';
+COMMENT ON TABLE funding_settlement_pages IS '只保存Archive已提交的真实结算页；幂等页与流水同事务持久化';
+COMMENT ON COLUMN funding_settlement_pages.complete IS '处理本页后该合约本次资金费结算是否已完成；仅末页为true且下一用户游标为0';
 
-CREATE TABLE IF NOT EXISTS core_funding_settlement_projection (
+CREATE TABLE IF NOT EXISTS funding_settlements (
     product_line VARCHAR(32) NOT NULL,
     settlement_id BIGINT NOT NULL,
     export_sequence BIGINT NOT NULL,
@@ -2664,9 +2449,9 @@ CREATE TABLE IF NOT EXISTS core_funding_settlement_projection (
 );
 
 CREATE INDEX IF NOT EXISTS idx_core_funding_settlement_symbol
-    ON core_funding_settlement_projection (product_line, instrument_id, settlement_id DESC);
+    ON funding_settlements (product_line, instrument_id, settlement_id DESC);
 
-CREATE TABLE IF NOT EXISTS core_funding_payment_projection (
+CREATE TABLE IF NOT EXISTS funding_payments (
     payment_id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     product_line VARCHAR(32) NOT NULL,
     export_sequence BIGINT NOT NULL,
@@ -2686,12 +2471,12 @@ CREATE TABLE IF NOT EXISTS core_funding_payment_projection (
 );
 
 CREATE INDEX IF NOT EXISTS idx_core_funding_payment_user
-    ON core_funding_payment_projection (product_line, user_id, payment_id DESC);
+    ON funding_payments (product_line, user_id, payment_id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_core_funding_payment_user_symbol
-    ON core_funding_payment_projection (product_line, user_id, instrument_id, payment_id DESC);
+    ON funding_payments (product_line, user_id, instrument_id, payment_id DESC);
 
-CREATE TABLE IF NOT EXISTS core_liquidation_projection (
+CREATE TABLE IF NOT EXISTS trading_liquidations (
     product_line VARCHAR(32) NOT NULL,
     liquidation_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
@@ -2712,32 +2497,14 @@ CREATE TABLE IF NOT EXISTS core_liquidation_projection (
 
 
 -- 已提交历史重建完成才发布产品就绪；重放位置由原独立检查点持有。
-CREATE TABLE IF NOT EXISTS core_liquidation_projection_initialization (
-    product_line VARCHAR(32) PRIMARY KEY
-);
 CREATE INDEX IF NOT EXISTS idx_core_liquidation_pending
-    ON core_liquidation_projection (product_line, status, liquidation_id);
+    ON trading_liquidations (product_line, status, liquidation_id);
 
 CREATE INDEX IF NOT EXISTS idx_core_liquidation_user
-    ON core_liquidation_projection (product_line, user_id, liquidation_id DESC);
-
-CREATE TABLE IF NOT EXISTS core_treasury_projection (
-    product_line VARCHAR(32) NOT NULL,
-    asset VARCHAR(20) NOT NULL,
-    fee_balance_units BIGINT NOT NULL,
-    insurance_balance_units BIGINT NOT NULL,
-    insurance_deficit_units BIGINT NOT NULL,
-    liquidation_fee_units BIGINT NOT NULL,
-    funding_residual_units BIGINT NOT NULL,
-    rounding_residual_units BIGINT NOT NULL,
-    clearing_pnl_units BIGINT NOT NULL,
-    export_sequence BIGINT NOT NULL,
-    updated_at_epoch_ms BIGINT NOT NULL,
-    PRIMARY KEY (product_line, asset)
-);
+    ON trading_liquidations (product_line, user_id, liquidation_id DESC);
 
 -- realtime 重放已提交日志后写入的处理回执。不是 Core 内存缓存，也不表示订单当前状态。
-CREATE TABLE IF NOT EXISTS core_command_result_projection (
+CREATE TABLE IF NOT EXISTS trading_command_results (
     product_line varchar(32) NOT NULL,
     command_id uuid NOT NULL,
     user_id bigint NOT NULL CHECK (user_id > 0),
@@ -2757,9 +2524,9 @@ CREATE TABLE IF NOT EXISTS core_command_result_projection (
     CHECK (command_status IN ('APPLIED', 'REJECTED'))
 );
 CREATE INDEX IF NOT EXISTS idx_core_command_result_user
-    ON core_command_result_projection (product_line, user_id, command_id);
+    ON trading_command_results (product_line, user_id, command_id);
 
-CREATE TABLE IF NOT EXISTS core_projection_watermark (
+CREATE TABLE IF NOT EXISTS projection_watermarks (
     product_line VARCHAR(32) NOT NULL,
     last_export_sequence BIGINT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2767,7 +2534,7 @@ CREATE TABLE IF NOT EXISTS core_projection_watermark (
     CHECK (last_export_sequence >= 0)
 );
 
-INSERT INTO core_projection_watermark (product_line, last_export_sequence)
+INSERT INTO projection_watermarks (product_line, last_export_sequence)
 VALUES ('SPOT', 0), ('LINEAR_PERPETUAL', 0), ('INVERSE_PERPETUAL', 0),
        ('LINEAR_DELIVERY', 0), ('INVERSE_DELIVERY', 0), ('OPTION', 0)
 ON CONFLICT (product_line) DO NOTHING;
@@ -3292,7 +3059,7 @@ VALUES ('SPOT'),('LINEAR_PERPETUAL'),('INVERSE_PERPETUAL'),('LINEAR_DELIVERY'),(
 ON CONFLICT DO NOTHING;
 
 -- Realtime committed Archive replay owns the latest parent intent and authoritative child progress.
-CREATE TABLE IF NOT EXISTS core_algo_order_projection (
+CREATE TABLE IF NOT EXISTS trading_algo_orders (
     product_line varchar(32) NOT NULL,
     algo_order_id bigint NOT NULL CHECK (algo_order_id > 0),
     user_id bigint NOT NULL CHECK (user_id > 0),
@@ -3307,17 +3074,10 @@ CREATE TABLE IF NOT EXISTS core_algo_order_projection (
     PRIMARY KEY(product_line,algo_order_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_algo_projection_client
-    ON core_algo_order_projection(product_line,user_id,client_algo_order_id);
+    ON trading_algo_orders(product_line,user_id,client_algo_order_id);
 CREATE INDEX IF NOT EXISTS idx_algo_projection_open
-    ON core_algo_order_projection(product_line,user_id,created_at_epoch_ms DESC,algo_order_id DESC)
+    ON trading_algo_orders(product_line,user_id,created_at_epoch_ms DESC,algo_order_id DESC)
     WHERE status_code IN (0,1,2);
-CREATE TABLE IF NOT EXISTS core_algo_projection_initialization (
-    product_line varchar(32) PRIMARY KEY,
-    snapshot_log_position bigint NOT NULL CHECK (snapshot_log_position >= 0),
-    initialized_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-
 -- C2C Gateway 业务；Core 持有资金。
 -- C2C 业务只在 Gateway 编排；Core 继续持有真实资产。
 -- 先部署迁移，随后发布应用；不修改任何现有账户余额或 Core 数据。
@@ -3800,7 +3560,7 @@ CREATE TRIGGER c2c_attachment_guard BEFORE UPDATE ON c2c_attachments
 
 -- Read-only financial history produced only from a committed Archive replay.
 -- A cutoff row certifies its complete user set, including users absent at that prefix.
-CREATE TABLE IF NOT EXISTS core_portfolio_cutoff (
+CREATE TABLE IF NOT EXISTS portfolio_cutoffs (
     product_line varchar(32) NOT NULL,
     cutoff_epoch_ms bigint NOT NULL CHECK (cutoff_epoch_ms > 0),
     cluster_position bigint NOT NULL CHECK (cluster_position >= 0),
@@ -3811,7 +3571,7 @@ CREATE TABLE IF NOT EXISTS core_portfolio_cutoff (
     PRIMARY KEY (product_line, cutoff_epoch_ms)
 );
 
-CREATE TABLE IF NOT EXISTS core_portfolio_equity (
+CREATE TABLE IF NOT EXISTS portfolio_equities (
     product_line varchar(32) NOT NULL,
     cutoff_epoch_ms bigint NOT NULL,
     user_id bigint NOT NULL CHECK (user_id > 0),
@@ -3819,10 +3579,10 @@ CREATE TABLE IF NOT EXISTS core_portfolio_equity (
     net_asset_units jsonb NOT NULL CHECK (jsonb_typeof(net_asset_units) = 'object'),
     PRIMARY KEY (product_line, cutoff_epoch_ms, user_id),
     FOREIGN KEY (product_line, cutoff_epoch_ms)
-        REFERENCES core_portfolio_cutoff(product_line, cutoff_epoch_ms) ON DELETE CASCADE
+        REFERENCES portfolio_cutoffs(product_line, cutoff_epoch_ms) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS core_portfolio_cash_flow (
+CREATE TABLE IF NOT EXISTS portfolio_cash_flows (
     product_line varchar(32) NOT NULL,
     command_id uuid NOT NULL,
     user_id bigint NOT NULL CHECK (user_id > 0),
@@ -3844,48 +3604,41 @@ CREATE TABLE IF NOT EXISTS core_portfolio_cash_flow (
             AND source_user_id > 0 AND target_user_id > 0))
 );
 CREATE INDEX IF NOT EXISTS core_portfolio_cash_flow_user_position
-    ON core_portfolio_cash_flow (user_id, product_line, cluster_position);
+    ON portfolio_cash_flows (user_id, product_line, cluster_position);
 CREATE INDEX IF NOT EXISTS core_portfolio_cash_flow_adjustment_retention
-    ON core_portfolio_cash_flow (product_line, occurred_at_epoch_ms)
+    ON portfolio_cash_flows (product_line, occurred_at_epoch_ms)
     WHERE transfer_id IS NULL;
 CREATE INDEX IF NOT EXISTS core_portfolio_cash_flow_transfer
-    ON core_portfolio_cash_flow (transfer_id, product_line, cluster_position)
+    ON portfolio_cash_flows (transfer_id, product_line, cluster_position)
     WHERE transfer_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS core_portfolio_projection_start (
-    product_line varchar(32) PRIMARY KEY,
-    cluster_position bigint NOT NULL CHECK (cluster_position >= 0),
-    occurred_at_epoch_ms bigint NOT NULL CHECK (occurred_at_epoch_ms >= 0),
-    ready boolean NOT NULL DEFAULT false
-);
-
-COMMENT ON TABLE core_portfolio_cutoff IS '已提交回放的完整用户权益切点凭据；不是在线可用余额事实源';
-COMMENT ON COLUMN core_portfolio_cutoff.product_line IS '隔离的交易产品线';
-COMMENT ON COLUMN core_portfolio_cutoff.cutoff_epoch_ms IS '估值切点的毫秒时间，切点前的命令均已回放';
-COMMENT ON COLUMN core_portfolio_cutoff.cluster_position IS '切点前已读取的完整 Archive 日志位置';
-COMMENT ON COLUMN core_portfolio_cutoff.state_sequence IS 'Core 状态发布序号，用于核对成交投影进度，不等同于日志位置';
-COMMENT ON COLUMN core_portfolio_cutoff.source_timestamp IS '所读取 Core 状态最后一条命令的毫秒时间';
-COMMENT ON COLUMN core_portfolio_cutoff.flow_covered_from_epoch_ms IS '连续资金流回放的起始时间';
-COMMENT ON COLUMN core_portfolio_cutoff.day_opening IS '是否为交易所业务日的期初切点';
-COMMENT ON TABLE core_portfolio_equity IS '切点的逐用户逐币种净权益异步分析投影';
-COMMENT ON COLUMN core_portfolio_equity.product_line IS '隔离的交易产品线';
-COMMENT ON COLUMN core_portfolio_equity.cutoff_epoch_ms IS '完整权益切点的毫秒时间';
-COMMENT ON COLUMN core_portfolio_equity.user_id IS '权益所属用户';
-COMMENT ON COLUMN core_portfolio_equity.complete IS '持仓价格和在途状态是否允许完整估值';
-COMMENT ON COLUMN core_portfolio_equity.net_asset_units IS '币种到净权益最小单位整数字符串的映射；含持仓市值或浮盈亏';
-COMMENT ON TABLE core_portfolio_cash_flow IS '已提交命令实际造成的现金变动；用于剔除本金流入流出并核对内部划转';
-COMMENT ON COLUMN core_portfolio_cash_flow.product_line IS '发生现金变动的产品线';
-COMMENT ON COLUMN core_portfolio_cash_flow.command_id IS '已提交命令的原始 UUID 幂等身份';
-COMMENT ON COLUMN core_portfolio_cash_flow.user_id IS '实际发生现金变动的用户';
-COMMENT ON COLUMN core_portfolio_cash_flow.cluster_position IS '命令已提交的 Archive 日志位置';
-COMMENT ON COLUMN core_portfolio_cash_flow.occurred_at_epoch_ms IS '集群确定的资金变动毫秒时间';
-COMMENT ON COLUMN core_portfolio_cash_flow.asset IS '不可变账务币种代码';
-COMMENT ON COLUMN core_portfolio_cash_flow.amount_units IS '带符号的现金净变动最小单位整数';
-COMMENT ON COLUMN core_portfolio_cash_flow.transfer_id IS '原始划转身份；普通调账为空';
-COMMENT ON COLUMN core_portfolio_cash_flow.source_product_line IS '划转来源产品线';
-COMMENT ON COLUMN core_portfolio_cash_flow.target_product_line IS '划转目标产品线';
-COMMENT ON COLUMN core_portfolio_cash_flow.source_user_id IS '划转来源用户';
-COMMENT ON COLUMN core_portfolio_cash_flow.target_user_id IS '划转接收用户';
+COMMENT ON TABLE portfolio_cutoffs IS '已提交回放的完整用户权益切点凭据；不是在线可用余额事实源';
+COMMENT ON COLUMN portfolio_cutoffs.product_line IS '隔离的交易产品线';
+COMMENT ON COLUMN portfolio_cutoffs.cutoff_epoch_ms IS '估值切点的毫秒时间，切点前的命令均已回放';
+COMMENT ON COLUMN portfolio_cutoffs.cluster_position IS '切点前已读取的完整 Archive 日志位置';
+COMMENT ON COLUMN portfolio_cutoffs.state_sequence IS 'Core 状态发布序号，用于核对成交投影进度，不等同于日志位置';
+COMMENT ON COLUMN portfolio_cutoffs.source_timestamp IS '所读取 Core 状态最后一条命令的毫秒时间';
+COMMENT ON COLUMN portfolio_cutoffs.flow_covered_from_epoch_ms IS '连续资金流回放的起始时间';
+COMMENT ON COLUMN portfolio_cutoffs.day_opening IS '是否为交易所业务日的期初切点';
+COMMENT ON TABLE portfolio_equities IS '切点的逐用户逐币种净权益异步分析投影';
+COMMENT ON COLUMN portfolio_equities.product_line IS '隔离的交易产品线';
+COMMENT ON COLUMN portfolio_equities.cutoff_epoch_ms IS '完整权益切点的毫秒时间';
+COMMENT ON COLUMN portfolio_equities.user_id IS '权益所属用户';
+COMMENT ON COLUMN portfolio_equities.complete IS '持仓价格和在途状态是否允许完整估值';
+COMMENT ON COLUMN portfolio_equities.net_asset_units IS '币种到净权益最小单位整数字符串的映射；含持仓市值或浮盈亏';
+COMMENT ON TABLE portfolio_cash_flows IS '已提交命令实际造成的现金变动；用于剔除本金流入流出并核对内部划转';
+COMMENT ON COLUMN portfolio_cash_flows.product_line IS '发生现金变动的产品线';
+COMMENT ON COLUMN portfolio_cash_flows.command_id IS '已提交命令的原始 UUID 幂等身份';
+COMMENT ON COLUMN portfolio_cash_flows.user_id IS '实际发生现金变动的用户';
+COMMENT ON COLUMN portfolio_cash_flows.cluster_position IS '命令已提交的 Archive 日志位置';
+COMMENT ON COLUMN portfolio_cash_flows.occurred_at_epoch_ms IS '集群确定的资金变动毫秒时间';
+COMMENT ON COLUMN portfolio_cash_flows.asset IS '不可变账务币种代码';
+COMMENT ON COLUMN portfolio_cash_flows.amount_units IS '带符号的现金净变动最小单位整数';
+COMMENT ON COLUMN portfolio_cash_flows.transfer_id IS '原始划转身份；普通调账为空';
+COMMENT ON COLUMN portfolio_cash_flows.source_product_line IS '划转来源产品线';
+COMMENT ON COLUMN portfolio_cash_flows.target_product_line IS '划转目标产品线';
+COMMENT ON COLUMN portfolio_cash_flows.source_user_id IS '划转来源用户';
+COMMENT ON COLUMN portfolio_cash_flows.target_user_id IS '划转接收用户';
 COMMENT ON TABLE core_portfolio_projection_start IS '资金历史连续性起点和重建验收状态';
 COMMENT ON COLUMN core_portfolio_projection_start.product_line IS '隔离的交易产品线';
 COMMENT ON COLUMN core_portfolio_projection_start.cluster_position IS '资金历史连续性起始日志位置';
@@ -3913,8 +3666,6 @@ CREATE TABLE IF NOT EXISTS price_business_settings (
     reason VARCHAR(1000) NOT NULL CHECK (length(trim(reason)) > 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
-ALTER TABLE price_mark_ticks ALTER COLUMN next_funding_time DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS order_business_settings (
     product_line VARCHAR(32) PRIMARY KEY CHECK (product_line IN ('SPOT','LINEAR_PERPETUAL','INVERSE_PERPETUAL','LINEAR_DELIVERY','INVERSE_DELIVERY','OPTION')),
@@ -4245,7 +3996,7 @@ CREATE INDEX IF NOT EXISTS gateway_announcement_audit_history_idx
     ON gateway_announcement_audit (announcement_id, audit_id DESC);
 
 -- realtime owns this reconstructable latest-state projection, including terminal trigger orders.
-CREATE TABLE IF NOT EXISTS core_trigger_order_projection (
+CREATE TABLE IF NOT EXISTS trading_trigger_orders (
     product_line varchar(32) NOT NULL,
     trigger_order_id bigint NOT NULL CHECK (trigger_order_id > 0),
     user_id bigint NOT NULL CHECK (user_id > 0),
@@ -4260,49 +4011,36 @@ CREATE TABLE IF NOT EXISTS core_trigger_order_projection (
     PRIMARY KEY (product_line, trigger_order_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_trigger_projection_client
-    ON core_trigger_order_projection(product_line,user_id,client_trigger_order_id)
+    ON trading_trigger_orders(product_line,user_id,client_trigger_order_id)
     WHERE client_trigger_order_id <> '';
 CREATE INDEX IF NOT EXISTS idx_trigger_projection_created
-    ON core_trigger_order_projection(product_line,created_at_epoch_ms,trigger_order_id);
+    ON trading_trigger_orders(product_line,created_at_epoch_ms,trigger_order_id);
 CREATE INDEX IF NOT EXISTS idx_trigger_projection_user_created
-    ON core_trigger_order_projection(product_line,user_id,created_at_epoch_ms,trigger_order_id);
+    ON trading_trigger_orders(product_line,user_id,created_at_epoch_ms,trigger_order_id);
 CREATE INDEX IF NOT EXISTS idx_trigger_projection_instrument_created
-    ON core_trigger_order_projection(product_line,instrument_id,created_at_epoch_ms,trigger_order_id);
+    ON trading_trigger_orders(product_line,instrument_id,created_at_epoch_ms,trigger_order_id);
 CREATE INDEX IF NOT EXISTS idx_trigger_projection_status_created
-    ON core_trigger_order_projection(product_line,status,created_at_epoch_ms,trigger_order_id);
+    ON trading_trigger_orders(product_line,status,created_at_epoch_ms,trigger_order_id);
 
 -- Presence proves that all retained states in the export checkpoint were reconstructed.
 -- A partially written bootstrap must not be exposed as an empty/complete query result.
-CREATE TABLE IF NOT EXISTS core_trigger_projection_initialization (
-    product_line varchar(32) PRIMARY KEY,
-    snapshot_log_position bigint NOT NULL CHECK (snapshot_log_position >= 0),
-    initial_export_sequence bigint NOT NULL CHECK (initial_export_sequence >= 0),
-    initialized_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 -- The current realtime exporter has not written the former execution table.
 -- Existing populated tables require an explicit historical rebuild before this migration;
 -- never synthesize public trade IDs or position sides from unrelated current state.
-ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS trade_id text NOT NULL;
-ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS taker_position_side varchar(16) NOT NULL;
-ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS maker_position_side varchar(16) NOT NULL;
+ALTER TABLE trading_trades ADD COLUMN IF NOT EXISTS trade_id text NOT NULL;
+ALTER TABLE trading_trades ADD COLUMN IF NOT EXISTS taker_position_side varchar(16) NOT NULL;
+ALTER TABLE trading_trades ADD COLUMN IF NOT EXISTS maker_position_side varchar(16) NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_core_execution_projection_trade
-    ON core_execution_projection(product_line,trade_id);
+    ON trading_trades(product_line,trade_id);
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_time
-    ON core_execution_projection(product_line,occurred_at_epoch_ms,export_sequence,execution_index);
+    ON trading_trades(product_line,occurred_at_epoch_ms,export_sequence,execution_index);
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_taker_order
-    ON core_execution_projection(product_line,taker_order_id,occurred_at_epoch_ms,export_sequence,execution_index);
+    ON trading_trades(product_line,taker_order_id,occurred_at_epoch_ms,export_sequence,execution_index);
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_maker_order
-    ON core_execution_projection(product_line,maker_order_id,occurred_at_epoch_ms,export_sequence,execution_index);
-
-CREATE TABLE IF NOT EXISTS core_execution_projection_initialization (
-    product_line varchar(32) PRIMARY KEY,
-    snapshot_log_position bigint NOT NULL CHECK (snapshot_log_position >= 0),
-    initialized_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+    ON trading_trades(product_line,maker_order_id,occurred_at_epoch_ms,export_sequence,execution_index);
 
 -- Minute buckets count committed account commands, including batches as one command.
-CREATE TABLE IF NOT EXISTS core_trading_command_statistics (
+CREATE TABLE IF NOT EXISTS trading_command_stats (
     product_line varchar(32) NOT NULL,
     minute_epoch_ms bigint NOT NULL CHECK (minute_epoch_ms >= 0),
     user_id bigint NOT NULL CHECK (user_id > 0),
@@ -4312,15 +4050,11 @@ CREATE TABLE IF NOT EXISTS core_trading_command_statistics (
     commands bigint NOT NULL CHECK (commands > 0),
     PRIMARY KEY(product_line,minute_epoch_ms,user_id,command_type,command_status,result_code)
 );
-CREATE TABLE IF NOT EXISTS core_trading_statistics_cursor (
+CREATE TABLE IF NOT EXISTS trading_stats_cursors (
     product_line varchar(32) PRIMARY KEY,
     last_command_position bigint NOT NULL CHECK (last_command_position >= 0)
 );
-CREATE TABLE IF NOT EXISTS core_trading_statistics_initialization (
-    product_line varchar(32) PRIMARY KEY,
-    snapshot_log_position bigint NOT NULL CHECK (snapshot_log_position >= 0)
-);
-CREATE TABLE IF NOT EXISTS core_trading_statistics_snapshot (
+CREATE TABLE IF NOT EXISTS trading_stats_snapshots (
     product_line varchar(32) NOT NULL,
     window_minutes integer NOT NULL CHECK (window_minutes IN (60,360,1440,10080)),
     cluster_position bigint NOT NULL CHECK (cluster_position >= 0),
@@ -4675,14 +4409,14 @@ CREATE INDEX IF NOT EXISTS affiliate_receipts_inviter ON affiliate_fee_receipts(
 CREATE INDEX IF NOT EXISTS affiliate_commissions_beneficiary ON affiliate_commissions(beneficiary_id,receipt_id);
 
 -- Generic committed fee history; no Affiliate or online Core dependency.
-CREATE TABLE IF NOT EXISTS core_trade_fee_progress (
+CREATE TABLE IF NOT EXISTS trade_fee_progress (
     product_line VARCHAR(32) NOT NULL,
     order_id BIGINT NOT NULL,
     cluster_position BIGINT NOT NULL,
     cumulative_fee_units BIGINT NOT NULL,
     PRIMARY KEY(product_line,order_id)
 );
-CREATE TABLE IF NOT EXISTS core_trade_fee_facts (
+CREATE TABLE IF NOT EXISTS trade_fee_facts (
     source_id BIGSERIAL PRIMARY KEY,
     product_line VARCHAR(32) NOT NULL,
     order_id BIGINT NOT NULL,
@@ -4695,7 +4429,7 @@ CREATE TABLE IF NOT EXISTS core_trade_fee_facts (
     occurred_at TIMESTAMPTZ NOT NULL,
     UNIQUE(product_line,order_id,cluster_position)
 );
-CREATE INDEX IF NOT EXISTS core_trade_fee_facts_source ON core_trade_fee_facts(product_line,cluster_position,order_id);
+CREATE INDEX IF NOT EXISTS core_trade_fee_facts_source ON trade_fee_facts(product_line,cluster_position,order_id);
 
 -- Apply after 20261028-affiliate.sql. Canonical receipts remain the source of fee metadata.
 CREATE INDEX IF NOT EXISTS affiliate_team_child_history ON affiliate_team_terms(child_id,effective_from DESC,term_id DESC) INCLUDE(parent_id,share_ppm,effective_until);
@@ -4812,7 +4546,7 @@ CREATE TABLE IF NOT EXISTS affiliate_deferred_fees (
  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
  next_attempt_at TIMESTAMPTZ NOT NULL,resolved_at TIMESTAMPTZ,receipt_id BIGINT UNIQUE REFERENCES affiliate_fee_receipts(receipt_id),
  PRIMARY KEY(product_line,cluster_position,order_id),
- FOREIGN KEY(product_line,order_id,cluster_position) REFERENCES core_trade_fee_facts(product_line,order_id,cluster_position),
+ FOREIGN KEY(product_line,order_id,cluster_position) REFERENCES trade_fee_facts(product_line,order_id,cluster_position),
  CHECK((resolved_at IS NULL)=(receipt_id IS NULL)),
  CHECK((previous_position,previous_order_id)<(cluster_position,order_id))
 );

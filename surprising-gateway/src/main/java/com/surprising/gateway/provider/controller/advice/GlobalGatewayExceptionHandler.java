@@ -169,6 +169,17 @@ public class GlobalGatewayExceptionHandler {
         return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(Map.of("message", msg));
     }
 
+    @ExceptionHandler(com.surprising.gateway.provider.auth.exception.AccountFrozenException.class)
+    public ResponseEntity<Map<String, Object>> accountFrozen(
+            com.surprising.gateway.provider.auth.exception.AccountFrozenException ex) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("code", "ACCOUNT_FROZEN");
+        body.put("message", ex.getMessage());
+        if (ex.reason() != null) body.put("reason", ex.reason());
+        if (ex.frozenUntil() != null) body.put("frozenUntil", ex.frozenUntil().toString());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).cacheControl(CacheControl.noStore()).body(body);
+    }
+
     @ExceptionHandler(GoogleIdentityClient.Unavailable.class)
     public ResponseEntity<Map<String, String>> googleUnavailable() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).cacheControl(CacheControl.noStore())

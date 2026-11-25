@@ -159,7 +159,8 @@ public class AdminAuthController {
         try {
             AdminUserStatusRequest request = readBody(body, AdminUserStatusRequest.class);
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return adminAuthService.updateUserStatus(authorization, userId, request.status());
+            return adminAuthService.updateUserStatus(authorization, userId, request.status(),
+                    request.reason(), request.frozenUntil());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

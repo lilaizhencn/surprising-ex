@@ -58,23 +58,15 @@ public class GatewayUserRepository {
 
     public Optional<UserCredential> findCredentialByUsername(String username) {
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, phone, password_hash, status, created_at
+                SELECT user_id, username, email, phone, password_hash, status, created_at, status_reason, frozen_until
                   FROM gateway_users
                  WHERE username = ?
-                """, (rs, rowNum) -> new UserCredential(
-                        rs.getLong("user_id"),
-                        rs.getString("username"),
-                        rs.getString("email"),
-                        rs.getString("phone"),
-                        rs.getString("password_hash"),
-                        rs.getString("status"),
-                        rs.getTimestamp("created_at").toInstant()),
-                username).stream().findFirst();
+                """, (rs, rowNum) -> toCredential(rs), username).stream().findFirst();
     }
 
     public Optional<UserCredential> findCredentialByEmail(String email) {
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, phone, password_hash, status, created_at
+                SELECT user_id, username, email, phone, password_hash, status, created_at, status_reason, frozen_until
                   FROM gateway_users
                  WHERE lower(email) = lower(?)
                 """, (rs, rowNum) -> toCredential(rs), email).stream().findFirst();
@@ -82,7 +74,7 @@ public class GatewayUserRepository {
 
     public Optional<UserCredential> findCredentialByPhone(String phone) {
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, phone, password_hash, status, created_at
+                SELECT user_id, username, email, phone, password_hash, status, created_at, status_reason, frozen_until
                  FROM gateway_users
                 WHERE phone = ?
                 """, (rs, rowNum) -> toCredential(rs), phone).stream().findFirst();
@@ -90,7 +82,7 @@ public class GatewayUserRepository {
 
     public Optional<UserCredential> findCredentialByUserId(long userId) {
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, phone, password_hash, status, created_at
+                SELECT user_id, username, email, phone, password_hash, status, created_at, status_reason, frozen_until
                   FROM gateway_users
                  WHERE user_id = ?
                 """, (rs, rowNum) -> toCredential(rs), userId).stream().findFirst();
@@ -98,7 +90,7 @@ public class GatewayUserRepository {
 
     public Optional<UserRecord> find(long userId) {
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, phone, status, created_at, display_name
+                SELECT user_id, username, email, phone, status, created_at, display_name, status_reason, frozen_until
                   FROM gateway_users
                  WHERE user_id = ?
                 """, (rs, rowNum) -> toUserRecord(rs), userId).stream().findFirst();
@@ -115,7 +107,7 @@ public class GatewayUserRepository {
         String normalizedStatus = filter.status();
         int safeLimit = limit;
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, phone, status, created_at, display_name
+                SELECT user_id, username, email, phone, status, created_at, display_name, status_reason, frozen_until
                   FROM gateway_users
                  WHERE (CAST(? AS text) IS NULL OR username LIKE ? OR CAST(user_id AS TEXT) = ? OR lower(email) LIKE ? OR phone LIKE ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
@@ -144,7 +136,7 @@ public class GatewayUserRepository {
         args.add(normalizedStatus);
         args.add(normalizedStatus);
         String sql = """
-                SELECT user_id, username, email, phone, status, created_at, display_name
+                SELECT user_id, username, email, phone, status, created_at, display_name, status_reason, frozen_until
                   FROM gateway_users
                  WHERE (CAST(? AS text) IS NULL OR username LIKE ? OR CAST(user_id AS TEXT) = ? OR lower(email) LIKE ? OR phone LIKE ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
@@ -161,13 +153,24 @@ public class GatewayUserRepository {
     }
 
     public Optional<UserRecord> updateStatus(long userId, String status, Instant now) {
+        return updateStatus(userId, status, null, null, now);
+    }
+
+    public Optional<UserRecord> updateStatus(long userId, String status, String reason, Instant frozenUntil, Instant now) {
+        String normalized = normalizeStatus(status);
+        String normalizedReason = "NORMAL".equals(normalized) || reason == null || reason.isBlank()
+                ? null : reason.trim();
+        Instant normalizedUntil = "NORMAL".equals(normalized) ? null : frozenUntil;
         Optional<UserRecord> updated = jdbcTemplate.query("""
                 UPDATE gateway_users
                    SET status = ?,
+                       status_reason = ?,
+                       frozen_until = ?,
                        updated_at = ?
                  WHERE user_id = ?
-                RETURNING user_id, username, email, phone, status, created_at, display_name
-                """, (rs, rowNum) -> toUserRecord(rs), normalizeStatus(status),
+                RETURNING user_id, username, email, phone, status, created_at, display_name, status_reason, frozen_until
+                """, (rs, rowNum) -> toUserRecord(rs), normalized, normalizedReason,
+                normalizedUntil == null ? null : Timestamp.from(normalizedUntil),
                 Timestamp.from(now), userId).stream().findFirst();
         if (updated.isPresent() && authState != null) authState.reloadUser(userId);
         return updated;
@@ -201,16 +204,21 @@ public class GatewayUserRepository {
     }
 
     private UserRecord toUserRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Timestamp until = rs.getTimestamp("frozen_until");
         return new UserRecord(
                 rs.getLong("user_id"),
                 rs.getString("username"),
                 rs.getString("email"),
                 rs.getString("phone"),
                 rs.getString("status"),
-                rs.getTimestamp("created_at").toInstant(), rs.getString("display_name"));
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getString("display_name"),
+                rs.getString("status_reason"),
+                until == null ? null : until.toInstant());
     }
 
     private UserCredential toCredential(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Timestamp until = rs.getTimestamp("frozen_until");
         return new UserCredential(
                 rs.getLong("user_id"),
                 rs.getString("username"),
@@ -218,7 +226,9 @@ public class GatewayUserRepository {
                 rs.getString("phone"),
                 rs.getString("password_hash"),
                 rs.getString("status"),
-                rs.getTimestamp("created_at").toInstant());
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getString("status_reason"),
+                until == null ? null : until.toInstant());
     }
 
     private String likeParameter(String term) {
@@ -243,13 +253,19 @@ public class GatewayUserRepository {
             String phone,
             String status,
             Instant createdAt,
-            String displayName) {
+            String displayName,
+            String statusReason,
+            Instant frozenUntil) {
+        public UserRecord(long userId, String username, String email, String phone,
+                          String status, Instant createdAt, String displayName) {
+            this(userId, username, email, phone, status, createdAt, displayName, null, null);
+        }
         public UserRecord(long userId, String username, String email, String phone,
                           String status, Instant createdAt) {
-            this(userId, username, email, phone, status, createdAt, null);
+            this(userId, username, email, phone, status, createdAt, null, null, null);
         }
         public UserRecord(long userId, String username, String email, String status, Instant createdAt) {
-            this(userId, username, email, null, status, createdAt);
+            this(userId, username, email, null, status, createdAt, null, null, null);
         }
     }
 
@@ -260,10 +276,16 @@ public class GatewayUserRepository {
             String phone,
             String passwordHash,
             String status,
-            Instant createdAt) {
+            Instant createdAt,
+            String statusReason,
+            Instant frozenUntil) {
+        public UserCredential(long userId, String username, String email, String phone,
+                              String passwordHash, String status, Instant createdAt) {
+            this(userId, username, email, phone, passwordHash, status, createdAt, null, null);
+        }
         public UserCredential(long userId, String username, String email, String passwordHash,
                               String status, Instant createdAt) {
-            this(userId, username, email, null, passwordHash, status, createdAt);
+            this(userId, username, email, null, passwordHash, status, createdAt, null, null);
         }
     }
     public void markEmailVerified(long userId, Instant now) {

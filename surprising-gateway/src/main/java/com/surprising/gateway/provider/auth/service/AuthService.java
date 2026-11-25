@@ -132,9 +132,14 @@ public class AuthService {
             throw new IllegalArgumentException("invalid identifier or password");
         }
         if ("FROZEN".equals(credential.status())) {
-            repository.loginLog(credential.userId(), "FAILED", "USER_" + credential.status(),
-                    userAgent(httpRequest), ipAddress(httpRequest), now);
-            throw new IllegalStateException("user is not active");
+            if (credential.frozenUntil() != null && !credential.frozenUntil().isAfter(now)) {
+                repository.updateStatus(credential.userId(), "NORMAL", null, null, now);
+            } else {
+                repository.loginLog(credential.userId(), "FAILED", "USER_" + credential.status(),
+                        userAgent(httpRequest), ipAddress(httpRequest), now);
+                throw new com.surprising.gateway.provider.auth.exception.AccountFrozenException(
+                        credential.statusReason(), credential.frozenUntil());
+            }
         }
         AuthenticatedUser user = repository.user(credential.userId())
                 .orElseThrow(() -> new IllegalStateException("user not found"));
@@ -160,7 +165,14 @@ public class AuthService {
     private LoginResult loginIdentity(long userId, AuthClientMetadata request, String source) {
         Instant now = Instant.now();
         var user = repository.user(userId).orElseThrow();
-        if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
+        if ("FROZEN".equals(user.status())) {
+            if (user.frozenUntil() != null && !user.frozenUntil().isAfter(now)) {
+                user = repository.updateStatus(userId, "NORMAL", null, null, now).orElse(user);
+            } else {
+                throw new com.surprising.gateway.provider.auth.exception.AccountFrozenException(
+                        user.statusReason(), user.frozenUntil());
+            }
+        }
         requireAccessAllowed(userId, deviceId(request), ipAddress(request));
         var credential = repository.credential(userId).orElseThrow();
         var challenge = loginVerification.begin(userId, credential.passwordHash(), now);

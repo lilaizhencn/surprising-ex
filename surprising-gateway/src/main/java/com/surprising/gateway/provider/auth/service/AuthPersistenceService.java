@@ -147,7 +147,11 @@ public class AuthPersistenceService {
     }
 
     public Optional<AuthenticatedUser> updateStatus(long userId, String status, Instant now) {
-        return userRepository.updateStatus(userId, status, now)
+        return updateStatus(userId, status, null, null, now);
+    }
+
+    public Optional<AuthenticatedUser> updateStatus(long userId, String status, String reason, Instant frozenUntil, Instant now) {
+        return userRepository.updateStatus(userId, status, reason, frozenUntil, now)
                 .map(user -> toAuthenticatedUser(user, roles(userId)));
     }
 
@@ -325,7 +329,10 @@ public class AuthPersistenceService {
                 user.email(),
                 user.status(),
                 roles,
-                user.createdAt(), user.displayName());
+                user.createdAt(),
+                user.displayName(),
+                user.statusReason(),
+                user.frozenUntil());
     }
 
 

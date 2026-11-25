@@ -10,9 +10,16 @@ public record AuthenticatedUser(
         String status,
         List<String> roles,
         Instant createdAt,
-        String displayName) {
+        String displayName,
+        String statusReason,
+        Instant frozenUntil) {
     public AuthenticatedUser(long userId, String username, String email, String status,
                              List<String> roles, Instant createdAt) {
-        this(userId, username, email, status, roles, createdAt, null);
+        this(userId, username, email, status, roles, createdAt, null, null, null);
+    }
+
+    public AuthenticatedUser(long userId, String username, String email, String status,
+                             List<String> roles, Instant createdAt, String displayName) {
+        this(userId, username, email, status, roles, createdAt, displayName, null, null);
     }
 }

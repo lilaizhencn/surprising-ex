@@ -112,6 +112,8 @@ public class AuthController {
     public LoginResult login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         try {
             return authService.login(AuthRequestBinding.login(request), clients.bind(httpRequest));
+        } catch (com.surprising.gateway.provider.auth.exception.AccountFrozenException ex) {
+            throw ex;
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

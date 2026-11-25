@@ -80,9 +80,27 @@ public class AdminAuthService {
 
     @Transactional
     public AuthenticatedUser updateUserStatus(String authorizationHeader, long userId, String status) {
+        return updateUserStatus(authorizationHeader, userId, status, null, null);
+    }
+
+    @Transactional
+    public AuthenticatedUser updateUserStatus(String authorizationHeader, long userId, String status,
+                                              String reason, Instant frozenUntil) {
         authService.authenticateAdminBearer(authorizationHeader);
-        return repository.updateStatus(userId, status, Instant.now())
+        Instant now = Instant.now();
+        String trimmedReason = reason == null || reason.isBlank() ? null : reason.trim();
+        if (trimmedReason != null && trimmedReason.length() > 500) {
+            throw new IllegalArgumentException("status reason must be at most 500 characters");
+        }
+        if (frozenUntil != null && !frozenUntil.isAfter(now)) {
+            throw new IllegalArgumentException("frozenUntil must be in the future");
+        }
+        AuthenticatedUser updated = repository.updateStatus(userId, status, trimmedReason, frozenUntil, now)
                 .orElseThrow(() -> new IllegalArgumentException("user not found"));
+        if ("FROZEN".equals(updated.status())) {
+            repository.revokeUserSessions(userId, now);
+        }
+        return updated;
     }
 
     @Transactional
