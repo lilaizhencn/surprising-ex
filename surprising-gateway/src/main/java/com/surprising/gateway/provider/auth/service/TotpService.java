@@ -78,8 +78,8 @@ public class TotpService {
         long counter = now.getEpochSecond() / PERIOD_SECONDS;
         for (long offset = 1; offset >= -1; offset--) {
             String expected = code(secret, counter + offset);
-            if (MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                    normalized.getBytes(StandardCharsets.UTF_8))) return counter + offset;
+            if (com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(expected, normalized))
+                return counter + offset;
         }
         return -1;
     }

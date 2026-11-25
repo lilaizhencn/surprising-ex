@@ -5,7 +5,7 @@ import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.c2c.repository.C2cProfileRepository;
 import com.surprising.gateway.c2c.repository.C2cSecurityGrantRepository;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
@@ -71,7 +71,7 @@ public class C2cAccessService {
     }
 
     public void verifyFunds(JwtPrincipal user, String authorization, String emailCode, String totpCode) {
-        String tokenHash = C2cDigests.sha256(authorization);
+        String tokenHash = Sha256Digests.hex(authorization);
         boolean accepted = Boolean.TRUE.equals(verification.execute(transaction -> {
             // 与验证设置修改串行，防止旧 TTL 在修改并清空凭据后重新插入长效凭据。
             int ttl = profiles.verificationMinutesWithShareLock(user.userId()).orElse(0);

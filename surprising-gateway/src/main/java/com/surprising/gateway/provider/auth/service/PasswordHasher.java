@@ -47,7 +47,8 @@ public class PasswordHasher {
             byte[] salt = Base64.getDecoder().decode(parts[2]);
             byte[] expected = Base64.getDecoder().decode(parts[3]);
             if (salt.length != SALT_LENGTH_BYTES || expected.length != KEY_LENGTH_BITS / 8) return false;
-            boolean matches = java.security.MessageDigest.isEqual(expected, derive(password, salt, ITERATIONS));
+            boolean matches = com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                    expected, derive(password, salt, ITERATIONS));
             return !missing && matches;
         } catch (IllegalArgumentException invalidHash) {
             return false;

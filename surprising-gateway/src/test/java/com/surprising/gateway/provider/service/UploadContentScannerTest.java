@@ -11,7 +11,7 @@ import com.surprising.gateway.c2c.service.*;
 import com.surprising.gateway.c2c.model.C2cAttachment;
 import com.surprising.gateway.c2c.repository.*;
 import com.surprising.gateway.c2c.storage.C2cR2Storage;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import java.net.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -78,7 +78,7 @@ class UploadContentScannerTest {
         verifyNoInteractions(storage, documents);
         var attachments = mock(C2cAttachmentRepository.class); var objects = mock(C2cR2Storage.class);
         UUID id = UUID.randomUUID();
-        when(attachments.find(id)).thenReturn(Optional.of(new C2cAttachment(id, 7, null, null, "PROOF", "private/key", "application/pdf", pdf.length, C2cDigests.sha256(pdf), "document.pdf", "PENDING")));
+        when(attachments.find(id)).thenReturn(Optional.of(new C2cAttachment(id, 7, null, null, "PROOF", "private/key", "application/pdf", pdf.length, Sha256Digests.hex(pdf), "document.pdf", "PENDING")));
         when(objects.read("private/key")).thenReturn(pdf);
         var c2c = new C2cAttachmentService(attachments, mock(), mock(), mock(), mock(), mock(), objects, mock(PlatformTransactionManager.class), limits, scanner);
         assertThatThrownBy(() -> c2c.confirm(7, id)).isInstanceOf(IllegalArgumentException.class);

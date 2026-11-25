@@ -21,7 +21,6 @@ import tools.jackson.databind.ObjectMapper;
 public class MarketVolatilityAlertService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketVolatilityAlertService.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
     private static final DateTimeFormatter HOUR_KEY_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HH")
             .withZone(ZoneId.systemDefault());
     private static final int ALERT_BATCH_LIMIT = 500;
@@ -31,7 +30,7 @@ public class MarketVolatilityAlertService {
     private final ObjectMapper objectMapper;
 
     public MarketVolatilityAlertService(NotificationPreferenceRepository preferenceRepository, PushDispatcher pushDispatcher) {
-        this(preferenceRepository, pushDispatcher, JSON);
+        this(preferenceRepository, pushDispatcher, com.surprising.gateway.provider.support.JsonMappers.DEFAULT);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -41,7 +40,7 @@ public class MarketVolatilityAlertService {
             ObjectMapper objectMapper) {
         this.preferenceRepository = preferenceRepository;
         this.pushDispatcher = pushDispatcher;
-        this.objectMapper = objectMapper == null ? JSON : objectMapper;
+        this.objectMapper = com.surprising.gateway.provider.support.JsonMappers.orDefault(objectMapper);
     }
 
     /**

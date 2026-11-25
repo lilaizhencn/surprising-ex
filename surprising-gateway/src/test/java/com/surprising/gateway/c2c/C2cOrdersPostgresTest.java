@@ -24,7 +24,7 @@ import com.surprising.gateway.c2c.model.C2cOrderStatus;
 import com.surprising.gateway.c2c.model.C2cQuote;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.product.GatewayProductServices;
@@ -82,15 +82,15 @@ class C2cOrdersPostgresTest {
     @AfterEach void cleanup(){if(db!=null)db.close();}
     private C2cAd ad(String side) {
         var body=new C2cController.Publish(marketId,side,"6.65","10","1","10000",List.of("ALIPAY"),side.equals("SELL")?List.of(makerAccount):List.of(),900,"Original terms",0);
-        String key="qa-ad-"+UUID.randomUUID();requests.admit(11,key,"AD_PUBLISH",C2cDigests.sha256(json.writeValueAsString(body)));
-        var value=db.transaction(()->ads.publish(user(11),"Bearer fixture",key,C2cDigests.sha256(json.writeValueAsString(body)),C2cController.publishParameters(body),"123456",""));
+        String key="qa-ad-"+UUID.randomUUID();requests.admit(11,key,"AD_PUBLISH",Sha256Digests.hex(json.writeValueAsString(body)));
+        var value=db.transaction(()->ads.publish(user(11),"Bearer fixture",key,Sha256Digests.hex(json.writeValueAsString(body)),C2cController.publishParameters(body),"123456",""));
         settle();return adRows.get(value.id(),false);
     }
     private C2cQuote quote(C2cAd ad,long actor,String quantity) {
         return db.transaction(()->orders.quote(user(actor),ad.id(),"CRYPTO",quantity,ad.side().equals("SELL")?makerAccount:sellerAccount));
     }
     private C2cOrder create(C2cQuote quote,long actor,String key) {
-        requests.admit(actor,key,"ORDER_CREATE",C2cDigests.sha256(quote.id().toString()));
+        requests.admit(actor,key,"ORDER_CREATE",Sha256Digests.hex(quote.id().toString()));
         return db.transaction(()->orders.create(user(actor),"Bearer fixture",key,quote.id(),"123456",""));
     }
     private C2cOrder create(C2cAd ad) {return create(quote(ad,12,"2"),12,"qa-order-"+UUID.randomUUID());}

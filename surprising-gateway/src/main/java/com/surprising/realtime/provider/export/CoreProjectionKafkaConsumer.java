@@ -32,8 +32,6 @@ import tools.jackson.databind.ObjectMapper;
 @ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true", matchIfMissing = true)
 @Slf4j
 public class CoreProjectionKafkaConsumer implements SmartLifecycle, HealthIndicator {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
     private final ProductLine product;
     private final String bootstrapServers;
     private final CommittedOrderProjectionService orders;
@@ -99,7 +97,8 @@ public class CoreProjectionKafkaConsumer implements SmartLifecycle, HealthIndica
 
     void applyRecord(String json) {
         if (json == null || json.isBlank()) return;
-        CoreProjectionBatchEvent event = MAPPER.readValue(json, CoreProjectionBatchEvent.class);
+        CoreProjectionBatchEvent event = com.surprising.gateway.provider.support.JsonMappers.DEFAULT
+                .readValue(json, CoreProjectionBatchEvent.class);
         if (event.product() != product) {
             throw new IllegalArgumentException("Cross-product projection event: " + event.product() + " != " + product);
         }

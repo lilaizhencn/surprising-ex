@@ -70,8 +70,7 @@ public class PasswordResetService {
             return new ResetResult(false);
         }
         String expected = digest(code, PURPOSE, email);
-        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                challenge.codeHash().getBytes(StandardCharsets.UTF_8))) {
+        if (!com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(expected, challenge.codeHash())) {
             challenges.incrementAttempts(challenge.challengeId(), credential.userId(), now);
             return new ResetResult(false);
         }

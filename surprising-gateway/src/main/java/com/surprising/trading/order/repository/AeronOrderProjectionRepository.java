@@ -50,27 +50,27 @@ public class AeronOrderProjectionRepository {
         this.maxEncodedResponseBytes = validateMaxEncodedResponseBytes(maxEncodedResponseBytes);
     }
 
-    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper();
-
     public AeronOrderProjectionRepository(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, new ProjectionWatermarkWaiter(jdbcTemplate), DEFAULT_OBJECT_MAPPER,
-                DEFAULT_MAX_ENCODED_RESPONSE_BYTES);
+        this(jdbcTemplate, new ProjectionWatermarkWaiter(jdbcTemplate),
+                com.surprising.gateway.provider.support.JsonMappers.DEFAULT, DEFAULT_MAX_ENCODED_RESPONSE_BYTES);
     }
 
     public AeronOrderProjectionRepository(JdbcTemplate jdbcTemplate, int maxEncodedResponseBytes) {
-        this(jdbcTemplate, new ProjectionWatermarkWaiter(jdbcTemplate), DEFAULT_OBJECT_MAPPER,
-                maxEncodedResponseBytes);
+        this(jdbcTemplate, new ProjectionWatermarkWaiter(jdbcTemplate),
+                com.surprising.gateway.provider.support.JsonMappers.DEFAULT, maxEncodedResponseBytes);
     }
 
     public AeronOrderProjectionRepository(JdbcTemplate jdbcTemplate,
                                           ProjectionWatermarkWaiter watermarkWaiter) {
-        this(jdbcTemplate, watermarkWaiter, DEFAULT_OBJECT_MAPPER, DEFAULT_MAX_ENCODED_RESPONSE_BYTES);
+        this(jdbcTemplate, watermarkWaiter, com.surprising.gateway.provider.support.JsonMappers.DEFAULT,
+                DEFAULT_MAX_ENCODED_RESPONSE_BYTES);
     }
 
     public AeronOrderProjectionRepository(JdbcTemplate jdbcTemplate,
                                           ProjectionWatermarkWaiter watermarkWaiter,
                                           int maxEncodedResponseBytes) {
-        this(jdbcTemplate, watermarkWaiter, DEFAULT_OBJECT_MAPPER, maxEncodedResponseBytes);
+        this(jdbcTemplate, watermarkWaiter, com.surprising.gateway.provider.support.JsonMappers.DEFAULT,
+                maxEncodedResponseBytes);
     }
 
     public ProjectionReadResult byOrder(ProductLine productLine, Long userId, long orderId,

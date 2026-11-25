@@ -14,7 +14,7 @@ import com.surprising.trading.order.service.OrderQueryService;
 import com.surprising.trading.trigger.model.OpenTriggerPageQuery;
 import com.surprising.trading.trigger.service.TriggerOrderAeronGateway;
 import com.surprising.trading.trigger.service.TriggerOrderService;
-import com.surprising.trading.trigger.utils.OpenTriggerCursors;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import java.util.concurrent.CompletionStage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -170,6 +170,6 @@ public class TradingTriggerController {
 
     public static OpenTriggerPageQuery activeTriggerPage(int limit, String cursor) {
         if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
-        return new OpenTriggerPageQuery(limit, OpenTriggerCursors.decode(cursor));
+        return new OpenTriggerPageQuery(limit, AdminCursorPage.decodeIdCursor("trigger:", cursor));
     }
 }

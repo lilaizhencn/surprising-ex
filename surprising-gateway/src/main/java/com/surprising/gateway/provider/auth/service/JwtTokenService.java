@@ -81,9 +81,8 @@ public class JwtTokenService {
             throw new IllegalArgumentException("invalid access token");
         }
         String unsigned = token.substring(0, secondDot);
-        byte[] expected = sign(unsigned).getBytes(StandardCharsets.UTF_8);
-        byte[] actual = token.substring(secondDot + 1).getBytes(StandardCharsets.UTF_8);
-        if (!MessageDigest.isEqual(expected, actual)) {
+        if (!com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                sign(unsigned), token.substring(secondDot + 1))) {
             throw new IllegalArgumentException("invalid access token signature");
         }
         String payloadPart = token.substring(firstDot + 1, secondDot);
@@ -95,13 +94,8 @@ public class JwtTokenService {
     }
 
     private String sign(String unsigned) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(secretKeySpec());
-            return URL_ENCODER.encodeToString(mac.doFinal(unsigned.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("failed to sign access token", ex);
-        }
+        return URL_ENCODER.encodeToString(com.surprising.gateway.provider.support.Sha256Digests.hmacSha256(
+                secretKeySpec(), unsigned.getBytes(StandardCharsets.UTF_8)));
     }
 
     private SecretKeySpec secretKeySpec() {

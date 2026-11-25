@@ -71,8 +71,8 @@ public class SensitiveActionVerificationService {
         if (challenge == null || challenge.attempts() >= 5 || emailCode == null || !emailCode.matches("\\d{6}")) {
             return false;
         }
-        if (!MessageDigest.isEqual(digest(emailCode, normalizedScene, destination)
-                .getBytes(StandardCharsets.UTF_8), challenge.codeHash().getBytes(StandardCharsets.UTF_8))) {
+        if (!com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                digest(emailCode, normalizedScene, destination), challenge.codeHash())) {
             challengeRepository.incrementAttempts(challenge.challengeId(), userId, now);
             return false;
         }

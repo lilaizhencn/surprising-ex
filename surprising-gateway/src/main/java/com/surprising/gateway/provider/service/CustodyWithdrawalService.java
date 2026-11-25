@@ -35,8 +35,6 @@ import tools.jackson.databind.ObjectMapper;
 public class CustodyWithdrawalService {
 
 
-    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper();
-
     private final GatewayProperties properties;
     private final CustodyWithdrawalRepository repository;
     private final CustodyWithdrawalStateService states;
@@ -100,7 +98,7 @@ public class CustodyWithdrawalService {
         this.valuationClient = valuationClient;
         this.refundService = refundService;
         this.reconciliationService = reconciliationService;
-        this.objectMapper = objectMapper == null ? DEFAULT_OBJECT_MAPPER : objectMapper;
+        this.objectMapper = com.surprising.gateway.provider.support.JsonMappers.orDefault(objectMapper);
         this.circuitBreaker = circuitBreaker;
         this.webhookHandler = webhookHandler != null
                 ? webhookHandler

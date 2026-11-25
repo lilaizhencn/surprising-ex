@@ -9,7 +9,7 @@ import com.surprising.gateway.c2c.controller.advice.C2cHttpErrors;
 import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.service.C2cAdminAccessService;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.*;
@@ -71,7 +71,7 @@ class C2cHttpBoundaryTest {
         assertThat(bound.path()).isEqualTo(http.getRequestURI());assertThat(bound.query()).isEqualTo(http.getQueryString());
         assertThat(bound.userAgent()).isEqualTo("original-agent");assertThat(bound.ip()).isEqualTo("127.0.0.9");
         byte[] body = " { \"reason\": \"原始正文\" }\r\n".getBytes(StandardCharsets.UTF_8);
-        assertThat(C2cAdminAccessService.hash(body)).isEqualTo(C2cDigests.sha256(body));
-        assertThat(C2cAdminAccessService.hash(body)).isNotEqualTo(C2cDigests.sha256(new String(body, StandardCharsets.UTF_8).trim().getBytes(StandardCharsets.UTF_8)));
+        assertThat(C2cAdminAccessService.hash(body)).isEqualTo(Sha256Digests.hex(body));
+        assertThat(C2cAdminAccessService.hash(body)).isNotEqualTo(Sha256Digests.hex(new String(body, StandardCharsets.UTF_8).trim().getBytes(StandardCharsets.UTF_8)));
     }
 }

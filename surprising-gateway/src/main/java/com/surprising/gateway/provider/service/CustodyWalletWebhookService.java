@@ -130,18 +130,13 @@ public class CustodyWalletWebhookService {
     }
 
     String signature(String secret, String eventId, String eventType, long timestamp, byte[] body) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] prefix = (timestamp + "." + eventId + "." + eventType + ".")
-                    .getBytes(StandardCharsets.UTF_8);
-            byte[] message = new byte[prefix.length + body.length];
-            System.arraycopy(prefix, 0, message, 0, prefix.length);
-            System.arraycopy(body, 0, message, prefix.length, body.length);
-            return "v1=" + Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(message));
-        } catch (Exception ex) {
-            throw new IllegalStateException("wallet webhook signing failed", ex);
-        }
+        byte[] prefix = (timestamp + "." + eventId + "." + eventType + ".")
+                .getBytes(StandardCharsets.UTF_8);
+        byte[] message = new byte[prefix.length + body.length];
+        System.arraycopy(prefix, 0, message, 0, prefix.length);
+        System.arraycopy(body, 0, message, prefix.length, body.length);
+        return "v1=" + com.surprising.gateway.provider.support.Sha256Digests.hmacSha256Base64Url(
+                secret.getBytes(StandardCharsets.UTF_8), message);
     }
 
     private void postSpotAdjustment(String eventId, String eventType, Map<String, Object> event) {
@@ -221,8 +216,7 @@ public class CustodyWalletWebhookService {
     private void verifySignature(String secret, String eventId, String eventType, long timestamp,
                                  String signature, byte[] body) {
         String expected = signature(secret, eventId, eventType, timestamp, body);
-        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                signature.getBytes(StandardCharsets.UTF_8))) {
+        if (!com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(expected, signature)) {
             throw new IllegalArgumentException("wallet webhook signature is invalid");
         }
     }

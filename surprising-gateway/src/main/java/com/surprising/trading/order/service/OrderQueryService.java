@@ -22,7 +22,7 @@ import com.surprising.trading.order.model.TradeReadCursor;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.repository.TradeProjectionRepository;
-import com.surprising.trading.order.utils.ActiveOrderCursors;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -233,7 +233,7 @@ public class OrderQueryService {
         boolean hasMore = orders.size() > limit;
         if (hasMore) orders = new ArrayList<>(orders.subList(0, limit));
         String nextCursor = hasMore && !orders.isEmpty()
-                ? ActiveOrderCursors.encode(orders.getLast().orderId()) : null;
+                ? AdminCursorPage.encodeIdCursor("core-open:v1:", orders.getLast().orderId()) : null;
         return new OrderQueryResponse(orders.size(), orders, nextCursor, hasMore, "createdAt.desc", limit);
     }
 

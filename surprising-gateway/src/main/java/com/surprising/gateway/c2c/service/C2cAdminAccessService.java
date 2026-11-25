@@ -10,7 +10,7 @@ import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.model.C2cAdminRequest;
 
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.model.AdminApprovalResponse;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import java.time.Instant;
@@ -78,7 +78,7 @@ public class C2cAdminAccessService {
     }
     public static String hash(byte[] body) {
         if(body==null || body.length==0) return null;
-        return C2cDigests.sha256(body);
+        return Sha256Digests.hex(body);
     }
     private static C2cProblem approvalRequired() {
         return new C2cProblem(C2cProblem.Reason.ACCESS_DENIED,"C2C_APPROVAL_REQUIRED","需要另一位有权限的管理员审批当前完整请求");

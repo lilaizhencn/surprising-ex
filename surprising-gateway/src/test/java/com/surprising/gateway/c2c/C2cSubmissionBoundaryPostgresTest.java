@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.surprising.gateway.c2c.service.C2cSubmissionService;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -36,7 +36,7 @@ class C2cSubmissionBoundaryPostgresTest {
     }
 
     @Test void callerRollbackCannotEraseAnAcceptedOrderOrItsEvent() throws Exception {
-        UUID ad=fixture.publish("SELL"),quote=fixture.quote(ad,12,"1");String key="qa-outer-order-"+UUID.randomUUID();String hash=C2cDigests.sha256(quote.toString());
+        UUID ad=fixture.publish("SELL"),quote=fixture.quote(ad,12,"1");String key="qa-outer-order-"+UUID.randomUUID();String hash=Sha256Digests.hex(quote.toString());
         clearInvocations(fixture.core);
         assertThatThrownBy(()->fixture.db.transaction(()->{
             fixture.bean(C2cSubmissionService.class).create(C2cHttpFixture.principal(12),"Bearer qa-12",key,quote,hash,"","");
@@ -105,7 +105,7 @@ class C2cSubmissionBoundaryPostgresTest {
         verifyNoInteractions(fixture.core);
     }
 
-    private String hash(Object payload) {return C2cDigests.sha256(fixture.json.writeValueAsString(payload));}
+    private String hash(Object payload) {return Sha256Digests.hex(fixture.json.writeValueAsString(payload));}
     private C2cController.Publish invalidPayload() {
         var p=fixture.payload("SELL");return new C2cController.Publish(p.marketId(),p.side(),"1e3",p.quantity(),p.minFiat(),p.maxFiat(),
                 p.methodCodes(),p.paymentAccountIds(),p.paymentWindowSeconds(),p.terms(),p.minCompleted());

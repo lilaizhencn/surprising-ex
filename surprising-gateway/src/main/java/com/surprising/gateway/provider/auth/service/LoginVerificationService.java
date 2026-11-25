@@ -501,9 +501,8 @@ public class LoginVerificationService {
         return expected != null
                 && code != null
                 && SIX_DIGIT_PATTERN.matcher(code).matches()
-                && MessageDigest.isEqual(
-                        expected.getBytes(StandardCharsets.UTF_8),
-                        codeHash(code, tokenHash, method).getBytes(StandardCharsets.UTF_8));
+                && com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                        expected, codeHash(code, tokenHash, method));
     }
 
     private String digest(String text) {

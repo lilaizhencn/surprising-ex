@@ -215,13 +215,8 @@ public class KycDocumentStorageService {
     }
 
     private byte[] hmac(byte[] key, String value) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(key, "HmacSHA256"));
-            return mac.doFinal(value.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception ex) {
-            throw new KycDocumentStorageException("KYC S3 signature failed", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.hmacSha256(
+                key, value.getBytes(StandardCharsets.UTF_8));
     }
 
     private String hmacHex(byte[] key, String value) {

@@ -7,8 +7,6 @@ import com.surprising.gateway.provider.telegram.bot.repository.TelegramBotSecuri
 import com.surprising.gateway.provider.support.Sha256Digests;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 
 @Service
@@ -61,8 +59,7 @@ public class TelegramBotSecurityService {
             return false;
         }
         String calculated = hashPin(userId, pin);
-        return MessageDigest.isEqual(calculated.getBytes(StandardCharsets.UTF_8),
-                expectedHash.get().getBytes(StandardCharsets.UTF_8));
+        return Sha256Digests.constantTimeEquals(calculated, expectedHash.get());
     }
 
     /**

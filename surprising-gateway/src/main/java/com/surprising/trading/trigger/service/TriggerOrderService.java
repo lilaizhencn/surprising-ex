@@ -37,7 +37,7 @@ import com.surprising.trading.order.service.StableOrderIdentity;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import java.nio.charset.StandardCharsets;
 import com.surprising.trading.trigger.model.OpenTriggerPageQuery;
-import com.surprising.trading.trigger.utils.OpenTriggerCursors;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -332,7 +332,7 @@ public class TriggerOrderService {
         boolean hasMore = values.size() > limit;
         List<TriggerOrderResponse> orders = hasMore ? values.subList(0, limit) : values;
         String next = hasMore && !orders.isEmpty()
-                ? OpenTriggerCursors.encode(orders.getLast().triggerOrderId()) : null;
+                ? AdminCursorPage.encodeIdCursor("trigger:", orders.getLast().triggerOrderId()) : null;
         return new TriggerOrderQueryResponse(orders.size(), List.copyOf(orders), next, hasMore,
                 "createdAt.desc", limit);
     }

@@ -19,7 +19,6 @@ import tools.jackson.databind.ObjectMapper;
 public class DeviceLoginAlertService {
 
     private static final Logger log = LoggerFactory.getLogger(DeviceLoginAlertService.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneId.systemDefault());
     private static final DateTimeFormatter DAY_KEY_FMT = DateTimeFormatter.ofPattern("yyyyMMdd")
@@ -30,7 +29,7 @@ public class DeviceLoginAlertService {
     private final ObjectMapper objectMapper;
 
     public DeviceLoginAlertService(GatewayLoginLogRepository loginLogRepository, PushDispatcher pushDispatcher) {
-        this(loginLogRepository, pushDispatcher, JSON);
+        this(loginLogRepository, pushDispatcher, com.surprising.gateway.provider.support.JsonMappers.DEFAULT);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -40,7 +39,7 @@ public class DeviceLoginAlertService {
             ObjectMapper objectMapper) {
         this.loginLogRepository = loginLogRepository;
         this.pushDispatcher = pushDispatcher;
-        this.objectMapper = objectMapper == null ? JSON : objectMapper;
+        this.objectMapper = com.surprising.gateway.provider.support.JsonMappers.orDefault(objectMapper);
     }
 
     /**

@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 
 import com.surprising.gateway.c2c.model.C2cOrderStatus;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import java.util.*;
 import java.util.concurrent.*;
 import org.junit.jupiter.api.*;
@@ -84,7 +84,7 @@ class C2cHttpPostgresTest {
 
     @Test void unknownRecoveryIsReadOnlyAndExplicitStopFencesALateCreation() throws Exception {
         UUID ad=fixture.publish("SELL");UUID quote=fixture.quote(ad,12,"2");String key="qa-stop-"+UUID.randomUUID();
-        String hash=C2cDigests.sha256(quote.toString());
+        String hash=Sha256Digests.hex(quote.toString());
         var unknown=fixture.call(HttpMethod.GET,"/api/v1/c2c/submissions/"+key+"?kind=ORDER_CREATE&requestHash="+hash,12,null,200);
         assertThat(unknown.get("status")).isEqualTo("UNKNOWN");
         assertThat(fixture.bean(C2cSubmissions.class).get(12,key,false)).isNull();
@@ -98,7 +98,7 @@ class C2cHttpPostgresTest {
 
     @Test void anAcceptedReceiptSurvivesLostResponseAndClosedMarketWithoutResubmission() throws Exception {
         UUID ad=fixture.publish("SELL");UUID quote=fixture.quote(ad,12,"2");String key="qa-recover-"+UUID.randomUUID();
-        String hash=C2cDigests.sha256(quote.toString());var original=fixture.create(quote,12,key,"",200);
+        String hash=Sha256Digests.hex(quote.toString());var original=fixture.create(quote,12,key,"",200);
         fixture.db.jdbc.update("UPDATE c2c_configuration SET enabled=false");when(fixture.products.enabled()).thenReturn(List.of());
         var recovered=fixture.call(HttpMethod.GET,"/api/v1/c2c/submissions/"+key+"?kind=ORDER_CREATE&requestHash="+hash,12,null,200);
         assertThat(recovered.get("resultId")).isEqualTo(original.get("resultId"));

@@ -98,6 +98,33 @@ public final class AdminCursorPage {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
+    public static String encodeIdCursor(String prefix, long id) {
+        if (id <= 0) {
+            throw new IllegalArgumentException("cursor id must be positive");
+        }
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString((prefix + id).getBytes(StandardCharsets.UTF_8));
+    }
+
+    public static long decodeIdCursor(String prefix, String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return 0L;
+        }
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+            if (!decoded.startsWith(prefix)) {
+                throw new IllegalArgumentException("invalid cursor");
+            }
+            long id = Long.parseLong(decoded.substring(prefix.length()));
+            if (id <= 0) {
+                throw new IllegalArgumentException("invalid cursor");
+            }
+            return id;
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException("invalid cursor", ex);
+        }
+    }
+
     public record SortSpec(String field, String column, String idColumn, boolean descending) {
         public SortSpec(String field, boolean descending) {
             this(field, field, "id", descending);

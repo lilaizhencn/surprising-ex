@@ -24,7 +24,7 @@ import com.surprising.gateway.c2c.repository.C2cProfileRepository;
 import com.surprising.gateway.c2c.repository.C2cQuoteRepository;
 import com.surprising.gateway.c2c.repository.C2cRelationRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import java.math.BigDecimal;
@@ -104,7 +104,7 @@ public class C2cOrderService {
     @Transactional
     public C2cOrder create(JwtPrincipal user,String authorization,String key,UUID quoteId,String email,String totp) {
         if(quoteId==null) throw new IllegalArgumentException("请选择有效报价");
-        String hash=C2cDigests.sha256(quoteId.toString());
+        String hash=Sha256Digests.hex(quoteId.toString());
         var receipt=submissions.begin(user.userId(),key,"ORDER_CREATE",hash);
         if(receipt.status().equals("SUCCEEDED")) {
             var accepted = orders.get(receipt.resultId(),false);

@@ -10,7 +10,7 @@ import com.surprising.gateway.c2c.model.C2cAttachmentContent;
 import com.surprising.gateway.c2c.model.C2cConversation;
 import com.surprising.gateway.c2c.repository.C2cAttachmentRepository;
 import com.surprising.gateway.c2c.repository.C2cMessageRepository;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import java.io.ByteArrayInputStream;
@@ -47,7 +47,7 @@ public class C2cAttachmentService {
     public Map<String,Object> upload(long user,UUID id,String purpose,UUID order,UUID conversation,String name,String mime,byte[] bytes) {
         storage.ensureEnabled();
         validateBytes(mime,bytes,"PAYMENT_QR".equals(purpose));
-        C2cAttachment admitted=admit(user,id,purpose,order,conversation,name,mime,bytes.length,C2cDigests.sha256(bytes));
+        C2cAttachment admitted=admit(user,id,purpose,order,conversation,name,mime,bytes.length,Sha256Digests.hex(bytes));
         if("READY".equals(admitted.status())) return view(admitted);
         try {storage.store(admitted.key(),bytes,mime);}
         catch(KycDocumentStorageException uncertain) {
@@ -192,5 +192,5 @@ public class C2cAttachmentService {
             } finally {reader.dispose();}
         } catch(java.io.IOException failure) {throw new IllegalArgumentException("图片无法读取");}
     }
-    private static boolean matches(C2cAttachment attachment,byte[] bytes) {return bytes.length==attachment.bytes() && C2cDigests.sha256(bytes).equals(attachment.sha256());}
+    private static boolean matches(C2cAttachment attachment,byte[] bytes) {return bytes.length==attachment.bytes() && Sha256Digests.hex(bytes).equals(attachment.sha256());}
 }

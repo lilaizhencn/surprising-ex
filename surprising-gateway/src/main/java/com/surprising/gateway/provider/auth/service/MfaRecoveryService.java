@@ -123,8 +123,8 @@ public class MfaRecoveryService {
         }
         String expected = digest(request.code(), userId, challenge.destination());
         if (request.code() == null || !SIX_DIGIT_PATTERN.matcher(request.code()).matches()
-                || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                        challenge.codeHash().getBytes(StandardCharsets.UTF_8))) {
+                || !com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                        expected, challenge.codeHash())) {
             challenges.incrementAttempts(challenge.challengeId(), userId, now);
             throw new IllegalArgumentException("recovery code is invalid");
         }

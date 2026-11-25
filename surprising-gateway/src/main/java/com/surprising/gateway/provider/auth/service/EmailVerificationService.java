@@ -57,8 +57,7 @@ public class EmailVerificationService {
             return false;
         }
         String expected = digest(code, PURPOSE, destination);
-        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                challenge.codeHash().getBytes(StandardCharsets.UTF_8))) {
+        if (!com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(expected, challenge.codeHash())) {
             repository.incrementAttempts(challenge.challengeId(), userId, now);
             return false;
         }

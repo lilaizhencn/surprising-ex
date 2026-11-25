@@ -18,8 +18,6 @@ import tools.jackson.databind.ObjectMapper;
 public class CustodyWithdrawalReconciliationService {
 
 
-    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper();
-
     private final CustodyWithdrawalRepository repository;
     private final CustodyWithdrawalStateService states;
     private final CustodyWalletClient walletClient;
@@ -35,7 +33,7 @@ public class CustodyWithdrawalReconciliationService {
         this.states = states;
         this.walletClient = walletClient;
         this.refundService = refundService;
-        this.objectMapper = objectMapper == null ? DEFAULT_OBJECT_MAPPER : objectMapper;
+        this.objectMapper = com.surprising.gateway.provider.support.JsonMappers.orDefault(objectMapper);
     }
 
     public void reconcile(CustodyWithdrawalModels.WithdrawalRecord record) {

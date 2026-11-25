@@ -163,10 +163,13 @@ public class SumsubKycProvider implements KycProvider {
         return Long.toString(userId) + ("BUSINESS".equals(applicantType) ? ":BUSINESS" : "");
     }
     public static String hmac(String secret, String algorithm, byte[] data) {
-        try { Mac mac = Mac.getInstance(algorithm); mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), algorithm)); return HexFormat.of().formatHex(mac.doFinal(data)); }
-        catch (Exception ex) { throw new IllegalStateException("unable to calculate provider signature", ex); }
+        return HexFormat.of().formatHex(com.surprising.gateway.provider.support.Sha256Digests.hmac(
+                algorithm, secret.getBytes(StandardCharsets.UTF_8), data));
     }
-    public static boolean constantTimeEquals(String supplied, String expected) { return supplied != null && MessageDigest.isEqual(supplied.toLowerCase().getBytes(StandardCharsets.UTF_8), expected.getBytes(StandardCharsets.UTF_8)); }
+    public static boolean constantTimeEquals(String supplied, String expected) {
+        return supplied != null && com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                supplied.toLowerCase(), expected);
+    }
     public static String header(Map<String, String> headers, String name) { return headers.entrySet().stream().filter(e -> e.getKey().equalsIgnoreCase(name)).map(Map.Entry::getValue).findFirst().orElse(""); }
     public static String sha256(byte[] body) { return com.surprising.gateway.provider.support.Sha256Digests.hex(body); }
     private static String enc(String s) { return java.net.URLEncoder.encode(s, StandardCharsets.UTF_8); }

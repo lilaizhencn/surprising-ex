@@ -146,14 +146,7 @@ public class CustodyWalletClient {
     }
 
     String sign(String secret, String canonical) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(
-                    mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("wallet request signing failed", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.hmacSha256Base64Url(secret, canonical);
     }
 
     private <T> T exchange(HttpMethod method, String path, Object payload,

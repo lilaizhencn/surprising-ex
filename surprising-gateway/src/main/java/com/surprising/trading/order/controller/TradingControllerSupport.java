@@ -12,7 +12,7 @@ import com.surprising.trading.order.model.ActiveOrderPageQuery;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.LeverageService;
 import com.surprising.trading.order.service.TradingFeeService;
-import com.surprising.trading.order.utils.ActiveOrderCursors;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -104,7 +104,7 @@ public final class TradingControllerSupport {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        return new ActiveOrderPageQuery(limit, ActiveOrderCursors.decode(cursor));
+        return new ActiveOrderPageQuery(limit, AdminCursorPage.decodeIdCursor("core-open:v1:", cursor));
     }
 
     public static String activeInstrument(String instrumentId) {

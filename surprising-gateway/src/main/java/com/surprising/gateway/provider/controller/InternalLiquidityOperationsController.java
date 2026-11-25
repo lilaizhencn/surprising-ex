@@ -68,7 +68,7 @@ public class InternalLiquidityOperationsController {
         String supplied = request.getHeader("X-Operations-Token");
         if (token.length() < 32 || supplied == null || !loopback
                 || request.getHeader("Forwarded") != null || request.getHeader("X-Forwarded-For") != null
-                || !MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8), supplied.getBytes(StandardCharsets.UTF_8)))
+                || !com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(token, supplied))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "host-local operations authentication required");
     }
 

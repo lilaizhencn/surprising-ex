@@ -14,7 +14,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
@@ -62,8 +62,8 @@ class C2cAdsPostgresTest {
     @AfterEach void cleanup() {if(db!=null)db.close();}
     private C2cController.Publish request() {return new C2cController.Publish(marketId,"SELL","6.65","10","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);}
     private C2cAd publish() {
-        new C2cSubmissions(db.jdbc).admit(owner.userId(),"original-ad-request-0001","AD_PUBLISH",C2cDigests.sha256(new ObjectMapper().writeValueAsString(request())));
-        return db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",C2cDigests.sha256(new ObjectMapper().writeValueAsString(request())),C2cController.publishParameters(request()),"123456",""));}
+        new C2cSubmissions(db.jdbc).admit(owner.userId(),"original-ad-request-0001","AD_PUBLISH",Sha256Digests.hex(new ObjectMapper().writeValueAsString(request())));
+        return db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",Sha256Digests.hex(new ObjectMapper().writeValueAsString(request())),C2cController.publishParameters(request()),"123456",""));}
     private C2cAd active() {
         var ad=publish();var intent=db.jdbc.queryForObject("SELECT intent_id FROM c2c_fund_intents WHERE owner_id=?",UUID.class,ad.id());
         funds.resume(intent);db.transaction(()->{ads.finishFunding(ad.id());return null;});return rows.get(ad.id(),false);
@@ -113,7 +113,7 @@ class C2cAdsPostgresTest {
         var other=new JwtPrincipal(12,"other","NORMAL",List.of(),Instant.now().plusSeconds(60));
         assertThatThrownBy(()->db.transaction(()->ads.status(other,"Bearer other",ad.id(),ad.revision(),"CLOSE","",""))).isInstanceOf(IllegalStateException.class);
         var changed=new C2cController.Publish(marketId,"SELL","6.65","11","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);
-        assertThatThrownBy(()->db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",C2cDigests.sha256(new ObjectMapper().writeValueAsString(changed)),C2cController.publishParameters(changed),"",""))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(()->db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",Sha256Digests.hex(new ObjectMapper().writeValueAsString(changed)),C2cController.publishParameters(changed),"",""))).isInstanceOf(IllegalStateException.class);
         assertThat(db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents",Integer.class)).isOne();
         assertThat(rows.get(ad.id(),false).status()).isEqualTo("ACTIVE");
     }

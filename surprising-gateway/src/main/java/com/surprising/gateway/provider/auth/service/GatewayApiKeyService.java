@@ -154,8 +154,8 @@ public class GatewayApiKeyService {
             throw new IllegalArgumentException("request timestamp is outside recvWindow");
         }
         String expected = sign(totpService.decryptSecret(record.secretCiphertext()), request.canonical());
-        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                request.signature().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8))) {
+        if (!com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                expected, request.signature().toLowerCase(Locale.ROOT))) {
             throw new IllegalArgumentException("invalid api signature");
         }
         currentClient.authenticated(record.userId(), record.apiKey());
@@ -183,13 +183,7 @@ public class GatewayApiKeyService {
     }
 
     public String sign(String secret, String canonicalQuery) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return java.util.HexFormat.of().formatHex(mac.doFinal(canonicalQuery.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("api signature is unavailable", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.hmacSha256Hex(secret, canonicalQuery);
     }
 
     private void requireSecurity(long userId, String emailCode, String totpCode) {

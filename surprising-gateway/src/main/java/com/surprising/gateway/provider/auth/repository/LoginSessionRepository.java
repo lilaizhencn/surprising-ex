@@ -142,7 +142,7 @@ public class LoginSessionRepository {
         String cursor=null;
         if(more) {
             long last=id(members.get(examined-1));
-            cursor=Base64.getUrlEncoder().withoutPadding().encodeToString((Instant.ofEpochMilli(last/1000)+"|"+last).getBytes(StandardCharsets.UTF_8));
+            cursor=AdminCursorPage.encodeCursor(Instant.ofEpochMilli(last/1000),last);
         }
         return new AdminCursorPage.CursorPage<>(rows,cursor,more,sort,limit);
     }

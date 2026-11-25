@@ -19,7 +19,7 @@ import com.surprising.gateway.c2c.model.C2cQuickQuoteSpec;
 import com.surprising.gateway.c2c.service.C2cQueryService;
 import com.surprising.gateway.c2c.service.C2cQuickQuoteService;
 import com.surprising.gateway.c2c.service.C2cSubmissionService;
-import com.surprising.gateway.c2c.utils.C2cDigests;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import java.util.*;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -104,7 +104,7 @@ public class C2cController {
         var user=access.user(authorization);
         requireKey(request.requestKey());
         if(request.payload()==null) throw new IllegalArgumentException("广告资料不完整");
-        String hash=C2cDigests.sha256(json.writeValueAsString(request.payload()));
+        String hash=Sha256Digests.hex(json.writeValueAsString(request.payload()));
         C2cAdPublish payload;
         try {payload=publishParameters(request.payload());}
         catch(IllegalArgumentException | ArithmeticException invalid) {return submissions.rejectInput(user.userId(),request.requestKey(),"AD_PUBLISH",hash,invalid);}
@@ -157,7 +157,7 @@ public class C2cController {
         var user=access.user(authorization);
         requireKey(request.requestKey());
         if(request.quoteId()==null) throw new IllegalArgumentException("请选择有效报价");
-        String hash=C2cDigests.sha256(request.quoteId().toString());
+        String hash=Sha256Digests.hex(request.quoteId().toString());
         var codes=C2cVerification.orEmpty(request.verification());
         return submissions.create(user,authorization,request.requestKey(),request.quoteId(),hash,codes.emailCode(),codes.totpCode());
     }

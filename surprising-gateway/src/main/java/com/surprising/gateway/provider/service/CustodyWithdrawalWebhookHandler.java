@@ -17,14 +17,12 @@ import tools.jackson.databind.ObjectMapper;
 public class CustodyWithdrawalWebhookHandler {
 
     private final CustodyWithdrawalStateService states;
-    private static final ObjectMapper DEFAULT_OBJECT_MAPPER = new ObjectMapper();
-
     private final ObjectMapper objectMapper;
 
     @Autowired
     public CustodyWithdrawalWebhookHandler(CustodyWithdrawalStateService states, ObjectMapper objectMapper) {
         this.states = states;
-        this.objectMapper = objectMapper == null ? DEFAULT_OBJECT_MAPPER : objectMapper;
+        this.objectMapper = com.surprising.gateway.provider.support.JsonMappers.orDefault(objectMapper);
     }
 
     @Transactional

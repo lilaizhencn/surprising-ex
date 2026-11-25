@@ -23,7 +23,7 @@ public class TelegramWebAppInitDataVerifier {
     private final ObjectMapper objectMapper;
 
     public TelegramWebAppInitDataVerifier() {
-        this(new ObjectMapper());
+        this(com.surprising.gateway.provider.support.JsonMappers.DEFAULT);
     }
 
     @Autowired
@@ -106,23 +106,15 @@ public class TelegramWebAppInitDataVerifier {
 
             // 3. 计算 HMAC-SHA256
             // secret_key = HMAC_SHA256(key="WebAppData", data=botToken)
-            Mac hmacSha256 = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secretKeySpec = new SecretKeySpec("WebAppData".getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-            hmacSha256.init(secretKeySpec);
-            byte[] secretKey = hmacSha256.doFinal(botToken.getBytes(StandardCharsets.UTF_8));
+            byte[] secretKey = com.surprising.gateway.provider.support.Sha256Digests.hmacSha256(
+                    "WebAppData".getBytes(StandardCharsets.UTF_8), botToken.getBytes(StandardCharsets.UTF_8));
 
             // data_hash = HMAC_SHA256(key=secretKey, data=dataCheckString)
-            Mac dataHmac = Mac.getInstance("HmacSHA256");
-            dataHmac.init(new SecretKeySpec(secretKey, "HmacSHA256"));
-            byte[] hashBytes = dataHmac.doFinal(dataCheckString.toString().getBytes(StandardCharsets.UTF_8));
+            String calculatedHex = com.surprising.gateway.provider.support.Sha256Digests.hmacSha256Hex(
+                    secretKey, dataCheckString.toString().getBytes(StandardCharsets.UTF_8));
 
-            StringBuilder calculatedHex = new StringBuilder();
-            for (byte b : hashBytes) {
-                calculatedHex.append(String.format("%02x", b));
-            }
-
-            if (!MessageDigest.isEqual(calculatedHex.toString().getBytes(StandardCharsets.UTF_8),
-                    receivedHash.toLowerCase().getBytes(StandardCharsets.UTF_8))) {
+            if (!com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                    calculatedHex, receivedHash.toLowerCase())) {
                 log.warn("Telegram WebApp initData hash mismatch!");
                 return Optional.empty();
             }

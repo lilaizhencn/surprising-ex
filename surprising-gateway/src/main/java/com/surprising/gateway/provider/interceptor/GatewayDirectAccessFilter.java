@@ -245,9 +245,8 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
                 && !route.admin()
                 && internalToken != null && !internalToken.isBlank()
                 && expectedSecret != null && !expectedSecret.isBlank()
-                && java.security.MessageDigest.isEqual(
-                        internalToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        expectedSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                && com.surprising.gateway.provider.support.Sha256Digests.constantTimeEquals(
+                        internalToken, expectedSecret)) {
             return null;
         }
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
