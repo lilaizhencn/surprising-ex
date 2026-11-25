@@ -52,7 +52,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private final java.util.concurrent.locks.ReentrantLock configurationLock = new java.util.concurrent.locks.ReentrantLock();
     private volatile MarketMakerProperties.ReferenceMarket loadedConfiguration;
     private volatile long configurationGeneration;
-    private static final Duration BOOK_HOLD = Duration.ofSeconds(15);
+    private static final Duration BOOK_HOLD = Duration.ofSeconds(30);
     private static final int MAX_QUEUED_PRINTS = 64;
     private static final int MAX_SEEN_TRADE_IDS = 4096;
 
@@ -73,7 +73,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper) {
-        this(properties, objectMapper, new com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups(properties, objectMapper));
+        this(properties, objectMapper, new com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups(properties));
     }
 
     @Override
@@ -106,14 +106,13 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         String normalizedSymbol = normalizeSymbol(instrumentId);
         String cacheKey = cacheKey(effectiveProductLine, normalizedSymbol);
         Instant now = Instant.now();
-        CachedSnapshot cached;
-        synchronized (configurationLock) {
-            if (generation != configurationGeneration) return null;
-            ensureWebSocketConnections(referenceMarket, effectiveProductLine, normalizedSymbol, instrument, now);
-            cached = cache.get(cacheKey);
-            if (cached != null
-                    && (cached.streaming() || cached.fetchedAt().plus(refreshInterval()).isAfter(now))
-                    && fresh(cached.snapshot(), now)) return cached.snapshot();
+        ensureWebSocketConnections(referenceMarket, effectiveProductLine, normalizedSymbol, instrument, now);
+        if (generation != configurationGeneration) return null;
+        CachedSnapshot cached = cache.get(cacheKey);
+        if (cached != null
+                && (cached.streaming() || cached.fetchedAt().plus(refreshInterval()).isAfter(now))
+                && fresh(cached.snapshot(), now)) {
+            return cached.snapshot();
         }
 
         for (MarketMakerProperties.ReferenceMarket.Source source : referenceMarket.getSources()) {
@@ -123,11 +122,9 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             try {
                 ReferenceOrderBookSnapshot snapshot = fetch(source, normalizedSymbol, instrument);
                 if (snapshot != null && snapshot.hasTwoSidedDepth()) {
-                    synchronized (configurationLock) {
-                        if (generation != configurationGeneration) return null;
-                        cache.put(cacheKey, new CachedSnapshot(snapshot, Instant.now(), false));
-                        return snapshot;
-                    }
+                    if (generation != configurationGeneration) return null;
+                    cache.put(cacheKey, new CachedSnapshot(snapshot, Instant.now(), false));
+                    return snapshot;
                 }
             } catch (RuntimeException ex) {
                 log.debug("Reference market fetch failed source={} symbol={} error={}",
@@ -135,11 +132,9 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             }
         }
 
-        synchronized (configurationLock) {
-            if (generation != configurationGeneration || cached == null) return null;
-            // A brief gap keeps the last two-sided book. Quoting holds it instead of pulling the ladder.
-            return fresh(cached.snapshot(), now) || held(cached.snapshot(), now) ? cached.snapshot() : null;
-        }
+        if (generation != configurationGeneration || cached == null) return null;
+        // A brief gap keeps the last two-sided book. Quoting holds it instead of pulling the ladder.
+        return fresh(cached.snapshot(), now) || held(cached.snapshot(), now) ? cached.snapshot() : null;
     }
 
     @Override
@@ -189,10 +184,11 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                                                              JsonNode root,
                                                              Instant receivedAt) {
         try {
-            if (recordTrades(source, instrumentId, instrument, root, receivedAt)) {
+            JsonNode payload = root != null && root.has("stream") && root.has("data") ? root.path("data") : root;
+            if (recordTrades(source, instrumentId, instrument, payload, receivedAt)) {
                 return null;
             }
-            ParsedBookUpdate update = parseLiveBookUpdate(liveParser(source), root);
+            ParsedBookUpdate update = parseLiveBookUpdate(liveParser(source), payload);
             if (update == null || update.empty()) {
                 return null;
             }
@@ -262,8 +258,11 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
     private ParsedBookUpdate parseLiveBookUpdate(String parser, JsonNode root) {
         return switch (parser.toUpperCase(Locale.ROOT)) {
-            case "BINANCE_DEPTH_STREAM", "BINANCE_PARTIAL_DEPTH_STREAM" -> new ParsedBookUpdate(
-                    parseLevels(root.path("b"), true), parseLevels(root.path("a"), true), false);
+            case "BINANCE_DEPTH_STREAM", "BINANCE_PARTIAL_DEPTH_STREAM" -> {
+                JsonNode bids = root.has("bids") ? root.path("bids") : root.path("b");
+                JsonNode asks = root.has("asks") ? root.path("asks") : root.path("a");
+                yield new ParsedBookUpdate(parseLevels(bids, true), parseLevels(asks, true), false);
+            }
             case "OKX_BOOKS_WS", "OKX_BOOKS_FULL_WS" -> {
                 JsonNode book = root.path("data").path(0);
                 boolean delta = "update".equalsIgnoreCase(root.path("action").asString("snapshot"));
@@ -395,10 +394,30 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 && snapshot.receivedAt().plus(holdAge()).isAfter(now);
     }
 
-    /** OKX public trades use the same socket as the book. The taker side is the print side. */
+    /** OKX & Binance public trades share the socket with the book. The taker side is the print side. */
     private boolean recordTrades(MarketMakerProperties.ReferenceMarket.Source source, String instrumentId,
                                  InstrumentResponse instrument, JsonNode root, Instant receivedAt) {
-        if (root == null || !"trades".equalsIgnoreCase(root.path("arg").path("channel").asString(""))) {
+        if (root == null) return false;
+        if ("trade".equalsIgnoreCase(root.path("e").asString(""))) {
+            String eventSymbol = root.path("s").asString("");
+            if (hasText(source.getExternalSymbol()) && hasText(eventSymbol)
+                    && !source.getExternalSymbol().equalsIgnoreCase(eventSymbol)) {
+                return false;
+            }
+            OrderSide side = root.path("m").asBoolean(false) ? OrderSide.SELL : OrderSide.BUY;
+            long priceTicks = toTicks(decimalText(root.path("p").asString(null)), instrument.pricePrecision());
+            long quantitySteps = toSteps(decimalText(root.path("q").asString(null)), instrument, source,
+                    properties.getReferenceMarket());
+            if (priceTicks > 0 && quantitySteps > 0) {
+                String key = cacheKey(source.getProductLine(), normalizeSymbol(instrumentId));
+                TradeTape tape = tradeTapes.computeIfAbsent(key, ignored -> new TradeTape());
+                String tradeId = root.path("t").asString("");
+                tape.add(new ExternalTrade(tradeId.isBlank() ? priceTicks + ":" + receivedAt.toEpochMilli() : tradeId,
+                        side, priceTicks, quantitySteps, receivedAt));
+            }
+            return true;
+        }
+        if (!"trades".equalsIgnoreCase(root.path("arg").path("channel").asString(""))) {
             return false;
         }
         JsonNode data = root.path("data");
@@ -463,8 +482,13 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             if (!shouldConnect(state, now)) {
                 continue;
             }
-            state.connecting = true;
-            state.lastAttempt = now;
+            synchronized (state) {
+                if (!shouldConnect(state, now)) {
+                    continue;
+                }
+                state.connecting = true;
+                state.lastAttempt = now;
+            }
             try {
                 httpClient.newWebSocketBuilder()
                         .connectTimeout(timeout())
@@ -609,12 +633,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                     JsonNode root = objectMapper.readTree(payload);
                     String externalSymbol = extractExternalSymbol(root);
                     Instant now = Instant.now();
-                    synchronized (configurationLock) {
-                        if (!state.retired) {
-                            for (WebSocketBinding binding : state.bindings.values()) {
-                                if (matchesBinding(binding, externalSymbol, root, state.bindings.size())) {
-                                    parseWebSocketPayload(binding.source(), binding.instrumentId(), binding.instrument(), root, now);
-                                }
+                    if (!state.retired) {
+                        for (WebSocketBinding binding : state.bindings.values()) {
+                            if (matchesBinding(binding, externalSymbol, root, state.bindings.size())) {
+                                parseWebSocketPayload(binding.source(), binding.instrumentId(), binding.instrument(), root, now);
                             }
                         }
                     }

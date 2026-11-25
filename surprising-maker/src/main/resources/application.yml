@@ -7,35 +7,10 @@ spring:
       accept-float-as-int: false
   application:
     name: surprising-maker
-  cloud:
-    openfeign:
-      circuitbreaker:
-        enabled: true
-      client:
-        config:
-          default:
-            # 做市报价是异步用户命令链路，读超时要覆盖 Kafka 重平衡和账户预占确认。
-            connect-timeout: 2000
-            read-timeout: 5000
-resilience4j:
-  circuitbreaker:
-    configs:
-      default:
-        slidingWindowSize: 20
-        minimumNumberOfCalls: 5
-        failureRateThreshold: 50.0
-        waitDurationInOpenState: 10s
-        permittedNumberOfCallsInHalfOpenState: 3
-        slowCallRateThreshold: 70.0
-        slowCallDurationThreshold: 3s
-  timelimiter:
-    configs:
-      default:
-        timeoutDuration: 5s
   task:
     scheduling:
       pool:
-        size: 4
+        size: 2
       thread-name-prefix: market-maker-scheduler-
       shutdown:
         await-termination: true
@@ -51,7 +26,6 @@ management:
     distribution:
       percentiles-histogram:
         http.server.requests: true
-        resilience4j.circuitbreaker.calls: true
       percentiles:
         http.server.requests: 0.5, 0.9, 0.95, 0.99, 0.999
       slo:
@@ -59,23 +33,23 @@ management:
 
 surprising:
   realtime:
-    enabled: ${REALTIME_ENABLED:true}
-    directory: ${AERON_DIR:/dev/shm/aeron-surprising}
-    channel: ${SURPRISING_MAKER_UDP_CHANNEL:aeron:udp?endpoint=127.0.0.1:40130}
-    stream: ${SURPRISING_MAKER_UDP_STREAM:2103}
+    enabled: true
+    directory: /dev/shm/aeron-surprising
+    channel: "aeron:udp?endpoint=127.0.0.1:40130"
+    stream: 2103
   market-maker:
     infrastructure:
-      product-line: ${PRODUCT_LINE}
-      node-id: ${MM_NODE_ID:}
+      product-line: LINEAR_PERPETUAL
+      node-id: ""
     # 单实例；业务配置与策略由 YAML 初始化，后台热更新只保留在当前进程。
     engine:
-      enabled: ${MM_ENGINE_ENABLED:false}
-      trade-interval: ${MM_TRADE_INTERVAL:1s}
+      enabled: true
+      trade-interval: 1s
     reference-market:
-      enabled: ${REFERENCE_MARKET_ENABLED:false}
-      max-age: 3s
-      request-timeout: 2s
-      reconnect-backoff: 5s
+      enabled: true
+      max-age: 5s
+      request-timeout: 5s
+      reconnect-backoff: 2s
       depth-levels: 20
       sources: []
     strategies: []

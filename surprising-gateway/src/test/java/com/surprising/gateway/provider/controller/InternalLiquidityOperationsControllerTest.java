@@ -29,7 +29,7 @@ class InternalLiquidityOperationsControllerTest {
         when(local.service(ProductLine.LINEAR_PERPETUAL, AccountCommandGateway.class)).thenReturn(accounts);
         when(local.service(ProductLine.LINEAR_PERPETUAL, LeverageService.class)).thenReturn(leverage);
         doThrow(new com.surprising.gateway.provider.exception.ProductUnavailableException(ProductLine.INVERSE_PERPETUAL)).when(local).requireEnabled(ProductLine.INVERSE_PERPETUAL);
-        return new InternalLiquidityOperationsController(configured, new com.surprising.gateway.provider.service.LiquidityOperationsService(local,instruments,audit), new ObjectMapper());
+        return new InternalLiquidityOperationsController(configured, new com.surprising.gateway.provider.service.LiquidityOperationsService(local,instruments,audit));
     }
     private MockHttpServletRequest request() {
         var r = new MockHttpServletRequest("POST", "/internal/v1/operations/liquidity/balance-adjustments");

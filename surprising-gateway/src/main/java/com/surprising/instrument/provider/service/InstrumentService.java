@@ -162,7 +162,7 @@ public class InstrumentService {
         var rows = configuration.instruments().stream().map(InstrumentResponse::immutableCopy).toList();
         var scales = Map.copyOf(configuration.assetScales());
         long sequence = rows.stream().mapToLong(InstrumentResponse::lastChangeId).max().orElse(0L);
-        var response = new InstrumentSnapshotResponse(productLine, sequence, "", rows, scales);
+        var response = new InstrumentSnapshotResponse(productLine, sequence, rows, scales);
         catalogSnapshots.put(productLine, new CatalogSnapshot(configuration.version(), response, now));
         return response;
     }

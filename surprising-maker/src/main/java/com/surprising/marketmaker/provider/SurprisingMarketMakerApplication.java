@@ -2,28 +2,15 @@ package com.surprising.marketmaker.provider;
 
 import lombok.extern.slf4j.Slf4j;
 
-import com.surprising.account.api.client.AccountRpcApi;
-import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
-import com.surprising.trading.api.client.MarketDataRpcApi;
-import com.surprising.trading.api.client.OrderRpcApi;
 import jakarta.annotation.PostConstruct;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = "com.surprising")
 @EnableScheduling
-@EnableFeignClients(clients = {
-        AccountRpcApi.class,
-        InstrumentRpcApi.class,
-        MarketDataRpcApi.class,
-        OrderRpcApi.class,
-        com.surprising.marketmaker.provider.client.MakerTradingFeeClient.class,
-        com.surprising.marketmaker.provider.client.MakerQuoteInputsClient.class
-})
 @EnableConfigurationProperties(com.surprising.marketmaker.provider.config.MarketMakerInfrastructureProperties.class)
 @Slf4j
 public class SurprisingMarketMakerApplication {

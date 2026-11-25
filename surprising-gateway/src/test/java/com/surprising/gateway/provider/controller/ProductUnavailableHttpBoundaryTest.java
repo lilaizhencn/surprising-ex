@@ -52,7 +52,7 @@ class ProductUnavailableHttpBoundaryTest {
         var audit=mock(AdminAuditRepository.class);var instruments=mock(InstrumentService.class);
         String token="host-operation-product-availability-secret";
         var mvc=MockMvcBuilders.standaloneSetup(new InternalLiquidityOperationsController(token,
-                new LiquidityOperationsService(products,instruments,audit),new ObjectMapper()))
+                new LiquidityOperationsService(products,instruments,audit)))
                 .setControllerAdvice(new GlobalGatewayExceptionHandler()).build();
         mvc.perform(get("/internal/v1/operations/liquidity/leverage").with(request->{request.setRemoteAddr("127.0.0.1");return request;})
                 .header("X-Operations-Token",token).param("userId","42").param("instrumentId","604")

@@ -316,16 +316,22 @@ public class QuotePlanner {
     private List<DesiredQuote> trimReferenceQuotesToBudget(MarketMakerProperties.Strategy strategy,
             MarketMakerProperties.Risk risk, InstrumentResponse instrument, MarkPriceResponse mark,
             long position, List<DesiredQuote> quotes) {
-        if (strategy.getProductLine() == ProductLine.SPOT) return List.copyOf(quotes);
-        long maxSteps = quoteCapacitySteps(strategy, risk, instrument, mark, quotes);
+        boolean spot = strategy.getProductLine() == ProductLine.SPOT;
+        long maxSteps = spot ? 0L : quoteCapacitySteps(strategy, risk, instrument, mark, quotes);
         long minimum = Math.max(1L, instrument.minQuantitySteps());
         List<DesiredQuote> sized = new ArrayList<>(quotes.size());
         for (OrderSide side : OrderSide.values()) {
-            long capacity = side == OrderSide.BUY ? Math.max(0, Math.subtractExact(maxSteps, position))
-                    : Math.max(0, Math.addExact(maxSteps, position));
             List<DesiredQuote> sideQuotes = quotes.stream()
                     .filter(quote -> quote.side() == side)
                     .toList();
+            if (spot && side == OrderSide.BUY) {
+                // Spot buy quotes are funded by quote asset, not base inventory.
+                sized.addAll(sideQuotes);
+                continue;
+            }
+            long capacity = spot ? Math.max(0L, position)
+                    : (side == OrderSide.BUY ? Math.max(0, Math.subtractExact(maxSteps, position))
+                            : Math.max(0, Math.addExact(maxSteps, position)));
             long totalRequested = sideQuotes.stream()
                     .mapToLong(DesiredQuote::quantitySteps)
                     .reduce(0L, (a, b) -> a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b);
@@ -583,7 +589,11 @@ public class QuotePlanner {
 
     private long clampQuantity(InstrumentResponse instrument, long quantity) {
         long minimum = Math.max(1L, instrument.minQuantitySteps());
-        long maximum = instrument.maxQuantitySteps();
+        long stepUnits = Math.max(1L, instrument.quantityStepUnits());
+        long unitCeiling = Long.MAX_VALUE / stepUnits;
+        long maximum = instrument.maxQuantitySteps() > 0
+                ? Math.min(instrument.maxQuantitySteps(), unitCeiling)
+                : unitCeiling;
         if (maximum > 0) quantity = Math.min(quantity, maximum);
         return Math.max(minimum, quantity);
     }

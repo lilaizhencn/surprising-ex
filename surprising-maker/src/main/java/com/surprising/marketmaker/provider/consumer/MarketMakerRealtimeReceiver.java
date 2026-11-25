@@ -6,8 +6,11 @@ import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.service.MarketMakerMarkPriceCache;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.product.api.ProductLine;
+import io.aeron.driver.MediaDriver;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
@@ -39,14 +42,26 @@ public class MarketMakerRealtimeReceiver implements AutoCloseable {
                                       MakerQuoteWakeups wakeups,
                                       ObjectMapper mapper,
                                       Environment env) {
+        this(properties, markPriceCache, wakeups, mapper, env, null);
+    }
+
+    @Autowired
+    public MarketMakerRealtimeReceiver(MarketMakerProperties properties,
+                                      MarketMakerMarkPriceCache markPriceCache,
+                                      MakerQuoteWakeups wakeups,
+                                      ObjectMapper mapper,
+                                      Environment env,
+                                      @Autowired(required = false) @Qualifier("makerMediaDriver") MediaDriver mediaDriver) {
         this.properties = properties;
         this.markPriceCache = markPriceCache;
         this.wakeups = wakeups;
         this.mapper = mapper;
 
         this.channel = env.getProperty("surprising.realtime.channel", "aeron:udp?endpoint=127.0.0.1:40130");
-        String directoryPath = env.getProperty("surprising.realtime.directory",
-                io.aeron.CommonContext.getAeronDirectoryName());
+        String directoryPath = mediaDriver != null
+                ? mediaDriver.aeronDirectoryName()
+                : env.getProperty("AERON_DIR", env.getProperty("surprising.realtime.directory",
+                        io.aeron.CommonContext.getAeronDirectoryName()));
         int streamId = env.getProperty("surprising.realtime.stream", Integer.class, 2103);
 
         AeronRealtimeReceiver activeReceiver = null;

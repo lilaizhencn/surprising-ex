@@ -1,31 +1,28 @@
-spring:
-  cloud:
-    openfeign:
-      circuitbreaker:
-        enabled: false
-
 surprising:
   market-maker:
     engine:
       enabled: true
-      quote-watchdog-interval: 100ms
-      trade-interval: 100ms
+      quote-watchdog-interval: 500ms
+      min-quote-interval: 40ms
+      trade-interval: 120ms
     quoting:
       order-book-depth: 100
       order-levels: 30
       min-spread-ticks: 2
       level-spacing-ticks: 1
-      refresh-threshold-ticks: 3
-      refresh-tolerance-ppm: 50
-      quantity-refresh-tolerance-ppm: 150000
+      refresh-threshold-ticks: 1
+      refresh-tolerance-ppm: 0
+      quantity-refresh-tolerance-ppm: 30000
       quantity-variation-ppm: 500000
       reference-pressure-skew-ppm: 150
       inventory-price-skew-ppm: 0
-      order-reconciliation-interval: 50ms
+      max-quote-updates-per-cycle: 2
+      prefer-in-place-amend: true
+      order-reconciliation-interval: 250ms
       max-open-orders-per-account-symbol: 200
+      max-price-deviation-ppm: 50000
     trade:
       enabled: true
-      account-ids: []
       orders-per-batch: 1
       min-quantity-steps: 1
       # A copied print is still capped by the top of our own book, so one external trade cannot clear it.
@@ -35,7 +32,7 @@ surprising:
     reference-market:
       enabled: true
       web-socket-enabled: true
-      refresh-interval: 100ms
+      refresh-interval: 40ms
       # Keep the external size. The old 1_000-step ceiling turned a 5-coin level into 10 at most,
       # and the strategy base of 3 steps then flattened every level to 0.03.
       max-quantity-steps: 10000000000
@@ -70,36 +67,36 @@ surprising:
           web-socket-url: wss://ws.okx.com:8443/ws/v5/public
           web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"SOL-USDT-SWAP"}]}'
           web-socket-parser: OKX_BOOKS_WS
-        - name: okx-spot-btc
+        - name: binance-spot-btc
           enabled: true
           product-line: SPOT
           instrument-id: "1001"
-          external-symbol: BTC-USDT
-          url: https://www.okx.com/api/v5/market/books?instId=BTC-USDT&sz=20
-          parser: OKX_BOOKS
-          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
-          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"BTC-USDT"}]}'
-          web-socket-parser: OKX_BOOKS_WS
-        - name: okx-spot-eth
+          external-symbol: BTCUSDT
+          url: https://data-api.binance.vision/api/v3/depth?symbol=BTCUSDT&limit=20
+          parser: BINANCE_DEPTH
+          web-socket-url: wss://data-stream.binance.vision:9443/stream?streams=btcusdt@depth20@100ms/btcusdt@trade
+          web-socket-subscribe-message: ""
+          web-socket-parser: BINANCE_PARTIAL_DEPTH_STREAM
+        - name: binance-spot-eth
           enabled: true
           product-line: SPOT
           instrument-id: "1002"
-          external-symbol: ETH-USDT
-          url: https://www.okx.com/api/v5/market/books?instId=ETH-USDT&sz=20
-          parser: OKX_BOOKS
-          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
-          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"ETH-USDT"}]}'
-          web-socket-parser: OKX_BOOKS_WS
-        - name: okx-spot-sol
+          external-symbol: ETHUSDT
+          url: https://data-api.binance.vision/api/v3/depth?symbol=ETHUSDT&limit=20
+          parser: BINANCE_DEPTH
+          web-socket-url: wss://data-stream.binance.vision:9443/stream?streams=ethusdt@depth20@100ms/ethusdt@trade
+          web-socket-subscribe-message: ""
+          web-socket-parser: BINANCE_PARTIAL_DEPTH_STREAM
+        - name: binance-spot-sol
           enabled: true
           product-line: SPOT
           instrument-id: "1003"
-          external-symbol: SOL-USDT
-          url: https://www.okx.com/api/v5/market/books?instId=SOL-USDT&sz=20
-          parser: OKX_BOOKS
-          web-socket-url: wss://ws.okx.com:8443/ws/v5/public
-          web-socket-subscribe-message: '{"op":"subscribe","args":[{"channel":"books","instId":"SOL-USDT"}]}'
-          web-socket-parser: OKX_BOOKS_WS
+          external-symbol: SOLUSDT
+          url: https://data-api.binance.vision/api/v3/depth?symbol=SOLUSDT&limit=20
+          parser: BINANCE_DEPTH
+          web-socket-url: wss://data-stream.binance.vision:9443/stream?streams=solusdt@depth20@100ms/solusdt@trade
+          web-socket-subscribe-message: ""
+          web-socket-parser: BINANCE_PARTIAL_DEPTH_STREAM
     strategies:
       - strategy-id: local-perp-btc
         product-line: LINEAR_PERPETUAL
@@ -154,11 +151,11 @@ surprising:
         enabled: true
         account-ids: [202]
         instrument-ids: ["1002"]
-        base-quantity-steps: 3
+        base-quantity-steps: 1
         margin-mode: CROSS
         spread-ticks: 1
         level-spacing-ticks: 1
-        order-levels: 30
+        order-levels: 10
         max-inventory-steps: 10000
         max-inventory-skew-ppm: 500000
       - strategy-id: local-spot-sol

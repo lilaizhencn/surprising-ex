@@ -23,7 +23,7 @@ class InstrumentSnapshotInitializerTest {
         var cache = new InstrumentSnapshotCache();
         for (ProductLine other : ProductLine.values()) {
             when(service.snapshot(other)).thenReturn(new InstrumentSnapshotResponse(
-                    other, 0, "", List.of(), Map.of("USDT", 100_000_000L)));
+                    other, 0, List.of(), Map.of("USDT", 100_000_000L)));
         }
 
         new GatewayInstrumentSnapshotBridge(service, cache).initialize();
@@ -40,10 +40,10 @@ class InstrumentSnapshotInitializerTest {
         var service = mock(InstrumentService.class);
         var cache = new InstrumentSnapshotCache();
         for (ProductLine other : ProductLine.values()) {
-            when(service.snapshot(other)).thenReturn(new InstrumentSnapshotResponse(other, 0, "", List.of()));
+            when(service.snapshot(other)).thenReturn(new InstrumentSnapshotResponse(other, 0, List.of()));
         }
         var mismatched = line == ProductLine.SPOT ? ProductLine.OPTION : ProductLine.SPOT;
-        when(service.snapshot(line)).thenReturn(new InstrumentSnapshotResponse(mismatched, 0, "", List.of()));
+        when(service.snapshot(line)).thenReturn(new InstrumentSnapshotResponse(mismatched, 0, List.of()));
 
         assertThatThrownBy(() -> new GatewayInstrumentSnapshotBridge(service, cache).initialize())
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("产品线不匹配");

@@ -4,21 +4,6 @@ import com.surprising.marketmaker.provider.model.MarketMakerRunEventPageQuery;
 
 import com.surprising.marketmaker.provider.model.MarketMakerAdminModels;
 import static org.assertj.core.api.Assertions.assertThat;
-import com.surprising.account.api.client.AccountRpcApi;
-import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.BalanceQueryResponse;
-import com.surprising.account.api.model.BalanceResponse;
-import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
-import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
-import com.surprising.account.api.model.PositionMarginResponse;
-import com.surprising.account.api.model.PositionModeResponse;
-import com.surprising.account.api.model.PositionModeUpdateRequest;
-import com.surprising.account.api.model.PositionQueryResponse;
-import com.surprising.account.api.model.PositionResponse;
-import com.surprising.account.api.model.ProductBalanceQueryResponse;
-import com.surprising.account.api.model.ProductBalanceResponse;
-import com.surprising.account.api.model.ProductTransferRequest;
-import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.ContractType;
@@ -29,7 +14,7 @@ import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
-import com.surprising.marketmaker.provider.config.MarketMakerProductLineContext;
+import com.surprising.marketmaker.provider.client.MakerAeronTradingGateway;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.ExternalTrade;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
@@ -77,8 +62,6 @@ import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
-import com.surprising.trading.api.client.MarketDataRpcApi;
-import com.surprising.trading.api.client.OrderRpcApi;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -91,8 +74,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.Optional;
 import java.util.zip.CRC32;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -101,11 +84,6 @@ class MarketMakerServiceTest {
     private static final ObjectMapper ORDER_OBJECT_MAPPER = JsonMapper.builder()
             .findAndAddModules()
             .build();
-
-    @AfterEach
-    void clearProductLineContext() {
-        MarketMakerProductLineContext.clear();
-    }
 
     @Test
     void excludingOwnQuotesAggregatesSamePriceAndKeepsMixedExternalLiquidity() {
@@ -120,35 +98,25 @@ class MarketMakerServiceTest {
                 order(3, 900001, "c", OrderSide.BUY, 99, 10, OrderStatus.PARTIALLY_FILLED),
                 order(4, 900001, "d", OrderSide.BUY, 98, 10, OrderStatus.CANCELED),
                 order(5, 900001, "e", OrderSide.SELL, 100, 10, OrderStatus.ACCEPTED));
-        OrderBookSnapshotResponse external = org.springframework.test.util.ReflectionTestUtils.invokeMethod(
-                service, "excludeOwnQuotes", book, orders);
+        OrderBookSnapshotResponse external = MakerQuoteMatchingSupport.excludeOwnQuotes(book, orders);
         assertThat(external.bids()).containsExactly(book.bids().get(1), book.bids().get(2));
         assertThat(external.asks()).containsExactlyElementsOf(book.asks());
         assertThat(external.bids().getFirst().quantitySteps()).isEqualTo(11); // retain the existing mixed-level semantics
     }
 
     @Test
-    void multipleAccountsShareOneQuoteInputRequestPerInstrumentCycle() {
+    void multipleAccountsReceiveQuotesInOneInstrumentCycle() {
         var fixtures = new Fixtures(List.of());
         fixtures.accountIds = List.of(900001L, 900002L, 900003L);
         fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
-        assertThat(fixtures.quoteInputCalls).isEqualTo(1);
         assertThat(fixtures.orderRpc.placeRequests).extracting(PlaceOrderRequest::userId)
                 .contains(900001L, 900002L, 900003L);
     }
 
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"product", "version", "missing", "account", "unavailable"})
-    void invalidBatchInputsNeverPlaceOrCancelQuotes(String failure) {
+    @Test
+    void unavailableUserStateNeverPlacesOrCancelsQuotes() {
         var fixtures = new Fixtures(List.of());
-        fixtures.quoteInputOverride = r -> {
-            if (failure.equals("unavailable")) throw new IllegalStateException("unavailable");
-            return new com.surprising.trading.api.model.MakerQuoteInputs.Response(
-                    failure.equals("product") ? ProductLine.SPOT : r.productLine(), r.instrumentId(),
-                    failure.equals("version") ? r.instrumentChangeId() + 1 : r.instrumentChangeId(),
-                    failure.equals("missing") ? List.of() : List.of(new com.surprising.trading.api.model.MakerQuoteInputs.Account(
-                            failure.equals("account") ? 99 : r.accountIds().getFirst(), 0, -100)));
-        };
+        fixtures.userStateUnavailable = true;
         fixtures.service().runOnce(new MarketMakerRunRequest("47", "1"));
         assertThat(fixtures.orderRpc.placeRequests).isEmpty();
         assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
@@ -334,7 +302,6 @@ class MarketMakerServiceTest {
                 });
         assertThat(fixtures.orderRpc.productLinesDuringOpenOrders).containsOnly(ProductLine.LINEAR_PERPETUAL);
         assertThat(fixtures.orderRpc.productLinesDuringPlace).containsOnly(ProductLine.LINEAR_PERPETUAL);
-        assertThat(MarketMakerProductLineContext.current()).isNull();
     }
 
     @Test
@@ -1050,9 +1017,7 @@ class MarketMakerServiceTest {
         private final FakeOrderRpc orderRpc;
         private final FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
         private List<Long> accountIds = List.of(900001L);
-        private int quoteInputCalls;
-        private java.util.function.Function<com.surprising.trading.api.model.MakerQuoteInputs.Request,
-                com.surprising.trading.api.model.MakerQuoteInputs.Response> quoteInputOverride;
+        private boolean userStateUnavailable;
         private boolean tradeEnabled;
         private boolean referenceMarketEnabled;
         private long quantityRefreshTolerancePpm;
@@ -1089,20 +1054,42 @@ class MarketMakerServiceTest {
             InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
             snapshotCache.replace(productLine,
                     List.of(new FakeInstrumentRpc(priceTickUnits, quantityStepUnits).latest(Integer.parseInt(instrumentId), productLine)));
-            return new MarketMakerService(properties, markPriceCache(),
-                    new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth, bookAgeSeconds), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
-                    referenceMarketProvider, new FakeOverrideStore(properties), runEventRepository, snapshotCache,
-                    (user, symbol, version, line) -> new com.surprising.marketmaker.provider.client.MakerTradingFeeClient.EffectiveFee(
-                            user, line, symbol, version, snapshotCache.current(line, Integer.parseInt(symbol), version).orElseThrow().makerFeeRatePpm()),
-                    request -> {
-                        quoteInputCalls++;
-                        if (quoteInputOverride != null) return quoteInputOverride.apply(request);
-                        return new com.surprising.trading.api.model.MakerQuoteInputs.Response(request.productLine(),
-                                request.instrumentId(), request.instrumentChangeId(), request.accountIds().stream().map(user ->
-                                new com.surprising.trading.api.model.MakerQuoteInputs.Account(user, 0,
-                                        snapshotCache.current(request.productLine(), Integer.parseInt(request.instrumentId()),
-                                                request.instrumentChangeId()).orElseThrow().makerFeeRatePpm())).toList());
+            var bookSource = new FakeMarketDataRpc(bestBidTicks, bestAskTicks, ascendingDepth, bookAgeSeconds);
+            MakerAeronTradingGateway aeronGateway = Mockito.mock(MakerAeronTradingGateway.class);
+            Mockito.when(aeronGateway.orderBook(Mockito.any(), Mockito.anyString(), Mockito.anyInt()))
+                    .thenAnswer(inv -> bookSource.orderBook(inv.getArgument(1), inv.getArgument(2)));
+            Mockito.when(aeronGateway.openOrders(Mockito.any(), Mockito.anyLong(), Mockito.anyString(), Mockito.anyInt()))
+                    .thenAnswer(inv -> {
+                        orderRpc.productLinesDuringOpenOrders.add(inv.getArgument(0));
+                        var resp = orderRpc.openOrders(inv.getArgument(1), inv.getArgument(2), inv.getArgument(3), null);
+                        if (resp == null || resp.orders() == null) throw new IllegalStateException("open order snapshot is unavailable");
+                        return List.copyOf(resp.orders());
                     });
+            Mockito.when(aeronGateway.userState(Mockito.any(), Mockito.anyLong()))
+                    .thenAnswer(inv -> {
+                        if (userStateUnavailable) throw new IllegalStateException("unavailable");
+                        return null;
+                    });
+            Mockito.when(aeronGateway.place(Mockito.any(), Mockito.any()))
+                    .thenAnswer(inv -> {
+                        orderRpc.productLinesDuringPlace.add(inv.getArgument(0));
+                        return orderRpc.place(inv.getArgument(1));
+                    });
+            Mockito.when(aeronGateway.placeBatch(Mockito.any(), Mockito.any()))
+                    .thenAnswer(inv -> {
+                        orderRpc.productLinesDuringPlace.add(inv.getArgument(0));
+                        return orderRpc.placeBatch(inv.getArgument(1));
+                    });
+            Mockito.when(aeronGateway.amendBatch(Mockito.any(), Mockito.any()))
+                    .thenAnswer(inv -> orderRpc.amendBatch(inv.getArgument(1)));
+            Mockito.when(aeronGateway.cancelBatch(Mockito.any(), Mockito.any()))
+                    .thenAnswer(inv -> {
+                        orderRpc.productLinesDuringCancel.add(inv.getArgument(0));
+                        return orderRpc.cancelBatch(inv.getArgument(1));
+                    });
+            return new MarketMakerService(properties, markPriceCache(), new QuotePlanner(),
+                    referenceMarketProvider, new FakeOverrideStore(properties), runEventRepository, snapshotCache,
+                    aeronGateway);
         }
 
         private MarketMakerMarkPriceCache markPriceCache() {
@@ -1237,7 +1224,7 @@ class MarketMakerServiceTest {
         }
     }
 
-    private static final class FakeOrderRpc implements OrderRpcApi {
+    private static final class FakeOrderRpc {
         private final List<OrderResponse> openOrders;
         private final List<PlaceOrderRequest> placeRequests = new ArrayList<>();
         private final List<CancelOrderRequest> cancelRequests = new ArrayList<>();
@@ -1265,9 +1252,7 @@ class MarketMakerServiceTest {
             this.openOrders = new ArrayList<>(openOrders);
         }
 
-        @Override
         public OrderCommandReceipt place(PlaceOrderRequest request) {
-            productLinesDuringPlace.add(MarketMakerProductLineContext.current());
             placeRequests.add(request);
             OrderResponse placed = orderAt(1000L + placeRequests.size(), request.userId(), request.clientOrderId(),
                     request.side(), request.priceTicks(), request.quantitySteps(), OrderStatus.ACCEPTED, Instant.now());
@@ -1275,7 +1260,6 @@ class MarketMakerServiceTest {
             return terminal(placed);
         }
 
-        @Override
         public OrderCommandReceipt placeBatch(BatchPlaceOrderRequest request) {
             if (!batchSupported) {
                 throw new UnsupportedOperationException();
@@ -1292,7 +1276,6 @@ class MarketMakerServiceTest {
                     results.add(new OrderBatchItemResponse(i, false, "INSUFFICIENT_BALANCE", null));
                     continue;
                 }
-                productLinesDuringPlace.add(MarketMakerProductLineContext.current());
                 placeRequests.add(placeRequest);
                 OrderResponse placed = orderAt(2_000L + batchPlaceRequests.size() * 100L + i,
                         placeRequest.userId(), placeRequest.clientOrderId(), placeRequest.side(),
@@ -1308,12 +1291,10 @@ class MarketMakerServiceTest {
             return terminal(new OrderBatchResponse(results.size(), results.size(), 0, results));
         }
 
-        @Override
         public TestOrderResponse test(PlaceOrderRequest request) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public OrderCommandReceipt amend(AmendOrderRequest request) {
             amendRequests.add(request);
             var original = openOrders.stream().filter(o -> o.orderId() == request.orderId()).findFirst().orElseThrow();
@@ -1328,7 +1309,6 @@ class MarketMakerServiceTest {
             return terminal(new AmendOrderResponse(original, replacement, true, "amended"));
         }
 
-        @Override
         public OrderCommandReceipt amendBatch(BatchAmendOrdersRequest request) {
             var results = new ArrayList<com.surprising.trading.api.model.AmendOrderBatchItemResponse>();
             boolean lose = loseNextAmendResponse;
@@ -1353,21 +1333,17 @@ class MarketMakerServiceTest {
                     results.size(), results.size() - (fail ? 1 : 0), fail ? 1 : 0, results));
         }
 
-        @Override
         public OrderResponse closePosition(ClosePositionRequest request) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public OrderCommandReceipt cancel(CancelOrderRequest request) {
-            productLinesDuringCancel.add(MarketMakerProductLineContext.current());
             cancelRequests.add(request);
             openOrders.removeIf(order -> order.orderId() == request.orderId());
             return terminal(order(request.orderId(), request.userId(), "canceled", OrderSide.BUY,
                     1L, 0L, OrderStatus.CANCELED));
         }
 
-        @Override
         public OrderCommandReceipt cancelBatch(BatchCancelOrdersRequest request) {
             if (cancelBatchCalls == 0)
                 bidPlacesAtFirstCancel = placeRequests.stream().filter(order -> order.side() == OrderSide.BUY).count();
@@ -1375,7 +1351,6 @@ class MarketMakerServiceTest {
             List<OrderBatchItemResponse> results = new ArrayList<>();
             for (int i = 0; i < request.orders().size(); i++) {
                 CancelOrderRequest cancelRequest = request.orders().get(i);
-                productLinesDuringCancel.add(MarketMakerProductLineContext.current());
                 cancelRequests.add(cancelRequest);
                 boolean success = !failedCancelOrderIds.contains(cancelRequest.orderId());
                 if (success) {
@@ -1406,61 +1381,50 @@ class MarketMakerServiceTest {
             }
         }
 
-        @Override
         public OrderBatchResponse cancelOpen(CancelOpenOrdersRequest request) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public CancelAllAfterResponse cancelAllAfter(CancelAllAfterRequest request) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public AlgoOrderResponse placeAlgo(PlaceAlgoOrderRequest request) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public AlgoOrderResponse cancelAlgo(CancelAlgoOrderRequest request) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public AlgoOrderBatchResponse cancelOpenAlgo(CancelOpenAlgoOrdersRequest request) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public AlgoOrderResponse getAlgo(long algoOrderId) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public AlgoOrderQueryResponse openAlgoOrders(long userId, String instrumentId, int limit) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public OrderResponse get(long orderId) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
             throw new UnsupportedOperationException();
         }
 
-        @Override
         public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
-            productLinesDuringOpenOrders.add(MarketMakerProductLineContext.current());
             openOrdersCalls++;
             if (nullOrderSnapshot) return null;
             return new OrderQueryResponse(openOrders.size(), openOrders);
         }
     }
 
-    private static final class FakeMarketDataRpc implements MarketDataRpcApi {
+    private static final class FakeMarketDataRpc {
         private final long bestBidTicks;
         private final long bestAskTicks;
         private final boolean ascendingDepth;
@@ -1481,7 +1445,6 @@ class MarketMakerServiceTest {
             this.bestAskTicks = bestAskTicks;
         }
 
-        @Override
         public OrderBookSnapshotResponse orderBook(String instrumentId, int depth) {
             Instant now = bookAgeSeconds == null ? Instant.parse("2026-01-01T00:00:00Z")
                     : Instant.now().minusSeconds(bookAgeSeconds);
@@ -1539,73 +1502,7 @@ class MarketMakerServiceTest {
 
         @Override
         public InstrumentSnapshotResponse snapshot(ProductLine productLine) {
-            return new InstrumentSnapshotResponse(productLine, 1L, "test", List.of(latest(1, productLine)));
-        }
-    }
-
-    private static final class FakeAccountRpc implements AccountRpcApi {
-        @Override
-        public BalanceResponse balance(long userId, String asset) {
-            return new BalanceResponse(userId, asset, 1_000_000_000L, 0L, 1_000_000_000L,
-                    Instant.parse("2026-01-01T00:00:00Z"));
-        }
-
-        @Override
-        public BalanceQueryResponse balances(long userId) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public ProductTransferResponse transfer(ProductTransferRequest request) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public PositionModeResponse positionMode(long userId) {
-            return positionMode(userId, null);
-        }
-
-        @Override
-        public PositionModeResponse positionMode(long userId, ProductLine productLine) {
-            return new PositionModeResponse(ProductLine.LINEAR_PERPETUAL, userId, PositionMode.ONE_WAY,
-                    Instant.parse("2026-01-01T00:00:00Z"));
-        }
-
-        @Override
-        public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
-            return new PositionModeResponse(ProductLine.LINEAR_PERPETUAL, request.userId(), request.positionMode(),
-                    Instant.parse("2026-01-01T00:00:00Z"));
-        }
-
-        @Override
-        public PositionResponse position(long userId, String instrumentId, String marginMode, String positionSide) {
-            return new PositionResponse(userId, instrumentId, MarginMode.CROSS, PositionSide.NET,
-                    0L, 0L, 0L, Instant.parse("2026-01-01T00:00:00Z"));
-        }
-
-        @Override
-        public PositionMarginResponse positionMargin(long userId, String instrumentId, String marginMode) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public PositionMarginAdjustmentResponse adjustPositionMargin(PositionMarginAdjustmentRequest request) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public PositionQueryResponse positions(long userId, String positionSide) {
-            throw new UnsupportedOperationException();
+            return new InstrumentSnapshotResponse(productLine, 1L, List.of(latest(1, productLine)));
         }
     }
 }

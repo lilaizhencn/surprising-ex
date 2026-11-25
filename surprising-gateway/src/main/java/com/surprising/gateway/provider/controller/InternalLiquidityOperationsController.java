@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
-import tools.jackson.databind.ObjectMapper;
 
 /** Host-local authenticated operations using the same funds, leverage and instrument services as admin. */
 @RestController
@@ -22,25 +21,23 @@ import tools.jackson.databind.ObjectMapper;
 public class InternalLiquidityOperationsController {
     private final String token;
     private final LiquidityOperationsService operations;
-    private final ObjectMapper mapper;
 
     public InternalLiquidityOperationsController(@Value("${surprising.gateway.operations.token:}") String token,
-            LiquidityOperationsService operations,ObjectMapper mapper) {
+            LiquidityOperationsService operations) {
         this.token=token;
         this.operations=operations;
-        this.mapper=mapper;
     }
 
     @PostMapping("/balance-adjustments")
     public Object adjust(@Valid @RequestBody ProductBalanceAdjustmentRequest body, HttpServletRequest request) {
         authorize(request);
-        return operations.adjust(body,metadata(request,body,body.referenceId(),body.reason()));
+        return operations.adjust(body,metadata(request,body.referenceId(),body.reason()));
     }
 
     @PostMapping("/leverage")
     public Object leverage(@Valid @RequestBody LeverageSettingRequest body, HttpServletRequest request) {
         authorize(request);
-        return operations.leverage(body,metadata(request,body,request.getHeader("X-Operation-Id"),body.reason()));
+        return operations.leverage(body,metadata(request,request.getHeader("X-Operation-Id"),body.reason()));
     }
 
     @GetMapping("/leverage")
@@ -61,7 +58,7 @@ public class InternalLiquidityOperationsController {
         authorize(request);
         try { com.surprising.instrument.provider.utils.InstrumentConfigurationFormats.validate(body); }
         catch (IllegalArgumentException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST,invalid.getMessage(),invalid); }
-        return operations.instrument(body,metadata(request,body,request.getHeader("X-Operation-Id"),reason));
+        return operations.instrument(body,metadata(request,request.getHeader("X-Operation-Id"),reason));
     }
 
     private void authorize(HttpServletRequest request) {
@@ -75,10 +72,10 @@ public class InternalLiquidityOperationsController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "host-local operations authentication required");
     }
 
-    private LiquidityOperationMetadata metadata(HttpServletRequest request,Object body,String reference,String reason) {
+    private LiquidityOperationMetadata metadata(HttpServletRequest request,String reference,String reason) {
         if (reference == null || reference.isBlank() || reference.length() > 128
                 || reason == null || reason.isBlank() || reason.length() > 128)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"operation reference and reason are required (max 128)");
-        return new LiquidityOperationMetadata(reference,reason,request.getRequestURI(),request.getRemoteAddr(),null);
+        return new LiquidityOperationMetadata(reference,reason,request.getRequestURI(),request.getRemoteAddr());
     }
 }

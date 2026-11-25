@@ -31,7 +31,7 @@ class MakerRunEventBoundaryTest {
             for(int i=0;i<3;i++)store.record(new MarketMakerRunEventWrite("maker",line,"1",7L,"node",i,"CYCLE_SUCCESS",1,0,0,null,null,i==2?TIME.plusNanos(1):TIME));
             store.record(new MarketMakerRunEventWrite("maker",line,"2",8L,"node",99,"CYCLE_ERROR",0,0,1,null,null,TIME));
         }
-        var service=new MarketMakerService(new MarketMakerProperties(),null,null,null,null,null,null,null,store,null,null,null);
+        var service=new MarketMakerService(new MarketMakerProperties(),null,null,null,null,store,null,null);
         mvc=MockMvcBuilders.standaloneSetup(new AdminMarketMakerController(service)).build();
     }
     static Stream<Arguments> pages() {

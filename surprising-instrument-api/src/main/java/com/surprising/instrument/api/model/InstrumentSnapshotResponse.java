@@ -10,7 +10,6 @@ import java.util.Map;
 public record InstrumentSnapshotResponse(
         ProductLine productLine,
         long snapshotSequence,
-        String checksum,
         List<InstrumentResponse> instruments,
         Map<String, Long> assetScales) {
 
@@ -21,14 +20,12 @@ public record InstrumentSnapshotResponse(
         instruments = instruments == null
                 ? List.of()
                 : instruments.stream().map(InstrumentResponse::immutableCopy).toList();
-        checksum = checksum == null ? "" : checksum;
         assetScales = assetScales == null ? Map.of() : Map.copyOf(assetScales);
     }
 
     public InstrumentSnapshotResponse(ProductLine productLine,
                                       long snapshotSequence,
-                                      String checksum,
                                       List<InstrumentResponse> instruments) {
-        this(productLine, snapshotSequence, checksum, instruments, Map.of());
+        this(productLine, snapshotSequence, instruments, Map.of());
     }
 }

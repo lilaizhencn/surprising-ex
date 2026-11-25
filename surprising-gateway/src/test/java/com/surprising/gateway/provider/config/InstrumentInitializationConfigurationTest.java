@@ -39,7 +39,7 @@ class InstrumentInitializationConfigurationTest {
         when(row.changeId()).thenReturn(1L);
         when(row.lastChangeId()).thenReturn(1L);
         when(row.status()).thenReturn(InstrumentStatus.TRADING);
-        var snapshot = new InstrumentSnapshotResponse(line, 1, "", List.of(row), Map.of("USDT", 100000000L));
+        var snapshot = new InstrumentSnapshotResponse(line, 1, List.of(row), Map.of("USDT", 100000000L));
         when(instruments.snapshot(line)).thenReturn(snapshot);
         context(line, instruments).run(ctx -> {
             assertThat(ctx).hasNotFailed().hasSingleBean(InstrumentSnapshotCache.class)
@@ -59,7 +59,7 @@ class InstrumentInitializationConfigurationTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
     void emptySnapshotStartsWithoutInventingTradableInstruments(ProductLine line) {
         var instruments = mock(InstrumentService.class);
-        when(instruments.snapshot(line)).thenReturn(new InstrumentSnapshotResponse(line, 0, "", List.of()));
+        when(instruments.snapshot(line)).thenReturn(new InstrumentSnapshotResponse(line, 0, List.of()));
         context(line, instruments).run(ctx -> {
             assertThat(ctx).hasNotFailed();
             var cache = ctx.getBean(InstrumentSnapshotCache.class);

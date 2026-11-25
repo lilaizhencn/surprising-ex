@@ -14,11 +14,11 @@ class MarketMakerQuoteArithmeticTest {
             long ppm = i == 0 ? 1_000_000 : random.nextInt(1_000_001);
             long expected = BigInteger.valueOf(value).multiply(BigInteger.valueOf(ppm))
                     .divide(BigInteger.valueOf(1_000_000)).longValueExact();
-            assertThat(MarketMakerService.ppmFloor(value, ppm)).isEqualTo(expected);
+            assertThat(MakerQuoteMatchingSupport.ppmFloor(value, ppm)).isEqualTo(expected);
         }
-        assertThat(MarketMakerService.ppmFloor(9999, 100)).isZero();
-        assertThat(MarketMakerService.ppmFloor(10000, 100)).isEqualTo(1);
-        assertThatThrownBy(() -> MarketMakerService.ppmFloor(-1, 1)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> MarketMakerService.ppmFloor(1, 1_000_001)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(MakerQuoteMatchingSupport.ppmFloor(9999, 100)).isZero();
+        assertThat(MakerQuoteMatchingSupport.ppmFloor(10000, 100)).isEqualTo(1);
+        assertThatThrownBy(() -> MakerQuoteMatchingSupport.ppmFloor(-1, 1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MakerQuoteMatchingSupport.ppmFloor(1, 1_000_001)).isInstanceOf(IllegalArgumentException.class);
     }
 }

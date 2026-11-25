@@ -26,10 +26,6 @@ public class MakerQuoteWakeups {
         this.properties = properties;
     }
 
-    public MakerQuoteWakeups(MarketMakerProperties properties, tools.jackson.databind.ObjectMapper mapper) {
-        this.properties = properties;
-    }
-
     public void changed(ProductLine product, String instrumentId) {
         if (product == null || instrumentId == null) return;
         for (var strategy : registeredStrategies.values()) {
@@ -43,6 +39,11 @@ public class MakerQuoteWakeups {
     public void register(MarketMakerProperties.Strategy strategy) {
         registeredStrategies.put(key(strategy), strategy);
         signals.computeIfAbsent(key(strategy), ignored -> new Signal()).wake();
+    }
+
+    public void unregister(String strategyKey) {
+        registeredStrategies.remove(strategyKey);
+        signals.remove(strategyKey);
     }
 
     public void await(MarketMakerProperties.Strategy strategy, Duration watchdog) throws InterruptedException {
@@ -65,10 +66,6 @@ public class MakerQuoteWakeups {
 
     public void onTrade(ProductLine product, String instrumentId) {
         changed(product, instrumentId);
-    }
-
-    public void onTrade(String instrumentId) {
-        changed(properties.getProductLine(), instrumentId);
     }
 
     private String key(MarketMakerProperties.Strategy s) {

@@ -63,7 +63,7 @@ class InstrumentSnapshotSupportTest {
                 (proxy, method, args) -> {
                     if (!method.getName().equals("snapshot")) throw new UnsupportedOperationException();
                     return new com.surprising.instrument.api.model.InstrumentSnapshotResponse(ProductLine.OPTION,
-                            0L, "", List.of(), java.util.Map.of());
+                            0L, List.of(), java.util.Map.of());
                 });
         var cache = new InstrumentSnapshotCache();
         InstrumentSnapshotSupport.initialize(rpc, cache, ProductLine.OPTION, "test");

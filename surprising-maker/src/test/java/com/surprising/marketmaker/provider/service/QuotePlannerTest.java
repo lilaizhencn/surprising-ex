@@ -421,6 +421,53 @@ class QuotePlannerTest {
     }
 
     @Test
+    void spotReferenceQuotesCapSellDepthToBaseInventoryWhileKeepingBuyDepth() {
+        MarketMakerProperties.Strategy strategy = strategy();
+        strategy.setProductLine(ProductLine.SPOT);
+        strategy.setOrderLevels(2);
+        var reference = new ReferenceOrderBookSnapshot("okx", "1",
+                List.of(new ReferenceOrderBookLevel(49_990L, 1_500L), new ReferenceOrderBookLevel(49_980L, 1_500L)),
+                List.of(new ReferenceOrderBookLevel(50_010L, 1_500L), new ReferenceOrderBookLevel(50_020L, 1_500L)),
+                Instant.parse("2026-01-01T00:00:00Z"));
+
+        QuotePlan plan = quotePlanner.plan(strategy, quoting(), risk(), spotInstrument(),
+                orderBook(49_990L, 50_010L), null, 800L, reference);
+
+        long buySum = plan.quotes().stream().filter(q -> q.side() == OrderSide.BUY)
+                .mapToLong(q -> q.quantitySteps()).sum();
+        long sellSum = plan.quotes().stream().filter(q -> q.side() == OrderSide.SELL)
+                .mapToLong(q -> q.quantitySteps()).sum();
+        assertThat(buySum).isEqualTo(3_000L);
+        assertThat(sellSum).isGreaterThan(0L).isLessThanOrEqualTo(800L);
+    }
+
+    @Test
+    void spotSimulatedMarketOrdersIncludeProtectionBoundPriceTicks() {
+        MarketMakerProperties.Strategy strategy = strategy();
+        strategy.setProductLine(ProductLine.SPOT);
+        MarketMakerProperties.Trade trade = new MarketMakerProperties.Trade();
+        trade.setEnabled(true);
+        trade.setSlippageTicks(10L);
+        trade.setMaxSweepLevels(2);
+        trade.setMinQuantitySteps(1L);
+        trade.setMaxQuantitySteps(100L);
+        var prints = List.of(
+                new com.surprising.marketmaker.provider.model.ExternalTrade("t1", OrderSide.BUY, 50_010L, 5L,
+                        Instant.parse("2026-01-01T00:00:00Z")),
+                new com.surprising.marketmaker.provider.model.ExternalTrade("t2", OrderSide.SELL, 49_990L, 5L,
+                        Instant.parse("2026-01-01T00:00:00Z")));
+
+        var orders = MakerSimulatedTradeSupport.externalPrintOrders(trade, strategy, "1", 104L,
+                spotInstrument(), orderBook(49_990L, 50_010L), 100L, prints, () -> "cid-" + System.nanoTime());
+
+        assertThat(orders).hasSize(2);
+        assertThat(orders.get(0).side()).isEqualTo(OrderSide.BUY);
+        assertThat(orders.get(0).priceTicks()).isEqualTo(50_020L);
+        assertThat(orders.get(1).side()).isEqualTo(OrderSide.SELL);
+        assertThat(orders.get(1).priceTicks()).isEqualTo(49_980L);
+    }
+
+    @Test
     void linearQuotesRequireMarkPriceEvenWithAnExplicitInitialAnchor() {
         var strategy = strategy();
         strategy.setInitialAnchorPriceTicks(50_000L);

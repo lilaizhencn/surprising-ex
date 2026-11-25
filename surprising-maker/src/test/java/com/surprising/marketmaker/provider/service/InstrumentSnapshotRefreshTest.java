@@ -44,7 +44,7 @@ class InstrumentSnapshotRefreshTest {
                 InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
 
         when(rpc.snapshot(ProductLine.LINEAR_PERPETUAL))
-                .thenReturn(new InstrumentSnapshotResponse(ProductLine.LINEAR_PERPETUAL, 1L, "hash1", List.of(initialInstrument), Map.of("USDT", 1_000_000L)));
+                .thenReturn(new InstrumentSnapshotResponse(ProductLine.LINEAR_PERPETUAL, 1L, List.of(initialInstrument), Map.of("USDT", 1_000_000L)));
 
         // 首次初始化
         initializer.initialize();
@@ -61,7 +61,7 @@ class InstrumentSnapshotRefreshTest {
                 InstrumentStatus.HALT, now, now, now, List.of(), List.of());
 
         when(rpc.snapshot(ProductLine.LINEAR_PERPETUAL))
-                .thenReturn(new InstrumentSnapshotResponse(ProductLine.LINEAR_PERPETUAL, 2L, "hash2", List.of(haltedInstrument), Map.of("USDT", 1_000_000L)));
+                .thenReturn(new InstrumentSnapshotResponse(ProductLine.LINEAR_PERPETUAL, 2L, List.of(haltedInstrument), Map.of("USDT", 1_000_000L)));
 
         // 执行定时刷新
         initializer.refreshSnapshots();

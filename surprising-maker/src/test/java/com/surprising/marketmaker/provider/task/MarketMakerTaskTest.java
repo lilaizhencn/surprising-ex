@@ -21,7 +21,7 @@ class MarketMakerTaskTest {
         var properties = properties();
         var service = mock(MarketMakerService.class);
         when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
-        var wakeups = new MakerQuoteWakeups(properties, new ObjectMapper());
+        var wakeups = new MakerQuoteWakeups(properties);
         var started = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var second = new CountDownLatch(1);
@@ -49,7 +49,7 @@ class MarketMakerTaskTest {
         var properties = properties();
         var service = mock(MarketMakerService.class);
         when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
-        var wakeups = new MakerQuoteWakeups(properties, new ObjectMapper());
+        var wakeups = new MakerQuoteWakeups(properties);
         var entered = new CountDownLatch(1);
         when(service.runScheduledStrategy(anyString(), any())).thenAnswer(call -> { entered.countDown(); return true; });
         var task = new MarketMakerTask(service, properties, wakeups);
@@ -70,7 +70,7 @@ class MarketMakerTaskTest {
         when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
         var checked = new CountDownLatch(2);
         when(service.runScheduledStrategy(anyString(), any())).thenAnswer(call -> { checked.countDown(); return true; });
-        var task = new MarketMakerTask(service, properties, new MakerQuoteWakeups(properties, new ObjectMapper()));
+        var task = new MarketMakerTask(service, properties, new MakerQuoteWakeups(properties));
         try { task.start(); assertThat(checked.await(2, TimeUnit.SECONDS)).isTrue(); }
         finally { task.stop(); }
     }
@@ -93,7 +93,7 @@ class MarketMakerTaskTest {
             return false;
         });
         when(service.runScheduledStrategy("fast", ProductLine.LINEAR_PERPETUAL)).thenAnswer(call -> { fastRan.countDown(); return true; });
-        var task = new MarketMakerTask(service, properties, new MakerQuoteWakeups(properties, new ObjectMapper()));
+        var task = new MarketMakerTask(service, properties, new MakerQuoteWakeups(properties));
         try {
             task.start(); assertThat(slowStarted.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(fastRan.await(2, TimeUnit.SECONDS)).isTrue();
@@ -103,8 +103,8 @@ class MarketMakerTaskTest {
 
     @Test
     void committedTradeWakesOnlyItsProductAndSymbol() throws Exception {
-        var properties = properties(); var mapper = new ObjectMapper();
-        var wakeups = new MakerQuoteWakeups(properties, mapper);
+        var properties = properties();
+        var wakeups = new MakerQuoteWakeups(properties);
         var service = mock(MarketMakerService.class);
         when(service.configuredStrategies()).thenAnswer(ignored -> properties.getStrategies());
         var first = new CountDownLatch(1); var second = new CountDownLatch(1); var calls = new AtomicInteger();
@@ -114,9 +114,9 @@ class MarketMakerTaskTest {
         var task = new MarketMakerTask(service, properties, wakeups);
         try {
             task.start(); assertThat(first.await(3, TimeUnit.SECONDS)).isTrue();
-            wakeups.onTrade("653");
+            wakeups.onTrade(ProductLine.LINEAR_PERPETUAL, "653");
             Thread.sleep(100); assertThat(calls.get()).isEqualTo(1);
-            wakeups.onTrade("604");
+            wakeups.onTrade(ProductLine.LINEAR_PERPETUAL, "604");
             assertThat(second.await(1, TimeUnit.SECONDS)).isTrue();
         } finally { task.stop(); }
     }
@@ -129,7 +129,7 @@ class MarketMakerTaskTest {
         when(service.configuredStrategies()).thenAnswer(ignored -> configured.get());
         var quoted = new CountDownLatch(1);
         when(service.runScheduledStrategy("new", ProductLine.LINEAR_PERPETUAL)).thenAnswer(ignored -> { quoted.countDown(); return true; });
-        var task = new MarketMakerTask(service, properties, new MakerQuoteWakeups(properties, new ObjectMapper()));
+        var task = new MarketMakerTask(service, properties, new MakerQuoteWakeups(properties));
         try {
             task.start();
             configured.set(List.of(strategy("new", "653")));

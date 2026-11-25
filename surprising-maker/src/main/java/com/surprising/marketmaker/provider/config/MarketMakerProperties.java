@@ -58,9 +58,11 @@ public class MarketMakerProperties {
     public void validateBusinessSettings() {
         var engine = getEngine();
         var referenceMarket = getReferenceMarket();
-        if (engine.quoteWatchdogInterval == null || engine.tradeInterval == null
-                || (engine.quoteWatchdogInterval.isNegative() || engine.quoteWatchdogInterval.toMillis() < 100) || engine.tradeInterval.isNegative())
-            throw new IllegalArgumentException("maker trade interval must be non-negative and quote watchdog at least 100ms");
+        if (engine.quoteWatchdogInterval == null || engine.minQuoteInterval == null || engine.tradeInterval == null
+                || (engine.quoteWatchdogInterval.isNegative() || engine.quoteWatchdogInterval.toMillis() < 100)
+                || engine.minQuoteInterval.isNegative()
+                || engine.tradeInterval.isNegative())
+            throw new IllegalArgumentException("maker minQuoteInterval/tradeInterval must be non-negative and quote watchdog at least 100ms");
         var identities = new java.util.HashSet<String>();
         for (Strategy strategy : strategies) {
             if (!identities.add(strategy.getProductLine() + ":" + strategy.getStrategyId().toLowerCase(java.util.Locale.ROOT)))
@@ -91,6 +93,8 @@ public class MarketMakerProperties {
         private String nodeId;
         @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration quoteWatchdogInterval = Duration.ofSeconds(1);
+        @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
+        private Duration minQuoteInterval = Duration.ofMillis(250);
         @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
         private Duration tradeInterval = Duration.ZERO;
 
@@ -156,6 +160,12 @@ public class MarketMakerProperties {
         private long volatilitySpreadMultiplierPpm = 500_000L;
         @Positive
         private long maxVolatilitySpreadTicks = 100L;
+        /** Maximum non-crossing quote updates per cycle; 0 updates all drifted levels in one pass. */
+        @Min(0)
+        @Max(100)
+        private int maxQuoteUpdatesPerCycle = 0;
+        /** Amend drifted same-level quotes atomically in place instead of cancel + re-place. */
+        private boolean preferInPlaceAmend = false;
 
     }
 

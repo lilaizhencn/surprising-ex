@@ -23,7 +23,7 @@ public class MarketMakerTask {
     // 只持有本服务工作线程；报价和资金状态仍由原服务及交易核心拥有。
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
     private final AtomicBoolean running = new AtomicBoolean();
-    private final java.util.Set<String> startedStrategies = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final java.util.Map<String, java.util.List<java.util.concurrent.Future<?>>> startedStrategies = new java.util.concurrent.ConcurrentHashMap<>();
 
     public MarketMakerTask(MarketMakerService service, MarketMakerProperties properties, MakerQuoteWakeups wakeups) {
         this.service = service;
@@ -40,16 +40,26 @@ public class MarketMakerTask {
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 1000)
     public void refreshStrategies() {
         if (!running.get()) return;
-        for (MarketMakerProperties.Strategy strategy : service.configuredStrategies()) {
-            if (!startedStrategies.add(strategy.getProductLine() + ":" + strategy.getStrategyId())) continue;
-            wakeups.register(strategy);
-            startWorker(strategy, false);
-            startWorker(strategy, true);
+        var configured = service.configuredStrategies();
+        var activeKeys = new java.util.HashSet<String>(configured.size());
+        for (MarketMakerProperties.Strategy strategy : configured) {
+            String key = strategy.getProductLine() + ":" + strategy.getStrategyId();
+            activeKeys.add(key);
+            startedStrategies.computeIfAbsent(key, ignored -> {
+                wakeups.register(strategy);
+                return java.util.List.of(startWorker(strategy, false), startWorker(strategy, true));
+            });
         }
+        startedStrategies.entrySet().removeIf(entry -> {
+            if (activeKeys.contains(entry.getKey())) return false;
+            entry.getValue().forEach(future -> future.cancel(true));
+            wakeups.unregister(entry.getKey());
+            return true;
+        });
     }
 
-    private void startWorker(MarketMakerProperties.Strategy strategy, boolean taking) {
-        workers.submit(() -> {
+    private java.util.concurrent.Future<?> startWorker(MarketMakerProperties.Strategy strategy, boolean taking) {
+        return workers.submit(() -> {
             while (running.get() && !Thread.currentThread().isInterrupted()) {
                 boolean completed = false;
                 try {
@@ -64,8 +74,12 @@ public class MarketMakerTask {
                 } catch (RuntimeException ex) {
                     log.warn("Market-maker worker failed strategyId={} taking={}", strategy.getStrategyId(), taking, ex);
                 }
-                // Quotes follow events; timeout only recovers stale feeds, leases and missed notifications.
-                long delayMillis = taking ? properties.getEngine().getTradeInterval().toMillis() : 0;
+                // Quotes follow events; minQuoteInterval coalesces bursty WS updates, and watchdog recovers missed notifications.
+                long delayMillis = taking
+                        ? (properties.getTrade().isEnabled()
+                                ? properties.getEngine().getTradeInterval().toMillis()
+                                : Math.max(500L, properties.getEngine().getTradeInterval().toMillis()))
+                        : properties.getEngine().getMinQuoteInterval().toMillis();
                 if (!completed) delayMillis = Math.max(100, delayMillis);
                 if (delayMillis > 0) {
                     try { Thread.sleep(delayMillis); }
@@ -78,6 +92,7 @@ public class MarketMakerTask {
     @PreDestroy
     public void stop() {
         running.set(false);
+        startedStrategies.clear();
         workers.shutdownNow();
         wakeups.clear();
     }

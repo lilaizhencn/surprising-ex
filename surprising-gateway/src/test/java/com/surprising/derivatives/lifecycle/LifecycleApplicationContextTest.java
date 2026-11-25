@@ -53,7 +53,7 @@ class LifecycleApplicationContextTest {
                     for (ProductLine p : ProductLine.values()) {
                         org.mockito.Mockito.when(instruments.snapshot(p))
                                 .thenReturn(new com.surprising.instrument.api.model.InstrumentSnapshotResponse(
-                                        p, 0, "", java.util.List.of()));
+                                        p, 0, java.util.List.of()));
                     }
                     return instruments;
                 })

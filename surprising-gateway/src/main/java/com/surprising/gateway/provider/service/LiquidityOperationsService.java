@@ -74,6 +74,6 @@ public class LiquidityOperationsService {
                 "liquidity-operations", "POST", metadata.requestPath(),
                 "referenceId=" + java.net.URLEncoder.encode(metadata.reference(), java.nio.charset.StandardCharsets.UTF_8)
                         + "&reason=" + java.net.URLEncoder.encode(metadata.reason(), java.nio.charset.StandardCharsets.UTF_8), product.name(),
-                metadata.bodyHash(), status, 0L, success, error, "host-local-operations", metadata.clientIp(), Instant.now());
+                null, status, 0L, success, error, "host-local-operations", metadata.clientIp(), Instant.now());
     }
 }
