@@ -30,7 +30,7 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class MarkPriceService {
-    private final ObjectProvider<RealtimeJsonPublisher> realtime;
+    private final RealtimeJsonPublisher realtime;
 
     private static final String SEQUENCE_MODULE = "price-mark";
 
@@ -39,7 +39,7 @@ public class MarkPriceService {
     private final MarkPriceCoordinationService coordinationService;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final LatestMarkPriceCache latestMarkPriceCache;
-    private final ObjectProvider<MarkPriceCorePublisher> corePublisher;
+    private final MarkPriceCorePublisher corePublisher;
     private final ApplicationEventPublisher eventPublisher;
     private final String nodeId;
 
@@ -56,8 +56,8 @@ public class MarkPriceService {
                             MarkPriceCoordinationService coordinationService,
                             @Qualifier("markKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                             LatestMarkPriceCache latestMarkPriceCache,
-                            ObjectProvider<RealtimeJsonPublisher> realtime,
-                            ObjectProvider<MarkPriceCorePublisher> corePublisher) {
+                            RealtimeJsonPublisher realtime,
+                            MarkPriceCorePublisher corePublisher) {
         this(properties, markPriceCalculator, coordinationService, kafkaTemplate,
                 latestMarkPriceCache, realtime, corePublisher, null);
     }
@@ -68,8 +68,8 @@ public class MarkPriceService {
                             MarkPriceCoordinationService coordinationService,
                             @Qualifier("markKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                             LatestMarkPriceCache latestMarkPriceCache,
-                            ObjectProvider<RealtimeJsonPublisher> realtime,
-                            ObjectProvider<MarkPriceCorePublisher> corePublisher,
+                            @org.springframework.beans.factory.annotation.Autowired(required = false) RealtimeJsonPublisher realtime,
+                            @org.springframework.beans.factory.annotation.Autowired(required = false) MarkPriceCorePublisher corePublisher,
                             ApplicationEventPublisher eventPublisher) {
         this.realtime = realtime;
         this.corePublisher = corePublisher;
@@ -111,8 +111,10 @@ public class MarkPriceService {
 
     public void acceptFundingRate(PerpFundingRateEvent event) {
         fundingRates.put(event.instrumentId(), event);
-        realtime.ifAvailable(publisher -> publisher.publish(properties.getProductLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.instrumentId(),event.instrumentId(),event.sequence(),event.eventTime(),event));
+        if (realtime != null) {
+            realtime.publish(properties.getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.instrumentId(),event.instrumentId(),event.sequence(),event.eventTime(),event);
+        }
     }
 
     /** Receiver callback only marks invalidity; it does not mutate owner-owned windows or do I/O. */
@@ -181,7 +183,9 @@ public class MarkPriceService {
         latestMarkPriceCache.update(event);
         if (log.isDebugEnabled()) log.debug("mark.calculated instrumentId={} indexSequence={} tradeSequence={}", instrumentId,
                 index.sequence(), trade == null ? null : trade.sequence());
-        corePublisher.ifAvailable(publisher -> publisher.publish(event));
+        if (corePublisher != null) {
+            corePublisher.publish(event);
+        }
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
                 fundingRates.get(instrumentId), basisAverage,
                 properties.getCalculation().getBasisWindow().toSeconds(), now);
@@ -190,9 +194,11 @@ public class MarkPriceService {
         if (eventPublisher != null) {
             eventPublisher.publishEvent(publishedEvent);
         }
-        realtime.ifAvailable(publisher -> publisher.publish(properties.getProductLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK, instrumentId, instrumentId,
-                event.sequence(), event.eventTime(), event));
+        if (realtime != null) {
+            realtime.publish(properties.getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK, instrumentId, instrumentId,
+                    event.sequence(), event.eventTime(), event);
+        }
 
         return true;
     }

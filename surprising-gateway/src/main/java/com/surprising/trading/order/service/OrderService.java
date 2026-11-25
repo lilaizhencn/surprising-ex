@@ -99,7 +99,6 @@ public class OrderService {
     private final MatchingMarketDataService bboOrderBook;
     private final BracketOrderDispatcher bracketOrderDispatcher;
     private final OrderQueryService queries;
-    private final OrderAdminService adminOps;
     private final OrderBatchService batchOps;
 
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
@@ -131,8 +130,11 @@ public class OrderService {
         this.bboOrderBook = bboOrderBook;
         this.bracketOrderDispatcher = bracketOrderDispatcher;
         this.queries = queries;
-        this.adminOps = new OrderAdminService(this, queries);
         this.batchOps = new OrderBatchService(this, queries);
+    }
+
+    OrderQueryService queries() {
+        return queries;
     }
 
     public ObjectNode tradingMetrics(int window, int limit, ProductLine requestedProduct) {
@@ -610,47 +612,6 @@ public class OrderService {
                                           String sort,
                                           ProductLine productLine) {
         return queries.adminOrders(userId, instrumentId, status, orderId, limit, cursor, sort, productLine);
-    }
-
-    public AdminCancelOrderResult adminCancelOrder(long orderId, String reason) {
-        return adminOps.adminCancelOrder(orderId, reason);
-    }
-
-    public AdminCancelOrderResult adminCancelOrder(long orderId, String reason, ProductLine productLine) {
-        return adminOps.adminCancelOrder(orderId, reason, productLine);
-    }
-
-    public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request) {
-        return adminOps.adminCancelOrders(request);
-    }
-
-    public AdminCancelOrdersResponse adminCancelOrders(AdminBatchCancelOrdersRequest request, ProductLine productLine) {
-        return adminOps.adminCancelOrders(request, productLine);
-    }
-
-    public AdminCancelOrdersPreviewResponse adminCancelPreview(Long userId, String instrumentId, int limit) {
-        return adminOps.adminCancelPreview(userId, instrumentId, limit);
-    }
-
-    public AdminCancelOrdersPreviewResponse adminCancelPreview(
-            Long userId, String instrumentId, int limit, ProductLine productLine) {
-        return adminOps.adminCancelPreview(userId, instrumentId, limit, productLine);
-    }
-
-    public AdminCancelOrdersResponse adminCancelByInstrument(AdminCancelByInstrumentRequest request) {
-        return adminOps.adminCancelByInstrument(request);
-    }
-
-    public AdminCancelOrdersResponse adminCancelByInstrument(AdminCancelByInstrumentRequest request, ProductLine productLine) {
-        return adminOps.adminCancelByInstrument(request, productLine);
-    }
-
-    public int requestLifecycleCancellation(String instrumentId, int limit) {
-        return adminOps.requestLifecycleCancellation(instrumentId, limit);
-    }
-
-    public boolean hasLifecycleActiveOrders(String instrumentId) {
-        return adminOps.hasLifecycleActiveOrders(instrumentId);
     }
 
     PlaceOrderCommand buildPlaceCommand(long orderId, PlaceOrderRequest request) {

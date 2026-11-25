@@ -4,7 +4,6 @@ import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.mark.model.MarkPriceEncoding;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -18,7 +17,7 @@ public class MarkPriceEncodingService {
 
     private final MarkPriceProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
-    private ObjectProvider<InstrumentService> instrumentService;
+    private InstrumentService instrumentService;
     private com.surprising.instrument.api.client.InstrumentRpcApi instrumentRpc;
 
     public MarkPriceEncodingService(MarkPriceProperties properties,
@@ -30,7 +29,7 @@ public class MarkPriceEncodingService {
     @Autowired
     public MarkPriceEncodingService(MarkPriceProperties properties,
                                     InstrumentSnapshotCache cache,
-                                    ObjectProvider<InstrumentService> instrumentService) {
+                                    @Autowired(required = false) InstrumentService instrumentService) {
         this(properties, cache);
         this.instrumentService = instrumentService;
     }
@@ -58,10 +57,9 @@ public class MarkPriceEncodingService {
         var instrument = snapshotCache.current(properties.getProductLine(), com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), instrumentChangeId).orElse(null);
         if (instrument == null) {
             int parsedId = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
-            InstrumentService localInstrument = instrumentService == null ? null : instrumentService.getIfAvailable();
             com.surprising.instrument.api.model.InstrumentTradeEncoding units;
-            if (localInstrument != null) {
-                units = localInstrument.tradeEncoding(properties.getProductLine(), parsedId, instrumentChangeId);
+            if (instrumentService != null) {
+                units = instrumentService.tradeEncoding(properties.getProductLine(), parsedId, instrumentChangeId);
             } else if (instrumentRpc != null) {
                 units = instrumentRpc.tradeEncoding(properties.getProductLine(), parsedId, instrumentChangeId);
             } else {

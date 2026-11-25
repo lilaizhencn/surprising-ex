@@ -39,9 +39,8 @@ class LifecycleBusinessSettingsIntegrationTest {
         var insurance = infra.insuranceProperties(env, risk);
         var adl = infra.adlProperties(risk);
         var funding = new FundingConfiguration().fundingProperties(env, risk);
-        var beans = new StaticListableBeanFactory(line.isFundingProduct() ? Map.of("funding", funding) : Map.of());
         var service = new LifecycleBusinessSettingsService(new com.surprising.derivatives.lifecycle.repository.LifecycleBusinessSettingsRepository(jdbc, JsonMapper.builder().findAndAddModules().build()), risk,
-                beans.getBeanProvider(FundingProperties.class), liquidation, insurance, adl, event -> {});
+                line.isFundingProduct() ? funding : null, liquidation, insurance, adl, event -> {});
         service.initialize();
         return new Instance(service, funding, liquidation, insurance, adl);
     }

@@ -364,19 +364,21 @@ class OrderServiceTest {
     @Test
     void adminCancelUsesLocalPartitionAndProductLine() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);
-        assertThatThrownBy(() -> service.adminCancelOrders(new AdminBatchCancelOrdersRequest(
+        OrderAdminService admin = new OrderAdminService(service, service.queries());
+        assertThatThrownBy(() -> admin.adminCancelOrders(new AdminBatchCancelOrdersRequest(
                 1001L, "1", 10, "risk"))).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     void adminCancelSelectsOpenOrdersFromCommittedRealtimeProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeron);
+        OrderAdminService admin = new OrderAdminService(service, service.queries());
         List<OrderResponse> open = openOrders(123);
         when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, null, "1", null, 123, null))
                 .thenReturn(ProjectionReadResult.ok(open, null, false, 1, 0));
         stubCancelBatches(ProductLine.LINEAR_PERPETUAL);
 
-        AdminCancelOrdersResponse result = service.adminCancelOrders(
+        AdminCancelOrdersResponse result = admin.adminCancelOrders(
                 new AdminBatchCancelOrdersRequest(null, "1", 123, "risk"));
 
         assertThat(result.requested()).isEqualTo(123);
@@ -390,6 +392,7 @@ class OrderServiceTest {
     @Test
     void adminSingleCancelUsesTheProductLineScopedCommittedOrder() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeron);
+        OrderAdminService admin = new OrderAdminService(service, service.queries());
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
         OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
         when(projection.byOrder(ProductLine.LINEAR_PERPETUAL, null, 91L, null))
@@ -399,7 +402,7 @@ class OrderServiceTest {
                         ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                         1L, CoreCommandResultCodec.encode(new CoreCommandResultView(List.of(view(canceled)), List.of())))));
 
-        assertThat(service.adminCancelOrder(91L, "risk", ProductLine.LINEAR_PERPETUAL).orderId()).isEqualTo(91L);
+        assertThat(admin.adminCancelOrder(91L, "risk", ProductLine.LINEAR_PERPETUAL).orderId()).isEqualTo(91L);
 
         verify(aeron, never()).orderState(anyLong(), anyLong());
         verify(aeron).commandOutcome(eq(CoreMessageType.CANCEL_ORDER), any(UUID.class), eq(1001L), any(byte[].class));
@@ -529,10 +532,11 @@ class OrderServiceTest {
     @Test
     void lifecycleCancellationUsesAeronAuthorityInsteadOfStaleProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeron);
+        OrderAdminService admin = new OrderAdminService(service, service.queries());
         when(aeron.lifecycleOpenOrders("1", 123)).thenReturn(openOrders(123).stream().map(this::view).toList());
         stubCancelBatches(ProductLine.LINEAR_PERPETUAL);
 
-        assertThat(service.requestLifecycleCancellation("1", 123)).isEqualTo(123);
+        assertThat(admin.requestLifecycleCancellation("1", 123)).isEqualTo(123);
 
         verify(aeron).lifecycleOpenOrders("1", 123);
         verify(aeron, times(3)).commandOutcome(eq(CoreMessageType.CANCEL_ORDER_BATCH), any(UUID.class), eq(1001L), any(byte[].class));
@@ -543,10 +547,11 @@ class OrderServiceTest {
     @Test
     void lifecycleActiveCheckUsesAeronAuthorityInsteadOfStaleProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeron);
+        OrderAdminService admin = new OrderAdminService(service, service.queries());
         when(aeron.lifecycleOpenOrders("1", 1))
                 .thenReturn(java.util.List.of(view(response(91, "client-91", OrderStatus.ACCEPTED))));
 
-        assertThat(service.hasLifecycleActiveOrders("1")).isTrue();
+        assertThat(admin.hasLifecycleActiveOrders("1")).isTrue();
 
         verify(aeron).lifecycleOpenOrders("1", 1);
         verifyNoInteractions(projection);
@@ -555,8 +560,9 @@ class OrderServiceTest {
     @Test
     void adminSingleCancelRejectsProductLineMismatchBeforeProjectionOrAeronOffer() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeron);
+        OrderAdminService admin = new OrderAdminService(service, service.queries());
 
-        assertThatThrownBy(() -> service.adminCancelOrder(91L, "risk", ProductLine.OPTION))
+        assertThatThrownBy(() -> admin.adminCancelOrder(91L, "risk", ProductLine.OPTION))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("product line");
 

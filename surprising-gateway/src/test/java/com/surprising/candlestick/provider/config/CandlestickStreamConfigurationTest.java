@@ -13,7 +13,7 @@ import org.springframework.boot.health.contributor.Status;
 import org.springframework.kafka.config.StreamsBuilderFactoryBean;
 
 class CandlestickStreamConfigurationTest {
-    private final CandlestickStreamConfiguration configuration = new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper());
+    private final CandlestickStreamConfiguration configuration = new CandlestickStreamConfiguration((RealtimeRouter) null, new tools.jackson.databind.ObjectMapper());
 
     @Test
     void provisionsBothSourcesForEachProductLineBeforeAnyTrade() {

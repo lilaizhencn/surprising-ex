@@ -122,7 +122,7 @@ class InternalBusinessContractTest {
         context.registerBean(TradingAlgoController.class, () -> new TradingAlgoController(
                 mock(AlgoOrderService.class)));
         context.registerBean(AdminTradingController.class, () -> new AdminTradingController(
-                mock(OrderService.class),
+                mock(com.surprising.trading.order.service.OrderAdminService.class),
                 mock(OrderQueryService.class),
                 mock(TriggerOrderService.class)));
         context.registerBean(AdminTradingMaintenanceController.class, () -> new AdminTradingMaintenanceController(

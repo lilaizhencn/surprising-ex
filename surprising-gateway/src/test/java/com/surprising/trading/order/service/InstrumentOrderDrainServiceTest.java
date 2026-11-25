@@ -24,28 +24,28 @@ class InstrumentOrderDrainServiceTest {
 
     @Test
     void waitsUntilOrdinaryOrdersReachTerminalState() {
-        OrderService orderService = mock(OrderService.class);
+        OrderAdminService orderAdminService = mock(OrderAdminService.class);
         AlgoOrderService algoOrderService = mock(AlgoOrderService.class);
-        when(orderService.hasLifecycleActiveOrders("1")).thenReturn(true);
+        when(orderAdminService.hasLifecycleActiveOrders("1")).thenReturn(true);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        InstrumentOrderDrainService service = service(orderService, algoOrderService, publisher);
+        InstrumentOrderDrainService service = service(orderAdminService, algoOrderService, publisher);
 
         assertThatThrownBy(() -> service.drain(event()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未完成");
 
         verify(algoOrderService).cancelLifecycleOrders("1", 1000);
-        verify(orderService).requestLifecycleCancellation("1", 1000);
+        verify(orderAdminService).requestLifecycleCancellation("1", 1000);
         verifyNoInteractions(publisher);
     }
 
     @Test
     void publishesReadyAfterOrdersAndAlgosAreDrained() {
-        OrderService orderService = mock(OrderService.class);
+        OrderAdminService orderAdminService = mock(OrderAdminService.class);
         AlgoOrderService algoOrderService = mock(AlgoOrderService.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
 
-        service(orderService, algoOrderService, publisher).drain(event());
+        service(orderAdminService, algoOrderService, publisher).drain(event());
 
         ArgumentCaptor<InstrumentLifecycleDrainEvent> captor = ArgumentCaptor.forClass(InstrumentLifecycleDrainEvent.class);
         verify(publisher).publishEvent(captor.capture());
@@ -56,7 +56,7 @@ class InstrumentOrderDrainServiceTest {
 
     @Test
     void pendingStopsPreventReadyAcknowledgement() {
-        var orders = mock(OrderService.class);
+        var orders = mock(OrderAdminService.class);
         var algos = mock(AlgoOrderService.class);
         var publisher = mock(ApplicationEventPublisher.class);
         when(triggers.hasLifecycleActiveOrders("1")).thenReturn(true);
@@ -65,12 +65,12 @@ class InstrumentOrderDrainServiceTest {
         verifyNoInteractions(publisher);
     }
 
-    private InstrumentOrderDrainService service(OrderService orderService,
+    private InstrumentOrderDrainService service(OrderAdminService orderAdminService,
                                                 AlgoOrderService algoOrderService,
                                                 ApplicationEventPublisher publisher) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        return new InstrumentOrderDrainService(properties, orderService, algoOrderService, triggers, publisher);
+        return new InstrumentOrderDrainService(properties, orderAdminService, algoOrderService, triggers, publisher);
     }
 
     private InstrumentEvent event() {

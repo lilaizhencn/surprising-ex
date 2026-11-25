@@ -46,7 +46,6 @@ class IndexPriceServiceTest {
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceService markPriceService = mock(MarkPriceService.class);
         var realtime = mock(RealtimeJsonPublisher.class);
-        var publishers = new StaticListableBeanFactory(java.util.Map.of("realtime", realtime));
         Instant now = Instant.now();
 
         when(configService.symbols()).thenReturn(List.of(instrumentId));
@@ -60,7 +59,7 @@ class IndexPriceServiceTest {
         IndexPriceService service = new IndexPriceService(properties, configService, spotPriceClient,
                 latestQuoteStore, new IndexPriceCalculator(properties), leaseRepository, sequenceRepository,
                 latestIndexPriceCache,
-                kafkaTemplate, markPriceService, publishers.getBeanProvider(RealtimeJsonPublisher.class));
+                kafkaTemplate, markPriceService, realtime);
 
         service.pollAndPublish();
 
@@ -94,7 +93,7 @@ class IndexPriceServiceTest {
         new IndexPriceService(properties, configService, spotPriceClient, latestQuoteStore,
                 new IndexPriceCalculator(properties), leaseRepository, sequenceRepository, latestIndexPriceCache,
                 kafkaTemplate, markPriceService,
-                new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class)).pollAndPublish();
+                (RealtimeJsonPublisher) null).pollAndPublish();
 
         verifyNoInteractions(spotPriceClient);
     }
@@ -126,7 +125,7 @@ class IndexPriceServiceTest {
         new IndexPriceService(properties, configService, spotPriceClient, latestQuoteStore,
                 new IndexPriceCalculator(properties), leaseRepository, sequenceRepository, latestIndexPriceCache,
                 kafkaTemplate, markPriceService,
-                new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class)).pollAndPublish();
+                (RealtimeJsonPublisher) null).pollAndPublish();
 
         verify(spotPriceClient).fetch(instrumentId.getSources().getFirst());
         ArgumentCaptor<IndexPriceEvent> eventCaptor = ArgumentCaptor.forClass(IndexPriceEvent.class);

@@ -23,9 +23,8 @@ class LifecycleSettingsSchedulingEventTest {
         var repository = mock(com.surprising.derivatives.lifecycle.repository.LifecycleBusinessSettingsRepository.class);
         var events = mock(ApplicationEventPublisher.class);
         var funding = new FundingProperties();
-        var beans = new StaticListableBeanFactory(Map.of("funding", funding));
         var service = new LifecycleBusinessSettingsService(repository, new RiskProperties(),
-                beans.getBeanProvider(FundingProperties.class), new LiquidationProperties(), new InsuranceProperties(),
+                funding, new LiquidationProperties(), new InsuranceProperties(),
                 new AdlProperties(), events);
         var value = new LifecycleSettingsSnapshot(1, LifecycleBusinessSettings.initial(), "SYSTEM", "initial", Instant.now());
         when(repository.find(new RiskProperties().getProductLine())).thenReturn(value);

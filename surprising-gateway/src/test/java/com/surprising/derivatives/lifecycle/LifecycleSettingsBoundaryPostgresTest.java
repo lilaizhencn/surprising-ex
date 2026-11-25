@@ -37,9 +37,8 @@ class LifecycleSettingsBoundaryPostgresTest {
     private Instance instance(JdbcTemplate jdbc,ProductLine line,ApplicationEventPublisher events) {
         var risk=new RiskProperties();risk.setProductLine(line);
         var funding=new FundingProperties();funding.getCoordination().setNodeId("funding-node");
-        var beans=new StaticListableBeanFactory(line.isFundingProduct()?Map.of("funding",funding):Map.of());
         var liquidation=new LiquidationProperties();var repository=new LifecycleBusinessSettingsRepository(jdbc,json);
-        var service=new LifecycleBusinessSettingsService(repository,risk,beans.getBeanProvider(FundingProperties.class),
+        var service=new LifecycleBusinessSettingsService(repository,risk,line.isFundingProduct()?funding:null,
                 liquidation,new InsuranceProperties(),new AdlProperties(),events);
         return new Instance(service,repository,liquidation,funding);
     }

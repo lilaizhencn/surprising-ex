@@ -12,7 +12,7 @@ import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.time.Instant;
-import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -32,9 +32,9 @@ public class LifecycleBusinessSettingsService {
     private volatile LifecycleSettingsSnapshot current;
 
     public LifecycleBusinessSettingsService(LifecycleBusinessSettingsRepository settings, RiskProperties risk,
-            ObjectProvider<FundingProperties> funding, LiquidationProperties liquidation,
+            @Autowired(required = false) FundingProperties funding, LiquidationProperties liquidation,
             InsuranceProperties insurance, AdlProperties adl, ApplicationEventPublisher events) {
-        this.settings = settings; this.line = risk.getProductLine(); this.funding = funding.getIfAvailable();
+        this.settings = settings; this.line = risk.getProductLine(); this.funding = funding;
         this.liquidation = liquidation; this.insurance = insurance; this.adl = adl; this.events = events;
     }
     @PostConstruct

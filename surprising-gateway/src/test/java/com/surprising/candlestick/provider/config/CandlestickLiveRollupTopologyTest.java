@@ -148,7 +148,7 @@ class CandlestickLiveRollupTopologyTest {
         Fixture(ProductLine product) {
             var p=new CandlestickProperties();p.getKafka().setProductLine(product);
             p.setPeriods(Arrays.stream(CandlePeriod.values()).map(CandlePeriod::code).toList());
-            var builder=new StreamsBuilder();new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder,p,
+            var builder=new StreamsBuilder();new CandlestickStreamConfiguration((RealtimeRouter) null, new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder,p,
                     mock(PostgresCandleSink.class),mock(SymbolRegistryService.class),mock(PublicTradeEventMapper.class),hot,minutes);
             var config=new Properties();config.put(StreamsConfig.APPLICATION_ID_CONFIG,"live-rollup-"+product);
             config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG,"unused:9092");

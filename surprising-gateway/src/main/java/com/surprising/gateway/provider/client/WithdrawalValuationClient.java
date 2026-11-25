@@ -6,7 +6,7 @@ import com.surprising.price.index.service.ExchangeRateService;
 import com.surprising.price.index.utils.CurrencyFormats;
 import java.math.BigDecimal;
 import java.time.Instant;
-import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** 直接调用进程内 ExchangeRateService 换算 USDT 估值，不再发起本地 HTTP 自调用。 */
@@ -14,19 +14,18 @@ import org.springframework.stereotype.Component;
 public class WithdrawalValuationClient {
 
     private final GatewayProperties properties;
-    private final ObjectProvider<ExchangeRateService> exchangeRateServiceProvider;
+    private final ExchangeRateService exchangeRateService;
 
     public WithdrawalValuationClient(GatewayProperties properties,
-                                     ObjectProvider<ExchangeRateService> exchangeRateServiceProvider) {
+                                     @Autowired(required = false) ExchangeRateService exchangeRateService) {
         this.properties = properties;
-        this.exchangeRateServiceProvider = exchangeRateServiceProvider;
+        this.exchangeRateService = exchangeRateService;
     }
 
     public BigDecimal toUsdt(String asset, BigDecimal amount) {
         if (asset == null || asset.isBlank() || amount == null || amount.signum() <= 0) {
             throw new IllegalArgumentException("asset and positive amount are required");
         }
-        ExchangeRateService exchangeRateService = exchangeRateServiceProvider.getIfAvailable();
         if (exchangeRateService == null) {
             throw new ValuationUnavailableException("withdrawal valuation service is unavailable");
         }

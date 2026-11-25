@@ -18,8 +18,8 @@ import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.order.model.GridStrategyModels.GridStrategyRecord;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import com.surprising.trading.order.service.GridStrategyService;
+import com.surprising.trading.order.service.OrderAdminService;
 import com.surprising.trading.order.service.OrderQueryService;
-import com.surprising.trading.order.service.OrderService;
 import com.surprising.trading.order.utils.TradeReadCursors;
 import com.surprising.trading.trigger.service.TriggerOrderService;
 import com.surprising.trading.trigger.utils.TriggerReadCursors;
@@ -43,31 +43,31 @@ import tools.jackson.databind.node.ObjectNode;
 
 @RestController
 public class AdminTradingController {
-    private final OrderService orderService;
+    private final OrderAdminService orderAdminService;
     private final OrderQueryService orderQueryService;
     private final TriggerOrderService triggerOrderService;
     private final GridStrategyService gridStrategyService;
 
-    public AdminTradingController(OrderService orderService,
+    public AdminTradingController(OrderAdminService orderAdminService,
                                   OrderQueryService orderQueryService,
                                   TriggerOrderService triggerOrderService) {
-        this(orderService, orderQueryService, triggerOrderService, null);
+        this(orderAdminService, orderQueryService, triggerOrderService, null);
     }
 
     @Autowired
-    public AdminTradingController(OrderService orderService,
+    public AdminTradingController(OrderAdminService orderAdminService,
                                   OrderQueryService orderQueryService,
                                   TriggerOrderService triggerOrderService,
                                   @Autowired(required = false) GridStrategyService gridStrategyService) {
-        this.orderService = orderService;
+        this.orderAdminService = orderAdminService;
         this.orderQueryService = orderQueryService;
         this.triggerOrderService = triggerOrderService;
         this.gridStrategyService = gridStrategyService;
     }
 
-    public AdminTradingController(OrderService orderService,
+    public AdminTradingController(OrderAdminService orderAdminService,
                                   TriggerOrderService triggerOrderService) {
-        this(orderService, null, triggerOrderService, null);
+        this(orderAdminService, null, triggerOrderService, null);
     }
 
     @GetMapping("/api/v1/admin/trading/orders/metrics")
@@ -128,7 +128,7 @@ public class AdminTradingController {
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @Valid @RequestBody AdminCancelByInstrumentRequest request) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return TradingControllerSupport.call(() -> orderService.adminCancelByInstrument(
+        return TradingControllerSupport.call(() -> orderAdminService.adminCancelByInstrument(
                 request, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
@@ -141,7 +141,7 @@ public class AdminTradingController {
             @RequestParam(value = "instrumentId", required = false) String instrumentId,
             @RequestParam(value = "limit", defaultValue = "100") int limit) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return TradingControllerSupport.call(() -> orderService.adminCancelPreview(
+        return TradingControllerSupport.call(() -> orderAdminService.adminCancelPreview(
                 userId, instrumentId, limit, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
@@ -207,7 +207,7 @@ public class AdminTradingController {
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @Valid @RequestBody(required = false) AdminBatchCancelOrdersRequest request) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return TradingControllerSupport.call(() -> orderService.adminCancelOrders(
+        return TradingControllerSupport.call(() -> orderAdminService.adminCancelOrders(
                 request, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
 
@@ -237,7 +237,7 @@ public class AdminTradingController {
             @PathVariable("orderId") long orderId,
             @Valid @RequestBody(required = false) AdminCancelOrderRequest request) {
         GatewayUserContext.requireAdminUserId(adminUserId);
-        return TradingControllerSupport.call(() -> orderService.adminCancelOrder(
+        return TradingControllerSupport.call(() -> orderAdminService.adminCancelOrder(
                 orderId, request == null ? null : request.reason(),
                 TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }

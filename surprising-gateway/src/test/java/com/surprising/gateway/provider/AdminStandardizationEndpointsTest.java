@@ -185,7 +185,8 @@ class AdminStandardizationEndpointsTest {
         gridService.createAndStartGrid(1001L, new CreateGridStrategyRequest(
                 "BTC-USDT", ProductLine.LINEAR_PERPETUAL, 48000L, 52000L, 4, 1_000_000L, true), 50000L);
 
-        AdminTradingController controller = new AdminTradingController(orderService, null, null, gridService);
+        AdminTradingController controller = new AdminTradingController(
+                (com.surprising.trading.order.service.OrderAdminService) null, null, null, gridService);
         var running = controller.listGridStrategies("9", "BTC", "RUNNING", null);
         assertThat(running).hasSize(1);
         String strategyId = String.valueOf(running.getFirst().get("strategyId"));

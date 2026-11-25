@@ -19,19 +19,19 @@ public class InstrumentOrderDrainService {
     private static final int BATCH_SIZE = 1000;
 
     private final TradingOrderProperties properties;
-    private final OrderService orderService;
+    private final OrderAdminService orderAdminService;
     private final AlgoOrderService algoOrderService;
     private final TriggerOrderService triggerOrderService;
     private final ApplicationEventPublisher eventPublisher;
 
     @Autowired
     public InstrumentOrderDrainService(TradingOrderProperties properties,
-                                       OrderService orderService,
+                                       OrderAdminService orderAdminService,
                                        AlgoOrderService algoOrderService,
                                        TriggerOrderService triggerOrderService,
                                        ApplicationEventPublisher eventPublisher) {
         this.properties = properties;
-        this.orderService = orderService;
+        this.orderAdminService = orderAdminService;
         this.algoOrderService = algoOrderService;
         this.triggerOrderService = triggerOrderService;
         this.eventPublisher = eventPublisher;
@@ -52,10 +52,10 @@ public class InstrumentOrderDrainService {
         String instrumentId = Integer.toString(event.instrumentId());
         algoOrderService.cancelLifecycleOrders(instrumentId, BATCH_SIZE);
         triggerOrderService.cancelLifecycleOrders(instrumentId, BATCH_SIZE);
-        orderService.requestLifecycleCancellation(instrumentId, BATCH_SIZE);
+        orderAdminService.requestLifecycleCancellation(instrumentId, BATCH_SIZE);
         if (algoOrderService.hasLifecycleActiveOrders(instrumentId)
                 || triggerOrderService.hasLifecycleActiveOrders(instrumentId)
-                || orderService.hasLifecycleActiveOrders(instrumentId)) {
+                || orderAdminService.hasLifecycleActiveOrders(instrumentId)) {
             throw new IllegalStateException("订单尚未完成到期清理: " + instrumentId);
         }
         if (eventPublisher != null) {

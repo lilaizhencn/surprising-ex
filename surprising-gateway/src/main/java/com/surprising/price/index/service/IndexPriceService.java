@@ -26,7 +26,7 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class IndexPriceService {
-    private final ObjectProvider<RealtimeJsonPublisher> realtime;
+    private final RealtimeJsonPublisher realtime;
 
     private static final String SEQUENCE_MODULE = "price-index";
 
@@ -53,7 +53,7 @@ public class IndexPriceService {
                              LatestIndexPriceCache latestIndexPriceCache,
                              @Qualifier("indexKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                              MarkPriceService markPriceService,
-                             ObjectProvider<RealtimeJsonPublisher> realtime) {
+                             @Autowired(required = false) RealtimeJsonPublisher realtime) {
         this.realtime = realtime;
         this.properties = properties;
         this.indexInstrumentConfigService = indexInstrumentConfigService;
@@ -99,8 +99,10 @@ public class IndexPriceService {
         latestIndexPriceCache.update(event);
         markPriceService.acceptIndexPrice(event);
         kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), instrumentId, PricePublishedEvent.index(event));
-        realtime.ifAvailable(publisher -> publisher.publish(properties.getProductLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event));
+        if (realtime != null) {
+            realtime.publish(properties.getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
+        }
 
     }
 

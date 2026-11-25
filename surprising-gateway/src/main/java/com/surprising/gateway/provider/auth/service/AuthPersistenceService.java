@@ -48,7 +48,7 @@ public class AuthPersistenceService {
     private final GatewayLoginLogRepository loginLogRepository;
     private final GatewayUserMfaRepository mfaRepository;
     private final LoginSessionRepository sessions;
-    private final org.springframework.beans.factory.ObjectProvider<com.surprising.gateway.provider.notification.service.DeviceLoginAlertService> deviceLoginAlertProvider;
+    private final com.surprising.gateway.provider.notification.service.DeviceLoginAlertService deviceLoginAlertService;
 
     public AuthPersistenceService(GatewayUserRepository userRepository,
                                   GatewayRoleRepository roleRepository,
@@ -71,7 +71,8 @@ public class AuthPersistenceService {
                                   GatewayLoginLogRepository loginLogRepository,
                                   GatewayUserMfaRepository mfaRepository,
                                   LoginSessionRepository sessions,
-                                  org.springframework.beans.factory.ObjectProvider<com.surprising.gateway.provider.notification.service.DeviceLoginAlertService> deviceLoginAlertProvider) {
+                                  @org.springframework.beans.factory.annotation.Autowired(required = false)
+                                  com.surprising.gateway.provider.notification.service.DeviceLoginAlertService deviceLoginAlertService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.permissionRepository = permissionRepository;
@@ -80,7 +81,7 @@ public class AuthPersistenceService {
         this.loginLogRepository = loginLogRepository;
         this.mfaRepository = mfaRepository;
         this.sessions = sessions;
-        this.deviceLoginAlertProvider = deviceLoginAlertProvider;
+        this.deviceLoginAlertService = deviceLoginAlertService;
     }
 
     public AuthenticatedUser createUser(String username, String email, String passwordHash, Instant now) {
@@ -271,9 +272,8 @@ public class AuthPersistenceService {
 
     public void loginLog(long userId, String result, String reason, String userAgent, String ipAddress, Instant now) {
         loginLogRepository.append(userId, result, reason, userAgent, ipAddress, now);
-        if ("SUCCESS".equalsIgnoreCase(result) && deviceLoginAlertProvider != null) {
-            deviceLoginAlertProvider.ifAvailable(alertService ->
-                    alertService.checkAndAlertNewDeviceLogin(userId, ipAddress, userAgent));
+        if ("SUCCESS".equalsIgnoreCase(result) && deviceLoginAlertService != null) {
+            deviceLoginAlertService.checkAndAlertNewDeviceLogin(userId, ipAddress, userAgent);
         }
     }
 

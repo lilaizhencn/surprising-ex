@@ -49,13 +49,13 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerde;
  * candle update events, and periodically lets the processor flush dirty snapshots to PostgreSQL.</p>
  */
 public class CandlestickStreamConfiguration {
-    private final ObjectProvider<RealtimeRouter> realtime;
+    private final RealtimeRouter realtime;
     private final tools.jackson.databind.ObjectMapper objectMapper;
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String defaultBootstrapServers = "localhost:9092";
 
     public CandlestickStreamConfiguration(
-            ObjectProvider<RealtimeRouter> realtime,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) RealtimeRouter realtime,
             tools.jackson.databind.ObjectMapper objectMapper) {
         this.realtime = realtime;
         this.objectMapper = objectMapper;
@@ -218,10 +218,12 @@ public class CandlestickStreamConfiguration {
     }
 
     private void publishCandle(CandlestickProperties properties, CandleUpdatedEvent event) {
-        realtime.ifAvailable(router -> router.offer(new com.surprising.aeron.protocol.RealtimeFrame(
-                properties.getProductLine(), com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,
-                0, Math.max(0, event.emittedAt().toEpochMilli()), 0, event.eventTime().toEpochMilli(),
-                0, event.instrumentId(), event.period(), objectMapper.writeValueAsBytes(event))));
+        if (realtime != null) {
+            realtime.offer(new com.surprising.aeron.protocol.RealtimeFrame(
+                    properties.getProductLine(), com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,
+                    0, Math.max(0, event.emittedAt().toEpochMilli()), 0, event.eventTime().toEpochMilli(),
+                    0, event.instrumentId(), event.period(), objectMapper.writeValueAsBytes(event)));
+        }
     }
 
     private <T> JacksonJsonSerde<T> jsonSerde(Class<T> type) {

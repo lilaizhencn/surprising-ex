@@ -114,13 +114,11 @@ class MarkPriceServiceTest {
         when(coordinationService.currentEncoding("1")).thenReturn(encoding());
         var realtime = mock(RealtimeJsonPublisher.class);
         var corePublisher = mock(MarkPriceCorePublisher.class);
-        var publishers = new StaticListableBeanFactory(java.util.Map.of(
-                "realtime", realtime, "core", corePublisher));
         MarkPriceProperties properties = properties();
         LatestMarkPriceCache cache = mock(LatestMarkPriceCache.class);
         MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate, cache,
-                 publishers.getBeanProvider(RealtimeJsonPublisher.class), publishers.getBeanProvider(MarkPriceCorePublisher.class));
+                realtime, corePublisher);
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
@@ -182,8 +180,8 @@ class MarkPriceServiceTest {
         MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
                 mock(LatestMarkPriceCache.class),
-                new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
-                new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
+                (RealtimeJsonPublisher) null,
+                (MarkPriceCorePublisher) null);
         Instant now = Instant.now();
 
         supplyMarket(service, now);
@@ -210,8 +208,8 @@ class MarkPriceServiceTest {
         MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
                 mock(LatestMarkPriceCache.class),
-                new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
-                new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
+                (RealtimeJsonPublisher) null,
+                (MarkPriceCorePublisher) null);
         Instant now = Instant.now();
 
         supplyMarket(service, now);
@@ -349,8 +347,8 @@ class MarkPriceServiceTest {
         when(coordinationService.currentEncoding("1")).thenReturn(encoding());
         return new MarkPriceService(properties, new MarkPriceCalculator(properties),
                 coordinationService, kafkaTemplate, mock(LatestMarkPriceCache.class),
-                new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
-                new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
+                (RealtimeJsonPublisher) null,
+                (MarkPriceCorePublisher) null);
     }
 
     private MarkPriceEncoding encoding() {
