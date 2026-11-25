@@ -4,13 +4,12 @@ import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationS
 import com.surprising.gateway.provider.telegram.bot.model.TelegramSecurityMode;
 import com.surprising.gateway.provider.telegram.bot.model.TelegramSecuritySettings;
 import com.surprising.gateway.provider.telegram.bot.repository.TelegramBotSecurityRepository;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.Base64;
 
 @Service
 public class TelegramBotSecurityService {
@@ -92,13 +91,6 @@ public class TelegramBotSecurityService {
     }
 
     private String hashPin(long userId, String pin) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            String salt = "surprising:tg:pin:" + userId + ":";
-            byte[] hash = digest.digest((salt + pin).getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 algorithm not found", e);
-        }
+        return Sha256Digests.base64Url("surprising:tg:pin:" + userId + ":" + pin);
     }
 }

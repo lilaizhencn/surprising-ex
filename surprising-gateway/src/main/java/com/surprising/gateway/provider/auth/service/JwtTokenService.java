@@ -94,17 +94,9 @@ public class JwtTokenService {
         return URL_ENCODER.encodeToString(objectMapper.writeValueAsBytes(value));
     }
 
-    private static final ThreadLocal<Mac> HMAC_SHA256 = ThreadLocal.withInitial(() -> {
-        try {
-            return Mac.getInstance("HmacSHA256");
-        } catch (Exception ex) {
-            throw new IllegalStateException("HmacSHA256 unavailable", ex);
-        }
-    });
-
     private String sign(String unsigned) {
         try {
-            Mac mac = HMAC_SHA256.get();
+            Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(secretKeySpec());
             return URL_ENCODER.encodeToString(mac.doFinal(unsigned.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception ex) {

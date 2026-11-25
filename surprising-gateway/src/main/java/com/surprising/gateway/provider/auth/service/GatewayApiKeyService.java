@@ -182,17 +182,9 @@ public class GatewayApiKeyService {
         return record;
     }
 
-    private static final ThreadLocal<Mac> HMAC_SHA256 = ThreadLocal.withInitial(() -> {
-        try {
-            return Mac.getInstance("HmacSHA256");
-        } catch (Exception ex) {
-            throw new IllegalStateException("HmacSHA256 unavailable", ex);
-        }
-    });
-
     public String sign(String secret, String canonicalQuery) {
         try {
-            Mac mac = HMAC_SHA256.get();
+            Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return java.util.HexFormat.of().formatHex(mac.doFinal(canonicalQuery.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception ex) {

@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.aeron.protocol.ProductLineWireCode;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.product.api.ProductLine;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
@@ -8,7 +9,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
 
 public final class StableOrderIdentity {
@@ -25,8 +25,6 @@ public final class StableOrderIdentity {
 
     private static final VarHandle LONG_LE =
             MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.LITTLE_ENDIAN);
-
-    private static final ThreadLocal<DigestScratch> SCRATCH = ThreadLocal.withInitial(DigestScratch::new);
 
     private StableOrderIdentity() {
     }
@@ -71,7 +69,20 @@ public final class StableOrderIdentity {
             throw new IllegalArgumentException("userId must be positive");
         }
         byte[] keyBytes = requireKey(clientKey).getBytes(StandardCharsets.UTF_8);
-        return SCRATCH.get().digest(ProductLineWireCode.encode(productLine), userId, namespace, keyBytes);
+        byte[] header = ByteBuffer.allocate(Integer.BYTES * 6 + Long.BYTES)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(Integer.BYTES)
+                .putInt(IDENTITY_VERSION)
+                .putInt(Integer.BYTES)
+                .putInt(ProductLineWireCode.encode(productLine))
+                .putInt(Long.BYTES)
+                .putLong(userId)
+                .putInt(namespace.length + keyBytes.length)
+                .array();
+        MessageDigest md = Sha256Digests.newDigest();
+        md.update(header);
+        md.update(namespace);
+        return md.digest(keyBytes);
     }
 
     private static long positiveLong(byte[] digest) {
@@ -88,33 +99,5 @@ public final class StableOrderIdentity {
             throw new IllegalArgumentException("client identity key is required");
         }
         return key;
-    }
-
-    private static final class DigestScratch {
-        private final MessageDigest md;
-        private final byte[] header = new byte[Integer.BYTES * 6 + Long.BYTES];
-        private final ByteBuffer headerView = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
-
-        DigestScratch() {
-            try {
-                this.md = MessageDigest.getInstance("SHA-256");
-            } catch (NoSuchAlgorithmException exception) {
-                throw new IllegalStateException("JDK does not provide SHA-256", exception);
-            }
-            headerView.putInt(0, Integer.BYTES);
-            headerView.putInt(4, IDENTITY_VERSION);
-            headerView.putInt(8, Integer.BYTES);
-            headerView.putInt(16, Long.BYTES);
-        }
-
-        byte[] digest(int productWireCode, long userId, byte[] namespace, byte[] keyBytes) {
-            headerView.putInt(12, productWireCode);
-            headerView.putLong(20, userId);
-            headerView.putInt(28, namespace.length + keyBytes.length);
-            md.reset();
-            md.update(header);
-            md.update(namespace);
-            return md.digest(keyBytes);
-        }
     }
 }

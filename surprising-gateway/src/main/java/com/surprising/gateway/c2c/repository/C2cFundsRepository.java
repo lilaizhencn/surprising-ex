@@ -3,9 +3,8 @@ package com.surprising.gateway.c2c.repository;
 import com.surprising.gateway.c2c.model.C2cFundTotals;
 import com.surprising.gateway.c2c.model.C2cProfileRows.Escrow;
 import com.surprising.gateway.c2c.model.C2cAdminRows.FundIntent;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -101,11 +100,8 @@ public class C2cFundsRepository {
     }
 
     private static long transferId(UUID id) {
-        try {
-            long value = ByteBuffer.wrap(MessageDigest.getInstance("SHA-256")
-                    .digest(("c2c-funds:" + id).getBytes(StandardCharsets.UTF_8))).getLong() & Long.MAX_VALUE;
-            return value == 0 ? 1 : value;
-        } catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
+        long value = ByteBuffer.wrap(Sha256Digests.bytes("c2c-funds:" + id)).getLong() & Long.MAX_VALUE;
+        return value == 0 ? 1 : value;
     }
     /**
      * 资金意图是托管统计根；按owner_type关联唯一广告/订单/质押仅确定原资产所有者，资产只提供权威精度。

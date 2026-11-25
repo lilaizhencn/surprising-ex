@@ -144,8 +144,7 @@ public class TotpService {
             String material = configured == null || configured.isBlank()
                     ? properties.getSecurity().getJwtSecret()
                     : configured;
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(material.getBytes(StandardCharsets.UTF_8));
+            byte[] digest = com.surprising.gateway.provider.support.Sha256Digests.bytes(material);
             return new SecretKeySpec(digest, "AES");
         } catch (Exception ex) {
             throw new IllegalStateException("failed to derive mfa encryption key", ex);
