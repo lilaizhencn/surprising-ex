@@ -3,10 +3,9 @@ package com.surprising.trading.order.utils;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.TradeReadCursor;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Set;
+import java.util.zip.CRC32;
 
 /** 稳定游标格式转换；请求入口验证作用域，SQL只使用原生坐标。 */
 public final class TradeReadCursors {
@@ -68,6 +67,8 @@ public final class TradeReadCursors {
     }
 
     private static String digest(String value) {
-        return com.surprising.gateway.provider.support.Sha256Digests.hex(value);
+        CRC32 crc = new CRC32();
+        crc.update(value.getBytes(StandardCharsets.UTF_8));
+        return Long.toHexString(crc.getValue());
     }
 }

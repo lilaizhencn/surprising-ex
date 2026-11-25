@@ -4,9 +4,8 @@ import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.trigger.model.TriggerReadCursor;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Base64;
-import java.util.HexFormat;
+import java.util.zip.CRC32;
 
 /** 条件单历史游标的稳定协议格式；无业务状态或SQL职责。 */
 public final class TriggerReadCursors {
@@ -15,7 +14,9 @@ public final class TriggerReadCursors {
     public static String scope(ProductLine product, Long user, String instrument, CoreTriggerOrderStatus status,
             Long trigger, boolean ascending) {
         String text = product.name() + '|' + user + '|' + instrument + '|' + status + '|' + trigger + '|' + (ascending ? "createdAt.asc" : "createdAt.desc");
-        return com.surprising.gateway.provider.support.Sha256Digests.hex(text);
+        CRC32 crc = new CRC32();
+        crc.update(text.getBytes(StandardCharsets.UTF_8));
+        return Long.toHexString(crc.getValue());
     }
 
     public static TriggerReadCursor decode(String cursor, String scope) {
