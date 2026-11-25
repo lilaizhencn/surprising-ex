@@ -1,8 +1,9 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.controller.LoginVerificationSettingsController;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
@@ -31,7 +32,7 @@ class LoginVerificationSettingsControllerTest {
     final AuthPersistenceService users = mock(AuthPersistenceService.class);
     final LoginChallengeRepository challenges = mock(LoginChallengeRepository.class);
     final GatewayProperties properties = new GatewayProperties();
-    final AuthModels.JwtPrincipal principal = new AuthModels.JwtPrincipal(
+    final JwtPrincipal principal = new JwtPrincipal(
             1, null, "NORMAL", List.of("USER"), Instant.now().plusSeconds(600), 42);
     MockMvc mvc;
 

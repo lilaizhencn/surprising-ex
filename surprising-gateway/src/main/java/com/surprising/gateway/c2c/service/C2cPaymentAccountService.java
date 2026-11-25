@@ -14,7 +14,7 @@ import com.surprising.gateway.c2c.model.C2cPaymentEnvelope;
 import com.surprising.gateway.c2c.repository.C2cAttachmentRepository;
 import com.surprising.gateway.c2c.repository.C2cPaymentAccountRepository;
 import com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.TotpService;
 import java.text.Normalizer;

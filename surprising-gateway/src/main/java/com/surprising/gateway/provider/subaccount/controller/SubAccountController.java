@@ -2,8 +2,8 @@ package com.surprising.gateway.provider.subaccount.controller;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductBalanceQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthResponse;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.subaccount.model.SubAccountModels.*;

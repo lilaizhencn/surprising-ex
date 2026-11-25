@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.auth.client;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
 import java.util.List;
 import org.springframework.stereotype.Component;
 

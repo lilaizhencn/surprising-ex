@@ -5,7 +5,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.gateway.provider.auth.controller.*;
 import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.support.GatewayLimitRequestBinding;
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.repository.*;
 import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.auth.support.ApiKeyRequestBinding;

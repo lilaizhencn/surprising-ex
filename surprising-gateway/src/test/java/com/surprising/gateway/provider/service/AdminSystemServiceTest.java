@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.client.SystemHealthClient;
 import com.surprising.gateway.provider.config.GatewayProperties;

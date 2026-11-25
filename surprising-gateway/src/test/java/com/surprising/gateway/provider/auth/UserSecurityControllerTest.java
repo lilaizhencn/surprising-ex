@@ -1,10 +1,11 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.AdminSessionRevokeResponse;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 
 import com.surprising.gateway.provider.auth.controller.UserSecurityController;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.LoginVerificationService;
@@ -26,8 +27,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AdminSessionResponse;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -168,7 +169,7 @@ class UserSecurityControllerTest {
     void revokeAllSessionsKeepsTheSessionOfTheCallingToken() {
         Instant now = Instant.parse("2026-08-01T00:00:00Z");
         when(authService.revokeOtherSessions("Bearer token"))
-                .thenReturn(new AuthModels.AdminSessionRevokeResponse(2, now));
+                .thenReturn(new AdminSessionRevokeResponse(2, now));
 
         var response = controller.revokeAllSessions("Bearer token");
 

@@ -1,12 +1,13 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.auth.client.KycProvider;
 import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
 import com.surprising.gateway.provider.auth.client.SumsubKycProvider;
 import com.surprising.gateway.provider.auth.client.VeriffKycProvider;
-import com.surprising.gateway.provider.auth.model.ComplianceModels;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -56,7 +57,7 @@ class ExternalKycProviderTest {
         KycProvider veriff = provider("VERIFF");
         var registry = new KycProviderRegistry(List.of(sumsub, veriff), properties);
 
-        var refreshed = registry.refreshSession(new ComplianceModels.KycProfile(42, "BASIC", "PENDING", "SG", "PASSPORT", "VERIFF", "existing-veriff-session", null, null, null, null, java.time.Instant.now(), java.time.Instant.now()), "https://example.veriff.com/session");
+        var refreshed = registry.refreshSession(new KycProfile(42, "BASIC", "PENDING", "SG", "PASSPORT", "VERIFF", "existing-veriff-session", null, null, null, null, java.time.Instant.now(), java.time.Instant.now()), "https://example.veriff.com/session");
 
         assertThat(refreshed.provider()).isEqualTo("VERIFF");
         assertThat(refreshed.providerReference()).isEqualTo("existing-veriff-session");
@@ -109,10 +110,10 @@ class ExternalKycProviderTest {
         return new KycProvider() {
             @Override public String code() { return code; }
             @Override public KycProviderSession start(long userId, KycSubmissionRequest request,
-                                                       List<com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument> documents) {
+                                                       List<com.surprising.gateway.provider.auth.model.KycDocument> documents) {
                 return new KycProviderSession(code, "new-session", null, null, "PENDING", false);
             }
-            @Override public KycProviderSession refreshSession(ComplianceModels.KycProfile profile, String redirectUrl) {
+            @Override public KycProviderSession refreshSession(KycProfile profile, String redirectUrl) {
                 return new KycProviderSession(code, profile.providerReference(), "refreshed-token", null, "PENDING", false);
             }
         };

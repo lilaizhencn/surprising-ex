@@ -6,7 +6,7 @@ import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import lombok.extern.slf4j.Slf4j;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminOperationLogResponse;
+import com.surprising.gateway.provider.auth.model.AdminOperationLogResponse;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;

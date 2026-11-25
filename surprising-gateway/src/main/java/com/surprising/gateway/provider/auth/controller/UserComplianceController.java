@@ -10,12 +10,12 @@ import com.surprising.gateway.provider.auth.client.KycProvider;
 import com.surprising.gateway.provider.auth.repository.CountryRepository;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionResponse;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSimulationRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProviderInfo;
+import com.surprising.gateway.provider.auth.model.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycSubmissionResponse;
+import com.surprising.gateway.provider.auth.model.KycSimulationRequest;
+import com.surprising.gateway.provider.auth.model.KycProviderInfo;
 import com.surprising.gateway.provider.exception.KycDocumentNotFoundException;
 import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import com.surprising.gateway.provider.exception.KycDocumentStorageUnavailableException;

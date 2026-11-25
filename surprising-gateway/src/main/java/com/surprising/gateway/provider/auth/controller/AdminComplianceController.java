@@ -11,16 +11,16 @@ import com.surprising.gateway.provider.compliance.por.service.ProofOfReservesSer
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseCreateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseStatusUpdateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.ComplianceUserSummary;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTag;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTagCreateRequest;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.AmlCase;
+import com.surprising.gateway.provider.auth.model.AmlCaseCreateRequest;
+import com.surprising.gateway.provider.auth.model.AmlCaseStatusUpdateRequest;
+import com.surprising.gateway.provider.auth.model.ComplianceUserSummary;
+import com.surprising.gateway.provider.auth.model.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycUpdateRequest;
+import com.surprising.gateway.provider.auth.model.RiskTag;
+import com.surprising.gateway.provider.auth.model.RiskTagCreateRequest;
 import com.surprising.gateway.provider.exception.KycDocumentNotFoundException;
 import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import jakarta.servlet.http.HttpServletRequest;

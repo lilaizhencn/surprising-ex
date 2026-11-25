@@ -1,9 +1,10 @@
 package com.surprising.gateway.c2c;
 
+
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
 import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels;
 import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
@@ -61,7 +62,7 @@ import com.surprising.gateway.c2c.repository.*;
 import com.surprising.gateway.c2c.service.C2cAdminQueryService;
 import com.surprising.gateway.c2c.service.C2cNotificationService;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.gateway.provider.service.*;
@@ -140,7 +141,7 @@ final class C2cHttpFixture implements AutoCloseable {
                 var rows=jdbc.queryForList("SELECT status,expires_at FROM gateway_user_kyc_profiles WHERE user_id=?",userId);
                 if(rows.isEmpty()) return null;
                 var row=rows.getFirst();var expires=(java.sql.Timestamp)row.get("expires_at");
-                return new ComplianceModels.KycProfile(userId,"STANDARD",(String)row.get("status"),"CN","IDENTITY_CARD","MANUAL",null,
+                return new KycProfile(userId,"STANDARD",(String)row.get("status"),"CN","IDENTITY_CARD","MANUAL",null,
                         null,null,null,expires==null?null:expires.toInstant(),Instant.now(),Instant.now());
             });
             when(security.verify(anyLong(),anyString(),any(),any(),any())).thenAnswer(call -> {

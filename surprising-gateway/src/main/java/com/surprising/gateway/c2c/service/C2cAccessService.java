@@ -6,7 +6,7 @@ import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.c2c.repository.C2cProfileRepository;
 import com.surprising.gateway.c2c.repository.C2cSecurityGrantRepository;
 import com.surprising.gateway.c2c.utils.C2cDigests;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;

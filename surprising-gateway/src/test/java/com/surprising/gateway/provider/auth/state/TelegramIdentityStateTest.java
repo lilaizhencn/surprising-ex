@@ -78,7 +78,7 @@ class TelegramIdentityStateTest {
     @Test void newBindingPublishesPermanentIdentityOnlyAfterCommitAndRollbackPublishesNothing() {
         var users=mock(com.surprising.gateway.provider.auth.service.AuthPersistenceService.class);
         var sync=mock(AuthStateSync.class);
-        when(users.createUser(isNull(),isNull(),isNull(),any())).thenReturn(new com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser(7,null,null,"NORMAL",List.of("USER"),Instant.EPOCH));
+        when(users.createUser(isNull(),isNull(),isNull(),any())).thenReturn(new com.surprising.gateway.provider.auth.model.AuthenticatedUser(7,null,null,"NORMAL",List.of("USER"),Instant.EPOCH));
         doAnswer(call->{fixture.state.putUser(user("NORMAL",List.of("USER")));return null;}).when(sync).reloadCommittedUser(7);
         var actual=new TelegramIdentityBinder(rows,users,mock(com.surprising.gateway.provider.auth.repository.GatewayUserRepository.class),fixture.state,sync);
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();

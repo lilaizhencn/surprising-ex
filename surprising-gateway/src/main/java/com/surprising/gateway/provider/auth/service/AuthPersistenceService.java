@@ -14,11 +14,11 @@ import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRoleResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
-import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogResponse;
+import com.surprising.gateway.provider.auth.model.AdminPermissionResponse;
+import com.surprising.gateway.provider.auth.model.AdminSessionResponse;
+import com.surprising.gateway.provider.auth.model.AdminRoleResponse;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.LoginLogResponse;
 import com.surprising.gateway.provider.auth.repository.GatewayPermissionRepository.PermissionRecord;
 import com.surprising.gateway.provider.auth.repository.GatewayRoleRepository.RoleRecord;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserCredential;

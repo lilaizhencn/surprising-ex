@@ -1,10 +1,12 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.client.SmsMessageSender;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
@@ -21,8 +23,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;
@@ -135,7 +137,7 @@ class MfaRecoveryDatabaseTest {
         when(users.credential(USER_ID)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
                 USER_ID, "recover-user", "recover@example.test", "+12025550123", "hash", "NORMAL", now)));
         when(users.mfaCredential(USER_ID)).thenAnswer(call -> mfa.find(USER_ID));
-        when(users.user(USER_ID)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
+        when(users.user(USER_ID)).thenReturn(Optional.of(new AuthenticatedUser(
                 USER_ID, "recover-user", "recover@example.test", "NORMAL", List.of("USER"), now)));
         doAnswer(call -> { mfa.disable(USER_ID, call.getArgument(1)); return null; })
                 .when(users).disableMfa(eq(USER_ID), any());
@@ -271,7 +273,7 @@ class MfaRecoveryDatabaseTest {
         when(users.credential(USER_ID)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
                 USER_ID, "recover-user", "recover@example.test", "+12025550123", "hash", "NORMAL", now)));
         when(users.mfaCredential(USER_ID)).thenAnswer(call -> mfa.find(USER_ID));
-        when(users.user(USER_ID)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
+        when(users.user(USER_ID)).thenReturn(Optional.of(new AuthenticatedUser(
                 USER_ID, "recover-user", "recover@example.test", "NORMAL", List.of("USER"), now)));
         doAnswer(call -> { mfa.disable(USER_ID, call.getArgument(1)); return null; })
                 .when(users).disableMfa(eq(USER_ID), any());
@@ -295,8 +297,8 @@ class MfaRecoveryDatabaseTest {
                 new MfaRecoveryRepository(jdbc), kyc, documents, passwords, properties, email, smsProvider, audit, notifications));
     }
 
-    private AuthModels.JwtPrincipal administrator() {
-        return new AuthModels.JwtPrincipal(ADMIN_ID, "reviewer", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600));
+    private JwtPrincipal administrator() {
+        return new JwtPrincipal(ADMIN_ID, "reviewer", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600));
     }
 
     private MfaRecoveryService transactional(MfaRecoveryService target) {

@@ -37,7 +37,7 @@ public class BrowserSessionController {
     public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String authorization,
                                        HttpServletRequest request) {
         if (authorization != null) {
-            com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal = null;
+            com.surprising.gateway.provider.auth.model.JwtPrincipal principal = null;
             try {
                 principal = auth.verifyBearer(authorization);
             } catch (com.surprising.gateway.provider.auth.state.AuthStateUnavailableException unavailable) {

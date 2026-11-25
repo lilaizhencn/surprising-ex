@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.auth.controller.advice;
 
 import com.surprising.gateway.provider.auth.support.BrowserSessionCookies;
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthResponse;
+import com.surprising.gateway.provider.auth.model.AuthResponse;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpHeaders;

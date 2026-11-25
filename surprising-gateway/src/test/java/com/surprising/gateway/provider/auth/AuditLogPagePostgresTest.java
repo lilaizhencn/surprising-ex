@@ -6,7 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.surprising.gateway.provider.auth.controller.*;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
 import com.surprising.gateway.provider.auth.repository.*;
 import com.surprising.gateway.provider.auth.service.*;

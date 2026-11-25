@@ -38,7 +38,7 @@ public final class LoginVerificationModels {
             Instant expiresAt,
             List<Method> methods,
             boolean simulated)
-            implements AuthModels.LoginResult {}
+            implements LoginResult {}
 
     public record VerifyRequest(
             @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 128)

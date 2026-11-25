@@ -1,8 +1,9 @@
 package com.surprising.gateway.provider.auth.controller;
 
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.LoginVerificationService;
@@ -10,14 +11,14 @@ import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationS
 import com.surprising.gateway.provider.auth.service.UserSecurityService;
 import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.UserMfaVerificationRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.ChangePasswordRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionRevokeResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.SensitiveChallengeRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.SensitiveChallengeVerificationRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.UserSecuritySceneUpdateRequest;
+import com.surprising.gateway.provider.auth.model.UserMfaVerificationRequest;
+import com.surprising.gateway.provider.auth.model.ChangePasswordRequest;
+import com.surprising.gateway.provider.auth.model.AdminSessionQueryResponse;
+import com.surprising.gateway.provider.auth.model.AdminSessionRevokeResponse;
+import com.surprising.gateway.provider.auth.model.LoginLogQueryResponse;
+import com.surprising.gateway.provider.auth.model.SensitiveChallengeRequest;
+import com.surprising.gateway.provider.auth.model.SensitiveChallengeVerificationRequest;
+import com.surprising.gateway.provider.auth.model.UserSecuritySceneUpdateRequest;
 import jakarta.validation.Valid;
 import com.surprising.gateway.provider.exception.SecurityVerificationRequiredException;
 import com.surprising.gateway.provider.model.UserDeviceStatus;
@@ -181,7 +182,7 @@ public class UserSecurityController {
     }
 
     @PostMapping("/devices/{deviceId}/revoke")
-    public AuthModels.AdminSessionRevokeResponse revokeDevice(
+    public AdminSessionRevokeResponse revokeDevice(
             @RequestHeader("Authorization") String authorization, @PathVariable String deviceId) {
         long userId = principal(authorization).userId();
         return access.revokeDevice(userId, normalizedDeviceId(deviceId));
@@ -314,7 +315,7 @@ public class UserSecurityController {
         }
     }
 
-    private AuthModels.JwtPrincipal principal(String authorization) {
+    private JwtPrincipal principal(String authorization) {
         return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.authenticateBearerPrincipal(authService, authorization);
     }
 

@@ -1,9 +1,9 @@
 package com.surprising.gateway.provider.auth.client;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycVerificationOption;
+import com.surprising.gateway.provider.auth.model.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycVerificationOption;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;

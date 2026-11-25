@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.controller.*;
 import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
-import com.surprising.gateway.provider.auth.model.AuthModels.*;
+import com.surprising.gateway.provider.auth.model.*;
 import com.surprising.gateway.provider.auth.repository.*;
 import com.surprising.gateway.provider.auth.state.AuthStateSync;
 import com.surprising.gateway.provider.auth.service.*;

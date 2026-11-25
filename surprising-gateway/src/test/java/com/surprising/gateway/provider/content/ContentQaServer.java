@@ -6,7 +6,7 @@ import com.surprising.gateway.provider.announcement.controller.*;
 import com.surprising.gateway.provider.announcement.repository.*;
 import com.surprising.gateway.provider.announcement.service.AnnouncementService;
 import com.surprising.gateway.provider.controller.advice.GlobalGatewayExceptionHandler;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.config.*;

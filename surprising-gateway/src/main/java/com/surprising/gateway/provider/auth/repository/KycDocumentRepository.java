@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.repository;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycDocument;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;

@@ -5,8 +5,8 @@ import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTag;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTagCreateRequest;
+import com.surprising.gateway.provider.auth.model.RiskTag;
+import com.surprising.gateway.provider.auth.model.RiskTagCreateRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;

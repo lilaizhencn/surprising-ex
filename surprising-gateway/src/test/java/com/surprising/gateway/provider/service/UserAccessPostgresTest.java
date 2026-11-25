@@ -1,11 +1,13 @@
 package com.surprising.gateway.provider.service;
 
+
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
@@ -102,7 +104,7 @@ class UserAccessPostgresTest {
         logins.append(42, "SUCCESS", null, "phone", "127.0.0.2", now.minusSeconds(2));
         logins.append(99, "SUCCESS", null, "other user", "127.0.0.4", now);
         var users = mock(AuthPersistenceService.class);
-        when(users.user(42)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
+        when(users.user(42)).thenReturn(Optional.of(new AuthenticatedUser(
                 42, "user", "user@example.test", "NORMAL", List.of("USER"), now)));
         when(users.mfaCredential(42)).thenReturn(Optional.empty());
         var properties = new GatewayProperties();
@@ -248,8 +250,8 @@ class UserAccessPostgresTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_user_access_blocks", Integer.class)).isZero();
     }
 
-    private AuthModels.JwtPrincipal actor() {
-        return new AuthModels.JwtPrincipal(42, "user", "NORMAL", List.of("USER"), Instant.now().plusSeconds(3600), 77);
+    private JwtPrincipal actor() {
+        return new JwtPrincipal(42, "user", "NORMAL", List.of("USER"), Instant.now().plusSeconds(3600), 77);
     }
 
     private void addSession(long id, long user, String device, String ip, Instant created) {

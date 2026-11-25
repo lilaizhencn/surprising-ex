@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.service;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.provider.service.AccountService;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.product.api.ProductLine;

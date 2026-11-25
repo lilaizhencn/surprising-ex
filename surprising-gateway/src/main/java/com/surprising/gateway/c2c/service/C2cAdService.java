@@ -14,7 +14,7 @@ import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
 import com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import java.math.BigDecimal;
 import java.util.*;

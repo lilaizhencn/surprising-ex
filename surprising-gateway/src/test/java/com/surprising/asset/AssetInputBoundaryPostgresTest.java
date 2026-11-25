@@ -4,7 +4,7 @@ import com.surprising.asset.controller.AssetConfigurationController;
 import com.surprising.asset.model.AssetConfiguration.*;
 import com.surprising.asset.repository.*;
 import com.surprising.asset.service.AssetConfigurationService;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.service.WalletFundingService;
 import java.time.Instant;

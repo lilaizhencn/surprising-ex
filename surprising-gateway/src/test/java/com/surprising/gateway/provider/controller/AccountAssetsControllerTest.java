@@ -9,7 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.surprising.account.api.model.*;
 import com.surprising.account.provider.service.AccountService;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.product.*;
 import com.surprising.product.api.ProductLine;

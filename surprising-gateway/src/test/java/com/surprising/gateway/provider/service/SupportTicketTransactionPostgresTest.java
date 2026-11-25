@@ -1,11 +1,13 @@
 package com.surprising.gateway.provider.service;
 
+
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.repository.SupportTicketNoteRepository;
@@ -62,9 +64,9 @@ class SupportTicketTransactionPostgresTest {
         var adminAuth = mock(com.surprising.gateway.provider.auth.service.AdminAuthService.class);
         Instant now = Instant.now();
         when(adminAuth.requireAdminPermission("Bearer admin", "admin.support.write"))
-                .thenReturn(new AuthModels.JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), now.plusSeconds(60)));
+                .thenReturn(new JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), now.plusSeconds(60)));
         when(adminAuth.adminUser("Bearer admin", 42))
-                .thenReturn(new AuthModels.AuthenticatedUser(42, "user", "user@example.test", "NORMAL", List.of("USER"), now));
+                .thenReturn(new AuthenticatedUser(42, "user", "user@example.test", "NORMAL", List.of("USER"), now));
         context = new AnnotationConfigApplicationContext();
         context.register(Transactions.class);
         context.registerBean(PlatformTransactionManager.class, () -> new DataSourceTransactionManager(dataSource));

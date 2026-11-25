@@ -8,7 +8,7 @@ import com.surprising.asset.model.AssetConfiguration.Asset;
 import com.surprising.asset.model.AssetConfiguration.Network;
 import com.surprising.asset.repository.AssetNetworkRepository;
 import com.surprising.asset.repository.AssetRepository;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.client.CustodyWalletClient;

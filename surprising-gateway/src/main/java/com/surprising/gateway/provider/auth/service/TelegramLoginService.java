@@ -1,7 +1,8 @@
 package com.surprising.gateway.provider.auth.service;
 
+
+import com.surprising.gateway.provider.auth.model.LoginResult;
 import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 
 import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
@@ -84,7 +85,7 @@ public class TelegramLoginService {
     }
 
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
-    public AuthModels.LoginResult complete(String state, String verifier, String deviceId,
+    public LoginResult complete(String state, String verifier, String deviceId,
                                            AuthClientMetadata request) {
         requireToken(state);
         requireToken(verifier);
@@ -127,7 +128,7 @@ public class TelegramLoginService {
     }
 
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
-    public AuthModels.LoginResult loginWebApp(String initData, AuthClientMetadata request) {
+    public LoginResult loginWebApp(String initData, AuthClientMetadata request) {
         if (webAppVerifier == null || botProperties == null || !botProperties.isConfigured()) {
             throw new IllegalStateException("Telegram bot token is not configured");
         }

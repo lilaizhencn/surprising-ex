@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.content.model.ContentLocale;
 import com.surprising.gateway.provider.content.service.ContentMediaService;

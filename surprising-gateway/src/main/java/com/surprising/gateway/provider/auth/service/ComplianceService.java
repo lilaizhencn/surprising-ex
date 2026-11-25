@@ -1,10 +1,10 @@
 package com.surprising.gateway.provider.auth.service;
 
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.auth.client.KycProvider;
 import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
-import com.surprising.gateway.provider.auth.model.AuthModels;
-import com.surprising.gateway.provider.auth.model.ComplianceModels;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.repository.ComplianceAmlCaseRepository;
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
@@ -16,19 +16,19 @@ import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseCreateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseStatusUpdateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.ComplianceUserSummary;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionResponse;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProviderInfo;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTag;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTagCreateRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.AmlCase;
+import com.surprising.gateway.provider.auth.model.AmlCaseCreateRequest;
+import com.surprising.gateway.provider.auth.model.AmlCaseStatusUpdateRequest;
+import com.surprising.gateway.provider.auth.model.ComplianceUserSummary;
+import com.surprising.gateway.provider.auth.model.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycUpdateRequest;
+import com.surprising.gateway.provider.auth.model.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycSubmissionResponse;
+import com.surprising.gateway.provider.auth.model.KycProviderInfo;
+import com.surprising.gateway.provider.auth.model.RiskTag;
+import com.surprising.gateway.provider.auth.model.RiskTagCreateRequest;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.repository.KycProviderEventRepository;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;
@@ -156,7 +156,7 @@ public class ComplianceService {
                                      KycUpdateRequest request,
                                      AdminRequestMetadata metadata,
                                      byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
+        JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         adminAuthService.adminUser(authorization, userId);
         return upsertKyc(userId, principal.userId(), request, Instant.now());
     }
@@ -207,7 +207,7 @@ public class ComplianceService {
     }
 
     public KycDocumentContent adminKycDocument(String authorization, long userId, long documentId) {
-        AuthModels.JwtPrincipal principal = authService.requireAdminPermission(
+        JwtPrincipal principal = authService.requireAdminPermission(
                 authorization, "admin.compliance.read");
         KycDocument document = kycDocumentService.requireForAdmin(userId, documentId);
         final KycDocumentContent content;
@@ -260,7 +260,7 @@ public class ComplianceService {
         List<KycDocument> documents = hasDocuments ? kycDocumentService.requireSubmissionDocuments(userId, request.documentIds(), request.documentType(),
                 request.applicantType(), request.kycLevel(), request.faceVerificationStatus()) : List.of();
         KycProvider.KycProviderSession session = kycProviders.start(userId, request, documents);
-        ComplianceModels.KycSubmissionRequest providerRequest = new ComplianceModels.KycSubmissionRequest(
+        KycSubmissionRequest providerRequest = new KycSubmissionRequest(
                 request.applicantType(), request.kycLevel(), request.country(), request.documentType(),
                 ComplianceValidation.provider(session.provider()),
                 ComplianceValidation.providerReference(ComplianceValidation.provider(session.provider()), session.providerReference()), request.submittedDocuments(),
@@ -404,7 +404,7 @@ public class ComplianceService {
         return amlRiskService.adminUpdateAmlCaseStatus(authorization, caseId, request, metadata, body);
     }
 
-    private AuthModels.JwtPrincipal requireAdminWrite(
+    private JwtPrincipal requireAdminWrite(
             String authorization,
             AdminRequestMetadata metadata,
             byte[] body) {
@@ -484,7 +484,7 @@ public class ComplianceService {
         }
     }
 
-    private void recordDocumentAccess(AuthModels.JwtPrincipal principal,
+    private void recordDocumentAccess(JwtPrincipal principal,
                                       long userId,
                                       long documentId,
                                       boolean success,

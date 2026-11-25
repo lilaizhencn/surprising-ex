@@ -1,9 +1,10 @@
 package com.surprising.gateway.c2c;
 
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
 import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
 import com.surprising.gateway.c2c.model.C2cAdminReviewModels;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 
 import com.surprising.gateway.c2c.controller.C2cAdminController;
@@ -82,7 +83,7 @@ class C2cAdminHttpPostgresTest {
 
     @Test void aCounterpartyCannotServeAsApproverEvenIfItAlsoHasAnAdminRole() throws Exception {
         var dispute=dispute();String path=decisionPath(dispute.appeal());
-        var sellerAdmin=new AuthModels.JwtPrincipal(11,"qa_seller_admin","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(600));
+        var sellerAdmin=new JwtPrincipal(11,"qa_seller_admin","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(600));
         doReturn(sellerAdmin).when(fixture.auth).authenticateAdminBearer("Bearer qa-11");
         var body=new C2cAdminReviewModels.AppealDecision("REFUND","Synthetic independently checked evidence");
         long approval=approve(path,body,9,11);

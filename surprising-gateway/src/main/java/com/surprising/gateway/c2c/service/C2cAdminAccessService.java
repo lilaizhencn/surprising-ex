@@ -11,8 +11,8 @@ import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.model.C2cAdminRequest;
 
 import com.surprising.gateway.c2c.utils.C2cDigests;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AdminApprovalResponse;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.stereotype.Service;

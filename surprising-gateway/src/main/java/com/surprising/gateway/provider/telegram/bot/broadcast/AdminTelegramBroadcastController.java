@@ -44,7 +44,7 @@ public class AdminTelegramBroadcastController {
         }
     }
 
-    private com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal authorize(String authorization) {
+    private com.surprising.gateway.provider.auth.model.JwtPrincipal authorize(String authorization) {
         try {
             return auth.requireAdminPermission(authorization, "admin.telegram.broadcast");
         } catch (IllegalArgumentException ex) {

@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.ComplianceUserSummary;
+import com.surprising.gateway.provider.auth.model.ComplianceUserSummary;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;

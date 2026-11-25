@@ -2,9 +2,9 @@ package com.surprising.gateway.provider.auth.controller;
 
 import com.surprising.gateway.provider.auth.service.AdminAuthService;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminMfaEnrollmentResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminMfaStatusResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminMfaVerificationRequest;
+import com.surprising.gateway.provider.auth.model.AdminMfaEnrollmentResponse;
+import com.surprising.gateway.provider.auth.model.AdminMfaStatusResponse;
+import com.surprising.gateway.provider.auth.model.AdminMfaVerificationRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;

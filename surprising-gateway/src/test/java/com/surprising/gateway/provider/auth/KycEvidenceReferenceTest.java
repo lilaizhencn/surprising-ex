@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels;
+
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -10,7 +11,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycDocument;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
 class KycEvidenceReferenceTest {
@@ -30,14 +31,14 @@ class KycEvidenceReferenceTest {
     @org.junit.jupiter.params.provider.ValueSource(strings = {"DRIVING_LICENSE", "RESIDENCE_PERMIT"})
     void persistsAdditionalIdentityEvidence(String type) {
         var repository = new ComplianceKycRepository(mock(JdbcTemplate.class));
-        var request = new ComplianceModels.KycSubmissionRequest("INDIVIDUAL", "BASIC", "SG", type, "SELF", null, null, "NOT_REQUIRED", List.of(1L, 2L));
+        var request = new KycSubmissionRequest("INDIVIDUAL", "BASIC", "SG", type, "SELF", null, null, "NOT_REQUIRED", List.of(1L, 2L));
         assertThatCode(() -> repository.submit(42, request,
             "[{\"type\":\"" + type + "_FRONT\",\"reference\":\"document:1\"},{\"type\":\"" + type + "_BACK\",\"reference\":\"document:2\"}]", Instant.now())).doesNotThrowAnyException();
     }
     @Test void persistsSeparatedIdentityCardEvidenceWithDates() {
         var jdbc = mock(JdbcTemplate.class);
         var repository = new ComplianceKycRepository(jdbc);
-        var request = new ComplianceModels.KycSubmissionRequest("INDIVIDUAL", "STANDARD", "SG", "ID_CARD", "SELF", null, null, "NOT_REQUIRED", List.of(1L, 2L, 3L, 4L));
+        var request = new KycSubmissionRequest("INDIVIDUAL", "STANDARD", "SG", "ID_CARD", "SELF", null, null, "NOT_REQUIRED", List.of(1L, 2L, 3L, 4L));
         String references = """
                 [{"type":"ID_CARD_FRONT","reference":"document:1","documentExpiresOn":"2030-01-01"},
                  {"type":"ID_CARD_BACK","reference":"document:2"},

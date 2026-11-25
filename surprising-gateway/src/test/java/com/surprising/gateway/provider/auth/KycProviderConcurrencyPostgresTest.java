@@ -1,8 +1,9 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.client.KycProvider;
 import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
@@ -11,8 +12,8 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.repository.KycProviderEventRepository;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import java.nio.file.Files;
@@ -78,7 +79,7 @@ class KycProviderConcurrencyPostgresTest {
         providers=mock(KycProviderRegistry.class);
         when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(new KycProvider.KycProviderResult("session-old","42","event-1","VERIFIED",null, java.time.Instant.now(), null, null)));
         when(providers.simulationEnabled()).thenReturn(true);when(providers.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));when(providers.selectedProvider()).thenReturn("SUMSUB");
-        var auth=mock(AuthService.class);when(auth.authenticateBearer("auth")).thenReturn(new AuthModels.JwtPrincipal(42,"user","NORMAL",List.of(),Instant.now().plusSeconds(600)));
+        var auth=mock(AuthService.class);when(auth.authenticateBearer("auth")).thenReturn(new JwtPrincipal(42,"user","NORMAL",List.of(),Instant.now().plusSeconds(600)));
         var countries=mock(com.surprising.gateway.provider.auth.repository.CountryRepository.class);
         when(countries.supported("SG")).thenReturn(true);
         when(providers.start(eq(42L),any(),anyList())).thenReturn(new KycProvider.KycProviderSession("SUMSUB","session-new", "token",null,"PENDING",false));
@@ -147,7 +148,7 @@ class KycProviderConcurrencyPostgresTest {
     }
 
     @Test void expiredVerifiedProfileCanSubmitAgainButValidProfileCannot() {
-        profiles.upsert(42,42,new com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest(
+        profiles.upsert(42,42,new com.surprising.gateway.provider.auth.model.KycUpdateRequest(
                 "STANDARD","VERIFIED","SG","PASSPORT","SUMSUB","session-old",null,Instant.now().plusSeconds(600)),Instant.now());
         assertThatThrownBy(()->service.submitUserKyc("auth",request(null))).hasMessageContaining("already pending or complete");
         profiles.updateExpiry(42,Instant.now().minusSeconds(1));
@@ -188,7 +189,7 @@ class KycProviderConcurrencyPostgresTest {
 
     @Test void manualReviewRejectsOldCallbacksButANewerProviderRejectionRevokesApproval() {
         Instant now=Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
-        profiles.upsert(42,42,new com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest(
+        profiles.upsert(42,42,new com.surprising.gateway.provider.auth.model.KycUpdateRequest(
                 "STANDARD","VERIFIED","SG","PASSPORT","SUMSUB","session-old",null,now.plusSeconds(600)),now);
         when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
                 new KycProvider.KycProviderResult("session-old","42","old-final","REJECTED","old",now.minusSeconds(1),null,null)));

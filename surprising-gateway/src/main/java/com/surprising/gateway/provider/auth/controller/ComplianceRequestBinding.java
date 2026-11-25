@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.controller;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.*;
+import com.surprising.gateway.provider.auth.model.*;
 import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 
 /** 合规 HTTP 输入格式绑定；状态流转、资料归属、第三方事实及事务由 Service 负责。 */

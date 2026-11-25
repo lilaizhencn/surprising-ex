@@ -1,8 +1,9 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.KycDocument;
 import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
-import com.surprising.gateway.provider.auth.model.AuthModels;
-import com.surprising.gateway.provider.auth.model.ComplianceModels;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.repository.ComplianceAmlCaseRepository;
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
@@ -14,9 +15,9 @@ import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTag;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.AmlCase;
+import com.surprising.gateway.provider.auth.model.RiskTag;
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;
 import java.time.Instant;
@@ -55,8 +56,8 @@ class ComplianceServiceTest {
 
     @Test
     void adminDocumentCannotBeReturnedWhenRequiredAuditFails() {
-        var administrator = new AuthModels.JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60));
-        var document = new ComplianceModels.KycDocument(
+        var administrator = new JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60));
+        var document = new KycDocument(
                 9, 42, "PASSPORT", "passport.png", "image/png", 3, "sha", "SUBMITTED", Instant.now(), null);
         when(authService.requireAdminPermission("Bearer admin", "admin.compliance.read")).thenReturn(administrator);
         when(kycDocumentService.requireForAdmin(42, 9)).thenReturn(document);
@@ -71,8 +72,8 @@ class ComplianceServiceTest {
 
     @Test
     void documentReadFailureKeepsItsCauseWhenFailureAuditAlsoFails() {
-        var administrator = new AuthModels.JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60));
-        var document = new ComplianceModels.KycDocument(
+        var administrator = new JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60));
+        var document = new KycDocument(
                 9, 42, "PASSPORT", "passport.png", "image/png", 3, "sha", "SUBMITTED", Instant.now(), null);
         when(authService.requireAdminPermission("Bearer admin", "admin.compliance.read")).thenReturn(administrator);
         when(kycDocumentService.requireForAdmin(42, 9)).thenReturn(document);
@@ -139,7 +140,7 @@ class ComplianceServiceTest {
         KycProfile verified = new KycProfile(42, "STANDARD", "VERIFIED", "SG", "PASSPORT", "SUMSUB",
                 "SIM-SUMSUB-42", null, now, null, null, now, now, "INDIVIDUAL", "[]", "VERIFIED");
         when(authService.authenticateBearer("Bearer user-token"))
-                .thenReturn(new AuthModels.JwtPrincipal(42, "user", "NORMAL", List.of("USER"), now.plusSeconds(60)));
+                .thenReturn(new JwtPrincipal(42, "user", "NORMAL", List.of("USER"), now.plusSeconds(60)));
         when(kycProviders.simulationEnabled()).thenReturn(true);
         when(kycProviders.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));
         when(kycProviders.selectedProvider()).thenReturn("SUMSUB");
@@ -163,7 +164,7 @@ class ComplianceServiceTest {
     @Test
     void simulatedCompletionCannotRunWhenProductionModeHasDisabledSimulation() {
         when(authService.authenticateBearer("Bearer user-token"))
-                .thenReturn(new AuthModels.JwtPrincipal(42, "user", "NORMAL", List.of("USER"), Instant.now().plusSeconds(60)));
+                .thenReturn(new JwtPrincipal(42, "user", "NORMAL", List.of("USER"), Instant.now().plusSeconds(60)));
         when(kycProviders.simulationEnabled()).thenReturn(false);
         assertThatThrownBy(() -> service.completeKycSimulation("Bearer user-token", "APPROVED"))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("disabled");
@@ -176,7 +177,7 @@ class ComplianceServiceTest {
         KycProfile pending = new KycProfile(42, "STANDARD", "PENDING", "SG", "PASSPORT", "SUMSUB",
                 "SIM-SUMSUB-42", null, null, null, null, now, now, "INDIVIDUAL", "[]", "PENDING");
         when(authService.authenticateBearer("Bearer user-token"))
-                .thenReturn(new AuthModels.JwtPrincipal(42, "user", "NORMAL", List.of("USER"), now.plusSeconds(60)));
+                .thenReturn(new JwtPrincipal(42, "user", "NORMAL", List.of("USER"), now.plusSeconds(60)));
         when(kycProviders.simulationEnabled()).thenReturn(true);
         when(kycProviders.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));
         when(kycProviders.selectedProvider()).thenReturn("SUMSUB");

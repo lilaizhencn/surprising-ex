@@ -5,8 +5,8 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.KycDocument;
 import com.surprising.gateway.provider.auth.repository.KycDocumentRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;

@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.repository.MfaRecoveryRepository.RecoveryRequest;
 import com.surprising.gateway.provider.repository.SecurityEmailNotificationRepository;

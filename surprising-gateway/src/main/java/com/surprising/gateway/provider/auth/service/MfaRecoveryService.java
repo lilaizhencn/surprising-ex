@@ -1,10 +1,12 @@
 package com.surprising.gateway.provider.auth.service;
 
+
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.client.SmsMessageSender;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
 import com.surprising.gateway.provider.auth.repository.MfaRecoveryRepository;
@@ -139,7 +141,7 @@ public class MfaRecoveryService {
     public List<MfaRecoveryRepository.RecoveryRequest> pending() { return recovery.pending(); }
 
     @Transactional
-    public MfaRecoveryRepository.RecoveryRequest decide(long requestId, AuthModels.JwtPrincipal administrator,
+    public MfaRecoveryRepository.RecoveryRequest decide(long requestId, JwtPrincipal administrator,
                                                         boolean approved, String reason,
                                                         String userAgent, String ipAddress, Instant now) {
         MfaRecoveryRepository.RecoveryRequest request = recovery.decide(requestId, administrator.userId(),
@@ -152,7 +154,7 @@ public class MfaRecoveryService {
                 administrator.userId(), administrator.username(), administrator.roles(),
                 "gateway", "POST", "/api/v1/admin/compliance/mfa-recovery/" + requestId + "/decision",
                 null, null, null, 200, null, true, null, userAgent, ipAddress, now));
-        users.user(request.userId()).map(AuthModels.AuthenticatedUser::email)
+        users.user(request.userId()).map(AuthenticatedUser::email)
                 .filter(address -> address != null && !address.isBlank())
                 .ifPresent(address -> notifications.mfaRecoveryDecision(request, address));
         return request;

@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.repository;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionResponse;
+import com.surprising.gateway.provider.auth.model.AdminSessionResponse;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.state.AuthState;
 import com.surprising.gateway.provider.auth.state.AuthStateUnavailableException;

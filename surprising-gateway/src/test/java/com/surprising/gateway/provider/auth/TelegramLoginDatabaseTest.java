@@ -1,10 +1,12 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.AuthResponse;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.config.GatewayProperties;
 
 import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
@@ -86,12 +88,12 @@ class TelegramLoginDatabaseTest {
         userRepository = new GatewayUserRepository(jdbc);
         when(users.createUser(isNull(), isNull(), isNull(), any())).thenAnswer(invocation -> {
             var created = userRepository.create(null, null, null, invocation.getArgument(3));
-            return new AuthModels.AuthenticatedUser(created.userId(), null, null, "NORMAL", List.of("USER"), created.createdAt());
+            return new AuthenticatedUser(created.userId(), null, null, "NORMAL", List.of("USER"), created.createdAt());
         });
         auth = mock(AuthService.class);
         when(auth.loginTelegram(anyLong(), any())).thenAnswer(invocation -> {
             var found = userRepository.find(invocation.getArgument(0)).orElseThrow();
-            return new AuthModels.AuthResponse(new AuthModels.AuthenticatedUser(found.userId(), found.username(),
+            return new AuthResponse(new AuthenticatedUser(found.userId(), found.username(),
                     found.email(), found.status(), List.of("USER"), found.createdAt(), found.displayName()),
                     "access", Instant.now().plusSeconds(600));
         });
@@ -123,10 +125,10 @@ class TelegramLoginDatabaseTest {
         return flow;
     }
 
-    AuthModels.AuthResponse complete(TelegramLoginService.Started flow, String device) {
+    AuthResponse complete(TelegramLoginService.Started flow, String device) {
         var http = new MockHttpServletRequest();
         http.addHeader("X-Device-Id", device);
-        return (AuthModels.AuthResponse) login.complete(flow.flowId(), flow.verifier(), device, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(http));
+        return (AuthResponse) login.complete(flow.flowId(), flow.verifier(), device, new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(http));
     }
 
     @Test

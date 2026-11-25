@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.service;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

@@ -45,7 +45,7 @@ public class ContentMediaService {
     }
 
     public ContentMedia.Upload upload(String authorization, String type, long size, InputStream input) throws IOException {
-        final com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal actor;
+        final com.surprising.gateway.provider.auth.model.JwtPrincipal actor;
         try { actor=auth.requireAdminPermission(authorization,"admin.content.media.write"); }
         catch (IllegalArgumentException invalid) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Sign in required."); }
         catch (IllegalStateException forbidden) { throw new ResponseStatusException(HttpStatus.FORBIDDEN,"You do not have permission to upload article media."); }

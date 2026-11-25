@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.gateway.provider.auth.controller.*;
 import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
-import com.surprising.gateway.provider.auth.model.AuthModels.*;
+import com.surprising.gateway.provider.auth.model.*;
 import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.config.*;
 import com.surprising.gateway.provider.support.GatewayLimitRequestBinding;

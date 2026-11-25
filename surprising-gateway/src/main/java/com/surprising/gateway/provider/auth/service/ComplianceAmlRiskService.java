@@ -1,13 +1,14 @@
 package com.surprising.gateway.provider.auth.service;
 
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseCreateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseStatusUpdateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTag;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTagCreateRequest;
+import com.surprising.gateway.provider.auth.model.AmlCase;
+import com.surprising.gateway.provider.auth.model.AmlCaseCreateRequest;
+import com.surprising.gateway.provider.auth.model.AmlCaseStatusUpdateRequest;
+import com.surprising.gateway.provider.auth.model.RiskTag;
+import com.surprising.gateway.provider.auth.model.RiskTagCreateRequest;
 import com.surprising.gateway.provider.auth.repository.ComplianceAmlCaseRepository;
 import com.surprising.gateway.provider.auth.repository.ComplianceRiskTagRepository;
 import com.surprising.trading.api.utils.AdminCursorPage;
@@ -44,7 +45,7 @@ public class ComplianceAmlRiskService {
                                       RiskTagCreateRequest request,
                                       AdminRequestMetadata metadata,
                                       byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
+        JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         adminAuthService.adminUser(authorization, userId);
         return createRiskTag(userId, principal.userId(), request, Instant.now());
     }
@@ -54,7 +55,7 @@ public class ComplianceAmlRiskService {
                                        long tagId,
                                        AdminRequestMetadata metadata,
                                        byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
+        JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         return resolveRiskTag(tagId, principal.userId(), Instant.now());
     }
 
@@ -64,7 +65,7 @@ public class ComplianceAmlRiskService {
                                       AmlCaseCreateRequest request,
                                       AdminRequestMetadata metadata,
                                       byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
+        JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         adminAuthService.adminUser(authorization, userId);
         return createAmlCase(userId, principal.userId(), request, Instant.now());
     }
@@ -75,7 +76,7 @@ public class ComplianceAmlRiskService {
                                             AmlCaseStatusUpdateRequest request,
                                             AdminRequestMetadata metadata,
                                             byte[] body) {
-        AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
+        JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         return updateAmlCaseStatus(caseId, principal.userId(), request, Instant.now());
     }
 
@@ -131,7 +132,7 @@ public class ComplianceAmlRiskService {
                 .orElseThrow(() -> new IllegalArgumentException("aml case not found"));
     }
 
-    private AuthModels.JwtPrincipal requireAdminWrite(String authorization,
+    private JwtPrincipal requireAdminWrite(String authorization,
                                                       AdminRequestMetadata metadata,
                                                       byte[] body) {
         return approvalService.requireWrite(

@@ -1,8 +1,8 @@
 package com.surprising.gateway.provider.auth.client;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;

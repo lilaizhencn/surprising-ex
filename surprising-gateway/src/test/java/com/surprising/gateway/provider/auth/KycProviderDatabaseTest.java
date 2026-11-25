@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;

@@ -5,7 +5,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.*;
+import com.surprising.gateway.provider.auth.model.*;
 import com.surprising.gateway.provider.auth.repository.*;
 import com.surprising.gateway.provider.auth.service.*;
 import java.nio.file.Files;

@@ -11,9 +11,9 @@ import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import com.surprising.gateway.provider.auth.model.AdminApprovalCommand;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminOperationLogResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AdminApprovalResponse;
+import com.surprising.gateway.provider.auth.model.AdminOperationLogResponse;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;

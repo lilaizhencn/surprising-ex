@@ -13,8 +13,8 @@ import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AdminApprovalCreateRequest;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
 import java.nio.file.Files;
 import java.nio.file.Path;

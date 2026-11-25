@@ -20,7 +20,7 @@ import com.surprising.gateway.c2c.repository.C2cMerchantBondPolicyRepository;
 import com.surprising.gateway.c2c.repository.C2cMerchantBondRepository;
 import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;

@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.service;
 
+
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -9,11 +12,10 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest;
+import com.surprising.gateway.provider.auth.model.KycUpdateRequest;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.client.KycProvider;
 import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
@@ -73,15 +75,15 @@ class KycNotificationTransactionPostgresTest {
             if (!statement.isBlank()) jdbc.execute(statement);
         }
         profiles = new ComplianceKycRepository(jdbc);
-        profiles.submit(42, new com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest("INDIVIDUAL", "STANDARD", "SG", "PASSPORT", "SUMSUB", "session-42", null, "PENDING", List.of()), "[]", Instant.now().minusSeconds(1));
+        profiles.submit(42, new com.surprising.gateway.provider.auth.model.KycSubmissionRequest("INDIVIDUAL", "STANDARD", "SG", "PASSPORT", "SUMSUB", "session-42", null, "PENDING", List.of()), "[]", Instant.now().minusSeconds(1));
         notifications = new SecurityNotificationService(new SecurityEmailNotificationRepository(jdbc),
                 (recipient, subject, body) -> delivered.add(subject));
         var users = mock(AuthPersistenceService.class);
-        when(users.user(42)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
+        when(users.user(42)).thenReturn(Optional.of(new AuthenticatedUser(
                 42, "user", "user@example.test", "NORMAL", List.of("USER"), Instant.now())));
         var approvals = mock(AdminApprovalService.class);
         when(approvals.requireWrite(eq("Bearer admin"), eq("admin.compliance.write"), eq("gateway-admin"), any(), any()))
-                .thenReturn(new AuthModels.JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600)));
+                .thenReturn(new JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600)));
         var providers = mock(KycProviderRegistry.class);
         when(providers.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));
         when(providers.verifyCallback(eq("SUMSUB"), any(), any()))

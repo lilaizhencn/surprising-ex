@@ -1,6 +1,6 @@
 package com.surprising.websocket.provider.task;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.websocket.provider.config.WebSocketAuthorizationConfiguration;
 import com.surprising.websocket.provider.config.WebSocketProperties;
 import com.surprising.websocket.provider.service.SubscriptionRegistry;

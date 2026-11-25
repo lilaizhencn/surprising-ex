@@ -2,7 +2,6 @@ package com.surprising.gateway.provider.reconciliation;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -12,7 +11,6 @@ import org.springframework.stereotype.Component;
  * 发现不一致立即熔断停机提现并发报警通知。
  */
 @Component
-@ConditionalOnProperty(prefix = "surprising.gateway.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class FundCheckScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(FundCheckScheduler.class);

@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.content;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.content.client.ContentR2Storage;
 import com.surprising.gateway.provider.content.model.ContentMedia;

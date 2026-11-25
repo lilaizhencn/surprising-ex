@@ -25,7 +25,7 @@ import com.surprising.gateway.c2c.model.C2cQuote;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;

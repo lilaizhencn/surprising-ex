@@ -1,12 +1,13 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.config.GatewayProperties;
 
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
@@ -79,7 +80,7 @@ class TelegramLoginServiceTest {
                 new TelegramLoginRows.Result("123", "小李", false)));
         when(identities.find("123")).thenReturn(Optional.empty());
         when(users.createUser(isNull(), isNull(), isNull(), any()))
-                .thenReturn(new AuthModels.AuthenticatedUser(7, null, null, "NORMAL", List.of("USER"), Instant.now()));
+                .thenReturn(new AuthenticatedUser(7, null, null, "NORMAL", List.of("USER"), Instant.now()));
         var challenge = new LoginVerificationModels.ChallengeResponse(true, "challenge", Instant.now().plusSeconds(300),
                 List.of(new LoginVerificationModels.Method("TOTP", null)), false);
         when(auth.loginTelegram(7, http)).thenReturn(challenge);

@@ -7,7 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.surprising.gateway.provider.auth.controller.UserApiKeyController;
 import com.surprising.gateway.provider.auth.model.ApiKeyAuthenticationRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayApiKeyRepository;
 import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.config.GatewayProperties;

@@ -1,10 +1,11 @@
 package com.surprising.gateway.provider.auth.service;
 
+
+import com.surprising.gateway.provider.auth.model.LoginResult;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
@@ -12,22 +13,22 @@ import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminMfaStatusResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRolePermissionsRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRolePermissionsResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminRoleQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionRevokeResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminUserQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogQueryResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.model.AuthModels.OperatingAccount;
-import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.EmailVerificationRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
+import com.surprising.gateway.provider.auth.model.AuthResponse;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.AdminMfaStatusResponse;
+import com.surprising.gateway.provider.auth.model.AdminPermissionQueryResponse;
+import com.surprising.gateway.provider.auth.model.AdminSessionQueryResponse;
+import com.surprising.gateway.provider.auth.model.AdminRolePermissionsRequest;
+import com.surprising.gateway.provider.auth.model.AdminRolePermissionsResponse;
+import com.surprising.gateway.provider.auth.model.AdminRoleQueryResponse;
+import com.surprising.gateway.provider.auth.model.AdminSessionRevokeResponse;
+import com.surprising.gateway.provider.auth.model.AdminUserQueryResponse;
+import com.surprising.gateway.provider.auth.model.LoginLogQueryResponse;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.OperatingAccount;
+import com.surprising.gateway.provider.auth.model.LoginRequest;
+import com.surprising.gateway.provider.auth.model.EmailVerificationRequest;
+import com.surprising.gateway.provider.auth.model.RegisterRequest;
 import com.surprising.gateway.provider.auth.state.AuthState;
 import com.surprising.gateway.provider.auth.state.AuthStateSync;
 import com.surprising.gateway.provider.auth.state.SessionState;
@@ -120,7 +121,7 @@ public class AuthService {
     }
 
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
-    public AuthModels.LoginResult login(LoginRequest request, AuthClientMetadata httpRequest) {
+    public LoginResult login(LoginRequest request, AuthClientMetadata httpRequest) {
         String identifier = request.identifier();
         currentClient.loginAttempt(identifier);
         Instant now = Instant.now();
@@ -147,17 +148,17 @@ public class AuthService {
 
     /** Called only after a server-validated Telegram identity has been consumed. */
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
-    public AuthModels.LoginResult loginTelegram(long userId, AuthClientMetadata request) {
+    public LoginResult loginTelegram(long userId, AuthClientMetadata request) {
         return loginIdentity(userId, request, "TELEGRAM_LOGIN");
     }
 
     /** Called only after Google signature, audience and presentation have been verified. */
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
-    public AuthModels.LoginResult loginGoogle(long userId, AuthClientMetadata request) {
+    public LoginResult loginGoogle(long userId, AuthClientMetadata request) {
         return loginIdentity(userId, request, "GOOGLE_LOGIN");
     }
 
-    private AuthModels.LoginResult loginIdentity(long userId, AuthClientMetadata request, String source) {
+    private LoginResult loginIdentity(long userId, AuthClientMetadata request, String source) {
         Instant now = Instant.now();
         var user = repository.user(userId).orElseThrow();
         if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");

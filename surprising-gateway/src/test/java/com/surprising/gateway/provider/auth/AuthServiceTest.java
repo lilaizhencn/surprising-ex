@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.AuthResponse;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 
@@ -8,7 +10,6 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
@@ -35,11 +36,11 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
+import com.surprising.gateway.provider.auth.model.AdminSessionResponse;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.LoginRequest;
+import com.surprising.gateway.provider.auth.model.RegisterRequest;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -336,7 +337,7 @@ class AuthServiceTest {
         when(jwtTokenService.createSessionToken(eq(42L), eq("user"), eq(List.of("USER")), anyLong(), any()))
                 .thenReturn("access");
 
-        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user", "password"), new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
+        var response = (AuthResponse) service.login(new LoginRequest("user", "password"), new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
 
         assertThat(response.accessToken()).isEqualTo("access");
         verifyNoInteractions(totpService);
@@ -365,7 +366,7 @@ class AuthServiceTest {
         when(jwtTokenService.createSessionToken(eq(42L), eq(null), eq(List.of("USER")), anyLong(), any()))
                 .thenReturn("access");
 
-        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user@example.com", "password"),
+        var response = (AuthResponse) service.login(new LoginRequest("user@example.com", "password"),
                 new AuthClientMetadataBinding(new GatewayProperties(), org.mockito.Mockito.mock(com.surprising.gateway.provider.service.GatewayRequestLimits.class), org.mockito.Mockito.mock(com.surprising.gateway.provider.support.GatewayLimitRequestBinding.class)).bind(new MockHttpServletRequest()));
 
         assertThat(response.user().email()).isEqualTo("user@example.com");

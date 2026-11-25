@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.auth.service;
 
 import com.surprising.gateway.provider.auth.client.GoogleIdentityClient;
 import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
-import com.surprising.gateway.provider.auth.model.AuthModels.LoginResult;
+import com.surprising.gateway.provider.auth.model.LoginResult;
 import com.surprising.gateway.provider.auth.repository.GoogleLoginRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;

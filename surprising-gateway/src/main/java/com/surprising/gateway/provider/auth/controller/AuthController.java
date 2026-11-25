@@ -1,22 +1,24 @@
 package com.surprising.gateway.provider.auth.controller;
 
 
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.LoginResult;
 import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.EmailVerificationService;
 import com.surprising.gateway.provider.auth.service.LoginVerificationService;
 import com.surprising.gateway.provider.auth.service.PasswordResetService;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.EmailVerificationRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.PasswordResetRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.PasswordResetResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.PasswordResetStartRequest;
-import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
+import com.surprising.gateway.provider.auth.model.AuthResponse;
+import com.surprising.gateway.provider.auth.model.EmailVerificationRequest;
+import com.surprising.gateway.provider.auth.model.LoginRequest;
+import com.surprising.gateway.provider.auth.model.PasswordResetRequest;
+import com.surprising.gateway.provider.auth.model.PasswordResetResponse;
+import com.surprising.gateway.provider.auth.model.PasswordResetStartRequest;
+import com.surprising.gateway.provider.auth.model.RegisterRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -107,7 +109,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public AuthModels.LoginResult login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+    public LoginResult login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         try {
             return authService.login(AuthRequestBinding.login(request), clients.bind(httpRequest));
         } catch (IllegalArgumentException ex) {
@@ -133,14 +135,14 @@ public class AuthController {
 
     /** 页面刷新后用 Cookie（或 Bearer）恢复当前登录用户；数据来自 Valkey 中的会话和用户状态。 */
     @GetMapping("/session")
-    public org.springframework.http.ResponseEntity<AuthModels.AuthResponse> session(@RequestHeader("Authorization") String authorization) {
+    public org.springframework.http.ResponseEntity<AuthResponse> session(@RequestHeader("Authorization") String authorization) {
         var principal = com.surprising.gateway.provider.interceptor.GatewayAccessSupport.authenticateBearerPrincipal(authService, authorization);
         return org.springframework.http.ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(authService.currentSession(principal));
     }
 
     @GetMapping("/me")
-    public AuthModels.JwtPrincipal me(@RequestHeader("Authorization") String authorization) {
+    public JwtPrincipal me(@RequestHeader("Authorization") String authorization) {
         return com.surprising.gateway.provider.interceptor.GatewayAccessSupport.authenticateBearerPrincipal(authService, authorization);
     }
 }

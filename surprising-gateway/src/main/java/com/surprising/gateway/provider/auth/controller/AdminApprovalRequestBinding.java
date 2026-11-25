@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.auth.controller;
 
 import com.surprising.gateway.provider.auth.model.AdminApprovalReference;
 import com.surprising.gateway.provider.auth.model.AdminApprovalCommand;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
+import com.surprising.gateway.provider.auth.model.AdminApprovalCreateRequest;
 import java.util.Locale;
 
 /** 创建审批的格式校验与规范化，状态、身份和有效期由 Service 裁决。 */

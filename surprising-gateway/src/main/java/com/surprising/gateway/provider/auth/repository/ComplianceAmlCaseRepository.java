@@ -5,8 +5,8 @@ import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseCreateRequest;
+import com.surprising.gateway.provider.auth.model.AmlCase;
+import com.surprising.gateway.provider.auth.model.AmlCaseCreateRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;

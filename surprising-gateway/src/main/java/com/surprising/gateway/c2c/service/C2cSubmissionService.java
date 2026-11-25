@@ -6,7 +6,7 @@ import com.surprising.gateway.c2c.service.C2cOrderService;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
 import com.surprising.gateway.c2c.model.C2cAdPublish;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;

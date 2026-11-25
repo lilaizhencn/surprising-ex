@@ -15,7 +15,7 @@ import com.surprising.asset.repository.AssetNetworkRepository;
 import com.surprising.asset.repository.AssetRepository;
 import com.surprising.asset.service.AssetConfigurationService;
 import com.surprising.gateway.provider.auth.controller.AdminComplianceController;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;

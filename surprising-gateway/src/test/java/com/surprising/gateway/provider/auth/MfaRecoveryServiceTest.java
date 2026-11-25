@@ -1,10 +1,12 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.client.SmsMessageSender;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
@@ -22,8 +24,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycDocument;
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;
@@ -65,7 +67,7 @@ class MfaRecoveryServiceTest {
                 USER_ID, "test-user", "user@example.test", "+12025550123", "hash", "NORMAL", NOW)));
         when(users.mfaCredential(USER_ID)).thenReturn(Optional.of(new GatewayUserMfaRepository.MfaCredential(
                 USER_ID, "encrypted-secret", true, NOW, NOW, NOW)));
-        when(users.user(USER_ID)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
+        when(users.user(USER_ID)).thenReturn(Optional.of(new AuthenticatedUser(
                 USER_ID, "test-user", "user@example.test", "NORMAL", List.of("USER"), NOW)));
         when(passwords.matches("correct-password", "hash")).thenReturn(true);
         when(recovery.hasPending(USER_ID)).thenReturn(false);
@@ -183,8 +185,8 @@ class MfaRecoveryServiceTest {
         return challenge;
     }
 
-    private AuthModels.JwtPrincipal administrator() {
-        return new AuthModels.JwtPrincipal(8, "reviewer", "NORMAL", List.of("ADMIN"), NOW.plusSeconds(3600));
+    private JwtPrincipal administrator() {
+        return new JwtPrincipal(8, "reviewer", "NORMAL", List.of("ADMIN"), NOW.plusSeconds(3600));
     }
 
     private AuthChallenge challengeWithCode(String code, String channel)

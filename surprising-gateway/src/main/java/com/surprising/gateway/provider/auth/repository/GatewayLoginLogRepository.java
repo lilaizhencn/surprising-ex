@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.auth.repository;
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogResponse;
+import com.surprising.gateway.provider.auth.model.LoginLogResponse;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;

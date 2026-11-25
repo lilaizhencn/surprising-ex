@@ -7,8 +7,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.surprising.gateway.provider.auth.controller.AdminAuthController;
 import com.surprising.gateway.provider.auth.model.AdminApprovalCommand;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AdminApprovalResponse;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.*;
 import com.surprising.gateway.provider.auth.service.*;
 import com.surprising.gateway.provider.config.GatewayProperties;

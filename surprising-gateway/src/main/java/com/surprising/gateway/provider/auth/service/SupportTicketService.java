@@ -1,12 +1,16 @@
 package com.surprising.gateway.provider.auth.service;
 
-import com.surprising.gateway.provider.auth.model.AuthModels;
+
+import com.surprising.gateway.provider.auth.model.AmlCase;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.KycProfile;
+import com.surprising.gateway.provider.auth.model.RiskTag;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.SupportModels.TicketMutation;
 import com.surprising.gateway.provider.exception.SupportUnauthorizedException;
 import com.surprising.gateway.provider.exception.SupportForbiddenException;
 import com.surprising.gateway.provider.exception.SupportTicketNotFoundException;
-import com.surprising.gateway.provider.auth.model.ComplianceModels;
 import com.surprising.gateway.provider.auth.repository.SupportTicketNoteRepository;
 import com.surprising.gateway.provider.auth.repository.SupportTicketRepository;
 
@@ -56,7 +60,7 @@ public class SupportTicketService {
 
     public SupportOverview adminOverview(String authorization, long userId) {
         supportPrincipal(authorization, "admin.support.read");
-        AuthModels.AuthenticatedUser user = adminUser(authorization, userId);
+        AuthenticatedUser user = adminUser(authorization, userId);
         return new SupportOverview(
                 Instant.now(),
                 new SupportUserSummary(
@@ -80,7 +84,7 @@ public class SupportTicketService {
                                             String priority,
                                             Long assignedAdminUserId,
                                             String initialNote) {
-        AuthModels.JwtPrincipal principal = supportPrincipal(authorization, "admin.support.write");
+        JwtPrincipal principal = supportPrincipal(authorization, "admin.support.write");
         adminUser(authorization, userId);
         return createTicket(
                 userId,
@@ -105,7 +109,7 @@ public class SupportTicketService {
                                           String noteType,
                                           String visibility,
                                           String body) {
-        AuthModels.JwtPrincipal principal = supportPrincipal(authorization, "admin.support.write");
+        JwtPrincipal principal = supportPrincipal(authorization, "admin.support.write");
         try {
             return noteRepository.addNote(
                     ticketId,
@@ -124,7 +128,7 @@ public class SupportTicketService {
                                             long ticketId,
                                             String status,
                                             String reason) {
-        AuthModels.JwtPrincipal principal = supportPrincipal(authorization, "admin.support.write");
+        JwtPrincipal principal = supportPrincipal(authorization, "admin.support.write");
         try {
             return updateStatus(
                     ticketId,
@@ -137,7 +141,7 @@ public class SupportTicketService {
         }
     }
 
-    private AuthModels.JwtPrincipal supportPrincipal(String authorization, String permission) {
+    private JwtPrincipal supportPrincipal(String authorization, String permission) {
         try {
             return adminAuthService.requireAdminPermission(authorization, permission);
         } catch (IllegalArgumentException ex) {
@@ -147,7 +151,7 @@ public class SupportTicketService {
         }
     }
 
-    private AuthModels.AuthenticatedUser adminUser(String authorization, long userId) {
+    private AuthenticatedUser adminUser(String authorization, long userId) {
         try {
             return adminAuthService.adminUser(authorization, userId);
         } catch (IllegalArgumentException ex) {
@@ -158,16 +162,16 @@ public class SupportTicketService {
     }
 
     private SupportComplianceSummary compliance(long userId) {
-        ComplianceModels.KycProfile kyc = complianceService.kyc(userId);
-        List<ComplianceModels.RiskTag> activeTags = complianceService.riskTags(userId, "ACTIVE", 100);
-        List<ComplianceModels.AmlCase> openCases = complianceService.amlCases(userId, null, 100).stream()
+        KycProfile kyc = complianceService.kyc(userId);
+        List<RiskTag> activeTags = complianceService.riskTags(userId, "ACTIVE", 100);
+        List<AmlCase> openCases = complianceService.amlCases(userId, null, 100).stream()
                 .filter(item -> !"CLOSED".equals(item.status()) && !"CLEARED".equals(item.status()))
                 .toList();
         long criticalTags = activeTags.stream()
                 .filter(item -> "CRITICAL".equals(item.severity()))
                 .count();
         int maxAmlRiskScore = openCases.stream()
-                .mapToInt(ComplianceModels.AmlCase::riskScore)
+                .mapToInt(AmlCase::riskScore)
                 .max()
                 .orElse(0);
         return new SupportComplianceSummary(

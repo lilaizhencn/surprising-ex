@@ -1,6 +1,7 @@
 package com.surprising.gateway.c2c;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels;
+
+import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
@@ -13,7 +14,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.surprising.gateway.c2c.model.C2cMarket;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -94,8 +95,8 @@ class C2cAccessPostgresTest {
         assertThat(db.jdbc.queryForObject("SELECT count(*) FROM c2c_security_grants",Integer.class)).isZero();
     }
 
-    private static ComplianceModels.KycProfile kyc(String status,Instant expiry) {
-        return new ComplianceModels.KycProfile(11,"STANDARD",status,"CN","IDENTITY_CARD","MANUAL",null,
+    private static KycProfile kyc(String status,Instant expiry) {
+        return new KycProfile(11,"STANDARD",status,"CN","IDENTITY_CARD","MANUAL",null,
                 null,null,null,expiry,Instant.now(),Instant.now());
     }
 }

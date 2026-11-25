@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.auth.service;
 import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserSecuritySceneRepository;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;

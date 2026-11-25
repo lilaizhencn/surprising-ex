@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.repository;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionResponse;
+import com.surprising.gateway.provider.auth.model.AdminPermissionResponse;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;

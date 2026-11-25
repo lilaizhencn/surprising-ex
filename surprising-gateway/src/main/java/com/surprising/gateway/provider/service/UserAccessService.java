@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionRevokeResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AdminSessionRevokeResponse;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
 import com.surprising.gateway.provider.auth.repository.LoginSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;

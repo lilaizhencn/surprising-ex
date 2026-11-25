@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth.controller;
 
-import com.surprising.gateway.provider.auth.model.AuthModels;
+
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.MfaRecoveryRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.MfaRecoveryService;
@@ -74,7 +75,7 @@ public class MfaRecoveryController {
             @Valid @RequestBody RecoveryDecisionRequest request,
             HttpServletRequest servletRequest) {
         try {
-            AuthModels.JwtPrincipal admin = auth.requireAdminPermission(bearer, "admin.compliance.write");
+            JwtPrincipal admin = auth.requireAdminPermission(bearer, "admin.compliance.write");
             return recovery.decide(requestId, admin, request.approved(), request.reason(),
                     servletRequest.getHeader("User-Agent"), servletRequest.getRemoteAddr(), Instant.now());
         } catch (IllegalArgumentException ex) { throw badRequest(ex); }

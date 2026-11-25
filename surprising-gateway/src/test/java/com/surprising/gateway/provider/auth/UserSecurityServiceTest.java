@@ -16,7 +16,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;

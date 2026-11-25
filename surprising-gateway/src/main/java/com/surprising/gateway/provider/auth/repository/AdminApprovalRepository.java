@@ -4,7 +4,7 @@ import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
 import com.surprising.gateway.provider.auth.model.AdminApprovalCommand;
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
+import com.surprising.gateway.provider.auth.model.AdminApprovalResponse;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;

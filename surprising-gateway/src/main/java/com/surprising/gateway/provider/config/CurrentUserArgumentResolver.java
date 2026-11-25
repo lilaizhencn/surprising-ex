@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.config;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.gateway.provider.auth.model.OperatingUser;
 import com.surprising.gateway.provider.auth.service.AuthService;

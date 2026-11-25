@@ -4,7 +4,6 @@ import com.surprising.gateway.provider.auth.model.LoginVerificationModels.*;
 
 import com.surprising.gateway.provider.auth.client.EmailMessageSender;
 import com.surprising.gateway.provider.auth.client.SmsMessageSender;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 

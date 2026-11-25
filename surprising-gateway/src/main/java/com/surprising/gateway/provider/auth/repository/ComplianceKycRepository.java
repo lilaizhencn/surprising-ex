@@ -2,9 +2,9 @@ package com.surprising.gateway.provider.auth.repository;
 
 import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest;
+import com.surprising.gateway.provider.auth.model.KycProfile;
+import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.KycUpdateRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import org.springframework.jdbc.core.JdbcTemplate;

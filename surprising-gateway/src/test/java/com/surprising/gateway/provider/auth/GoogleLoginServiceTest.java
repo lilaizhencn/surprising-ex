@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.gateway.provider.auth.client.GoogleIdentityClient;
 import com.surprising.gateway.provider.auth.model.*;
-import com.surprising.gateway.provider.auth.model.AuthModels.*;
+import com.surprising.gateway.provider.auth.model.*;
 import com.surprising.gateway.provider.auth.repository.*;
 import com.surprising.gateway.provider.auth.service.*;
 import java.time.Instant;

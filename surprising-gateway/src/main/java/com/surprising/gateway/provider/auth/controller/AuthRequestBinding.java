@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.controller;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.*;
+import com.surprising.gateway.provider.auth.model.*;
 import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.util.LinkedHashSet;
 import java.util.List;

@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.auth;
 import static org.assertj.core.api.Assertions.*;
 import com.sun.net.httpserver.HttpServer;
 import com.surprising.gateway.provider.auth.client.*;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.*;
+import com.surprising.gateway.provider.auth.model.*;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;

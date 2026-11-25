@@ -17,9 +17,9 @@ public class AuthClientMetadataBinding {
     private final com.surprising.gateway.provider.support.GatewayLimitRequestBinding limitRequests;
     private static final String CHARGED = AuthClientMetadataBinding.class.getName() + ".charged";
     private static final String BEARER = AuthClientMetadataBinding.class.getName() + ".bearer";
-    private record VerifiedBearer(String authorization, com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal) {}
+    private record VerifiedBearer(String authorization, com.surprising.gateway.provider.auth.model.JwtPrincipal principal) {}
 
-    public com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal cachedBearer(String authorization) {
+    public com.surprising.gateway.provider.auth.model.JwtPrincipal cachedBearer(String authorization) {
         var attributes = RequestContextHolder.getRequestAttributes();
         if (attributes instanceof ServletRequestAttributes servlet
                 && servlet.getRequest().getAttribute(BEARER) instanceof VerifiedBearer cached
@@ -27,7 +27,7 @@ public class AuthClientMetadataBinding {
         return null;
     }
 
-    public void cacheBearer(String authorization, com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal) {
+    public void cacheBearer(String authorization, com.surprising.gateway.provider.auth.model.JwtPrincipal principal) {
         var attributes = RequestContextHolder.getRequestAttributes();
         if (attributes instanceof ServletRequestAttributes servlet)
             servlet.getRequest().setAttribute(BEARER, new VerifiedBearer(authorization, principal));

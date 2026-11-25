@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.support.AuthClientMetadataBinding;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;

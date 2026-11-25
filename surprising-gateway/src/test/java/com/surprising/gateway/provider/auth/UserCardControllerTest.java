@@ -1,7 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.controller.UserCardController;
-import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 
@@ -21,7 +22,7 @@ class UserCardControllerTest {
 
     @Test
     void scanningReturnsOnlyServerResolvedPublicIdentity() {
-        when(users.user(42)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
+        when(users.user(42)).thenReturn(Optional.of(new AuthenticatedUser(
                 42, null, "private@example.test", "NORMAL", List.of("USER"), Instant.now(), "小李")));
         assertThat(controller.scan("Bearer access", new UserCardController.ScanRequest("surprising://user/42")))
                 .isEqualTo(new UserCardController.PublicProfile(42, "小李"));
@@ -39,7 +40,7 @@ class UserCardControllerTest {
 
     @Test
     void missingAndFrozenProfilesAreNotDisclosed() {
-        when(users.user(42)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
+        when(users.user(42)).thenReturn(Optional.of(new AuthenticatedUser(
                 42, null, null, "FROZEN", List.of("USER"), Instant.now(), "hidden")));
         assertThatThrownBy(() -> controller.scan("Bearer access", new UserCardController.ScanRequest("surprising://user/42")))
                 .isInstanceOf(ResponseStatusException.class).extracting("statusCode.value").isEqualTo(404);

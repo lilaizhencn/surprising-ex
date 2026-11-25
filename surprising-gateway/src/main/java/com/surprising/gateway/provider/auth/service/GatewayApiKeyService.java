@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.auth.service;
 import com.surprising.gateway.provider.auth.repository.GatewayApiKeyRepository;
 import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.ApiKeyAuthenticationRequest;
 import com.surprising.gateway.provider.auth.model.ApiKeyModels.ApiKeyView;
 import com.surprising.gateway.provider.auth.model.ApiKeyModels.CreatedApiKey;

@@ -5,7 +5,7 @@ import com.surprising.account.api.model.ProductBalanceQueryResponse;
 import com.surprising.account.provider.service.AccountService;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
-import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
 import com.surprising.gateway.provider.subaccount.model.SubAccountModels.*;
 import com.surprising.gateway.provider.subaccount.repository.SubAccountRepository;
