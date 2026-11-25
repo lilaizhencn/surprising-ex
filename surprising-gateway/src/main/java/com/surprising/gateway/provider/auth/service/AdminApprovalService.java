@@ -15,7 +15,6 @@ import com.surprising.gateway.provider.auth.model.AdminApprovalResponse;
 import com.surprising.gateway.provider.auth.model.AdminOperationLogResponse;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.Duration;

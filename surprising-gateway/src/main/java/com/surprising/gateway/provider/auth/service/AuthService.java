@@ -35,7 +35,6 @@ import com.surprising.gateway.provider.auth.state.SessionState;
 import com.surprising.gateway.provider.auth.state.UserState;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Duration;
 import java.time.Instant;

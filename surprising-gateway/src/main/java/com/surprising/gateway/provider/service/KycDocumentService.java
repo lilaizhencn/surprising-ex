@@ -13,7 +13,6 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import static com.surprising.gateway.provider.utils.KycDocumentFormats.normalizeDocumentType;
 
 import com.surprising.gateway.provider.model.KycDocumentUpload;
-import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;

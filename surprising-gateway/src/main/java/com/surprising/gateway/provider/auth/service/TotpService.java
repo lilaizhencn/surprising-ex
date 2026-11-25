@@ -4,7 +4,6 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Arrays;
@@ -16,7 +15,6 @@ import com.google.zxing.EncodeHintType;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.qrcode.QRCodeWriter;
 import javax.crypto.Cipher;
-import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Service;
@@ -124,9 +122,8 @@ public class TotpService {
 
     private String code(String secret, long counter) {
         try {
-            Mac mac = Mac.getInstance("HmacSHA1");
-            mac.init(new SecretKeySpec(base32Decode(secret), "HmacSHA1"));
-            byte[] hash = mac.doFinal(ByteBuffer.allocate(Long.BYTES).putLong(counter).array());
+            byte[] hash = com.surprising.gateway.provider.support.Sha256Digests.hmac(
+                    "HmacSHA1", base32Decode(secret), ByteBuffer.allocate(Long.BYTES).putLong(counter).array());
             int offset = hash[hash.length - 1] & 0x0f;
             int binary = ((hash[offset] & 0x7f) << 24)
                     | ((hash[offset + 1] & 0xff) << 16)

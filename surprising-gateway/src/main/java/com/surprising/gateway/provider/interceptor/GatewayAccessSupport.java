@@ -10,7 +10,6 @@ import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
 import jakarta.servlet.http.HttpServletRequest;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;

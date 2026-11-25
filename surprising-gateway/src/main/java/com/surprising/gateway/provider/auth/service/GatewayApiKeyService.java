@@ -9,7 +9,6 @@ import com.surprising.gateway.provider.auth.model.ApiKeyModels.ApiKeyView;
 import com.surprising.gateway.provider.auth.model.ApiKeyModels.CreatedApiKey;
 import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;
@@ -17,7 +16,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Service;
 

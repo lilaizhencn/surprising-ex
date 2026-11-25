@@ -8,7 +8,6 @@ import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
 import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import java.time.Instant;
 import java.util.Base64;

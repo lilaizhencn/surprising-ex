@@ -6,7 +6,6 @@ import com.surprising.gateway.provider.config.GatewayLimitProperties.Rule;
 import com.surprising.product.api.ProductLine;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
