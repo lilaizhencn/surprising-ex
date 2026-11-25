@@ -4,7 +4,6 @@ import com.surprising.marketmaker.provider.model.MarketMakerAdminModels.*;
 import com.surprising.marketmaker.provider.model.MarketMakerRunEventPageQuery;
 
 import lombok.extern.slf4j.Slf4j;
-import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
@@ -13,10 +12,8 @@ import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyQueryResponse;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyResponse;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
-import com.surprising.marketmaker.provider.config.MarketMakerProductLineContext;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
-import com.surprising.marketmaker.provider.client.MakerQuoteInputsClient;
-import com.surprising.marketmaker.provider.client.MakerTradingFeeClient;
+import com.surprising.marketmaker.provider.client.MakerAeronTradingGateway;
 import com.surprising.trading.api.model.MakerQuoteInputs;
 import com.surprising.marketmaker.provider.model.DesiredQuote;
 import com.surprising.marketmaker.provider.model.ExternalTrade;
@@ -52,8 +49,6 @@ import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
-import com.surprising.trading.api.client.MarketDataRpcApi;
-import com.surprising.trading.api.client.OrderRpcApi;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -80,20 +75,12 @@ public class MarketMakerService {
 
     private static final int MAX_BATCH_PLACE_ORDERS = 20;
     private static final int MAX_BATCH_CANCEL_ORDERS = 50;
-    // 预占结果通过账户 Kafka 异步返回。预占中的报价仍然占用一个报价槽位，
-    // 若在下一轮被当成非活动订单撤掉，会形成“永远预占不成功”的并发活锁。
-    private static final Set<OrderStatus> LIVE_STATUSES = EnumSet.of(
-            OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED, OrderStatus.PENDING_RESERVE);
 
     private final MarketMakerProperties properties;
     private final InstrumentSnapshotCache instrumentSnapshotCache;
     private final MarketMakerMarkPriceCache markPriceCache;
-    private final MarketDataRpcApi marketDataRpcApi;
-    private final OrderRpcApi orderRpcApi;
-    private final AccountRpcApi accountRpcApi;
     private final QuotePlanner quotePlanner;
-    private final MakerQuoteInputsClient quoteInputsClient;
-    private final MakerTradingFeeClient tradingFeeClient;
+    private final MakerAeronTradingGateway aeronGateway;
     private final ReferenceMarketProvider referenceMarketProvider;
     private final MarketMakerStrategyOverrideStore overrideStore;
     private final MarketMakerRunEventRepository runEventRepository;
@@ -108,27 +95,18 @@ public class MarketMakerService {
     // One bounded diagnostic budget for the process; watchdog failures must not flood logs.
     private final java.util.concurrent.atomic.AtomicLong nextQuoteFailureLogNanos = new java.util.concurrent.atomic.AtomicLong();
 
-    @Autowired
     public MarketMakerService(MarketMakerProperties properties,
                               MarketMakerMarkPriceCache markPriceCache,
-                              MarketDataRpcApi marketDataRpcApi,
-                              OrderRpcApi orderRpcApi,
-                              AccountRpcApi accountRpcApi,
                               QuotePlanner quotePlanner,
                               ReferenceMarketProvider referenceMarketProvider,
                               MarketMakerStrategyOverrideStore overrideStore,
                               MarketMakerRunEventRepository runEventRepository,
                               InstrumentSnapshotCache instrumentSnapshotCache,
-                              MakerTradingFeeClient tradingFeeClient,
-                              MakerQuoteInputsClient quoteInputsClient) {
-        this.quoteInputsClient = quoteInputsClient;
-        this.tradingFeeClient = tradingFeeClient;
+                              MakerAeronTradingGateway aeronGateway) {
+        this.aeronGateway = aeronGateway;
         this.properties = properties;
         this.instrumentSnapshotCache = instrumentSnapshotCache;
         this.markPriceCache = markPriceCache;
-        this.marketDataRpcApi = marketDataRpcApi;
-        this.orderRpcApi = orderRpcApi;
-        this.accountRpcApi = accountRpcApi;
         this.quotePlanner = quotePlanner;
         this.referenceMarketProvider = referenceMarketProvider;
         this.overrideStore = overrideStore;
@@ -161,8 +139,6 @@ public class MarketMakerService {
         AtomicBoolean lock = cycleLocks.computeIfAbsent(strategyKey(strategy) + ":" + instrumentId + ":trade",
                 ignored -> new AtomicBoolean());
         if (!lock.compareAndSet(false, true)) return false;
-        ProductLine previous = MarketMakerProductLineContext.current();
-        MarketMakerProductLineContext.set(strategy.getProductLine());
         try {
             InstrumentResponse instrument = currentInstrument(strategy.getProductLine(), instrumentId);
             requireTradable(instrument, strategy.getProductLine());
@@ -174,23 +150,12 @@ public class MarketMakerService {
                     strategy.getStrategyId(), instrumentId, ex.getMessage());
             return false;
         } finally {
-            MarketMakerProductLineContext.set(previous);
             lock.set(false);
         }
     }
 
     public MarketMakerStrategyQueryResponse strategies() {
         return strategies(null);
-    }
-
-    private long effectiveMakerFee(long accountId, ProductLine productLine, InstrumentResponse instrument) {
-        var fee = tradingFeeClient.effective(accountId, String.valueOf(instrument.instrumentId()), instrument.changeId(), productLine);
-        if (fee == null || fee.userId() != accountId || fee.productLine() != productLine
-                || !String.valueOf(instrument.instrumentId()).equals(fee.instrumentId())
-                || fee.instrumentChangeId() != instrument.changeId()) {
-            throw new IllegalStateException("做市账户生效费率与合约版本不匹配，停止本轮报价");
-        }
-        return fee.makerFeeRatePpm();
     }
 
     private InstrumentResponse currentInstrument(ProductLine productLine, String instrumentId) {
@@ -324,7 +289,9 @@ public class MarketMakerService {
                 }
             }
         }
-        return new MarketMakerAdminMetricsResponse(now, nodeId, totals(productLine, rows, anomalies), rows, anomalies, warnings);
+        return new MarketMakerAdminMetricsResponse(now, nodeId,
+                MakerMetricsSupport.totals(strategies(productLine).strategies(), rows, anomalies),
+                rows, anomalies, warnings);
     }
 
     public MarketMakerRunLogQueryResponse runLogs(ProductLine productLine, String strategyId, String instrumentId,
@@ -347,8 +314,6 @@ public class MarketMakerService {
         ProductLine productLine = strategy.getProductLine();
         String accountPrefix = accountPrefix(strategy, instrumentId, accountId);
         List<MarketMakerAnomaly> rowAnomalies = new ArrayList<>();
-        ProductLine previousProductLine = MarketMakerProductLineContext.current();
-        MarketMakerProductLineContext.set(productLine);
         if (!strategy.isEnabled()) {
             rowAnomalies.add(anomaly("INFO", "STRATEGY_DISABLED", strategyId, productLine, instrumentId, accountId,
                     0, 1, "strategy is disabled by configuration"));
@@ -365,11 +330,11 @@ public class MarketMakerService {
             List<OrderResponse> openOrders = openOrders(productLine, accountId, instrumentId, now);
             List<OrderResponse> ownedLive = openOrders.stream()
                     .filter(order -> ownsOrder(accountPrefix, order))
-                    .filter(this::isLive)
+                    .filter(MakerQuoteMatchingSupport::isLive)
                     .toList();
             InstrumentResponse instrument = currentInstrument(productLine, instrumentId);
             PositionResponse position = currentPosition(strategy, accountId, instrumentId, instrument);
-            OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
+            OrderBookSnapshotResponse orderBook = fetchOrderBook(productLine, instrumentId,
                     properties.getQuoting().getOrderBookDepth());
             MarkPriceResponse markPrice = latestMarkPrice(productLine, instrumentId, instrument);
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId, productLine, instrument);
@@ -378,7 +343,7 @@ public class MarketMakerService {
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                     orderBook, markPrice, position.signedQuantitySteps(), currentVolatility(strategy, instrumentId),
-                    referenceOrderBook, effectiveMakerFee(accountId, productLine, instrument));
+                    referenceOrderBook, 0L);
             long staleOwned = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
                     ? ownedLive.size() : 0;
             int desiredQuotes = plan.quotes().size();
@@ -394,15 +359,15 @@ public class MarketMakerService {
             long absInventory = Math.abs(position.signedQuantitySteps());
             long inventoryUsagePpm = maxInventory <= 0 ? 0 : Math.min(10_000_000L,
                     Math.round(absInventory * 1_000_000.0d / maxInventory));
-            long bestBid = bestBid(orderBook);
-            long bestAsk = bestAsk(orderBook);
+            long bestBid = MakerSimulatedTradeSupport.bestBid(orderBook);
+            long bestAsk = MakerSimulatedTradeSupport.bestAsk(orderBook);
             long spreadTicks = bestBid > 0 && bestAsk > 0 ? Math.max(0, bestAsk - bestBid) : 0;
-            long midTicks = midPriceTicks(orderBook);
+            long midTicks = MakerSimulatedTradeSupport.midPriceTicks(orderBook);
             long spreadPpm = midTicks <= 0 || spreadTicks <= 0 ? 0
                     : Math.round(spreadTicks * 1_000_000.0d / midTicks);
             long quoteCoveragePpm = desiredQuotes <= 0 ? 0
                     : Math.round(matchedDesired * 1_000_000.0d / desiredQuotes);
-            long markTicks = markPriceTicks(instrument, markPrice);
+            long markTicks = MakerSimulatedTradeSupport.markPriceTicks(instrument, markPrice);
 
             if (properties.getReferenceMarket().isEnabled() && referenceOrderBook == null) {
                 rowAnomalies.add(anomaly("CRITICAL", "REFERENCE_BOOK_UNAVAILABLE", strategyId,
@@ -442,7 +407,7 @@ public class MarketMakerService {
                 rowAnomalies.add(anomaly("CRITICAL", "INSTRUMENT_NOT_TRADING", strategyId, productLine, instrumentId, accountId,
                         1, 0, "instrument is unavailable or not TRADING"));
             }
-            MarketMakerLiquidityMetric liquidity = linearLiquidity(instrument, orderBook, Instant.now());
+            MarketMakerLiquidityMetric liquidity = MakerMetricsSupport.linearLiquidity(properties, instrument, orderBook, Instant.now());
             if (liquidity != null && liquidity.targetNotionalUnits() > 0) {
                 if (!liquidity.fresh()) rowAnomalies.add(anomaly("CRITICAL", "LIQUIDITY_BOOK_STALE", strategyId,
                         productLine, instrumentId, accountId, 0, 1, "fresh two-sided depth is required for liquidity verification"));
@@ -456,7 +421,7 @@ public class MarketMakerService {
             }
             anomalies.addAll(rowAnomalies);
             return new MarketMakerStrategyMetric(
-                    strategyId, productLine, instrumentId, accountId, strategyStatus, qualityStatus(rowAnomalies),
+                    strategyId, productLine, instrumentId, accountId, strategyStatus, MakerMetricsSupport.qualityStatus(rowAnomalies),
                     strategy.isEnabled(), state.paused(), state.cycleSequence(), state.submittedOrders(),
                     state.canceledOrders(), state.rejectedOrders(), state.skippedCycles(),
                     position.signedQuantitySteps(), absInventory, maxInventory, inventoryUsagePpm,
@@ -479,72 +444,7 @@ public class MarketMakerService {
                     state.skippedCycles(), 0, 0, effectiveMaxInventorySteps(strategy), 0, 0, null,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                     state.lastError(), state.lastCycleTime(), message, null);
-        } finally {
-            MarketMakerProductLineContext.set(previousProductLine);
         }
-    }
-
-    private MarketMakerLiquidityMetric linearLiquidity(InstrumentResponse instrument,
-                                                       OrderBookSnapshotResponse book, Instant now) {
-        if (instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL
-                && instrument.contractType() != com.surprising.instrument.api.model.ContractType.LINEAR_DELIVERY) return null;
-        long ppm = properties.getQuoting().getLiquiditySlippagePpm();
-        boolean fresh = book.eventTime() != null && !book.eventTime().isAfter(now)
-                && !book.eventTime().plus(properties.getReferenceMarket().getMaxAge()).isBefore(now)
-                && bestBid(book) > 0 && bestAsk(book) > bestBid(book);
-        return new MarketMakerLiquidityMetric(ppm, properties.getQuoting().getLinearLiquidityTargetNotionalUnits(),
-                bandNotional(book.bids(), OrderSide.SELL, ppm, instrument.notionalMultiplierUnits()),
-                bandNotional(book.asks(), OrderSide.BUY, ppm, instrument.notionalMultiplierUnits()),
-                book.sequence(), book.eventTime(), fresh);
-    }
-
-    private long bandNotional(List<OrderBookLevel> levels, OrderSide takingSide, long ppm, long multiplier) {
-        if (levels == null || levels.isEmpty()) return 0;
-        // Native depth can be returned in ascending price order on both sides.
-        levels = levels.stream().sorted(takingSide == OrderSide.SELL
-                ? Comparator.comparingLong(OrderBookLevel::priceTicks).reversed()
-                : Comparator.comparingLong(OrderBookLevel::priceTicks)).toList();
-        long best = levels.getFirst().priceTicks();
-        if (best <= 0 || multiplier <= 0) throw new IllegalStateException("invalid linear liquidity units");
-        var threshold = java.math.BigInteger.valueOf(best).multiply(java.math.BigInteger.valueOf(ppm));
-        var notional = java.math.BigInteger.ZERO;
-        long previous = best;
-        for (OrderBookLevel level : levels) {
-            long price = level.priceTicks();
-            if (price <= 0 || level.quantitySteps() < 0
-                    || takingSide == OrderSide.BUY && price < previous
-                    || takingSide == OrderSide.SELL && price > previous)
-                throw new IllegalStateException("invalid liquidity book ordering or amount");
-            previous = price;
-            var distance = java.math.BigInteger.valueOf(takingSide == OrderSide.BUY ? price - best : best - price)
-                    .multiply(java.math.BigInteger.valueOf(1_000_000L));
-            if (distance.compareTo(threshold) > 0) break;
-            notional = notional.add(java.math.BigInteger.valueOf(price)
-                    .multiply(java.math.BigInteger.valueOf(level.quantitySteps()))
-                    .multiply(java.math.BigInteger.valueOf(multiplier)));
-        }
-        return notional.longValueExact();
-    }
-
-    private MarketMakerMetricsTotals totals(ProductLine productLine,
-                                            List<MarketMakerStrategyMetric> rows,
-                                            List<MarketMakerAnomaly> anomalies) {
-        List<MarketMakerStrategyResponse> strategies = strategies(productLine).strategies();
-        return new MarketMakerMetricsTotals(
-                strategies.size(),
-                strategies.stream().filter(MarketMakerStrategyResponse::configuredEnabled).count(),
-                strategies.stream().filter(item -> item.status() == MarketMakerStrategyStatus.RUNNING).count(),
-                strategies.stream().filter(item -> item.status() == MarketMakerStrategyStatus.DEGRADED).count(),
-                strategies.stream().filter(item -> item.status() == MarketMakerStrategyStatus.PAUSED).count(),
-                strategies.stream().filter(item -> item.status() == MarketMakerStrategyStatus.DISABLED).count(),
-                rows.size(),
-                strategies.stream().mapToLong(MarketMakerStrategyResponse::submittedOrders).sum(),
-                strategies.stream().mapToLong(MarketMakerStrategyResponse::canceledOrders).sum(),
-                strategies.stream().mapToLong(MarketMakerStrategyResponse::rejectedOrders).sum(),
-                strategies.stream().mapToLong(MarketMakerStrategyResponse::skippedCycles).sum(),
-                anomalies.size(),
-                anomalies.stream().filter(item -> "CRITICAL".equals(item.severity())).count(),
-                anomalies.stream().filter(item -> "WARN".equals(item.severity())).count());
     }
 
     private long effectiveMaxInventorySteps(MarketMakerProperties.Strategy strategy) {
@@ -559,19 +459,6 @@ public class MarketMakerService {
                 : strategy.getMaxInventorySkewPpm();
     }
 
-    private String qualityStatus(List<MarketMakerAnomaly> anomalies) {
-        if (anomalies.stream().anyMatch(item -> "CRITICAL".equals(item.severity()))) {
-            return "CRITICAL";
-        }
-        if (anomalies.stream().anyMatch(item -> "WARN".equals(item.severity()))) {
-            return "WARN";
-        }
-        if (anomalies.stream().anyMatch(item -> "INFO".equals(item.severity()))) {
-            return "INFO";
-        }
-        return "OK";
-    }
-
     private MarketMakerAnomaly anomaly(String severity,
                                        String type,
                                        String strategyId,
@@ -581,7 +468,7 @@ public class MarketMakerService {
                                        long metricValue,
                                        long threshold,
                                        String summary) {
-        return new MarketMakerAnomaly(severity, type, strategyId, productLine, instrumentId, accountId, metricValue, threshold, summary);
+        return MakerMetricsSupport.anomaly(severity, type, strategyId, productLine, instrumentId, accountId, metricValue, threshold, summary);
     }
 
     private void recordRunEvent(MarketMakerProperties.Strategy strategy,
@@ -637,28 +524,22 @@ public class MarketMakerService {
     public void onInstrumentStatusChanged(ProductLine productLine, String instrumentId, boolean isTradable) {
         if (!isTradable) {
             Instant now = Instant.now();
-            ProductLine previousProductLine = MarketMakerProductLineContext.current();
-            MarketMakerProductLineContext.set(productLine);
-            try {
-                for (var strategy : properties.getStrategies()) {
-                    if (strategy.getProductLine() == productLine && strategy.getInstrumentIds().contains(instrumentId)) {
-                        StrategyRuntimeState state = state(strategy);
-                        for (long accountId : strategy.getAccountIds()) {
-                            String prefix = accountPrefix(strategy, instrumentId, accountId);
-                            var requests = openOrders(productLine, accountId, instrumentId, now).stream()
-                                    .filter(this::isLive).filter(order -> ownsOrder(prefix, order))
-                                    .map(order -> new CancelOrderRequest(accountId, order.orderId())).toList();
-                            if (!requests.isEmpty()) {
-                                var result = cancelOrders(productLine, accountId, instrumentId, requests);
-                                state.addCanceled(result.completed());
-                                recordRunEvent(strategy, instrumentId, accountId, state.cycleSequence(), "INSTRUMENT_SUSPENDED_DRAIN",
-                                        0, result.completed(), result.failed().size(), "INSTRUMENT_NOT_TRADING", null, now);
-                            }
+            for (var strategy : properties.getStrategies()) {
+                if (strategy.getProductLine() == productLine && strategy.getInstrumentIds().contains(instrumentId)) {
+                    StrategyRuntimeState state = state(strategy);
+                    for (long accountId : strategy.getAccountIds()) {
+                        String prefix = accountPrefix(strategy, instrumentId, accountId);
+                        var requests = openOrders(productLine, accountId, instrumentId, now).stream()
+                                .filter(MakerQuoteMatchingSupport::isLive).filter(order -> ownsOrder(prefix, order))
+                                .map(order -> new CancelOrderRequest(accountId, order.orderId())).toList();
+                        if (!requests.isEmpty()) {
+                            var result = cancelOrders(productLine, accountId, instrumentId, requests);
+                            state.addCanceled(result.completed());
+                            recordRunEvent(strategy, instrumentId, accountId, state.cycleSequence(), "INSTRUMENT_SUSPENDED_DRAIN",
+                                    0, result.completed(), result.failed().size(), "INSTRUMENT_NOT_TRADING", null, now);
                         }
                     }
                 }
-            } finally {
-                MarketMakerProductLineContext.set(previousProductLine);
             }
         }
     }
@@ -676,8 +557,6 @@ public class MarketMakerService {
                     0, 0, 0, "CYCLE_IN_PROGRESS", null, Instant.now());
             return false;
         }
-        ProductLine previousProductLine = MarketMakerProductLineContext.current();
-        MarketMakerProductLineContext.set(strategy.getProductLine());
         try {
             Instant now = Instant.now();
             try {
@@ -685,7 +564,7 @@ public class MarketMakerService {
                     for (long accountId : strategy.getAccountIds()) {
                         String prefix = accountPrefix(strategy, instrumentId, accountId);
                         var requests = openOrders(strategy.getProductLine(), accountId, instrumentId, now).stream()
-                                .filter(this::isLive).filter(order -> ownsOrder(prefix, order))
+                                .filter(MakerQuoteMatchingSupport::isLive).filter(order -> ownsOrder(prefix, order))
                                 .map(order -> new CancelOrderRequest(accountId, order.orderId())).toList();
                         var result = cancelOrders(strategy.getProductLine(), accountId, instrumentId, requests);
                         state.addCanceled(result.completed());
@@ -696,15 +575,13 @@ public class MarketMakerService {
                 }
                 InstrumentResponse instrument = currentInstrument(strategy.getProductLine(), instrumentId);
                 requireTradable(instrument, strategy.getProductLine());
-                OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
+                OrderBookSnapshotResponse orderBook = fetchOrderBook(strategy.getProductLine(), instrumentId,
                         properties.getQuoting().getOrderBookDepth());
                 MarkPriceResponse markPrice = latestMarkPrice(strategy.getProductLine(), instrumentId, instrument);
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId,
                         strategy.getProductLine(), instrument);
                 long volatilityTicks = observeVolatility(strategy, instrumentId, instrument, orderBook, markPrice);
-                var inputs = quoteInputsClient.query(new MakerQuoteInputs.Request(
-                        strategy.getProductLine(), instrumentId, instrument.changeId(), strategy.getMarginMode(),
-                        strategy.getAccountIds()));
+                var inputs = fetchQuoteInputs(strategy, instrumentId, instrument);
                 validateQuoteInputs(inputs, strategy, instrumentId, instrument.changeId());
                 long rejectedQuotes = 0;
                 String quoteRejection = null;
@@ -742,6 +619,13 @@ public class MarketMakerService {
                 recordRunEvent(strategy, instrumentId, null, cycleSequence, "CYCLE_SUCCESS",
                         0, 0, 0, null, null, now);
                 return true;
+            } catch (PartialAmendException ex) {
+                log.debug("Market-maker cycle partial amend strategyId={} instrumentId={} error={}",
+                        strategy.getStrategyId(), instrumentId, ex.getMessage());
+                state.markFailure(ex.getMessage(), now);
+                recordRunEvent(strategy, instrumentId, null, cycleSequence, "CYCLE_FAILED",
+                        0, 0, 0, null, ex.getMessage(), now);
+                return false;
             } catch (RuntimeException ex) {
                 log.warn("Market-maker cycle failed strategyId={} instrumentId={} error={}",
                         strategy.getStrategyId(), instrumentId, ex.getMessage());
@@ -751,7 +635,6 @@ public class MarketMakerService {
                 return false;
             }
         } finally {
-            MarketMakerProductLineContext.set(previousProductLine);
             cycleLock.set(false);
         }
     }
@@ -793,7 +676,7 @@ public class MarketMakerService {
                               long makerFeeRatePpm,
                               Instant now) {
         List<OrderResponse> openOrders = openOrders(strategy.getProductLine(), accountId, instrumentId, now);
-        OrderBookSnapshotResponse otherLiquidity = excludeOwnQuotes(orderBook, openOrders);
+        OrderBookSnapshotResponse otherLiquidity = MakerQuoteMatchingSupport.excludeOwnQuotes(orderBook, openOrders);
         if (properties.getReferenceMarket().isEnabled() && referenceOrderBook == null) {
             // Keep the resting ladder. An empty plan would cancel every owned quote and blank the book.
             recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "QUOTE_HELD",
@@ -812,25 +695,6 @@ public class MarketMakerService {
         return result;
     }
 
-    /** 报价只避让其他参与者的盘口；自己的旧报价交由分批撤补处理，不能反向锁住参考价。 */
-    private OrderBookSnapshotResponse excludeOwnQuotes(OrderBookSnapshotResponse book, List<OrderResponse> orders) {
-        // Derived only for this call from the authoritative order snapshot; never shared between cycles.
-        var bids = new HashMap<Long, Long>();
-        var asks = new HashMap<Long, Long>();
-        for (var order : orders) {
-            if (!isLive(order) || order.side() == null) continue;
-            var quantities = order.side() == OrderSide.BUY ? bids : asks;
-            quantities.merge(order.priceTicks(), order.remainingQuantitySteps(), Long::sum);
-        }
-        return new OrderBookSnapshotResponse(book.instrumentId(), book.sequence(), book.depth(),
-                excludeOwnSide(book.bids(), bids), excludeOwnSide(book.asks(), asks), book.eventTime());
-    }
-
-    private List<OrderBookLevel> excludeOwnSide(List<OrderBookLevel> levels, Map<Long, Long> ownQuantities) {
-        return levels.stream().filter(level -> level.quantitySteps()
-                > ownQuantities.getOrDefault(level.priceTicks(), 0L)).toList();
-    }
-
     private ReconcileResult reconcile(MarketMakerProperties.Strategy strategy,
                                       long accountId,
                                       String instrumentId,
@@ -844,7 +708,7 @@ public class MarketMakerService {
                 .filter(order -> ownsOrder(accountPrefix, order))
                 // CANCEL_REQUESTED 已不再是可交易订单，不能继续占用目标报价档位。
                 // 会导致所有报价都被跳过，做市策略进入“运行但无盘口”的假健康状态。
-                .filter(this::isLive)
+                .filter(MakerQuoteMatchingSupport::isLive)
                 .sorted(Comparator.comparing(OrderResponse::createdAt, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
         // Keep the remaining ladder live while each small replacement batch is confirmed.
@@ -857,8 +721,26 @@ public class MarketMakerService {
                 .mapToLong(OrderResponse::priceTicks).max().orElse(0);
         long previousAsk = owned.stream().filter(order -> order.side() == OrderSide.SELL)
                 .mapToLong(OrderResponse::priceTicks).min().orElse(Long.MAX_VALUE);
-        List<CancelOrderRequest> cancelRequests = owned.stream()
+        List<OrderResponse> drifted = owned.stream()
                 .filter(order -> !shouldKeep(order, plan.quotes(), accountPrefix, quoting))
+                .toList();
+        List<OrderResponse> crossing = new ArrayList<>();
+        List<OrderResponse> nonCrossing = new ArrayList<>();
+        for (OrderResponse order : drifted) {
+            boolean wouldCross = order.side() == OrderSide.SELL && order.priceTicks() <= highestBid
+                    || order.side() == OrderSide.BUY && order.priceTicks() >= lowestAsk;
+            if (wouldCross) crossing.add(order);
+            else nonCrossing.add(order);
+        }
+        int maxUpdates = quoting.getMaxQuoteUpdatesPerCycle();
+        if (maxUpdates > 0 && nonCrossing.size() > maxUpdates) {
+            java.util.Collections.shuffle(nonCrossing, ThreadLocalRandom.current());
+            nonCrossing = nonCrossing.subList(0, maxUpdates);
+        }
+        List<OrderResponse> toUpdate = new ArrayList<>(crossing.size() + nonCrossing.size());
+        toUpdate.addAll(crossing);
+        toUpdate.addAll(nonCrossing);
+        List<CancelOrderRequest> cancelRequests = toUpdate.stream()
                 // Move quotes that would cross the new opposite side first, preserving post-only semantics.
                 .sorted(Comparator.<OrderResponse>comparingInt(order ->
                         order.side() == OrderSide.SELL && order.priceTicks() <= highestBid
@@ -882,6 +764,10 @@ public class MarketMakerService {
         rejected += refill.rejected();
         rejectionReason = refill.rejectionReason();
         if (cancelRequests.isEmpty()) return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
+        var keptById = new HashMap<Long, OrderResponse>(kept.size() * 2);
+        for (OrderResponse order : kept) {
+            keptById.put(order.orderId(), order);
+        }
         // If old oversized quotes occupy the budget, replace one small batch to release it.
         // The existing rejection check below stops us from withdrawing the rest of the ladder.
         for (int start = 0; start < Math.max(1, cancelRequests.size()); start += replacementBatchSize) {
@@ -890,9 +776,8 @@ public class MarketMakerService {
             List<CancelOrderRequest> cancellations = new ArrayList<>();
             Map<Long, DesiredQuote> amendments = new java.util.LinkedHashMap<>();
             for (CancelOrderRequest request : batch) {
-                OrderResponse old = kept.stream().filter(order -> order.orderId() == request.orderId())
-                        .findFirst().orElse(null);
-                DesiredQuote best = liquidityQuoteReplacement(strategy, plan, old, accountPrefix, highestBid, lowestAsk, quoting);
+                OrderResponse old = keptById.get(request.orderId());
+                DesiredQuote best = quoteReplacement(strategy, plan, old, accountPrefix, highestBid, lowestAsk, quoting);
                 if (best == null) cancellations.add(request);
                 else amendments.put(request.orderId(), best);
             }
@@ -910,7 +795,7 @@ public class MarketMakerService {
             }
             List<OrderResponse> updated = amendQuotes(strategy, accountId, instrumentId, amendments, cycleSequence);
             kept.removeIf(order -> amendments.containsKey(order.orderId()));
-            updated.stream().filter(this::isLive).forEach(kept::add);
+            updated.stream().filter(MakerQuoteMatchingSupport::isLive).forEach(kept::add);
             canceled += amendments.size();
             submitted += amendments.size();
             ReconcileResult replacement = placeMissingQuotes(strategy, accountId, instrumentId, plan,
@@ -924,18 +809,20 @@ public class MarketMakerService {
         return new ReconcileResult(submitted, canceled, rejected, rejectionReason);
     }
 
-    private DesiredQuote liquidityQuoteReplacement(MarketMakerProperties.Strategy strategy, QuotePlan plan,
+    private DesiredQuote quoteReplacement(MarketMakerProperties.Strategy strategy, QuotePlan plan,
             OrderResponse old, String prefix, long bid, long ask, MarketMakerProperties.Quoting quoting) {
-        if (old == null || quoting.getLinearLiquidityTargetNotionalUnits() == 0
-                || (strategy.getProductLine() != ProductLine.LINEAR_PERPETUAL
-                && strategy.getProductLine() != ProductLine.LINEAR_DELIVERY)) return null;
-        int level = quoteLevel(old.clientOrderId(), prefix, old.side());
+        if (old == null) return null;
+        int level = MakerQuoteMatchingSupport.quoteLevel(old.clientOrderId(), prefix, old.side());
         if (level < 0) return null;
+        boolean linearLiquidity = quoting.getLinearLiquidityTargetNotionalUnits() != 0
+                && (strategy.getProductLine() == ProductLine.LINEAR_PERPETUAL
+                || strategy.getProductLine() == ProductLine.LINEAR_DELIVERY);
+        if (!linearLiquidity && !quoting.isPreferInPlaceAmend()) return null;
         long best = old.side() == OrderSide.BUY ? bid : ask;
-        long tolerance = ppmFloor(best, quoting.getLiquiditySlippagePpm());
+        long tolerance = linearLiquidity ? MakerQuoteMatchingSupport.ppmFloor(best, quoting.getLiquiditySlippagePpm()) : 0L;
         for (var quote : plan.quotes()) {
             if (quote.side() != old.side() || quote.level() != level) continue;
-            if (Math.abs(quote.priceTicks() - best) <= tolerance) return quote;
+            if (!linearLiquidity || Math.abs(quote.priceTicks() - best) <= tolerance) return quote;
         }
         return null;
     }
@@ -953,11 +840,15 @@ public class MarketMakerService {
         try {
             for (int start = 0; start < requests.size(); start += 20) {
                 var batch = requests.subList(start, Math.min(start + 20, requests.size()));
-                var receipt = orderRpcApi.amendBatch(new BatchAmendOrdersRequest(batch));
+                var receipt = submitAmendBatch(strategy.getProductLine(), new BatchAmendOrdersRequest(batch));
                 var result = receiptResult(receipt, AmendOrderBatchResponse.class);
-                if (result == null || result.failed() != 0 || result.completed() != batch.size()
-                        || result.results().size() != batch.size())
+                if (result == null) {
                     throw new IllegalStateException("quote amendments not confirmed: " + receiptMessage(receipt));
+                }
+                if (result.failed() != 0 || result.completed() != batch.size()
+                        || result.results().size() != batch.size()) {
+                    throw new PartialAmendException("quote amendments not confirmed: " + receiptMessage(receipt));
+                }
                 boolean[] confirmed = new boolean[batch.size()];
                 List<OrderResponse> replacements = new ArrayList<>(batch.size());
                 for (var item : result.results()) {
@@ -978,10 +869,18 @@ public class MarketMakerService {
                 updated.addAll(replacements);
             }
             return updated;
+        } catch (PartialAmendException ex) {
+            openOrderSnapshots.remove(orderSnapshotKey(strategy.getProductLine(), accountId, instrumentId));
+            throw new PartialAmendException("quote amendment outcome requires an actual order query: " + ex.getMessage(), ex);
         } catch (RuntimeException ex) {
             openOrderSnapshots.remove(orderSnapshotKey(strategy.getProductLine(), accountId, instrumentId));
             throw new IllegalStateException("quote amendment outcome requires an actual order query: " + ex.getMessage(), ex);
         }
+    }
+
+    private static final class PartialAmendException extends IllegalStateException {
+        PartialAmendException(String message) { super(message); }
+        PartialAmendException(String message, Throwable cause) { super(message, cause); }
     }
 
     private ReconcileResult placeMissingQuotes(MarketMakerProperties.Strategy strategy,
@@ -1035,7 +934,7 @@ public class MarketMakerService {
                 List<PlaceOrderRequest> batchRequests = requests.subList(start,
                         Math.min(start + MAX_BATCH_PLACE_ORDERS, requests.size()));
                 try {
-                    OrderCommandReceipt receipt = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(batchRequests));
+                    OrderCommandReceipt receipt = submitPlaceBatch(strategy.getProductLine(), new BatchPlaceOrderRequest(batchRequests));
                     OrderBatchResponse batch = receiptResult(receipt, OrderBatchResponse.class);
                     if (batch == null) {
                         throw new IllegalStateException(receiptMessage(receipt));
@@ -1082,90 +981,27 @@ public class MarketMakerService {
         return new ReconcileResult(submitted, 0L, rejected, rejectionReason);
     }
 
-    /** 只保留第一条拒单原因，避免一次批量报价把运行事件写得不可读。 */
     private String firstReason(String current, String candidate) {
-        if (current != null && !current.isBlank()) {
-            return current;
-        }
-        return candidate == null || candidate.isBlank() ? "报价被拒绝" : candidate;
+        return MakerQuoteMatchingSupport.firstReason(current, candidate);
     }
 
     private boolean shouldKeep(OrderResponse order,
                                List<DesiredQuote> desiredQuotes,
                                String accountPrefix,
                                MarketMakerProperties.Quoting quoting) {
-        return desiredQuotes.stream().anyMatch(quote -> isFreshQuote(order, quote, accountPrefix, quoting));
-    }
-
-    private boolean isFreshQuote(OrderResponse order,
-                                 DesiredQuote quote,
-                                 String accountPrefix,
-                                 MarketMakerProperties.Quoting quoting) {
-        return isLive(order) && matchesQuote(order, quote, accountPrefix, quoting);
+        return MakerQuoteMatchingSupport.shouldKeep(order, desiredQuotes, accountPrefix, quoting);
     }
 
     private boolean hasLiveQuote(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix, MarketMakerProperties.Quoting quoting) {
-        return orders.stream()
-                .filter(this::isLive)
-                .anyMatch(order -> matchesQuote(order, quote, accountPrefix, quoting));
+        return MakerQuoteMatchingSupport.hasLiveQuote(orders, quote, accountPrefix, quoting);
     }
 
-    /** Existing own slots and live opposite quotes block replenishment, including pending cancels. */
     private boolean occupiedOrCrossingQuote(List<OrderResponse> orders, DesiredQuote quote, String accountPrefix) {
-        for (OrderResponse order : orders) {
-            if (order == null) continue;
-            if (quoteLevel(order.clientOrderId(), accountPrefix, quote.side()) == quote.level()) return true;
-            if (isLive(order) && order.side() != quote.side() && (quote.side() == OrderSide.BUY
-                    ? quote.priceTicks() >= order.priceTicks() : quote.priceTicks() <= order.priceTicks())) return true;
-        }
-        return false;
+        return MakerQuoteMatchingSupport.occupiedOrCrossingQuote(orders, quote, accountPrefix);
     }
 
     private boolean matchesQuote(OrderResponse order, DesiredQuote quote, String accountPrefix, MarketMakerProperties.Quoting quoting) {
-        return order.side() == quote.side()
-                && quoteLevel(order.clientOrderId(), accountPrefix, quote.side()) == quote.level()
-                && Math.abs(order.priceTicks() - quote.priceTicks())
-                <= Math.max(quoting.getRefreshThresholdTicks(), ppmFloor(quote.priceTicks(), quoting.getRefreshTolerancePpm()))
-                && quantityWithinRefreshTolerance(order.remainingQuantitySteps(), quote.quantitySteps(), quoting);
-    }
-
-    /** Read the canonical side/level slot without constructing prefixes during every quote comparison. */
-    static int quoteLevel(String clientOrderId, String accountPrefix, OrderSide side) {
-        if (clientOrderId == null || side == null || !clientOrderId.startsWith(accountPrefix)) return -1;
-        int offset = accountPrefix.length();
-        if (offset + 2 >= clientOrderId.length()
-                || clientOrderId.charAt(offset++) != (side == OrderSide.BUY ? 'b' : 's')) return -1;
-        if (clientOrderId.charAt(offset) == '0' && clientOrderId.charAt(offset + 1) != '-') return -1;
-        int level = 0;
-        boolean digitSeen = false;
-        for (; offset < clientOrderId.length(); offset++) {
-            char digit = clientOrderId.charAt(offset);
-            if (digit == '-') return digitSeen ? level : -1;
-            if (digit < '0' || digit > '9' || level > (Integer.MAX_VALUE - (digit - '0')) / 10) return -1;
-            level = level * 10 + (digit - '0');
-            digitSeen = true;
-        }
-        return -1;
-    }
-
-    private boolean quantityWithinRefreshTolerance(long resting, long desired, MarketMakerProperties.Quoting quoting) {
-        long ppm = quoting.getQuantityRefreshTolerancePpm();
-        if (ppm == 0L) return resting == desired;
-        if (resting < 0L || desired <= 0L) return false;
-        long tolerance = ppmFloor(desired, ppm);
-        long difference = resting >= desired ? resting - desired : desired - resting;
-        return difference <= tolerance;
-    }
-
-    /** Exact floor(value * ppm / 1e6) without overflowing the intermediate product. */
-    static long ppmFloor(long value, long ppm) {
-        if (value < 0 || ppm < 0 || ppm > 1_000_000L)
-            throw new IllegalArgumentException("positive value and ppm in [0, 1000000] required");
-        return (value / 1_000_000L) * ppm + (value % 1_000_000L) * ppm / 1_000_000L;
-    }
-
-    private boolean isLive(OrderResponse order) {
-        return order != null && LIVE_STATUSES.contains(order.status());
+        return MakerQuoteMatchingSupport.matchesQuote(order, quote, accountPrefix, quoting);
     }
 
     private PlaceOrderRequest quoteRequest(MarketMakerProperties.Strategy strategy,
@@ -1201,7 +1037,7 @@ public class MarketMakerService {
         List<ExternalTrade> prints = referenceMarketProvider.drainTrades(instrumentId, strategy.getProductLine(),
                 trade.getOrdersPerBatch() * 2);
         if (prints.isEmpty()) return false;
-        OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
+        OrderBookSnapshotResponse orderBook = fetchOrderBook(strategy.getProductLine(), instrumentId,
                 properties.getQuoting().getOrderBookDepth());
         PositionResponse position = currentPosition(strategy, accountId, instrumentId, instrument);
         List<PlaceOrderRequest> requests = externalPrintOrders(strategy, instrumentId, accountId, cycleSequence,
@@ -1217,7 +1053,7 @@ public class MarketMakerService {
         if (requests.size() > 1) return tradeBatch(strategy, instrumentId, accountId, cycleSequence,
                 requests, state, now);
         PlaceOrderRequest request = requests.getFirst();
-        OrderCommandReceipt receipt = orderRpcApi.place(request);
+        OrderCommandReceipt receipt = submitPlace(strategy.getProductLine(), request);
         OrderResponse response = receiptResult(receipt, OrderResponse.class);
         if (response == null || response.status() == OrderStatus.REJECTED) {
             state.addRejected(1L);
@@ -1241,64 +1077,13 @@ public class MarketMakerService {
         return true;
     }
 
-    /**
-     * Copy third-party taker prints onto our book. At most {@code ordersPerBatch} prints are copied
-     * on each side, and each copy stops at the configured sweep so one external print cannot clear the ladder.
-     */
     private List<PlaceOrderRequest> externalPrintOrders(MarketMakerProperties.Strategy strategy, String instrumentId,
                                                          long accountId, long cycleSequence, InstrumentResponse instrument,
                                                          OrderBookSnapshotResponse book, long position,
                                                          List<ExternalTrade> prints) {
-        if (!instrument.marketOrderEnabled() || prints == null || prints.isEmpty()) return List.of();
-        MarketMakerProperties.Trade trade = properties.getTrade();
-        RandomGenerator fullSweep = new RandomGenerator() {
-            @Override
-            public long nextLong() {
-                return Long.MAX_VALUE;
-            }
-
-            @Override
-            public int nextInt(int bound) {
-                return Math.max(0, bound - 1);
-            }
-        };
-        long buyAvailable = tradeTarget(OrderSide.BUY, book, trade.getSlippageTicks(),
-                trade.getMaxSweepLevels(), fullSweep).availableQuantitySteps();
-        long sellAvailable = tradeTarget(OrderSide.SELL, book, trade.getSlippageTicks(),
-                trade.getMaxSweepLevels(), fullSweep).availableQuantitySteps();
-        long threshold = trade.getInventoryThresholdSteps();
-        if (threshold > 0) {
-            buyAvailable = Math.min(buyAvailable, position < -threshold ? Math.negateExact(position)
-                    : Math.max(0, Math.subtractExact(threshold, position)));
-            sellAvailable = Math.min(sellAvailable, position > threshold ? position
-                    : Math.max(0, Math.addExact(threshold, position)));
-        }
-        long minimum = Math.max(trade.getMinQuantitySteps(), instrument.minQuantitySteps());
-        long maximum = Math.min(trade.getMaxQuantitySteps(), instrument.maxQuantitySteps());
-        if (minimum <= 0 || maximum < minimum) return List.of();
-        int buyCopies = 0;
-        int sellCopies = 0;
-        List<PlaceOrderRequest> requests = new ArrayList<>();
-        for (ExternalTrade print : prints) {
-            boolean buy = print.takerSide() == OrderSide.BUY;
-            if (buy && buyCopies >= trade.getOrdersPerBatch()) continue;
-            if (!buy && sellCopies >= trade.getOrdersPerBatch()) continue;
-            long available = buy ? buyAvailable : sellAvailable;
-            long quantity = Math.min(print.quantitySteps(), Math.min(maximum, available));
-            if (quantity < minimum) continue;
-            requests.add(new PlaceOrderRequest(accountId,
-                    takerClientOrderId(strategy, instrumentId, accountId, cycleSequence), instrumentId, print.takerSide(),
-                    OrderType.MARKET, TimeInForce.IOC, 0L, quantity, strategy.getMarginMode(),
-                    PositionSide.NET, false, false));
-            if (buy) {
-                buyAvailable -= quantity;
-                buyCopies++;
-            } else {
-                sellAvailable -= quantity;
-                sellCopies++;
-            }
-        }
-        return requests;
+        return MakerSimulatedTradeSupport.externalPrintOrders(properties.getTrade(), strategy, instrumentId,
+                accountId, instrument, book, position, prints,
+                () -> takerClientOrderId(strategy, instrumentId, accountId, cycleSequence));
     }
 
     /** Build local simulated orders; each side reserves its own worst-case fill budget for this batch. */
@@ -1306,47 +1091,9 @@ public class MarketMakerService {
                                            long accountId, long cycleSequence, InstrumentResponse instrument,
                                            OrderBookSnapshotResponse book, MarkPriceResponse mark,
                                            long position, RandomGenerator random) {
-        if (!instrument.marketOrderEnabled()) return List.of();
-        MarketMakerProperties.Trade trade = properties.getTrade();
-        TradeTarget buyTarget = tradeTarget(OrderSide.BUY, book, trade.getSlippageTicks(),
-                trade.getMaxSweepLevels(), random);
-        TradeTarget sellTarget = tradeTarget(OrderSide.SELL, book, trade.getSlippageTicks(),
-                trade.getMaxSweepLevels(), random);
-        long buyAvailable = buyTarget.availableQuantitySteps();
-        long sellAvailable = sellTarget.availableQuantitySteps();
-        long threshold = trade.getInventoryThresholdSteps();
-        if (threshold > 0) {
-            // Do not assume opposite-side orders fill: any subset of fills must respect the cap.
-            buyAvailable = Math.min(buyAvailable, position < -threshold ? Math.negateExact(position)
-                    : Math.max(0, Math.subtractExact(threshold, position)));
-            sellAvailable = Math.min(sellAvailable, position > threshold ? position
-                    : Math.max(0, Math.addExact(threshold, position)));
-        }
-        long minimum = Math.max(trade.getMinQuantitySteps(), instrument.minQuantitySteps());
-        long maximum = Math.min(trade.getMaxQuantitySteps(), instrument.maxQuantitySteps());
-        if (minimum <= 0 || maximum < minimum) return List.of();
-        List<PlaceOrderRequest> requests = new ArrayList<>(trade.getOrdersPerBatch());
-        for (int i = 0; i < trade.getOrdersPerBatch(); i++) {
-            boolean canBuy = buyAvailable >= minimum;
-            boolean canSell = sellAvailable >= minimum;
-            if (!canBuy && !canSell) break;
-            double buyProbability = 0.5;
-            if (threshold > 0) buyProbability -= 0.35 * Math.clamp((double) position / threshold, -1, 1);
-            long markTicks = markPriceTicks(instrument, mark);
-            long midTicks = midPriceTicks(book);
-            if (markTicks > 0 && midTicks > 0) buyProbability += 0.1 * Long.compare(markTicks, midTicks);
-            OrderSide side = !canSell || (canBuy && random.nextDouble() < buyProbability)
-                    ? OrderSide.BUY : OrderSide.SELL;
-            long available = side == OrderSide.BUY ? buyAvailable : sellAvailable;
-            long quantity = tradeQuantity(minimum, Math.min(maximum, available), random);
-            requests.add(new PlaceOrderRequest(accountId,
-                    takerClientOrderId(strategy, instrumentId, accountId, cycleSequence), instrumentId, side,
-                    OrderType.MARKET, TimeInForce.IOC, 0L, quantity, strategy.getMarginMode(),
-                    PositionSide.NET, false, false));
-            if (side == OrderSide.BUY) buyAvailable -= quantity;
-            else sellAvailable -= quantity;
-        }
-        return requests;
+        return MakerSimulatedTradeSupport.simulatedOrders(properties.getTrade(), strategy, instrumentId,
+                accountId, instrument, book, mark, position, random,
+                () -> takerClientOrderId(strategy, instrumentId, accountId, cycleSequence));
     }
 
     /** Submit ordinary simulated-user orders together; the core validates and settles every order. */
@@ -1354,7 +1101,7 @@ public class MarketMakerService {
                                long cycleSequence, List<PlaceOrderRequest> requests,
                                StrategyRuntimeState state, Instant now) {
         int count = requests.size();
-        OrderCommandReceipt receipt = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(requests));
+        OrderCommandReceipt receipt = submitPlaceBatch(strategy.getProductLine(), new BatchPlaceOrderRequest(requests));
         OrderBatchResponse response = receiptResult(receipt, OrderBatchResponse.class);
         if (response == null) throw new IllegalStateException(receiptMessage(receipt));
         int accepted = 0;
@@ -1391,67 +1138,14 @@ public class MarketMakerService {
         return accountIds.get((int) Math.floorMod(cycleSequence, accountIds.size()));
     }
 
-    private TradeTarget tradeTarget(OrderSide side,
-                                    OrderBookSnapshotResponse orderBook,
-                                    long slippageTicks,
-                                    int maxSweepLevels, RandomGenerator random) {
-        List<OrderBookLevel> levels = side == OrderSide.BUY
-                ? orderBook == null ? List.of() : orderBook.asks()
-                : orderBook == null ? List.of() : orderBook.bids();
-        if (levels == null || levels.isEmpty()) {
-            return new TradeTarget(0L, 0L);
-        }
-        int targetDistinctLevels = random.nextInt(Math.max(1, maxSweepLevels)) + 1;
-        long cumulativeQuantity = 0L;
-        long targetPriceTicks = 0L;
-        long previousPriceTicks = 0L;
-        int distinctLevels = 0;
-        for (OrderBookLevel level : levels) {
-            if (level == null || level.priceTicks() <= 0 || level.quantitySteps() <= 0) {
-                continue;
-            }
-            if (level.priceTicks() != previousPriceTicks) {
-                distinctLevels++;
-                previousPriceTicks = level.priceTicks();
-            }
-            if (distinctLevels > targetDistinctLevels) {
-                break;
-            }
-            cumulativeQuantity = Math.addExact(cumulativeQuantity, level.quantitySteps());
-            targetPriceTicks = level.priceTicks();
-        }
-        if (targetPriceTicks <= 0 || cumulativeQuantity <= 0) {
-            return new TradeTarget(0L, 0L);
-        }
-        long slippage = Math.max(0L, slippageTicks);
-        if (side == OrderSide.BUY) {
-            return new TradeTarget(Math.addExact(targetPriceTicks, slippage), cumulativeQuantity);
-        }
-        return new TradeTarget(Math.max(1L, targetPriceTicks - slippage), cumulativeQuantity);
-    }
-
-    private long tradeQuantity(long minimum, long maximum, RandomGenerator random) {
-        // More small orders than large ones, always integer multiples of the instrument step.
-        long range = maximum - minimum + 1;
-        return minimum + Math.min(random.nextLong(range), random.nextLong(range));
-    }
-
-    private long markPriceTicks(InstrumentResponse instrument, MarkPriceResponse markPrice) {
-        if (instrument == null || markPrice == null || instrument.priceTickUnits() <= 0
-                || markPrice.markPriceUnits() <= 0) {
-            return 0L;
-        }
-        return (markPrice.markPriceUnits() + instrument.priceTickUnits() / 2L) / instrument.priceTickUnits();
-    }
-
     private long observeVolatility(MarketMakerProperties.Strategy strategy,
                                    String instrumentId,
                                    InstrumentResponse instrument,
                                    OrderBookSnapshotResponse orderBook,
                                    MarkPriceResponse markPrice) {
-        long anchor = markPriceTicks(instrument, markPrice);
+        long anchor = MakerSimulatedTradeSupport.markPriceTicks(instrument, markPrice);
         if (anchor <= 0) {
-            anchor = midPriceTicks(orderBook);
+            anchor = MakerSimulatedTradeSupport.midPriceTicks(orderBook);
         }
         if (anchor <= 0) {
             return currentVolatility(strategy, instrumentId);
@@ -1463,42 +1157,6 @@ public class MarketMakerService {
     private long currentVolatility(MarketMakerProperties.Strategy strategy, String instrumentId) {
         PriceState state = priceStates.get(strategyKey(strategy) + ":" + instrumentId);
         return state == null ? 0L : state.volatilityTicks();
-    }
-
-    private long midPriceTicks(OrderBookSnapshotResponse orderBook) {
-        long bestBid = bestBid(orderBook);
-        long bestAsk = bestAsk(orderBook);
-        if (bestBid > 0 && bestAsk > 0) {
-            return (bestBid + bestAsk) / 2L;
-        }
-        if (bestBid > 0) {
-            return bestBid;
-        }
-        return bestAsk;
-    }
-
-    private long bestBid(OrderBookSnapshotResponse orderBook) {
-        OrderBookLevel level = firstBid(orderBook);
-        return level == null ? 0L : level.priceTicks();
-    }
-
-    private long bestAsk(OrderBookSnapshotResponse orderBook) {
-        OrderBookLevel level = firstAsk(orderBook);
-        return level == null ? 0L : level.priceTicks();
-    }
-
-    private OrderBookLevel firstBid(OrderBookSnapshotResponse orderBook) {
-        if (orderBook == null || orderBook.bids() == null || orderBook.bids().isEmpty()) {
-            return null;
-        }
-        return orderBook.bids().get(0);
-    }
-
-    private OrderBookLevel firstAsk(OrderBookSnapshotResponse orderBook) {
-        if (orderBook == null || orderBook.asks() == null || orderBook.asks().isEmpty()) {
-            return null;
-        }
-        return orderBook.asks().get(0);
     }
 
     private CancelResult cancelOrders(ProductLine productLine,
@@ -1514,7 +1172,7 @@ public class MarketMakerService {
             List<CancelOrderRequest> batchRequests = requests.subList(start,
                     Math.min(start + MAX_BATCH_CANCEL_ORDERS, requests.size()));
             try {
-                OrderCommandReceipt receipt = orderRpcApi.cancelBatch(new BatchCancelOrdersRequest(batchRequests));
+                OrderCommandReceipt receipt = submitCancelBatch(productLine, new BatchCancelOrdersRequest(batchRequests));
                 OrderBatchResponse response = receiptResult(receipt, OrderBatchResponse.class);
                 if (response == null) {
                     log.warn("做市批量撤单未返回终态结果 accountId={} instrumentId={} receipt={}", accountId, instrumentId,
@@ -1545,15 +1203,11 @@ public class MarketMakerService {
     }
 
     private <T> T receiptResult(OrderCommandReceipt receipt, Class<T> type) {
-        OrderCommandResult result = receipt == null ? null : receipt.result();
-        return result != null && type.isInstance(result) ? type.cast(result) : null;
+        return MakerQuoteMatchingSupport.receiptResult(receipt, type);
     }
 
     private String receiptMessage(OrderCommandReceipt receipt) {
-        if (receipt == null) {
-            return "订单服务未返回命令回执";
-        }
-        return receipt.code() + ": " + receipt.message();
+        return MakerQuoteMatchingSupport.receiptMessage(receipt);
     }
 
     private List<OrderResponse> openOrders(ProductLine productLine,
@@ -1566,12 +1220,8 @@ public class MarketMakerService {
         if (cached != null && interval != null && cached.refreshedAt().plus(interval).isAfter(now)) {
             return cached.orders();
         }
-        OrderQueryResponse response = orderRpcApi.openOrders(accountId, instrumentId,
-                properties.getQuoting().getMaxOpenOrdersPerAccountSymbol(), null);
-        if (response == null || response.orders() == null) {
-            throw new IllegalStateException("open order snapshot is unavailable");
-        }
-        List<OrderResponse> orders = List.copyOf(response.orders());
+        List<OrderResponse> orders = aeronGateway.openOrders(productLine, accountId, instrumentId,
+                properties.getQuoting().getMaxOpenOrdersPerAccountSymbol());
         openOrderSnapshots.put(key, new CachedOpenOrders(orders, now));
         return orders;
     }
@@ -1636,27 +1286,82 @@ public class MarketMakerService {
                 event.eventTime());
     }
 
-    /** 现货没有持仓对象，做市库存由资产余额约束；这里不能调用永续持仓接口。 */
+    /** 现货没有持仓对象，做市库存由资产余额约束；直连 Aeron 查询用户状态。 */
     private PositionResponse currentPosition(MarketMakerProperties.Strategy strategy,
                                              long accountId,
                                              String instrumentId,
                                              InstrumentResponse instrument) {
+        var state = aeronGateway.userState(strategy.getProductLine(), accountId);
         if (strategy.getProductLine() == ProductLine.SPOT) {
             if (instrument == null || instrument.baseAsset() == null || instrument.baseAsset().isBlank()) {
                 throw new IllegalStateException("现货做市缺少基础资产快照");
             }
-            // 现货没有持仓对象，使用账户 JVM 快照中的基础资产权益作为库存约束。
-            // AccountRpcApi 只访问账户服务本地快照，不会在报价周期内查询数据库。
-            var balance = accountRpcApi.balance(accountId, instrument.baseAsset());
             if (instrument.quantityStepUnits() <= 0) {
                 throw new IllegalStateException("现货做市数量步长必须为正数");
             }
-            long inventory = balance == null ? 0L
-                    : Math.max(0L, balance.equityUnits()) / instrument.quantityStepUnits();
+            long equity = state == null ? 0L : state.balances().stream()
+                    .filter(b -> instrument.baseAsset().equals(b.asset()))
+                    .mapToLong(b -> Math.addExact(b.availableUnits(), b.lockedUnits()))
+                    .findFirst().orElse(0L);
+            long inventory = Math.max(0L, equity) / instrument.quantityStepUnits();
             return new PositionResponse(accountId, instrumentId,
                     strategy.getMarginMode(), PositionSide.NET, inventory, 0L, 0L, Instant.now());
         }
-        return accountRpcApi.position(accountId, instrumentId, strategy.getMarginMode().name(), PositionSide.NET.name());
+        long signed = state == null ? 0L : state.positions().stream()
+                .filter(p -> instrumentId.equals(p.instrumentId())
+                        && p.marginMode().name().equals(strategy.getMarginMode().name())
+                        && p.positionSide().name().equals(PositionSide.NET.name()))
+                .mapToLong(com.surprising.aeron.protocol.CorePositionView::signedQuantitySteps)
+                .findFirst().orElse(0L);
+        return new PositionResponse(accountId, instrumentId,
+                strategy.getMarginMode(), PositionSide.NET, signed, 0L, 0L, Instant.now());
+    }
+
+    private OrderBookSnapshotResponse fetchOrderBook(ProductLine productLine, String instrumentId, int depth) {
+        return aeronGateway.orderBook(productLine, instrumentId, depth);
+    }
+
+    private MakerQuoteInputs.Response fetchQuoteInputs(MarketMakerProperties.Strategy strategy,
+                                                       String instrumentId,
+                                                       InstrumentResponse instrument) {
+        ProductLine productLine = strategy.getProductLine();
+        List<MakerQuoteInputs.Account> accountInputs = new ArrayList<>(strategy.getAccountIds().size());
+        for (long accountId : strategy.getAccountIds()) {
+            var userState = aeronGateway.userState(productLine, accountId);
+            long signedInventorySteps;
+            if (productLine == ProductLine.SPOT) {
+                long equity = userState == null ? 0L : userState.balances().stream()
+                        .filter(b -> instrument.baseAsset().equals(b.asset()))
+                        .mapToLong(b -> Math.addExact(b.availableUnits(), b.lockedUnits()))
+                        .findFirst().orElse(0L);
+                signedInventorySteps = Math.max(0L, equity) / Math.max(1L, instrument.quantityStepUnits());
+            } else {
+                signedInventorySteps = userState == null ? 0L : userState.positions().stream()
+                        .filter(p -> instrumentId.equals(p.instrumentId())
+                                && p.marginMode().name().equals(strategy.getMarginMode().name())
+                                && p.positionSide().name().equals(PositionSide.NET.name()))
+                        .mapToLong(com.surprising.aeron.protocol.CorePositionView::signedQuantitySteps)
+                        .findFirst().orElse(0L);
+            }
+            accountInputs.add(new MakerQuoteInputs.Account(accountId, signedInventorySteps, 0L));
+        }
+        return new MakerQuoteInputs.Response(productLine, instrumentId, instrument.changeId(), accountInputs);
+    }
+
+    private OrderCommandReceipt submitPlace(ProductLine productLine, PlaceOrderRequest request) {
+        return aeronGateway.place(productLine, request);
+    }
+
+    private OrderCommandReceipt submitPlaceBatch(ProductLine productLine, BatchPlaceOrderRequest request) {
+        return aeronGateway.placeBatch(productLine, request);
+    }
+
+    private OrderCommandReceipt submitAmendBatch(ProductLine productLine, BatchAmendOrdersRequest request) {
+        return aeronGateway.amendBatch(productLine, request);
+    }
+
+    private OrderCommandReceipt submitCancelBatch(ProductLine productLine, BatchCancelOrdersRequest request) {
+        return aeronGateway.cancelBatch(productLine, request);
     }
 
     private void requireTradable(InstrumentResponse instrument, ProductLine productLine) {
@@ -1837,106 +1542,51 @@ public class MarketMakerService {
     }
 
     private String normalizeRequired(String value, String field) {
-        String normalized = normalizeOptional(value);
-        if (normalized == null) {
-            throw new IllegalArgumentException(field + " is required");
-        }
-        return normalized;
+        return MarketMakerParameterSupport.normalizeRequired(value, field);
     }
 
     private String normalizeOptional(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        return value.trim().toUpperCase(Locale.ROOT);
+        return MarketMakerParameterSupport.normalizeOptional(value);
     }
 
     private String normalizeSymbol(String value) {
-        String normalized = normalizeRequired(value, "instrumentId");
-        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
-            throw new IllegalArgumentException("invalid instrumentId: " + value);
-        }
-        return normalized;
+        return MarketMakerParameterSupport.normalizeSymbol(value);
     }
 
     private String normalizeReason(String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("reason is required");
-        }
-        String normalized = value.trim();
-        if (normalized.length() > 500) {
-            throw new IllegalArgumentException("reason must be at most 500 characters");
-        }
-        return normalized;
+        return MarketMakerParameterSupport.normalizeReason(value);
     }
 
     private MarginMode parseMarginMode(String value) {
-        String normalized = normalizeOptional(value);
-        if (normalized == null) {
-            return null;
-        }
-        try {
-            return MarginMode.valueOf(normalized);
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("invalid marginMode: " + value, ex);
-        }
+        return MarketMakerParameterSupport.parseMarginMode(value);
     }
 
     private Long positiveOrNull(Long value, String field) {
-        if (value == null) {
-            return null;
-        }
-        if (value <= 0) {
-            throw new IllegalArgumentException(field + " must be positive");
-        }
-        return value;
+        return MarketMakerParameterSupport.positiveOrNull(value, field);
     }
 
     private Long nonNegativeOrNull(Long value, String field) {
-        if (value == null) {
-            return null;
-        }
-        if (value < 0) {
-            throw new IllegalArgumentException(field + " must be non-negative");
-        }
-        return value;
+        return MarketMakerParameterSupport.nonNegativeOrNull(value, field);
     }
 
     private Long boundedLongOrNull(Long value, long min, long max, String field) {
-        if (value == null) {
-            return null;
-        }
-        if (value < min || value > max) {
-            throw new IllegalArgumentException(field + " must be between " + min + " and " + max);
-        }
-        return value;
+        return MarketMakerParameterSupport.boundedLongOrNull(value, min, max, field);
     }
 
     private Integer boundedIntOrNull(Integer value, int min, int max, String field) {
-        if (value == null) {
-            return null;
-        }
-        if (value < min || value > max) {
-            throw new IllegalArgumentException(field + " must be between " + min + " and " + max);
-        }
-        return value;
+        return MarketMakerParameterSupport.boundedIntOrNull(value, min, max, field);
     }
 
     private String strategyKey(MarketMakerProperties.Strategy strategy) {
-        return strategy == null ? strategyKey(null, null) : strategyKey(strategy.getProductLine(), strategy.getStrategyId());
+        return MarketMakerParameterSupport.strategyKey(strategy);
     }
 
     private String strategyKey(ProductLine productLine, String strategyId) {
-        ProductLine safeProductLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
-        String safeStrategyId = strategyId == null ? "" : strategyId.trim().toLowerCase(Locale.ROOT);
-        return safeProductLine.name() + ":" + safeStrategyId;
+        return MarketMakerParameterSupport.strategyKey(productLine, strategyId);
     }
 
     private String resolveNodeId(String configuredNodeId) {
-        if (configuredNodeId != null && !configuredNodeId.isBlank()) {
-            return configuredNodeId.trim();
-        }
-        return "market-maker-" + UUID.randomUUID();
+        return MarketMakerParameterSupport.resolveNodeId(configuredNodeId);
     }
 
     private record ReconcileResult(long submitted, long canceled, long rejected, String rejectionReason) {

@@ -469,102 +469,55 @@ public class CustodyWithdrawalService {
     }
 
     private String rejectionEvidence(CustodyWalletClient.CustodyWalletRejectedException ex) {
-        return json(Map.of("kind","SUBMISSION_REFUSAL","receipt",objectMapper.readValue(ex.responseBody(),Map.class)));
+        return CustodyWithdrawalPayloadSupport.rejectionEvidence(objectMapper, ex);
     }
 
-    private Map<String,Object> withdrawalPayload(CustodyWithdrawalModels.WithdrawalRecord record) {
-        return CustodyWithdrawalModels.custodyRequest(record);
+    private Map<String, Object> withdrawalPayload(CustodyWithdrawalModels.WithdrawalRecord record) {
+        return CustodyWithdrawalPayloadSupport.withdrawalPayload(record);
     }
 
     private String payload(WithdrawalRequest request, String externalReference) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("custodyAddressId", request.custodyAddressId());
-        payload.put("chain", request.chain());
-        payload.put("assetSymbol", request.assetSymbol());
-        payload.put("toAddress", request.toAddress());
-        payload.put("amount", request.amount());
-        payload.put("externalReference", externalReference);
-        if (request.externalReference() != null && !request.externalReference().isBlank()) {
-            payload.put("clientExternalReference", request.externalReference().trim());
-        }
-        payload.put("confirmed", true);
-        return json(payload);
+        return CustodyWithdrawalPayloadSupport.payload(objectMapper, request, externalReference);
     }
 
     private String canonical(WithdrawalRequest request) {
-        // Only stable user intent belongs to identity; price, chosen custody source and mutable policy do not.
-        return json(List.of(request.chain().trim().toUpperCase(Locale.ROOT),
-                request.assetSymbol().trim().toUpperCase(Locale.ROOT), request.toAddress().trim(),
-                new BigDecimal(request.amount().trim()).stripTrailingZeros().toPlainString(),
-                request.externalReference() == null ? "" : request.externalReference().trim(),
-                request.custodyAddressId() == null ? "" : request.custodyAddressId().toString(),
-                request.networkRevision() == null ? "" : request.networkRevision().toString()));
+        return CustodyWithdrawalPayloadSupport.canonical(objectMapper, request);
     }
 
     private String json(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JacksonException ex) {
-            throw new IllegalStateException("withdrawal payload cannot be serialized", ex);
-        }
+        return CustodyWithdrawalPayloadSupport.json(objectMapper, value);
     }
 
     private String stringValue(Object value, String fallback) {
-        return value == null || String.valueOf(value).isBlank() ? fallback : String.valueOf(value);
+        return CustodyWithdrawalPayloadSupport.stringValue(value, fallback);
     }
 
-    private boolean matchesPayload(CustodyWithdrawalModels.WithdrawalRecord record, Map<String,Object> payload) {
-        if (payload == null) return false;
-        try {
-            return record.fundingSource().equals(payload.get("fundingSource"))
-                    && ("user:" + record.userId()).equals(payload.get("subject"))
-                    && record.chain().equalsIgnoreCase(String.valueOf(payload.get("chain")))
-                    && record.assetSymbol().equalsIgnoreCase(stringValue(payload.get("assetSymbol"),stringValue(payload.get("asset"),"")))
-                    && record.toAddress().equals(payload.get("toAddress"))
-                    && new BigDecimal(String.valueOf(payload.get("amount"))).compareTo(new BigDecimal(record.fees().receivedAmount())) == 0;
-        } catch (NumberFormatException invalid) { return false; }
+    private boolean matchesPayload(CustodyWithdrawalModels.WithdrawalRecord record, Map<String, Object> payload) {
+        return CustodyWithdrawalPayloadSupport.matchesPayload(record, payload);
     }
 
     private boolean terminal(String status) {
-        return "SUBMITTED".equals(status) || "COMPLETED".equals(status)
-                || "REFUNDED".equals(status) || "REJECTED".equals(status);
+        return CustodyWithdrawalPayloadSupport.terminal(status);
     }
 
     private void validateInput(long userId, String idempotencyKey, WithdrawalRequest request) {
-        if (userId <= 0L || idempotencyKey == null || !idempotencyKey.matches("[A-Za-z0-9._:-]{8,128}")
-                || request == null || request.custodyAddressId() != null || request.chain() == null
-                || request.chain().isBlank() || request.assetSymbol() == null || request.assetSymbol().isBlank()
-                || request.toAddress() == null || request.toAddress().isBlank() || request.amount() == null
-                || request.amount().isBlank() || request.chain().length() > 32 || request.assetSymbol().length() > 32
-                || request.toAddress().length() > 160 || request.amount().length() > 120
-                || (request.externalReference() != null && request.externalReference().length() > 160)) {
-            throw new IllegalArgumentException("withdrawal request is invalid");
-        }
+        CustodyWithdrawalPayloadSupport.validateInput(userId, idempotencyKey, request);
     }
 
     private String sha256(String value) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("SHA-256 is unavailable", ex);
-        }
+        return CustodyWithdrawalPayloadSupport.sha256(value);
     }
 
     private String message(Throwable throwable) {
-        return throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage();
+        return CustodyWithdrawalPayloadSupport.message(throwable);
     }
 
     private String custodyIdempotencyKey(CustodyWithdrawalModels.WithdrawalRecord record) {
-        if (record.externalReference() != null && !record.externalReference().isBlank()) {
-            return record.externalReference();
-        }
-        return "custody-wallet-idempotency:" + sha256(record.userId() + ":" + record.idempotencyKey());
+        return CustodyWithdrawalPayloadSupport.custodyIdempotencyKey(record);
     }
 
     private WithdrawalResponse response(CustodyWithdrawalModels.WithdrawalRecord record) {
-        return new WithdrawalResponse(record.withdrawalId(), record.status(), record.walletWithdrawalId(),
-                record.usdtValue(), record.createdAt(), record.updatedAt(), record.amount(), record.fees().fee(), record.fees().receivedAmount(), record.fees().networkRevision());
+        return CustodyWithdrawalPayloadSupport.response(record);
     }
 
     public record WithdrawalRequest(UUID custodyAddressId, String chain, String assetSymbol, String toAddress,
