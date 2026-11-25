@@ -18,8 +18,7 @@ class AdminOrderRequestHandlerTest {
                 .isInstanceOf(ResponseStatusException.class);
         org.mockito.Mockito.verifyNoInteractions(service);
         var after = new com.surprising.trading.order.model.TradeReadCursor.Execution(1234L, Long.MAX_VALUE, Integer.MAX_VALUE);
-        String scope = com.surprising.trading.order.utils.TradeReadCursors.executionScope(com.surprising.product.api.ProductLine.OPTION,7L,"604",Long.MAX_VALUE,true);
-        String cursor = com.surprising.trading.order.utils.TradeReadCursors.encode(scope,after);
+        String cursor = com.surprising.trading.order.utils.TradeReadCursors.encode(after);
         requests.trades("admin-1","OPTION",null,7L,"604",Long.MAX_VALUE,10,cursor,"eventTime.asc");
         org.mockito.Mockito.verify(service).adminTrades(7L,"604",Long.MAX_VALUE,10,after,true,com.surprising.product.api.ProductLine.OPTION);
         assertThatThrownBy(() -> requests.trades("admin-1","OPTION",null,null,null,null,0,null,null))

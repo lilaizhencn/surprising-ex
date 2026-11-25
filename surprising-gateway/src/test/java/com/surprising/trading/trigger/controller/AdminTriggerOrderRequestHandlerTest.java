@@ -16,9 +16,8 @@ class AdminTriggerOrderRequestHandlerTest {
         var service=mock(TriggerOrderService.class);
         var requests=new AdminTradingController(null,service);
         var cursor=new TriggerReadCursor(9007199254740993L,Long.MAX_VALUE);
-        var scope=TriggerReadCursors.scope(ProductLine.OPTION,7L,"74",CoreTriggerOrderStatus.CANCELED,Long.MAX_VALUE,true);
         requests.triggerOrders("1",null,"OPTION",7L," 74 "," canceled ",Long.MAX_VALUE,10,
-                TriggerReadCursors.encode(scope,cursor),"createdAt.asc");
+                TriggerReadCursors.encode(cursor),"createdAt.asc");
         verify(service).adminOrders(7L,"74",CoreTriggerOrderStatus.CANCELED,Long.MAX_VALUE,10,cursor,true,ProductLine.OPTION);
     }
 
@@ -33,9 +32,8 @@ class AdminTriggerOrderRequestHandlerTest {
         badRequest(()->requests.triggerOrders("1",null,"OPTION",null,null,"INVALID",null,10,null,null));
         badRequest(()->requests.triggerOrders("1",null,"OPTION",null,null,null,null,10,null,"id.asc"));
         badRequest(()->requests.triggerOrders("1",null,"OPTION",null,null,null,null,10,"garbage",null));
-        String scope=TriggerReadCursors.scope(ProductLine.OPTION,7L,null,null,null,false);
         for (var cursor:java.util.List.of(new TriggerReadCursor(0,1),new TriggerReadCursor(1,0)))
-            badRequest(()->requests.triggerOrders("1",null,"OPTION",7L,null,null,null,10,TriggerReadCursors.encode(scope,cursor),null));
+            badRequest(()->requests.triggerOrders("1",null,"OPTION",7L,null,null,null,10,TriggerReadCursors.encode(cursor),null));
         verifyNoInteractions(service);
     }
 

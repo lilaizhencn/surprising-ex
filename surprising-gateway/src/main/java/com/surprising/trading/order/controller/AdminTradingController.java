@@ -113,8 +113,7 @@ public class AdminTradingController {
             boolean ascending = ordering.endsWith("asc");
             ProductLine requested = TradingControllerSupport.productLine(queryProductLine, headerProductLine);
             ProductLine effective = requested == null ? orderQueryService.currentProductLine() : requested;
-            var after = cursor == null || cursor.isBlank() ? null : TradeReadCursors.execution(cursor,
-                    TradeReadCursors.executionScope(effective, userId, instrumentId, orderId, ascending));
+            var after = cursor == null || cursor.isBlank() ? null : TradeReadCursors.execution(cursor);
             return orderQueryService.adminTrades(userId, instrumentId, orderId, limit, after, ascending, requested);
         } catch (IllegalArgumentException invalid) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
@@ -172,8 +171,7 @@ public class AdminTradingController {
             }
             boolean ascending = ordering.endsWith("asc");
             ProductLine effective = productLine == null ? triggerOrderService.currentProductLine() : productLine;
-            var after = cursor == null || cursor.isBlank() ? null : TriggerReadCursors.decode(cursor,
-                    TriggerReadCursors.scope(effective, userId, instrument, state, triggerOrderId, ascending));
+            var after = cursor == null || cursor.isBlank() ? null : TriggerReadCursors.decode(cursor);
             return triggerOrderService.adminOrders(userId, instrument, state, triggerOrderId, limit, after, ascending, productLine);
         });
     }

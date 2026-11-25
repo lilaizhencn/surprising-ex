@@ -84,8 +84,7 @@ public class TradingController {
             }
             instrumentId = instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase(Locale.ROOT);
             if (instrumentId != null) InstrumentIds.parse(instrumentId);
-            var after = cursor == null || cursor.isBlank() ? null : TradeReadCursors.fill(cursor,
-                    TradeReadCursors.fillScope(orderQueryService.currentProductLine(), userId, instrumentId, orderId, startTime, endTime));
+            var after = cursor == null || cursor.isBlank() ? null : TradeReadCursors.fill(cursor);
             return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                     .body(orderQueryService.ownFills(userId, instrumentId, orderId, startTime, endTime, limit, after));
         } catch (IllegalArgumentException invalid) {

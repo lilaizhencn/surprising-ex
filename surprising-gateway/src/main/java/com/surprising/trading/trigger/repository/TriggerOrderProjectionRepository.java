@@ -35,7 +35,6 @@ public class TriggerOrderProjectionRepository {
     public Page search(ProductLine product, Long userId, String instrumentId, CoreTriggerOrderStatus status,
                        Long triggerId, int limit, TriggerReadCursor after, boolean ascending) {
         String ordering = ascending ? "createdAt.asc" : "createdAt.desc";
-        String scope = TriggerReadCursors.scope(product,userId,instrumentId,status,triggerId,ascending);
         var sql = new StringBuilder("SELECT * FROM trading_trigger_orders WHERE product_line=?");
         var args = new ArrayList<Object>(); args.add(product.name());
         if (userId != null) { sql.append(" AND user_id=?"); args.add(userId); }
@@ -54,7 +53,7 @@ public class TriggerOrderProjectionRepository {
             boolean more = values.size() > limit;
             var page = List.copyOf(more ? values.subList(0, limit) : values);
             var last = page.isEmpty() ? null : page.getLast();
-            String next = !more ? null : TriggerReadCursors.encode(scope,
+            String next = !more ? null : TriggerReadCursors.encode(
                     new TriggerReadCursor(last.createdAtEpochMillis(),last.triggerOrderId()));
             return new Page(page, next, more, ordering);
         } catch (DataAccessException unavailable) { throw unavailable(unavailable); }

@@ -19,7 +19,6 @@ public class TradeProjectionRepository {
 
     public TradeFillQueryResponse ownFills(ProductLine product, long userId, String instrumentId,
             Long orderId, Long startTime, Long endTime, int limit, TradeReadCursor.Fill after) {
-        String scope = TradeReadCursors.fillScope(product,userId,instrumentId,orderId,startTime,endTime);
         // Each branch selects only this account's side. Self-trades intentionally
         // produce two fills, with independent order, side and historical fee rate.
         var sql = new StringBuilder("""
@@ -68,7 +67,7 @@ public class TradeProjectionRepository {
             boolean more = values.size() > limit;
             var page = more ? values.subList(0, limit) : values;
             var last = page.isEmpty() ? null : page.getLast();
-            String next = !more ? null : TradeReadCursors.encode(scope,
+            String next = !more ? null : TradeReadCursors.encode(
                     new TradeReadCursor.Fill(last.fill().eventTime().toEpochMilli(),last.sequence(),last.index(),last.fill().liquidityRole()));
             return new TradeFillQueryResponse(userId, product, page.size(), page.stream().map(ProjectedFill::fill).toList(), next, more, "eventTime.desc", limit);
         } catch (DataAccessException unavailable) {
@@ -82,7 +81,6 @@ public class TradeProjectionRepository {
     public AdminTradeQueryResponse search(ProductLine product, Long userId, String instrumentId,
             Long orderId, int limit, TradeReadCursor.Execution after, boolean ascending) {
         String ordering = ascending ? "eventTime.asc" : "eventTime.desc";
-        String scope = TradeReadCursors.executionScope(product,userId,instrumentId,orderId,ascending);
         var sql = new StringBuilder("SELECT * FROM trading_trades WHERE product_line=?");
         var args = new ArrayList<Object>(); args.add(product.name());
         if (userId != null && orderId != null) {
@@ -124,7 +122,7 @@ public class TradeProjectionRepository {
             boolean more = values.size() > limit;
             var page = List.copyOf(more ? values.subList(0, limit) : values);
             var last = page.isEmpty() ? null : page.getLast();
-            String next = !more ? null : TradeReadCursors.encode(scope,
+            String next = !more ? null : TradeReadCursors.encode(
                     new TradeReadCursor.Execution(last.eventTime().toEpochMilli(),last.clusterPosition(),last.executionIndex()));
             return new AdminTradeQueryResponse(product, page.size(), page, next, more, ordering, limit);
         } catch (DataAccessException unavailable) {

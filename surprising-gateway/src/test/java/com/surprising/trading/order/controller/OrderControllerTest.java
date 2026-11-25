@@ -33,8 +33,7 @@ class OrderControllerTest {
         var line=com.surprising.product.api.ProductLine.OPTION;
         when(service.currentProductLine()).thenReturn(line);
         var after=new com.surprising.trading.order.model.TradeReadCursor.Fill(9007199254740993L,Long.MAX_VALUE,Integer.MAX_VALUE,"MAKER");
-        String scope=com.surprising.trading.order.utils.TradeReadCursors.fillScope(line,7,"604",Long.MAX_VALUE,1L,Long.MAX_VALUE);
-        String cursor=com.surprising.trading.order.utils.TradeReadCursors.encode(scope,after);
+        String cursor=com.surprising.trading.order.utils.TradeReadCursors.encode(after);
         requests.ownFills(7L,null,null," 604 ",Long.MAX_VALUE,1L,Long.MAX_VALUE,10,cursor);
         org.mockito.Mockito.verify(service).ownFills(7,"604",Long.MAX_VALUE,1L,Long.MAX_VALUE,10,after);
         org.mockito.Mockito.clearInvocations(service);
