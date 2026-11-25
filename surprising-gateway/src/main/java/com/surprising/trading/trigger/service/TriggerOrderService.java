@@ -343,7 +343,7 @@ public class TriggerOrderService {
     }
 
     public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, CoreTriggerOrderStatus status,
-            Long triggerOrderId, int limit, com.surprising.trading.trigger.model.TriggerReadCursor cursor,
+            Long triggerOrderId, int limit, com.surprising.trading.api.utils.AdminCursorPage.Cursor cursor,
             boolean ascending, ProductLine productLine) {
         ProductLine effective = productLine == null ? currentProductLine() : productLine;
         if (effective != currentProductLine()) throw new IllegalArgumentException("product line does not match provider");

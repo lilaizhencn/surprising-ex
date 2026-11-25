@@ -90,7 +90,7 @@ public final class AdminCursorPage {
         return new CursorPage<>(rows, nextCursor, hasMore, sort.token(), limit);
     }
 
-    private static String encodeCursor(Instant timestamp, long id) {
+    public static String encodeCursor(Instant timestamp, long id) {
         if (timestamp == null) {
             throw new IllegalArgumentException("cursor timestamp is required");
         }

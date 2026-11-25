@@ -21,8 +21,8 @@ import com.surprising.trading.order.service.GridStrategyService;
 import com.surprising.trading.order.service.OrderAdminService;
 import com.surprising.trading.order.service.OrderQueryService;
 import com.surprising.trading.order.utils.TradeReadCursors;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.trading.trigger.service.TriggerOrderService;
-import com.surprising.trading.trigger.utils.TriggerReadCursors;
 import jakarta.validation.Valid;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -171,7 +171,10 @@ public class AdminTradingController {
             }
             boolean ascending = ordering.endsWith("asc");
             ProductLine effective = productLine == null ? triggerOrderService.currentProductLine() : productLine;
-            var after = cursor == null || cursor.isBlank() ? null : TriggerReadCursors.decode(cursor);
+            var after = cursor == null || cursor.isBlank() ? null : AdminCursorPage.decodeCursor(cursor);
+            if (after != null && (after.timestamp().toEpochMilli() <= 0 || after.id() <= 0)) {
+                throw new IllegalArgumentException("trigger cursor is invalid");
+            }
             return triggerOrderService.adminOrders(userId, instrument, state, triggerOrderId, limit, after, ascending, productLine);
         });
     }

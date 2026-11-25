@@ -4,8 +4,8 @@ import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.trigger.model.TriggerReadCursor;
-import com.surprising.trading.trigger.utils.TriggerReadCursors;
+import com.surprising.trading.api.utils.AdminCursorPage;
+import java.time.Instant;
 import java.util.*;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,7 +33,7 @@ public class TriggerOrderProjectionRepository {
     public record Page(List<CoreTriggerOrderStateView> orders, String nextCursor, boolean hasMore, String sort) {}
 
     public Page search(ProductLine product, Long userId, String instrumentId, CoreTriggerOrderStatus status,
-                       Long triggerId, int limit, TriggerReadCursor after, boolean ascending) {
+                       Long triggerId, int limit, AdminCursorPage.Cursor after, boolean ascending) {
         String ordering = ascending ? "createdAt.asc" : "createdAt.desc";
         var sql = new StringBuilder("SELECT * FROM trading_trigger_orders WHERE product_line=?");
         var args = new ArrayList<Object>(); args.add(product.name());
@@ -43,7 +43,7 @@ public class TriggerOrderProjectionRepository {
         if (triggerId != null) { sql.append(" AND trigger_order_id=?"); args.add(triggerId); }
         if (after != null) {
             sql.append(" AND (created_at_epoch_ms,trigger_order_id) ").append(ascending ? ">" : "<").append(" (?,?)");
-            args.add(after.createdAt()); args.add(after.triggerOrderId());
+            args.add(after.timestamp().toEpochMilli()); args.add(after.id());
         }
         String direction = ascending ? " ASC" : " DESC";
         sql.append(" ORDER BY created_at_epoch_ms").append(direction).append(",trigger_order_id").append(direction).append(" LIMIT ?");
@@ -53,8 +53,8 @@ public class TriggerOrderProjectionRepository {
             boolean more = values.size() > limit;
             var page = List.copyOf(more ? values.subList(0, limit) : values);
             var last = page.isEmpty() ? null : page.getLast();
-            String next = !more ? null : TriggerReadCursors.encode(
-                    new TriggerReadCursor(last.createdAtEpochMillis(),last.triggerOrderId()));
+            String next = !more ? null : AdminCursorPage.encodeCursor(
+                    Instant.ofEpochMilli(last.createdAtEpochMillis()), last.triggerOrderId());
             return new Page(page, next, more, ordering);
         } catch (DataAccessException unavailable) { throw unavailable(unavailable); }
     }
