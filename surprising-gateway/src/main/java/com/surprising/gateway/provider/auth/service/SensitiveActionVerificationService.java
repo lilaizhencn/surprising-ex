@@ -89,15 +89,9 @@ public class SensitiveActionVerificationService {
     }
 
     private String digest(String code, String sceneCode, String destination) {
-        try {
-            byte[] bytes = MessageDigest.getInstance("SHA-256")
-                    .digest((properties.getSecurity().getVerificationCodePepper() + "|"
-                            + PURPOSE + "|" + sceneCode + "|" + destination + "|" + code)
-                            .getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        } catch (java.security.NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("verification code digest unavailable", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.base64Url(
+                properties.getSecurity().getVerificationCodePepper() + "|"
+                        + PURPOSE + "|" + sceneCode + "|" + destination + "|" + code);
     }
 
     private boolean isEnabled(long userId, String sceneCode) {

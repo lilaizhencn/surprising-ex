@@ -180,12 +180,9 @@ public class MfaRecoveryService {
     }
 
     private String digest(String code, long userId, String destination) {
-        try {
-            String payload = properties.getSecurity().getVerificationCodePepper() + "|" + PURPOSE + "|"
-                    + userId + "|" + destination + "|" + code;
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(
-                    MessageDigest.getInstance("SHA-256").digest(payload.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) { throw new IllegalStateException("recovery code digest unavailable", ex); }
+        String payload = properties.getSecurity().getVerificationCodePepper() + "|" + PURPOSE + "|"
+                + userId + "|" + destination + "|" + code;
+        return com.surprising.gateway.provider.support.Sha256Digests.base64Url(payload);
     }
 
     private String mask(String destination) {

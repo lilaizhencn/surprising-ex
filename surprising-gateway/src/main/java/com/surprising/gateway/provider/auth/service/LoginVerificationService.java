@@ -507,15 +507,7 @@ public class LoginVerificationService {
     }
 
     private String digest(String text) {
-        try {
-            return Base64.getUrlEncoder()
-                    .withoutPadding()
-                    .encodeToString(
-                            MessageDigest.getInstance("SHA-256")
-                                    .digest(text.getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.base64Url(text);
     }
 
     private String mask(String value) {

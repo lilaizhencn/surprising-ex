@@ -168,6 +168,6 @@ public class SumsubKycProvider implements KycProvider {
     }
     public static boolean constantTimeEquals(String supplied, String expected) { return supplied != null && MessageDigest.isEqual(supplied.toLowerCase().getBytes(StandardCharsets.UTF_8), expected.getBytes(StandardCharsets.UTF_8)); }
     public static String header(Map<String, String> headers, String name) { return headers.entrySet().stream().filter(e -> e.getKey().equalsIgnoreCase(name)).map(Map.Entry::getValue).findFirst().orElse(""); }
-    public static String sha256(byte[] body) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body)); } catch (Exception ex) { throw new IllegalStateException(ex); } }
+    public static String sha256(byte[] body) { return com.surprising.gateway.provider.support.Sha256Digests.hex(body); }
     private static String enc(String s) { return java.net.URLEncoder.encode(s, StandardCharsets.UTF_8); }
 }

@@ -243,11 +243,7 @@ public class KycDocumentService {
     }
 
     private String sha256(byte[] content) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
-        } catch (Exception ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(content);
     }
     private String validateReferences(String value) {
         String normalized = value == null || value.isBlank() ? "[]" : value.trim();

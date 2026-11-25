@@ -10,13 +10,8 @@ import java.util.Set;
 
 /** 稳定游标格式转换；请求入口验证作用域，SQL只使用原生坐标。 */
 public final class TradeReadCursors {
-    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (java.security.NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    });
+    private static final ThreadLocal<MessageDigest> SHA_256 =
+            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
 
     private TradeReadCursors() {}
 

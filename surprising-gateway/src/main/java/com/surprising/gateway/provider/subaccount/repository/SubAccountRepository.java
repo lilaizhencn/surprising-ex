@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.subaccount.repository;
 
-import com.surprising.gateway.provider.subaccount.model.SubAccountModels.SubAccountRecord;
+import com.surprising.gateway.provider.subaccount.model.SubAccountRecord;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;

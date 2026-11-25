@@ -111,10 +111,7 @@ public class TelegramLoginService {
     }
 
     public static String hash(String value) {
-        try {
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(
-                    MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
+        return com.surprising.gateway.provider.support.Sha256Digests.base64Url(value);
     }
 
     private static void requireToken(String value) {

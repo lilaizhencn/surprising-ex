@@ -70,15 +70,9 @@ public class EmailVerificationService {
     }
 
     private String digest(String code, String purpose, String destination) {
-        try {
-            String pepper = properties.getSecurity().getVerificationCodePepper();
-            byte[] bytes = MessageDigest.getInstance("SHA-256")
-                    .digest((pepper + "|" + purpose + "|" + destination + "|" + code)
-                            .getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        } catch (java.security.NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("verification code digest unavailable", ex);
-        }
+        String pepper = properties.getSecurity().getVerificationCodePepper();
+        return com.surprising.gateway.provider.support.Sha256Digests.base64Url(
+                pepper + "|" + purpose + "|" + destination + "|" + code);
     }
 
     private String normalizeEmail(String email) {

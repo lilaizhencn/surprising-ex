@@ -30,13 +30,8 @@ import org.springframework.web.server.ResponseStatusException;
 public final class GatewayAccessSupport {
     private static final Pattern ADMIN_SERVICE_PATTERN = Pattern.compile("[a-z0-9][a-z0-9_-]{0,63}");
     private static final byte[] EMPTY_BYTES = new byte[0];
-    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
-        }
-    });
+    private static final ThreadLocal<MessageDigest> SHA_256 =
+            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
 
     public record GatewayIdentity(String userId, String username, String status, List<String> roles, boolean admin) {
         public static GatewayIdentity user(String userId) {

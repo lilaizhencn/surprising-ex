@@ -10,13 +10,8 @@ import java.util.HexFormat;
 
 /** 条件单历史游标的稳定协议格式；无业务状态或SQL职责。 */
 public final class TriggerReadCursors {
-    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (java.security.NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    });
+    private static final ThreadLocal<MessageDigest> SHA_256 =
+            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
 
     private TriggerReadCursors() {}
 

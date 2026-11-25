@@ -6,7 +6,7 @@ import com.surprising.gateway.provider.auth.model.AuthResponse;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.gateway.provider.auth.service.AuthService;
-import com.surprising.gateway.provider.subaccount.model.SubAccountModels.*;
+import com.surprising.gateway.provider.subaccount.model.*;
 import com.surprising.gateway.provider.subaccount.service.SubAccountService;
 import jakarta.validation.Valid;
 import java.util.List;

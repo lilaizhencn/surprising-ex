@@ -50,7 +50,7 @@ public class OpenCapitalApiService {
                                  ComplianceService complianceService,
                                  CustodyWalletClient custodyWalletClient,
                                  CustodyWithdrawalService withdrawalService,
-                                 @Autowired(required = false) UserDepositAddressRepository depositAddressRepository,
+                                 UserDepositAddressRepository depositAddressRepository,
                                  OpenApiSupport support) {
         this(properties, accountService, verificationService, complianceService, custodyWalletClient,
                 withdrawalService, depositAddressRepository, null, null, support);

@@ -6,7 +6,7 @@ import com.surprising.gateway.provider.service.CustodyWithdrawalService.Withdraw
 import com.surprising.gateway.provider.service.CustodyWithdrawalService.WithdrawalResponse;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import com.surprising.gateway.provider.support.Sha256Digests;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -104,12 +104,7 @@ final class CustodyWithdrawalPayloadSupport {
     }
 
     static String sha256(String value) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("SHA-256 is unavailable", ex);
-        }
+        return Sha256Digests.hex(value);
     }
 
     static String message(Throwable throwable) {

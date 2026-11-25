@@ -228,11 +228,7 @@ public class CustodyWalletWebhookService {
     }
 
     private String sha256(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (Exception ex) {
-            throw new IllegalStateException("SHA-256 is unavailable", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(bytes);
     }
 
     private String normalizedEventType(String eventType) {

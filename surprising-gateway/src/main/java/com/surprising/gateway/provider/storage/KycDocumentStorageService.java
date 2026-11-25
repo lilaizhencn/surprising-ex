@@ -229,11 +229,7 @@ public class KycDocumentStorageService {
     }
 
     private String sha256(byte[] value) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
-        } catch (Exception ex) {
-            throw new KycDocumentStorageException("SHA-256 is not available", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(value);
     }
 
     public static String objectKey(String prefix, long userId, String extension) {

@@ -16,7 +16,7 @@ import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.auth.service.TotpService;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.subaccount.model.SubAccountModels.SubAccountRecord;
+import com.surprising.gateway.provider.subaccount.model.SubAccountRecord;
 import com.surprising.gateway.provider.subaccount.repository.SubAccountRepository;
 import java.time.Instant;
 import java.util.List;

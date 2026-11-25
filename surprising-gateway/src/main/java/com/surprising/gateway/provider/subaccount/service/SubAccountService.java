@@ -7,7 +7,7 @@ import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
-import com.surprising.gateway.provider.subaccount.model.SubAccountModels.*;
+import com.surprising.gateway.provider.subaccount.model.*;
 import com.surprising.gateway.provider.subaccount.repository.SubAccountRepository;
 import com.surprising.gateway.provider.auth.state.AuthStateSync;
 import com.surprising.gateway.provider.product.GatewayProductServices;
@@ -34,15 +34,23 @@ public class SubAccountService {
     private AuthStateSync authStateSync;
     private final AccountService accountService;
 
-    @Autowired
     public SubAccountService(SubAccountRepository subAccountRepository,
                              AuthPersistenceService authPersistenceService,
                              GatewayProductServices products) {
+        this(subAccountRepository, authPersistenceService, products, null);
+    }
+
+    @Autowired
+    public SubAccountService(SubAccountRepository subAccountRepository,
+                             AuthPersistenceService authPersistenceService,
+                             GatewayProductServices products,
+                             @Autowired(required = false) AuthStateSync authStateSync) {
         this.subAccountRepository = subAccountRepository;
         this.authPersistenceService = authPersistenceService;
         this.products = products;
         this.accountCommandGateway = null;
         this.accountService = null;
+        this.authStateSync = authStateSync;
     }
 
     public SubAccountService(SubAccountRepository subAccountRepository,
@@ -62,7 +70,6 @@ public class SubAccountService {
         this.accountService = accountService;
     }
 
-    @Autowired(required = false)
     public void setAuthStateSync(AuthStateSync authStateSync) {
         this.authStateSync = authStateSync;
     }

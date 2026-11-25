@@ -63,10 +63,7 @@ public class GoogleLoginService {
     }
 
     private static String hash(String value) {
-        try {
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        return com.surprising.gateway.provider.support.Sha256Digests.base64Url(value);
     }
     private static void requireDevice(String device) {
         if (device == null || device.isBlank() || device.length() > 128)

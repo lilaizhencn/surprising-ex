@@ -175,14 +175,9 @@ public final class ProductTransferService {
     }
 
     private long transferId(long userId, String idempotencyKey) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest((userId + ":" + idempotencyKey.trim()).getBytes(StandardCharsets.UTF_8));
-            long value = ByteBuffer.wrap(digest).order(ByteOrder.BIG_ENDIAN).getLong() & Long.MAX_VALUE;
-            return value == 0 ? 1 : value;
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
+        byte[] digest = com.surprising.gateway.provider.support.Sha256Digests.bytes(userId + ":" + idempotencyKey.trim());
+        long value = ByteBuffer.wrap(digest).order(ByteOrder.BIG_ENDIAN).getLong() & Long.MAX_VALUE;
+        return value == 0 ? 1 : value;
     }
 
     static ProductLine productLine(AccountType accountType) {

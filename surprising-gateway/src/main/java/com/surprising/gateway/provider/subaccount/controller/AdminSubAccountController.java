@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
-import com.surprising.gateway.provider.subaccount.model.SubAccountModels.SubAccountRecord;
+import com.surprising.gateway.provider.subaccount.model.SubAccountRecord;
 import com.surprising.gateway.provider.subaccount.service.SubAccountService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;

@@ -112,14 +112,9 @@ public class PasswordResetService {
     }
 
     private String digest(String code, String purpose, String destination) {
-        try {
-            byte[] bytes = MessageDigest.getInstance("SHA-256")
-                    .digest((properties.getSecurity().getVerificationCodePepper() + "|"
-                            + purpose + "|" + destination + "|" + code).getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        } catch (java.security.NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("verification code digest unavailable", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.base64Url(
+                properties.getSecurity().getVerificationCodePepper() + "|"
+                        + purpose + "|" + destination + "|" + code);
     }
 
     private void validatePassword(String password) {

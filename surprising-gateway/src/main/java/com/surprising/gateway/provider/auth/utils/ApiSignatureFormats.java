@@ -34,13 +34,8 @@ public final class ApiSignatureFormats {
         return sb.toString();
     }
 
-    private static final ThreadLocal<java.security.MessageDigest> SHA256 = ThreadLocal.withInitial(() -> {
-        try {
-            return java.security.MessageDigest.getInstance("SHA-256");
-        } catch (java.security.NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    });
+    private static final ThreadLocal<java.security.MessageDigest> SHA256 =
+            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
 
     public static String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap, byte[] body) {
         java.security.MessageDigest digest = SHA256.get();

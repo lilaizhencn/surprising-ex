@@ -271,11 +271,7 @@ public class CustodyWalletClient {
     }
 
     private static String sha256(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (Exception ex) {
-            throw new IllegalStateException("SHA-256 is unavailable", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(bytes);
     }
 
     private String requireText(String value, String field) {

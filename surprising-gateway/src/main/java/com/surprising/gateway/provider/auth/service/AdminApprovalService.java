@@ -250,16 +250,7 @@ public class AdminApprovalService {
         if (body == null || body.length == 0) {
             return null;
         }
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(body);
-            StringBuilder hex = new StringBuilder(digest.length * 2);
-            for (byte item : digest) {
-                hex.append(String.format("%02x", item));
-            }
-            return hex.toString();
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
-        }
+        return com.surprising.gateway.provider.support.Sha256Digests.hex(body);
     }
 
 }

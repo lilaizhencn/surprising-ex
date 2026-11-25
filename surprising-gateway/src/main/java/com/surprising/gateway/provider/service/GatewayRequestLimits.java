@@ -118,13 +118,8 @@ public final class GatewayRequestLimits {
         consume(List.of(requestCharge, new Charge(actor + "login", properties.getLoginIp(), 1)), "IP");
     }
 
-    private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(() -> {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (java.security.NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    });
+    private static final ThreadLocal<MessageDigest> SHA_256 =
+            ThreadLocal.withInitial(com.surprising.gateway.provider.support.Sha256Digests::newDigest);
 
     public void checkLoginAccount(String identifier) {
         if (!properties.isEnabled()) return;

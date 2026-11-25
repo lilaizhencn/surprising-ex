@@ -3,8 +3,8 @@ package com.surprising.gateway.provider.auth.repository;
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
-import com.surprising.gateway.provider.auth.model.SupportModels.CursorPage;
-import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicketNote;
+import com.surprising.gateway.provider.auth.model.CursorPage;
+import com.surprising.gateway.provider.auth.model.SupportTicketNote;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
