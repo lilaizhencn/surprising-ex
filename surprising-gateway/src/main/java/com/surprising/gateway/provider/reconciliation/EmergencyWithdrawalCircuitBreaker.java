@@ -47,7 +47,8 @@ public class EmergencyWithdrawalCircuitBreaker {
                 }
             }
         } catch (Exception ex) {
-            log.warn("Failed to check Redis emergency stop key, relying on memory state: {}", ex.getMessage());
+            log.error("Failed to check Redis emergency stop key; failing closed for withdrawal safety: {}", ex.getMessage());
+            return false;
         }
         return true;
     }

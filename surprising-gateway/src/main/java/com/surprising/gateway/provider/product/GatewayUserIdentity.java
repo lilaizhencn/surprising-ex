@@ -3,8 +3,8 @@ package com.surprising.gateway.provider.product;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-public final class GatewayUserContext {
-    private GatewayUserContext() {}
+public final class GatewayUserIdentity {
+    private GatewayUserIdentity() {}
 
     public static long requireUserId(Long queryUserId, String headerUserId, String adminUserId) {
         Long resolved = resolveUserId(queryUserId, headerUserId, adminUserId);

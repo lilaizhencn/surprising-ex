@@ -1,6 +1,6 @@
 package com.surprising.instrument.provider.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.instrument.api.model.InstrumentQueryResponse;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
@@ -144,7 +144,7 @@ public class InstrumentController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("reason") String reason,
             @RequestParam("expectedChangeId") long expectedChangeId) {
-        String operator = GatewayUserContext.requireAdminUserId(adminUserId);
+        String operator = GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             requireAudit(operator, reason);
             InstrumentConfigurationFormats.validate(request);
@@ -166,7 +166,7 @@ public class InstrumentController {
             @RequestParam(value = "sort", required = false) String sort,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             return instrumentService.list(productLine(queryProductLine, headerProductLine), type, status, pageQuery(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
@@ -183,7 +183,7 @@ public class InstrumentController {
             @RequestParam(value = "underlyingSettlementPriceUnits", defaultValue = "0") long underlyingSettlementPriceUnits,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "reason", defaultValue = "Admin settlement confirmation") String reason) {
-        String operator = GatewayUserContext.requireAdminUserId(adminUserId);
+        String operator = GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             requireAudit(operator, reason);
             ProductLine productLine = productLine(queryProductLine, headerProductLine);
@@ -205,7 +205,7 @@ public class InstrumentController {
             @RequestParam("productLine") ProductLine productLine,
             @RequestParam(value = "beforeId", defaultValue = "0") long beforeId,
             @RequestParam(value = "limit", defaultValue = "50") int limit) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return instrumentService.changes(instrumentId, productLine, beforeId, limit);
     }
 
@@ -218,7 +218,7 @@ public class InstrumentController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("reason") String reason,
             @RequestParam("expectedChangeId") long expectedChangeId) {
-        String operator = GatewayUserContext.requireAdminUserId(adminUserId);
+        String operator = GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             requireAudit(operator, reason);
             return instrumentService.editStatus(instrumentId, requiredProductLine(queryProductLine, headerProductLine), status,
@@ -236,7 +236,7 @@ public class InstrumentController {
             @PathVariable("instrumentId") int instrumentId,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             return instrumentService.latest(instrumentId, requiredProductLine(queryProductLine, headerProductLine));
         } catch (IllegalArgumentException ex) {

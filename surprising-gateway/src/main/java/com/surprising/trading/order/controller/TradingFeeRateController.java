@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
 import com.surprising.trading.order.service.TradingFeeService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,7 +29,7 @@ public class TradingFeeRateController {
             @RequestParam(value = "instrumentChangeId", defaultValue = "0") long instrumentChangeId,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.effectiveFee(tradingFeeService, userId, instrumentId,
                 instrumentChangeId, headerProductLine, queryProductLine);
     }

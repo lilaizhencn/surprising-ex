@@ -1,7 +1,7 @@
 package com.surprising.trading.order.controller;
 
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
@@ -77,7 +77,7 @@ public class AdminTradingController {
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @RequestParam(value = "windowMinutes", defaultValue = "1440") int windowMinutes,
             @RequestParam(value = "limit", defaultValue = "20") int limit) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             if (!Set.of(60, 360, 1440, 10080).contains(windowMinutes) || limit < 1 || limit > 100) {
                 throw new IllegalArgumentException("statistics window must be 60,360,1440,10080 and limit in [1,100]");
@@ -99,7 +99,7 @@ public class AdminTradingController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             if (userId != null && userId <= 0 || orderId != null && orderId <= 0 || limit < 1 || limit > 1000) {
                 throw new IllegalArgumentException("invalid trade query");
@@ -126,7 +126,7 @@ public class AdminTradingController {
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @Valid @RequestBody AdminCancelByInstrumentRequest request) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.call(() -> orderAdminService.adminCancelByInstrument(
                 request, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
@@ -139,7 +139,7 @@ public class AdminTradingController {
             @RequestParam(value = "userId", required = false) Long userId,
             @RequestParam(value = "instrumentId", required = false) String instrumentId,
             @RequestParam(value = "limit", defaultValue = "100") int limit) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.call(() -> orderAdminService.adminCancelPreview(
                 userId, instrumentId, limit, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
@@ -156,7 +156,7 @@ public class AdminTradingController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.call(() -> {
             ProductLine productLine = TradingControllerSupport.productLine(queryProductLine, headerProductLine);
             if (userId != null && userId <= 0) throw new IllegalArgumentException("userId must be positive");
@@ -185,7 +185,7 @@ public class AdminTradingController {
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @PathVariable("triggerOrderId") long triggerOrderId) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.call(() -> triggerOrderService.adminTimeline(
                 triggerOrderId, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
@@ -196,7 +196,7 @@ public class AdminTradingController {
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @PathVariable("triggerOrderId") long triggerOrderId) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.call(() -> triggerOrderService.get(
                 triggerOrderId, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
@@ -207,7 +207,7 @@ public class AdminTradingController {
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @Valid @RequestBody(required = false) AdminBatchCancelOrdersRequest request) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.call(() -> orderAdminService.adminCancelOrders(
                 request, TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
     }
@@ -224,7 +224,7 @@ public class AdminTradingController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.call(() -> orderQueryService.adminOrders(
                 userId, instrumentId, status, orderId, limit, cursor, sort,
                 TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
@@ -237,7 +237,7 @@ public class AdminTradingController {
             @RequestParam(value = "productLine", required = false) String queryProductLine,
             @PathVariable("orderId") long orderId,
             @Valid @RequestBody(required = false) AdminCancelOrderRequest request) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.call(() -> orderAdminService.adminCancelOrder(
                 orderId, request == null ? null : request.reason(),
                 TradingControllerSupport.productLine(queryProductLine, headerProductLine)));
@@ -249,7 +249,7 @@ public class AdminTradingController {
             @RequestParam(value = "symbol", required = false) String symbol,
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "userId", required = false) Long userId) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         if (gridStrategyService == null) {
             return List.of();
         }
@@ -262,7 +262,7 @@ public class AdminTradingController {
     public Map<String, Object> stopGridStrategy(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("strategyId") long strategyId) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         if (gridStrategyService == null) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Grid strategy service unavailable");
         }

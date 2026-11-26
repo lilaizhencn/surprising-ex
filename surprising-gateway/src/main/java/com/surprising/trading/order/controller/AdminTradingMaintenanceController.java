@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.trading.maintenance.controller.MaintenanceRequest;
@@ -44,7 +44,7 @@ public class AdminTradingMaintenanceController {
             @RequestParam("instrumentId") String instrumentId,
             @RequestParam(value = "userId", defaultValue = "0") long userId,
             @RequestParam(value = "afterUserId", defaultValue = "0") long afterUserId) {
-        authorizeMaintenance(GatewayUserContext.requireAdminUserId(adminUserId), headerProductLine, productLine);
+        authorizeMaintenance(GatewayUserIdentity.requireAdminUserId(adminUserId), headerProductLine, productLine);
         if (!InstrumentIds.valid(instrumentId)) {
             badRequest("explicit instrument_id is required");
         }
@@ -59,7 +59,7 @@ public class AdminTradingMaintenanceController {
             @RequestHeader("X-Product-Line") String headerProductLine,
             @RequestParam("productLine") ProductLine productLine,
             @RequestParam(value = "beforeId", defaultValue = "0") long beforeId) {
-        authorizeMaintenance(GatewayUserContext.requireAdminUserId(adminUserId), headerProductLine, productLine);
+        authorizeMaintenance(GatewayUserIdentity.requireAdminUserId(adminUserId), headerProductLine, productLine);
         nonnegative(beforeId, "invalid cursor");
         return maintenanceService.list(beforeId);
     }
@@ -70,7 +70,7 @@ public class AdminTradingMaintenanceController {
             @RequestHeader("X-Product-Line") String headerProductLine,
             @RequestParam("productLine") ProductLine productLine,
             @RequestBody MaintenanceRequest request) {
-        String verifiedAdmin = GatewayUserContext.requireAdminUserId(adminUserId);
+        String verifiedAdmin = GatewayUserIdentity.requireAdminUserId(adminUserId);
         authorizeMaintenance(verifiedAdmin, headerProductLine, productLine);
         if (request == null || request.requestId() == null || request.mode() == null
                 || request.instrumentId() == null || !InstrumentIds.valid(request.instrumentId())
@@ -90,7 +90,7 @@ public class AdminTradingMaintenanceController {
             @RequestParam("productLine") ProductLine productLine,
             @PathVariable("id") long id,
             @RequestParam(value = "afterKey", defaultValue = "") String afterKey) {
-        authorizeMaintenance(GatewayUserContext.requireAdminUserId(adminUserId), headerProductLine, productLine);
+        authorizeMaintenance(GatewayUserIdentity.requireAdminUserId(adminUserId), headerProductLine, productLine);
         positiveId(id);
         return maintenanceService.actions(id, afterKey == null ? "" : afterKey);
     }
@@ -101,7 +101,7 @@ public class AdminTradingMaintenanceController {
             @RequestHeader("X-Product-Line") String headerProductLine,
             @RequestParam("productLine") ProductLine productLine,
             @PathVariable("id") long id) {
-        authorizeMaintenance(GatewayUserContext.requireAdminUserId(adminUserId), headerProductLine, productLine);
+        authorizeMaintenance(GatewayUserIdentity.requireAdminUserId(adminUserId), headerProductLine, productLine);
         positiveId(id);
         return maintenanceService.release(id);
     }
@@ -112,7 +112,7 @@ public class AdminTradingMaintenanceController {
             @RequestHeader("X-Product-Line") String headerProductLine,
             @RequestParam("productLine") ProductLine productLine,
             @PathVariable("id") long id) {
-        authorizeMaintenance(GatewayUserContext.requireAdminUserId(adminUserId), headerProductLine, productLine);
+        authorizeMaintenance(GatewayUserIdentity.requireAdminUserId(adminUserId), headerProductLine, productLine);
         positiveId(id);
         return maintenanceService.retry(id);
     }
@@ -123,7 +123,7 @@ public class AdminTradingMaintenanceController {
             @RequestHeader("X-Product-Line") String headerProductLine,
             @RequestParam("productLine") ProductLine productLine,
             @PathVariable("id") long id) {
-        authorizeMaintenance(GatewayUserContext.requireAdminUserId(adminUserId), headerProductLine, productLine);
+        authorizeMaintenance(GatewayUserIdentity.requireAdminUserId(adminUserId), headerProductLine, productLine);
         positiveId(id);
         return maintenanceService.get(id);
     }

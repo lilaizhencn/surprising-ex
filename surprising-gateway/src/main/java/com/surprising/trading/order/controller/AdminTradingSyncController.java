@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.service.InstrumentCoreSyncService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,7 +26,7 @@ public class AdminTradingSyncController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("instrumentId") String instrumentId,
             @RequestParam("productLine") ProductLine productLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return instrumentCoreSyncService.state(instrumentId, productLine);
     }
 }

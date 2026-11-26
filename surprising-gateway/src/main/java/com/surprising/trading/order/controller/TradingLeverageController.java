@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.trading.api.model.LeverageSettingRequest;
 import com.surprising.trading.api.model.LeverageSettingResponse;
 import com.surprising.trading.api.model.MarginMode;
@@ -41,7 +41,7 @@ public class TradingLeverageController {
             @RequestParam(value = "marginMode", required = false) MarginMode marginMode,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.getLeverage(leverageService, userId, instrumentId,
                 marginMode, headerProductLine, queryProductLine);
     }

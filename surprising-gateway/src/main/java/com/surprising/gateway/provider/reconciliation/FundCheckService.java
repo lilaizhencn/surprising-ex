@@ -92,7 +92,8 @@ public class FundCheckService {
                     log.error("[FUND-CHECK] 发现 {} 个账户存在严重负余额穿仓！", negativeCount);
                 }
             } catch (Exception ex) {
-                log.warn("Negative balance query check failed or table not ready: {}", ex.getMessage());
+                log.error("[FUND-CHECK] 负余额穿仓核查失败: {}", ex.getMessage(), ex);
+                discrepancies.add("负余额穿仓核查异常: " + ex.getMessage());
             }
 
             // 2. 统计已检查的总账账户数
@@ -101,7 +102,8 @@ public class FundCheckService {
                 Long count = jdbc.queryForObject(countSql, Long.class);
                 accountsChecked = (count != null) ? count : 0;
             } catch (Exception ex) {
-                log.warn("[FUND-CHECK] 查询总账账户数失败: {}", ex.getMessage());
+                log.error("[FUND-CHECK] 查询总账账户数失败: {}", ex.getMessage(), ex);
+                discrepancies.add("总账账户统计异常: " + ex.getMessage());
             }
 
             // 3. 统计在途提现记录数
@@ -111,24 +113,20 @@ public class FundCheckService {
                 Long pCount = jdbc.queryForObject(pendingWithdrawalSql, Long.class);
                 pendingWithdrawals = (pCount != null) ? pCount : 0;
             } catch (Exception ex) {
-                log.warn("[FUND-CHECK] 查询在途提现记录数失败: {}", ex.getMessage());
+                log.error("[FUND-CHECK] 查询在途提现记录数失败: {}", ex.getMessage(), ex);
+                discrepancies.add("在途提现统计异常: " + ex.getMessage());
             }
 
-            // 4. 汇总核对出入金与净资产平衡
+            // 4. 核对已完成但缺失托管钱包提现单号的幽灵提现记录
             try {
-                String totalCompletedWithdrawalsSql = "SELECT COALESCE(SUM(usdt_value), 0) FROM gateway_wallet_withdrawals WHERE status = 'COMPLETED'";
-                BigDecimal totalWithdrawn = jdbc.queryForObject(totalCompletedWithdrawalsSql, BigDecimal.class);
-                if (totalWithdrawn == null) totalWithdrawn = BigDecimal.ZERO;
-
-                // 检查是否有异常标记或流水孤立
                 String orphanWithdrawalSql = "SELECT COUNT(*) FROM gateway_wallet_withdrawals " +
                         "WHERE status = 'COMPLETED' AND (wallet_withdrawal_id IS NULL OR wallet_withdrawal_id = '')";
                 Long orphanCount = jdbc.queryForObject(orphanWithdrawalSql, Long.class);
                 if (orphanCount != null && orphanCount > 0) {
-                    discrepancies.add("存在 " + orphanCount + " 笔已标记完成但无链上 tx_hash 的幽灵提现记录！");
+                    discrepancies.add("存在 " + orphanCount + " 笔已标记完成但无托管提现单号的幽灵提现记录！");
                 }
             } catch (Exception ex) {
-                log.error("[FUND-CHECK] 核对幽灵提现记录失败: {}", ex.getMessage());
+                log.error("[FUND-CHECK] 核对幽灵提现记录失败: {}", ex.getMessage(), ex);
                 discrepancies.add("核对幽灵提现异常: " + ex.getMessage());
             }
 

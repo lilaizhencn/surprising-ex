@@ -232,7 +232,7 @@ surprising:
   realtime:
     router:
       enabled: true
-      directory: ${SURPRISING_REALTIME_ROUTER_DIRECTORY:${SURPRISING_REALTIME_DIRECTORY:/dev/shm/aeron-router}}
+      directory: ${SURPRISING_REALTIME_DIRECTORY:/dev/shm/aeron-router}
       channel: "aeron:udp?endpoint=0.0.0.0:21010"
 
 telegram:

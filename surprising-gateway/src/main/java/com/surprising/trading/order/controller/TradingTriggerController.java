@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.trading.api.model.BatchCancelTriggerOrdersRequest;
 import com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest;
 import com.surprising.trading.api.model.CancelOpenTriggerOrdersRequest;
@@ -100,7 +100,7 @@ public class TradingTriggerController {
             @RequestParam(value = "instrumentId", required = false) String instrumentId,
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
             return triggerOrderService.openOrders(userId, TradingControllerSupport.activeInstrument(instrumentId), activeTriggerPage(limit, cursor));
@@ -116,7 +116,7 @@ public class TradingTriggerController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("takeProfitClientId") String takeProfitClientId,
             @RequestParam("stopLossClientId") String stopLossClientId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             return orderQueryService.commandResult(userId, triggerOrderService.ocoCommandId(userId, takeProfitClientId, stopLossClientId));
         } catch (IllegalArgumentException invalid) {
@@ -130,7 +130,7 @@ public class TradingTriggerController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("clientTriggerOrderId") String clientTriggerOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             return orderQueryService.commandResult(userId, triggerOrderService.submissionCommandId(userId, clientTriggerOrderId));
         } catch (IllegalArgumentException invalid) {
@@ -144,7 +144,7 @@ public class TradingTriggerController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("triggerOrderId") long triggerOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             return orderQueryService.commandResult(userId, TriggerOrderAeronGateway.cancellationCommandId(userId, triggerOrderId));
         } catch (IllegalArgumentException invalid) {
@@ -158,7 +158,7 @@ public class TradingTriggerController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("triggerOrderId") long triggerOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             return triggerOrderService.get(userId, triggerOrderId);
         } catch (IllegalArgumentException ex) {

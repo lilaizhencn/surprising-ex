@@ -24,7 +24,7 @@ import com.surprising.account.provider.exception.AccountCommandTimeoutException;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.account.provider.service.AccountQueryService;
 import com.surprising.account.provider.service.AccountService;
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.product.api.ProductLine;
 import jakarta.validation.Valid;
 import java.util.function.Supplier;
@@ -62,7 +62,7 @@ public class AccountController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestHeader(value = "X-Admin-Username", required = false) String adminUsername,
             @Valid @RequestBody ProductBalanceAdjustmentRequest request) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeCommand(() -> commandGateway.adjustProductBalance(AccountInputBinding.productAdjustment(request), adminUserId, adminUsername));
     }
 
@@ -82,7 +82,7 @@ public class AccountController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestHeader(value = "X-Admin-Username", required = false) String adminUsername,
             @RequestBody BalanceAdjustmentRequest request) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeCommand(() -> commandGateway.adjustBalance(AccountInputBinding.adjustment(request), adminUserId, adminUsername));
     }
 
@@ -91,7 +91,7 @@ public class AccountController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("userId") long userId,
             @RequestParam(value = "accountType", required = false) AccountType accountType) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeQuery(() -> accountService.productBalances(userId, accountType));
     }
 
@@ -105,7 +105,7 @@ public class AccountController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeQuery(() -> {
             AccountHistoryRequestBinding.userId(userId);
             return history.productLedger(userId, accountType,
@@ -127,7 +127,7 @@ public class AccountController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeQuery(() -> {
             AccountHistoryRequestBinding.userId(userId);
             AccountHistoryRequestBinding.userId(filterAdminUserId);
@@ -145,7 +145,7 @@ public class AccountController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "accountType", required = false) AccountType accountType) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return executeQuery(() -> accountService.productBalances(userId, accountType));
     }
 
@@ -156,7 +156,7 @@ public class AccountController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("accountType") AccountType accountType,
             @RequestParam("asset") String asset) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return executeQuery(() -> accountService.productBalance(userId, accountType, AccountInputBinding.asset(asset)));
     }
 
@@ -167,7 +167,7 @@ public class AccountController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("instrumentId") String instrumentId,
             @RequestParam(value = "marginMode", required = false) String marginMode) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return executeQuery(() -> accountService.positionMargin(userId,
                 AccountInputBinding.instrument(instrumentId), AccountInputBinding.marginMode(marginMode)));
     }
@@ -177,7 +177,7 @@ public class AccountController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("userId") long userId,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeQuery(() -> accountService.positions(userId, AccountInputBinding.optionalPositionSide(positionSide)));
     }
 
@@ -190,7 +190,7 @@ public class AccountController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeQuery(() -> {
             AccountHistoryRequestBinding.userId(userId);
             return history.productTransfers(userId, accountType,
@@ -203,7 +203,7 @@ public class AccountController {
     public BalanceQueryResponse adminBalances(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("userId") long userId) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return accountService.balances(userId);
     }
 
@@ -214,7 +214,7 @@ public class AccountController {
             @RequestParam("instrumentId") String instrumentId,
             @RequestParam(value = "marginMode", required = false) String marginMode,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeQuery(() -> accountService.position(userId, AccountInputBinding.instrument(instrumentId),
                 AccountInputBinding.marginMode(marginMode), AccountInputBinding.positionSide(positionSide)));
     }
@@ -228,7 +228,7 @@ public class AccountController {
             @RequestParam(value = "limit", defaultValue = "50") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        long userId = GatewayUserContext.requireHeaderUserId(headerUserId);
+        long userId = GatewayUserIdentity.requireHeaderUserId(headerUserId);
         return executeQuery(() -> {
             AccountHistoryRequestBinding.userId(userId);
             return history.productLedger(userId, accountType,
@@ -245,7 +245,7 @@ public class AccountController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return executeQuery(() -> accountService.positionMode(productLine(queryProductLine, headerProductLine), userId));
     }
 
@@ -267,7 +267,7 @@ public class AccountController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return executeQuery(() -> {
             AccountHistoryRequestBinding.userId(userId);
             return history.accountLedger(userId,
@@ -288,7 +288,7 @@ public class AccountController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return executeQuery(() -> accountService.positions(userId, AccountInputBinding.optionalPositionSide(positionSide)));
     }
 
@@ -300,7 +300,7 @@ public class AccountController {
             @RequestParam(value = "limit", defaultValue = "50") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        long userId = GatewayUserContext.requireHeaderUserId(headerUserId);
+        long userId = GatewayUserIdentity.requireHeaderUserId(headerUserId);
         return executeQuery(() -> {
             AccountHistoryRequestBinding.userId(userId);
             return history.productTransfers(userId, accountType,
@@ -314,7 +314,7 @@ public class AccountController {
             @RequestParam(value = "userId", required = false) Long queryUserId,
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return accountService.balances(userId);
     }
 
@@ -326,7 +326,7 @@ public class AccountController {
             @RequestParam("instrumentId") String instrumentId,
             @RequestParam(value = "marginMode", required = false) String marginMode,
             @RequestParam(value = "positionSide", required = false) String positionSide) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return executeQuery(() -> accountService.position(userId, AccountInputBinding.instrument(instrumentId),
                 AccountInputBinding.marginMode(marginMode), AccountInputBinding.positionSide(positionSide)));
     }
@@ -337,7 +337,7 @@ public class AccountController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("asset") String asset) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return executeQuery(() -> accountService.balance(userId, AccountInputBinding.asset(asset)));
     }
 
@@ -349,7 +349,7 @@ public class AccountController {
             @RequestParam(value = "limit", defaultValue = "10") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        long userId = GatewayUserContext.requireHeaderUserId(headerUserId);
+        long userId = GatewayUserIdentity.requireHeaderUserId(headerUserId);
         return executeQuery(() -> {
             AccountHistoryRequestBinding.userId(userId);
             return history.accountLedger(userId,

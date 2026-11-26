@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
 import com.surprising.trading.api.model.AlgoOrderQueryResponse;
@@ -73,7 +73,7 @@ public class TradingAlgoController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "instrumentId", required = false) String instrumentId,
             @RequestParam(value = "limit", defaultValue = "100") int limit) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
             if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
@@ -91,7 +91,7 @@ public class TradingAlgoController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("clientAlgoOrderId") String clientAlgoOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
             if (clientAlgoOrderId == null || clientAlgoOrderId.isBlank() || clientAlgoOrderId.trim().length() > 64) {
@@ -113,7 +113,7 @@ public class TradingAlgoController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("algoOrderId") long algoOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             if (algoOrderId <= 0) throw new IllegalArgumentException("algoOrderId must be positive");
             if (userId <= 0) throw new IllegalArgumentException("invalid algo owner");

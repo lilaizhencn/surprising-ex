@@ -3,6 +3,8 @@ package com.surprising.gateway.provider.reconciliation;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -49,7 +51,7 @@ class FundCheckTest {
         when(jdbc.query(anyString(), any(RowMapper.class))).thenReturn(List.of());
         when(jdbc.queryForObject(contains("COUNT(DISTINCT user_id)"), eq(Long.class))).thenReturn(150L);
         when(jdbc.queryForObject(contains("status IN ('PENDING_APPROVAL'"), eq(Long.class))).thenReturn(3L);
-        when(jdbc.queryForObject(contains("tx_hash IS NULL"), eq(Long.class))).thenReturn(0L);
+        when(jdbc.queryForObject(contains("wallet_withdrawal_id IS NULL"), eq(Long.class))).thenReturn(0L);
 
         FundCheckResult result = service.checkFunds();
 
@@ -76,5 +78,35 @@ class FundCheckTest {
 
         // 验证并发触发了紧急通知
         verify(alertNotifier).broadcastFundCheckAlert(eq(result));
+    }
+
+    @Test
+    void failsClosedWhenNegativeBalanceQueryThrows() {
+        when(jdbc.query(anyString(), any(RowMapper.class)))
+                .thenThrow(new RuntimeException("database timeout"));
+        when(jdbc.queryForObject(contains("COUNT(DISTINCT user_id)"), eq(Long.class))).thenReturn(150L);
+        when(jdbc.queryForObject(contains("status IN ('PENDING_APPROVAL'"), eq(Long.class))).thenReturn(0L);
+        when(jdbc.queryForObject(contains("wallet_withdrawal_id IS NULL"), eq(Long.class))).thenReturn(0L);
+
+        FundCheckResult result = service.checkFunds();
+
+        assertFalse(result.healthy());
+        assertFalse(result.discrepancies().isEmpty());
+        assertTrue(circuitBreaker.isStopped());
+        verify(alertNotifier).broadcastFundCheckAlert(eq(result));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void circuitBreakerFailsClosedWhenRedisReadFails() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get(anyString())).thenThrow(new RuntimeException("redis unavailable"));
+
+        EmergencyWithdrawalCircuitBreaker distributedBreaker = new EmergencyWithdrawalCircuitBreaker(redis);
+
+        assertFalse(distributedBreaker.isWithdrawalAllowed());
+        assertTrue(distributedBreaker.isStopped());
     }
 }

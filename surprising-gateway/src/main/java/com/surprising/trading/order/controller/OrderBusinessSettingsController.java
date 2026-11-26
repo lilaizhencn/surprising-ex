@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.OrderBusinessSettings;
 import com.surprising.trading.order.model.OrderSettingsSnapshot;
@@ -38,7 +38,7 @@ public class OrderBusinessSettingsController {
     public OrderSettingsSnapshot current(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("productLine") ProductLine productLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return settings.current(productLine);
     }
 
@@ -47,7 +47,7 @@ public class OrderBusinessSettingsController {
             @RequestParam("productLine") ProductLine productLine,
             @RequestBody JsonNode body,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
-        String admin = GatewayUserContext.requireAdminUserId(adminUserId);
+        String admin = GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             var request = parse(body);
             if (request.expectedVersion() < 1 || admin == null || !admin.matches("[1-9][0-9]*")

@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
 import com.surprising.trading.api.model.FeeScheduleQueryResponse;
@@ -55,7 +55,7 @@ public class AdminTradingFeeController {
     @GetMapping("/api/v1/admin/trading/fees/vip/levels")
     public List<Map<String, Object>> vipLevels(
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         List<VipTierModels.VipTierDefinition> tiers = vipTierService != null
                 ? vipTierService.getVipTiers()
                 : VipTierModels.VIP_TIERS;
@@ -80,7 +80,7 @@ public class AdminTradingFeeController {
             @RequestParam("userId") long userId,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         if (vipTierService == null) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "VIP tier service unavailable");
         }
@@ -98,7 +98,7 @@ public class AdminTradingFeeController {
             @RequestBody AdminVipOverrideRequest request,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         if (vipTierService == null) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "VIP tier service unavailable");
         }
@@ -148,7 +148,7 @@ public class AdminTradingFeeController {
             @RequestParam(value = "instrumentChangeId", defaultValue = "0") long instrumentChangeId,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         return TradingControllerSupport.effectiveFee(tradingFeeService, userId, instrumentId,
                 instrumentChangeId, headerProductLine, queryProductLine);
     }
@@ -159,7 +159,7 @@ public class AdminTradingFeeController {
             @RequestBody FeeScheduleUpsertRequest request,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             ProductLine productLine = TradingControllerSupport.productLine(queryProductLine, headerProductLine);
             FeeScheduleUpsertRequest bound = request == null || request.productLine() != null || productLine == null
@@ -185,7 +185,7 @@ public class AdminTradingFeeController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             return tradingFeeService.querySchedules(
                     TradingControllerSupport.productLine(queryProductLine, headerProductLine),
@@ -202,7 +202,7 @@ public class AdminTradingFeeController {
             @PathVariable("feeScheduleId") long feeScheduleId,
             @RequestHeader(value = "X-Product-Line", required = false) String headerProductLine,
             @RequestParam(value = "productLine", required = false) String queryProductLine) {
-        GatewayUserContext.requireAdminUserId(adminUserId);
+        GatewayUserIdentity.requireAdminUserId(adminUserId);
         try {
             return tradingFeeService.disableSchedule(feeScheduleId,
                     TradingControllerSupport.productLine(queryProductLine, headerProductLine));

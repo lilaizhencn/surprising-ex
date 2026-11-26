@@ -5,7 +5,7 @@ import static com.surprising.trading.order.controller.TradingControllerSupport.a
 import static com.surprising.trading.order.controller.TradingControllerSupport.commandResponse;
 import static com.surprising.trading.order.controller.TradingControllerSupport.mapAsyncFailure;
 
-import com.surprising.gateway.provider.product.GatewayUserContext;
+import com.surprising.gateway.provider.product.GatewayUserIdentity;
 import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.BatchAmendOrdersRequest;
@@ -75,7 +75,7 @@ public class TradingController {
             @RequestParam(value = "endTime", required = false) Long endTime,
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         try {
             if (userId <= 0 || orderId != null && orderId <= 0 || limit < 1 || limit > 1000
                     || startTime != null && startTime <= 0 || endTime != null && endTime <= 0
@@ -98,7 +98,7 @@ public class TradingController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam(value = "instrumentId", required = false) String instrumentId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.call(() -> ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(orderQueryService.cancellationPlan(userId, instrumentId)));
     }
@@ -109,7 +109,7 @@ public class TradingController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("batchKey") String batchKey) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.callUnavailable(
                 () -> commandResponse(orderQueryService.cancellationBatch(userId, batchKey)),
                 "committed cancellation batch is unavailable");
@@ -121,7 +121,7 @@ public class TradingController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("clientRequestId") String clientRequestId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.callUnavailable(
                 () -> commandResponse(orderQueryService.amendment(userId, clientRequestId)),
                 "committed amendment result is unavailable");
@@ -133,7 +133,7 @@ public class TradingController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("orderId") long orderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.callUnavailable(
                 () -> commandResponse(orderQueryService.cancellation(userId, orderId)),
                 "committed cancellation result is unavailable");
@@ -145,7 +145,7 @@ public class TradingController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("clientOrderId") String clientOrderId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.callUnavailable(() -> {
             var result = orderQueryService.submission(userId, clientOrderId);
             return ResponseEntity.status("TERMINAL".equals(result.outcome()) ? HttpStatus.OK : HttpStatus.ACCEPTED)
@@ -165,7 +165,7 @@ public class TradingController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @RequestParam("clientOrderId") String clientOrderId,
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.call(() -> orderQueryService.getByClientOrderId(userId, clientOrderId, minExportSequence));
     }
 
@@ -211,7 +211,7 @@ public class TradingController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence,
             @RequestParam(value = "status", required = false) String status) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.call(() ->
                 orderQueryService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence, status));
     }
@@ -251,7 +251,7 @@ public class TradingController {
             @RequestParam(value = "limit", defaultValue = "100") int limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.call(() -> {
             if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
             return orderQueryService.openOrders(userId, activeInstrument(instrumentId), activePage(limit, cursor), minExportSequence);
@@ -271,7 +271,7 @@ public class TradingController {
             @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("commandId") UUID commandId) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.callUnavailable(
                 () -> commandResponse(orderQueryService.commandResult(userId, commandId)),
                 "committed command result is unavailable");
@@ -284,7 +284,7 @@ public class TradingController {
             @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId,
             @PathVariable("orderId") long orderId,
             @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
-        long userId = GatewayUserContext.requireUserId(queryUserId, headerUserId, adminUserId);
+        long userId = GatewayUserIdentity.requireUserId(queryUserId, headerUserId, adminUserId);
         return TradingControllerSupport.call(() -> orderQueryService.get(userId, orderId, minExportSequence));
     }
 }
