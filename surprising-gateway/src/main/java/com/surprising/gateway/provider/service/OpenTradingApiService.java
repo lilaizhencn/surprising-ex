@@ -27,7 +27,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.CompletionException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -172,63 +171,29 @@ public class OpenTradingApiService {
         );
         OrderCommandReceipt receipt;
         try {
-            receipt = orderService.placeCommandAsync(placeRequest).toCompletableFuture().join();
+            receipt = orderService.placeCommand(placeRequest);
         } catch (Exception ex) {
             throw unwrapCommandException(ex);
         }
         if (receipt != null && receipt.result() instanceof OrderResponse resp) {
             return support.json(HttpStatus.OK, orderView(resp, symbol, scale));
         }
-        long prospectiveOrderId = (receipt != null && !receipt.prospectiveOrderIds().isEmpty())
-                ? receipt.prospectiveOrderIds().getFirst() : 0L;
-        Map<String, Object> fallback = new LinkedHashMap<>();
-        fallback.put("symbol", symbol);
-        fallback.put("orderId", prospectiveOrderId);
-        fallback.put("orderListId", -1);
-        fallback.put("clientOrderId", clientOrderId);
-        fallback.put("transactTime", System.currentTimeMillis());
-        fallback.put("price", support.decimalString(priceTicks, scale.getPriceScale()));
-        fallback.put("origQty", support.decimalString(quantitySteps, scale.getQuantityScale()));
-        fallback.put("executedQty", "0");
-        fallback.put("cummulativeQuoteQty", "0");
-        fallback.put("status", "NEW");
-        fallback.put("timeInForce", tif);
-        fallback.put("type", type);
-        fallback.put("side", side);
-        fallback.put("workingTime", System.currentTimeMillis());
-        fallback.put("selfTradePreventionMode", "NONE");
-        return support.json(HttpStatus.OK, fallback);
+        throw nonCommittedOrderException(receipt);
     }
 
     private ResponseEntity<byte[]> cancelOrder(Map<String, Object> params, long userId, String symbol) {
         Long orderId = support.longParameter(params, "orderId");
         OrderCommandReceipt receipt;
         try {
-            receipt = orderService.cancelCommandAsync(new CancelOrderRequest(userId, orderId)).toCompletableFuture().join();
+            receipt = orderService.cancelCommand(new CancelOrderRequest(userId, orderId));
         } catch (Exception ex) {
             throw unwrapCommandException(ex);
         }
-        GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
         if (receipt != null && receipt.result() instanceof OrderResponse resp) {
+            GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
             return support.json(HttpStatus.OK, orderView(resp, symbol, scale));
         }
-        Map<String, Object> fallback = new LinkedHashMap<>();
-        fallback.put("symbol", symbol);
-        fallback.put("orderId", orderId);
-        fallback.put("orderListId", -1);
-        fallback.put("clientOrderId", support.first(params, "origClientOrderId", "clientOrderId"));
-        fallback.put("transactTime", System.currentTimeMillis());
-        fallback.put("price", "0");
-        fallback.put("origQty", "0");
-        fallback.put("executedQty", "0");
-        fallback.put("cummulativeQuoteQty", "0");
-        fallback.put("status", "CANCELED");
-        fallback.put("timeInForce", "GTC");
-        fallback.put("type", "LIMIT");
-        fallback.put("side", "BUY");
-        fallback.put("workingTime", System.currentTimeMillis());
-        fallback.put("selfTradePreventionMode", "NONE");
-        return support.json(HttpStatus.OK, fallback);
+        throw nonCommittedOrderException(receipt);
     }
 
     private ResponseEntity<byte[]> queryOrder(Map<String, Object> params, long userId, String symbol) {
@@ -246,15 +211,34 @@ public class OpenTradingApiService {
         throw new IllegalArgumentException("orderId or origClientOrderId is required");
     }
 
+    private ResponseStatusException nonCommittedOrderException(OrderCommandReceipt receipt) {
+        if (receipt == null) {
+            return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "order command returned no receipt");
+        }
+        HttpStatus status = switch (receipt.code()) {
+            case "IDEMPOTENCY_CONFLICT" -> HttpStatus.CONFLICT;
+            case "CLIENT_BACKPRESSURED" -> HttpStatus.TOO_MANY_REQUESTS;
+            case "MATCHING_PENDING", "RESULT_UNKNOWN" -> HttpStatus.ACCEPTED;
+            case "RESULT_UNKNOWN_OUTSIDE_RETENTION" -> HttpStatus.GONE;
+            default -> HttpStatus.SERVICE_UNAVAILABLE;
+        };
+        String reason = receipt.message() != null && !receipt.message().isBlank()
+                ? receipt.code() + ": " + receipt.message()
+                : receipt.code();
+        return new ResponseStatusException(status, reason);
+    }
+
     private RuntimeException unwrapCommandException(Exception ex) {
-        Throwable cause = ex instanceof CompletionException ? ex.getCause() : ex;
-        if (cause instanceof ResponseStatusException rse) {
+        if (ex instanceof ResponseStatusException rse) {
             return rse;
         }
-        if (cause instanceof com.surprising.trading.order.exception.OrderCommandRejectedException rejected) {
-            return rejected;
+        if (ex instanceof IllegalArgumentException iae) {
+            return iae;
         }
-        return new ResponseStatusException(HttpStatus.BAD_REQUEST, cause != null ? cause.getMessage() : ex.getMessage(), cause);
+        if (ex instanceof com.surprising.trading.order.exception.OrderCommandRejectedException rejected) {
+            return new ResponseStatusException(HttpStatus.CONFLICT, rejected.getMessage(), rejected);
+        }
+        return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
     }
 
     private boolean isKycVerified(KycProfile profile) {

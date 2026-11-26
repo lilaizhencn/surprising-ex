@@ -1,16 +1,16 @@
 package com.surprising.marketmaker.provider.client;
 
-import com.surprising.marketmaker.provider.service.ReferenceMarketProvider;
-
-import com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups;
-
-import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.marketmaker.provider.client.ReferenceLiveBook.ParsedBook;
+import com.surprising.marketmaker.provider.client.ReferenceLiveBook.ParsedBookUpdate;
+import com.surprising.marketmaker.provider.client.ReferenceLiveBook.ParsedLevel;
+import com.surprising.marketmaker.provider.client.ReferenceLiveBook.TradeTape;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
+import com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups;
 import com.surprising.marketmaker.provider.model.ExternalTrade;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
 import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
+import com.surprising.marketmaker.provider.service.ReferenceMarketProvider;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderSide;
 import java.math.BigDecimal;
@@ -19,22 +19,16 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.WebSocket;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.NavigableMap;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -44,36 +38,36 @@ import tools.jackson.databind.ObjectMapper;
 public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
     private static final BigDecimal ONE_PPM = BigDecimal.valueOf(1_000_000L);
+    private static final Duration BOOK_HOLD = Duration.ofSeconds(30);
 
     private final MarketMakerProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
-    private final com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups wakeups;
-    private final java.util.concurrent.locks.ReentrantLock configurationLock = new java.util.concurrent.locks.ReentrantLock();
+    private final MakerQuoteWakeups wakeups;
+    private final ReferenceWebSocketFeed webSocketFeed;
+    private final ReentrantLock configurationLock = new ReentrantLock();
     private volatile MarketMakerProperties.ReferenceMarket loadedConfiguration;
     private volatile long configurationGeneration;
-    private static final Duration BOOK_HOLD = Duration.ofSeconds(30);
-    private static final int MAX_QUEUED_PRINTS = 64;
-    private static final int MAX_SEEN_TRADE_IDS = 4096;
 
     private final Map<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
-    private final Map<String, LiveBook> liveBooks = new ConcurrentHashMap<>();
-    private final Map<String, WebSocketState> webSockets = new ConcurrentHashMap<>();
+    private final Map<String, ReferenceLiveBook> liveBooks = new ConcurrentHashMap<>();
     private final Map<String, TradeTape> tradeTapes = new ConcurrentHashMap<>();
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     public RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper,
-            com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups wakeups) {
+                                       MakerQuoteWakeups wakeups) {
         this.properties = properties;
         this.wakeups = wakeups;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(timeout())
                 .build();
+        this.webSocketFeed = new ReferenceWebSocketFeed(properties, httpClient, objectMapper,
+                this::parseWebSocketPayload);
     }
 
     RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper) {
-        this(properties, objectMapper, new com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups(properties));
+        this(properties, objectMapper, new MakerQuoteWakeups(properties));
     }
 
     @Override
@@ -84,11 +78,10 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
             configurationLock.lock();
             try {
                 if (loadedConfiguration != referenceMarket) {
-                    for (var state : webSockets.values()) {
-                        state.retired = true;
-                        if (state.webSocket != null) state.webSocket.abort();
-                    }
-                    webSockets.clear(); liveBooks.clear(); cache.clear(); tradeTapes.clear();
+                    webSocketFeed.reset();
+                    liveBooks.clear();
+                    cache.clear();
+                    tradeTapes.clear();
                     loadedConfiguration = referenceMarket;
                     configurationGeneration++;
                 }
@@ -106,7 +99,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         String normalizedSymbol = normalizeSymbol(instrumentId);
         String cacheKey = cacheKey(effectiveProductLine, normalizedSymbol);
         Instant now = Instant.now();
-        ensureWebSocketConnections(referenceMarket, effectiveProductLine, normalizedSymbol, instrument, now);
+        webSocketFeed.ensureConnections(referenceMarket, effectiveProductLine, normalizedSymbol, instrument, now);
         if (generation != configurationGeneration) return null;
         CachedSnapshot cached = cache.get(cacheKey);
         if (cached != null
@@ -193,7 +186,8 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 return null;
             }
             String normalizedSymbol = normalizeSymbol(instrumentId);
-            LiveBook liveBook = liveBooks.computeIfAbsent(liveKey(source, normalizedSymbol), ignored -> new LiveBook());
+            ReferenceLiveBook liveBook = liveBooks.computeIfAbsent(liveKey(source, normalizedSymbol),
+                    ignored -> new ReferenceLiveBook());
             if (update.delta()) {
                 if (liveBook.isEmpty()) {
                     return null;
@@ -208,8 +202,9 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                 var previous = cache.put(cacheKey(source.getProductLine(), normalizedSymbol),
                         new CachedSnapshot(snapshot, receivedAt, true));
                 if (previous == null || !previous.snapshot().bids().equals(snapshot.bids())
-                        || !previous.snapshot().asks().equals(snapshot.asks()))
+                        || !previous.snapshot().asks().equals(snapshot.asks())) {
                     wakeups.changed(source.getProductLine(), normalizedSymbol);
+                }
                 return snapshot;
             }
             return null;
@@ -222,7 +217,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
                                              String instrumentId,
                                              InstrumentResponse instrument) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url(source)))
+            HttpRequest request = HttpRequest.newBuilder(URI.create(template(source.getUrl(), source)))
                     .timeout(timeout())
                     .header("User-Agent", "surprising-market-maker/1.0")
                     .GET()
@@ -243,14 +238,14 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private ParsedBook parseBook(String parser, JsonNode root) {
         return switch (parser.toUpperCase(Locale.ROOT)) {
             case "BINANCE_DEPTH", "BINANCE_FUTURES_DEPTH" -> new ParsedBook(
-                    parseLevels(root.path("bids")), parseLevels(root.path("asks")));
+                    parseLevels(root.path("bids"), false), parseLevels(root.path("asks"), false));
             case "OKX_BOOKS", "OKX_BOOKS_FULL" -> {
                 JsonNode book = root.path("data").path(0);
-                yield new ParsedBook(parseLevels(book.path("bids")), parseLevels(book.path("asks")));
+                yield new ParsedBook(parseLevels(book.path("bids"), false), parseLevels(book.path("asks"), false));
             }
             case "BYBIT_ORDERBOOK", "BYBIT_V5_ORDERBOOK" -> {
                 JsonNode book = root.path("result");
-                yield new ParsedBook(parseLevels(book.path("b")), parseLevels(book.path("a")));
+                yield new ParsedBook(parseLevels(book.path("b"), false), parseLevels(book.path("a"), false));
             }
             default -> throw new IllegalArgumentException("unsupported reference market parser: " + parser);
         };
@@ -282,10 +277,6 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         };
     }
 
-    private List<ParsedLevel> parseLevels(JsonNode levels) {
-        return parseLevels(levels, false);
-    }
-
     private List<ParsedLevel> parseLevels(JsonNode levels, boolean includeZeroQuantity) {
         List<ParsedLevel> result = new ArrayList<>();
         if (levels == null || !levels.isArray()) {
@@ -306,7 +297,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     private List<ReferenceOrderBookLevel> convertDelta(List<ParsedLevel> levels, InstrumentResponse instrument,
-                                                        MarketMakerProperties.ReferenceMarket.Source source) {
+                                                       MarketMakerProperties.ReferenceMarket.Source source) {
         List<ReferenceOrderBookLevel> result = new ArrayList<>();
         var referenceMarket = properties.getReferenceMarket();
         for (ParsedLevel level : levels) {
@@ -320,7 +311,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     private List<ReferenceOrderBookLevel> convert(List<ParsedLevel> levels, InstrumentResponse instrument,
-                                                   MarketMakerProperties.ReferenceMarket.Source source) {
+                                                  MarketMakerProperties.ReferenceMarket.Source source) {
         List<ReferenceOrderBookLevel> result = new ArrayList<>();
         var referenceMarket = properties.getReferenceMarket();
         for (ParsedLevel level : levels) {
@@ -374,26 +365,6 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         return new BigDecimal(value);
     }
 
-    private boolean matches(MarketMakerProperties.ReferenceMarket.Source source, ProductLine productLine, String instrumentId) {
-        return source != null
-                && source.isEnabled()
-                && source.getProductLine() == productLine
-                && instrumentId.equals(normalizeSymbol(source.getInstrumentId()));
-    }
-
-    private boolean fresh(ReferenceOrderBookSnapshot snapshot, Instant now) {
-        Duration maxAge = maxAge();
-        return snapshot != null
-                && snapshot.receivedAt() != null
-                && snapshot.receivedAt().plus(maxAge).isAfter(now);
-    }
-
-    private boolean held(ReferenceOrderBookSnapshot snapshot, Instant now) {
-        return snapshot != null
-                && snapshot.receivedAt() != null
-                && snapshot.receivedAt().plus(holdAge()).isAfter(now);
-    }
-
     /** OKX & Binance public trades share the socket with the book. The taker side is the print side. */
     private boolean recordTrades(MarketMakerProperties.ReferenceMarket.Source source, String instrumentId,
                                  InstrumentResponse instrument, JsonNode root, Instant receivedAt) {
@@ -444,90 +415,16 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         return new BigDecimal(value);
     }
 
-    private List<String> subscriptions(String subscribeMessage) {
-        if (!hasText(subscribeMessage)) return List.of();
-        List<String> messages = new ArrayList<>();
-        messages.add(subscribeMessage);
-        String trades = subscribeMessage.replace("\"channel\":\"books\"", "\"channel\":\"trades\"");
-        if (!trades.equals(subscribeMessage)) messages.add(trades);
-        return messages;
+    private boolean fresh(ReferenceOrderBookSnapshot snapshot, Instant now) {
+        return snapshot != null
+                && snapshot.receivedAt() != null
+                && snapshot.receivedAt().plus(maxAge()).isAfter(now);
     }
 
-    private void ensureWebSocketConnections(MarketMakerProperties.ReferenceMarket referenceMarket,
-                                            ProductLine productLine,
-                                            String instrumentId,
-                                            InstrumentResponse instrument,
-                                            Instant now) {
-        if (!referenceMarket.isWebSocketEnabled()) {
-            return;
-        }
-        for (MarketMakerProperties.ReferenceMarket.Source source : referenceMarket.getSources()) {
-            if (!matches(source, productLine, instrumentId) || !hasText(source.getWebSocketUrl())) {
-                continue;
-            }
-            String resolvedUrl = template(source.getWebSocketUrl(), source);
-            WebSocketState state = webSockets.computeIfAbsent(resolvedUrl, ignored -> new WebSocketState());
-            String bindingKey = liveKey(source, instrumentId);
-            String subscribeMessage = hasText(source.getWebSocketSubscribeMessage())
-                    ? template(source.getWebSocketSubscribeMessage(), source)
-                    : null;
-            WebSocketBinding binding = new WebSocketBinding(bindingKey, source, instrumentId, instrument, subscribeMessage);
-            state.attach(binding);
-            WebSocket activeSocket = state.webSocket;
-            if (activeSocket != null && !activeSocket.isInputClosed() && !activeSocket.isOutputClosed()) {
-                for (String message : subscriptions(subscribeMessage)) {
-                    if (state.sentSubscriptions.add(message)) activeSocket.sendText(message, true);
-                }
-            }
-            if (!shouldConnect(state, now)) {
-                continue;
-            }
-            synchronized (state) {
-                if (!shouldConnect(state, now)) {
-                    continue;
-                }
-                state.connecting = true;
-                state.lastAttempt = now;
-            }
-            try {
-                httpClient.newWebSocketBuilder()
-                        .connectTimeout(timeout())
-                        .buildAsync(URI.create(resolvedUrl),
-                                new ReferenceMarketWebSocketListener(resolvedUrl, state))
-                        .whenComplete((webSocket, error) -> {
-                            if (error != null) {
-                                state.connecting = false;
-                                state.webSocket = null;
-                                log.debug("Reference market websocket connect failed url={} error={}",
-                                        resolvedUrl, error.getMessage());
-                            }
-                        });
-            } catch (RuntimeException ex) {
-                state.connecting = false;
-                state.webSocket = null;
-                log.debug("Reference market websocket connect rejected url={} error={}",
-                        resolvedUrl, ex.getMessage());
-            }
-        }
-    }
-
-    private boolean shouldConnect(WebSocketState state, Instant now) {
-        WebSocket webSocket = state.webSocket;
-        if (state.connecting || (webSocket != null && !webSocket.isInputClosed() && !webSocket.isOutputClosed())) {
-            return false;
-        }
-        return state.lastAttempt.plus(reconnectBackoff()).isBefore(now);
-    }
-
-    private String url(MarketMakerProperties.ReferenceMarket.Source source) {
-        return template(source.getUrl(), source);
-    }
-
-    private String template(String value, MarketMakerProperties.ReferenceMarket.Source source) {
-        String externalSymbol = source.getExternalSymbol();
-        return value
-                .replace("{externalSymbol}", externalSymbol)
-                .replace("{externalSymbolLower}", externalSymbol.toLowerCase(Locale.ROOT));
+    private boolean held(ReferenceOrderBookSnapshot snapshot, Instant now) {
+        return snapshot != null
+                && snapshot.receivedAt() != null
+                && snapshot.receivedAt().plus(holdAge()).isAfter(now);
     }
 
     private Duration timeout() {
@@ -550,271 +447,40 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
         return maxAge.compareTo(BOOK_HOLD) > 0 ? maxAge : BOOK_HOLD;
     }
 
-    private Duration reconnectBackoff() {
-        Duration reconnectBackoff = properties.getReferenceMarket().getReconnectBackoff();
-        return reconnectBackoff == null || reconnectBackoff.isNegative() || reconnectBackoff.isZero()
-                ? Duration.ofSeconds(5)
-                : reconnectBackoff;
-    }
-
     private String liveParser(MarketMakerProperties.ReferenceMarket.Source source) {
         return hasText(source.getWebSocketParser()) ? source.getWebSocketParser() : source.getParser();
     }
 
-    private String liveKey(MarketMakerProperties.ReferenceMarket.Source source, String instrumentId) {
+    static boolean matches(MarketMakerProperties.ReferenceMarket.Source source, ProductLine productLine, String instrumentId) {
+        return source != null
+                && source.isEnabled()
+                && source.getProductLine() == productLine
+                && instrumentId.equals(normalizeSymbol(source.getInstrumentId()));
+    }
+
+    static String template(String value, MarketMakerProperties.ReferenceMarket.Source source) {
+        String externalSymbol = source.getExternalSymbol();
+        return value
+                .replace("{externalSymbol}", externalSymbol)
+                .replace("{externalSymbolLower}", externalSymbol.toLowerCase(Locale.ROOT));
+    }
+
+    static String liveKey(MarketMakerProperties.ReferenceMarket.Source source, String instrumentId) {
         return source.getProductLine().name() + ":" + normalizeSymbol(source.getName()) + ":" + normalizeSymbol(instrumentId);
     }
 
-    private String cacheKey(ProductLine productLine, String instrumentId) {
+    static String cacheKey(ProductLine productLine, String instrumentId) {
         return (productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine).name() + ":" + normalizeSymbol(instrumentId);
     }
 
-    private boolean hasText(String value) {
+    static boolean hasText(String value) {
         return value != null && !value.isBlank();
     }
 
-    private String normalizeSymbol(String value) {
+    static String normalizeSymbol(String value) {
         return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
     }
 
     private record CachedSnapshot(ReferenceOrderBookSnapshot snapshot, Instant fetchedAt, boolean streaming) {
-    }
-
-    private record WebSocketBinding(String key, MarketMakerProperties.ReferenceMarket.Source source,
-                                      String instrumentId, InstrumentResponse instrument, String subscribeMessage) {
-    }
-
-    private static final class WebSocketState {
-        private volatile WebSocket webSocket;
-        private volatile boolean retired;
-        private volatile boolean connecting;
-        private volatile Instant lastAttempt = Instant.EPOCH;
-        private final Map<String, WebSocketBinding> bindings = new ConcurrentHashMap<>();
-        private final java.util.Set<String> sentSubscriptions = ConcurrentHashMap.newKeySet();
-
-        void attach(WebSocketBinding binding) {
-            bindings.putIfAbsent(binding.key(), binding);
-        }
-    }
-
-    private final class ReferenceMarketWebSocketListener implements WebSocket.Listener {
-        private final String url;
-        private final WebSocketState state;
-        private final StringBuilder text = new StringBuilder();
-
-        private ReferenceMarketWebSocketListener(String url, WebSocketState state) {
-            this.url = url;
-            this.state = state;
-        }
-
-        @Override
-        public void onOpen(WebSocket webSocket) {
-            if (state.retired) { webSocket.abort(); return; }
-            state.sentSubscriptions.clear();
-            state.webSocket = webSocket;
-            if (state.retired) { webSocket.abort(); return; }
-            state.connecting = false;
-            for (WebSocketBinding binding : state.bindings.values()) {
-                for (String message : subscriptions(binding.subscribeMessage())) {
-                    if (state.sentSubscriptions.add(message)) webSocket.sendText(message, true);
-                }
-            }
-            webSocket.request(1);
-        }
-
-        @Override
-        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-            if (state.retired) { webSocket.abort(); return CompletableFuture.completedFuture(null); }
-            text.append(data);
-            if (last) {
-                String payload = text.toString();
-                text.setLength(0);
-                try {
-                    JsonNode root = objectMapper.readTree(payload);
-                    String externalSymbol = extractExternalSymbol(root);
-                    Instant now = Instant.now();
-                    if (!state.retired) {
-                        for (WebSocketBinding binding : state.bindings.values()) {
-                            if (matchesBinding(binding, externalSymbol, root, state.bindings.size())) {
-                                parseWebSocketPayload(binding.source(), binding.instrumentId(), binding.instrument(), root, now);
-                            }
-                        }
-                    }
-                } catch (Exception ex) {
-                    log.debug("Reference market websocket message ignored url={} error={}",
-                            url, ex.getMessage());
-                }
-            }
-            webSocket.request(1);
-            return CompletableFuture.completedFuture(null);
-        }
-
-        @Override
-        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-            state.webSocket = null;
-            state.connecting = false;
-            state.sentSubscriptions.clear();
-            return CompletableFuture.completedFuture(null);
-        }
-
-        @Override
-        public void onError(WebSocket webSocket, Throwable error) {
-            state.webSocket = null;
-            state.connecting = false;
-            state.sentSubscriptions.clear();
-            log.debug("Reference market websocket failed url={} error={}",
-                    url, error.getMessage());
-        }
-    }
-
-    private static String extractExternalSymbol(JsonNode root) {
-        if (root == null) return "";
-        String okxInst = root.path("arg").path("instId").asString("");
-        if (!okxInst.isEmpty()) return okxInst;
-        String bybitSymbol = root.path("data").path("s").asString("");
-        if (!bybitSymbol.isEmpty()) return bybitSymbol;
-        String binanceSymbol = root.path("s").asString("");
-        if (!binanceSymbol.isEmpty()) return binanceSymbol;
-        String topic = root.path("topic").asString("");
-        if (!topic.isEmpty()) {
-            int dot = topic.lastIndexOf('.');
-            if (dot >= 0 && dot + 1 < topic.length()) return topic.substring(dot + 1);
-        }
-        return "";
-    }
-
-    private static boolean matchesBinding(WebSocketBinding binding, String externalSymbol, JsonNode root, int totalBindings) {
-        if (externalSymbol != null && !externalSymbol.isEmpty()) {
-            return externalSymbol.equalsIgnoreCase(binding.source().getExternalSymbol());
-        }
-        String topic = root.path("topic").asString("");
-        if (!topic.isEmpty()) {
-            return topic.toUpperCase(Locale.ROOT).contains(binding.source().getExternalSymbol().toUpperCase(Locale.ROOT));
-        }
-        return totalBindings == 1;
-    }
-
-    private static final class LiveBook {
-        private final java.util.concurrent.locks.ReentrantReadWriteLock rwLock = new java.util.concurrent.locks.ReentrantReadWriteLock();
-        private final NavigableMap<Long, Long> bids = new TreeMap<>(Comparator.reverseOrder());
-        private final NavigableMap<Long, Long> asks = new TreeMap<>();
-
-        boolean isEmpty() {
-            rwLock.readLock().lock();
-            try {
-                return bids.isEmpty() || asks.isEmpty();
-            } finally {
-                rwLock.readLock().unlock();
-            }
-        }
-
-        void replace(List<ReferenceOrderBookLevel> bidLevels,
-                     List<ReferenceOrderBookLevel> askLevels) {
-            rwLock.writeLock().lock();
-            try {
-                bids.clear();
-                asks.clear();
-                putAll(bids, bidLevels);
-                putAll(asks, askLevels);
-            } finally {
-                rwLock.writeLock().unlock();
-            }
-        }
-
-        void applyDeltas(List<ReferenceOrderBookLevel> bidLevels,
-                         List<ReferenceOrderBookLevel> askLevels) {
-            rwLock.writeLock().lock();
-            try {
-                applyDelta(bids, bidLevels);
-                applyDelta(asks, askLevels);
-            } finally {
-                rwLock.writeLock().unlock();
-            }
-        }
-
-        ReferenceOrderBookSnapshot snapshot(String source,
-                                            String instrumentId,
-                                            Instant receivedAt,
-                                            int depthLevels) {
-            rwLock.readLock().lock();
-            try {
-                List<ReferenceOrderBookLevel> bidLevels = topLevels(bids, depthLevels);
-                List<ReferenceOrderBookLevel> askLevels = topLevels(asks, depthLevels);
-                if (bidLevels.isEmpty() || askLevels.isEmpty()) {
-                    return null;
-                }
-                return new ReferenceOrderBookSnapshot(source, "WEBSOCKET", instrumentId, bidLevels, askLevels, receivedAt);
-            } finally {
-                rwLock.readLock().unlock();
-            }
-        }
-
-        private void putAll(NavigableMap<Long, Long> side, List<ReferenceOrderBookLevel> levels) {
-            for (ReferenceOrderBookLevel level : levels) {
-                if (level.priceTicks() > 0 && level.quantitySteps() > 0) {
-                    side.put(level.priceTicks(), level.quantitySteps());
-                }
-            }
-        }
-
-        private void applyDelta(NavigableMap<Long, Long> side, List<ReferenceOrderBookLevel> levels) {
-            for (ReferenceOrderBookLevel level : levels) {
-                if (level.priceTicks() <= 0) {
-                    continue;
-                }
-                if (level.quantitySteps() <= 0) {
-                    side.remove(level.priceTicks());
-                } else {
-                    side.put(level.priceTicks(), level.quantitySteps());
-                }
-            }
-        }
-
-        private List<ReferenceOrderBookLevel> topLevels(NavigableMap<Long, Long> side, int depthLevels) {
-            List<ReferenceOrderBookLevel> levels = new ArrayList<>();
-            for (Map.Entry<Long, Long> entry : side.entrySet()) {
-                if (levels.size() >= depthLevels) {
-                    break;
-                }
-                levels.add(new ReferenceOrderBookLevel(entry.getKey(), entry.getValue()));
-            }
-            return levels;
-        }
-    }
-
-    private record ParsedBook(List<ParsedLevel> bids, List<ParsedLevel> asks) {
-    }
-
-    private record ParsedBookUpdate(List<ParsedLevel> bids, List<ParsedLevel> asks, boolean delta) {
-        private boolean empty() {
-            return bids.isEmpty() && asks.isEmpty();
-        }
-    }
-
-    private record ParsedLevel(BigDecimal price, BigDecimal quantity) {
-    }
-
-    private static final class TradeTape {
-        private final ArrayDeque<ExternalTrade> trades = new ArrayDeque<>();
-        private final ArrayDeque<String> seenOrder = new ArrayDeque<>();
-        private final Set<String> seen = new HashSet<>();
-
-        private void add(ExternalTrade trade) {
-            synchronized (this) {
-                if (!seen.add(trade.tradeId())) return;
-                seenOrder.addLast(trade.tradeId());
-                while (seenOrder.size() > MAX_SEEN_TRADE_IDS) seen.remove(seenOrder.removeFirst());
-                if (trades.size() >= MAX_QUEUED_PRINTS) trades.removeFirst();
-                trades.addLast(trade);
-            }
-        }
-
-        private List<ExternalTrade> drain(int limit) {
-            synchronized (this) {
-                List<ExternalTrade> drained = new ArrayList<>();
-                while (drained.size() < limit && !trades.isEmpty()) drained.add(trades.removeFirst());
-                return List.copyOf(drained);
-            }
-        }
     }
 }

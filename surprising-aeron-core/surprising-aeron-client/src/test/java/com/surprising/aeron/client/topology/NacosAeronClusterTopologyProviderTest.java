@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -57,6 +58,21 @@ class NacosAeronClusterTopologyProviderTest {
                 namingService, false, "surprising-aeron-core", "DEFAULT_GROUP", fallback)) {
             List<String> hostnames = provider.lookupHostnames(ProductLine.SPOT);
             assertThat(hostnames).containsExactly("10.0.0.1", "10.0.0.2", "10.0.0.3");
+        }
+    }
+
+    @Test
+    @DisplayName("当 Nacos 无实例且未配置显式 fallback 时应快速失败而非静默回退到 127.0.0.1")
+    void shouldFailFastWhenNoInstancesAndNoFallback() throws Exception {
+        NamingService namingService = Mockito.mock(NamingService.class);
+        when(namingService.selectInstances(eq("surprising-aeron-core"), eq("DEFAULT_GROUP"), anyBoolean()))
+                .thenReturn(List.of());
+
+        try (NacosAeronClusterTopologyProvider provider = new NacosAeronClusterTopologyProvider(
+                namingService, false, "surprising-aeron-core", "DEFAULT_GROUP", null)) {
+            assertThatThrownBy(() -> provider.lookupHostnames(ProductLine.SPOT))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("no fallback is configured");
         }
     }
 }

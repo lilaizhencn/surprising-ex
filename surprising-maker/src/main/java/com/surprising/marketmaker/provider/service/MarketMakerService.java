@@ -81,7 +81,7 @@ public class MarketMakerService {
     private final MarketMakerRunEventRepository runEventRepository;
     private final MarketMakerMarketFeed marketFeed;
     private final MarketMakerQuoteReconciler quoteReconciler;
-    private final MarketMakerTradeExecutor tradeExecutor;
+    private final MarketMakerSimulatedTrades simulatedTrades;
     private final MarketMakerMetricsAssembler metricsAssembler;
     private final Map<String, StrategyRuntimeState> states = new ConcurrentHashMap<>();
     private final Map<String, AtomicBoolean> cycleLocks = new ConcurrentHashMap<>();
@@ -109,9 +109,9 @@ public class MarketMakerService {
         this.marketFeed = new MarketMakerMarketFeed(properties, instrumentSnapshotCache, markPriceCache,
                 aeronGateway, referenceMarketProvider);
         this.quoteReconciler = new MarketMakerQuoteReconciler(this, properties, aeronGateway, marketFeed, orderNonce);
-        this.tradeExecutor = new MarketMakerTradeExecutor(this, properties, aeronGateway, referenceMarketProvider, marketFeed);
+        this.simulatedTrades = new MarketMakerSimulatedTrades(this, properties, aeronGateway, referenceMarketProvider, marketFeed);
         this.metricsAssembler = new MarketMakerMetricsAssembler(this, properties, quotePlanner,
-                referenceMarketProvider, marketFeed, tradeExecutor, nodeId);
+                referenceMarketProvider, marketFeed, simulatedTrades, nodeId);
     }
 
     /** 一个策略的连续工作线程入口；false 表示暂停、未取得租约或本轮失败。 */
@@ -142,7 +142,7 @@ public class MarketMakerService {
             requireTradable(instrument, strategy.getProductLine());
             MarkPriceResponse mark = marketFeed.latestMarkPrice(strategy.getProductLine(), instrumentId, instrument);
             StrategyRuntimeState state = state(strategy);
-            return tradeExecutor.maybeTrade(strategy, state, state.cycleSequence(), instrumentId, instrument, mark, Instant.now());
+            return simulatedTrades.maybeTrade(strategy, state, state.cycleSequence(), instrumentId, instrument, mark, Instant.now());
         } catch (RuntimeException ex) {
             log.warn("Market-maker simulated trade failed strategyId={} instrumentId={} error={}",
                     strategy.getStrategyId(), instrumentId, ex.getMessage());
@@ -379,7 +379,7 @@ public class MarketMakerService {
                 MarkPriceResponse markPrice = marketFeed.latestMarkPrice(strategy.getProductLine(), instrumentId, instrument);
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId,
                         strategy.getProductLine(), instrument);
-                long volatilityTicks = tradeExecutor.observeVolatility(strategy, instrumentId, instrument, orderBook, markPrice);
+                long volatilityTicks = simulatedTrades.observeVolatility(strategy, instrumentId, instrument, orderBook, markPrice);
                 var inputs = marketFeed.fetchQuoteInputs(strategy, instrumentId, instrument);
                 validateQuoteInputs(inputs, strategy, instrumentId, instrument.changeId());
                 long rejectedQuotes = 0;
@@ -498,7 +498,7 @@ public class MarketMakerService {
                                             long accountId, long cycleSequence, InstrumentResponse instrument,
                                             OrderBookSnapshotResponse book, MarkPriceResponse mark,
                                             long position, RandomGenerator random) {
-        return tradeExecutor.simulatedOrders(strategy, instrumentId, accountId, cycleSequence,
+        return simulatedTrades.simulatedOrders(strategy, instrumentId, accountId, cycleSequence,
                 instrument, book, mark, position, random);
     }
 

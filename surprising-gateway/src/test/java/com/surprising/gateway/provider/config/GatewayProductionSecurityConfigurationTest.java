@@ -160,9 +160,6 @@ class GatewayProductionSecurityConfigurationTest {
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_API_SECRET", "wallet-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET", "wallet-webhook-secret");
         testEnvironment.put("GATEWAY_CUSTODY_WALLET_ASSET_SCALES", "{\"USDT\":6}");
-        testEnvironment.put("GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT", "10000");
-        testEnvironment.put("GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT", "50000");
-        testEnvironment.put("GATEWAY_PRODUCT_TRANSFER_VERIFICATION_THRESHOLD_USDT", "10000");
         testEnvironment.put("GATEWAY_WITHDRAWAL_VALUATION_BASE_URL", "https://price.example.com");
         testEnvironment.put("GATEWAY_KYC_DOCUMENTS_ENDPOINT", "https://s3.example.com");
         testEnvironment.put("GATEWAY_KYC_DOCUMENTS_BUCKET", "kyc-documents");

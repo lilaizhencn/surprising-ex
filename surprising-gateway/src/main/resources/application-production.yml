@@ -18,22 +18,22 @@ surprising:
       scanner-host: 127.0.0.1
       scanner-port: 3310
     withdrawal:
-      single-approval-threshold-usdt: ${GATEWAY_WITHDRAWAL_SINGLE_APPROVAL_THRESHOLD_USDT}
-      daily-limit-usdt: ${GATEWAY_WITHDRAWAL_DAILY_LIMIT_USDT}
+      single-approval-threshold-usdt: 10000
+      daily-limit-usdt: 50000
       valuation-max-age: 30s
       failure-reconciliation-delay: 30s
     product-transfer:
-      verification-threshold-usdt: ${GATEWAY_PRODUCT_TRANSFER_VERIFICATION_THRESHOLD_USDT}
+      verification-threshold-usdt: 10000
       reconciliation-delay: 5s
       reconciliation-batch-size: 100
     custody-wallet:
-      enabled: ${GATEWAY_CUSTODY_WALLET_ENABLED:true}
+      enabled: true
       base-url: ${GATEWAY_CUSTODY_WALLET_BASE_URL}
       api-key: ${GATEWAY_CUSTODY_WALLET_API_KEY}
       api-secret: ${GATEWAY_CUSTODY_WALLET_API_SECRET}
       webhook-secret: ${GATEWAY_CUSTODY_WALLET_WEBHOOK_SECRET}
     kyc-documents:
-      enabled: ${GATEWAY_KYC_DOCUMENTS_ENABLED:true}
+      enabled: true
       type: s3
       endpoint: ${GATEWAY_KYC_DOCUMENTS_ENDPOINT}
       bucket: ${GATEWAY_KYC_DOCUMENTS_BUCKET}

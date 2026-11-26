@@ -26,14 +26,17 @@ import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import com.surprising.instrument.provider.service.InstrumentService;
+import com.surprising.trading.api.model.CancelOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderQueryResponse;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
@@ -339,6 +342,77 @@ class OpenApiControllerTest {
                 .containsEntry("bidQty", "2")
                 .containsEntry("askPrice", "123.55")
                 .containsEntry("askQty", "3");
+    }
+
+    @Test
+    void placeOrderDoesNotFabricateSuccessWhenReceiptIsNotCommitted() throws Exception {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
+        scale.setPriceScale(2);
+        scale.setQuantityScale(3);
+        properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
+        properties.getBinanceApi().setSymbolAliases(Map.of("SPOT:BTCUSDT", "1"));
+        OrderService orderService = mock(OrderService.class);
+        UUID commandId = UUID.randomUUID();
+        when(orderService.placeCommand(any(PlaceOrderRequest.class))).thenReturn(
+                new OrderCommandReceipt(commandId, "RESULT_UNKNOWN", "RESULT_UNKNOWN",
+                        "timed out waiting for committed command result",
+                        OrderCommandReceipt.commandResultUrl(commandId), List.of(9001L), null, null));
+
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
+                mock(InstrumentService.class), orderService,
+                mock(AccountService.class), mock(MatchingMarketDataService.class),
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class),
+                bearerAuth(), mock(ComplianceService.class), mock(CustodyWalletClient.class),
+                mock(CustodyWithdrawalService.class), new ObjectMapper());
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v3/order");
+        request.addHeader("Authorization", "Bearer token");
+        request.setParameter("symbol", "BTCUSDT");
+        request.setParameter("side", "BUY");
+        request.setParameter("type", "LIMIT");
+        request.setParameter("price", "123.45");
+        request.setParameter("quantity", "1.000");
+
+        ResponseEntity<byte[]> response = controller.handle(request, null);
+        assertThat(response.getStatusCode().value()).isEqualTo(202);
+        Map<?, ?> body = new ObjectMapper().readValue(response.getBody(), Map.class);
+        assertThat(String.valueOf(body.get("msg"))).contains("RESULT_UNKNOWN");
+        verify(orderService).placeCommand(any(PlaceOrderRequest.class));
+    }
+
+    @Test
+    void cancelOrderDoesNotFabricateCanceledWhenReceiptIsNotCommitted() throws Exception {
+        GatewayProperties properties = new GatewayProperties();
+        GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
+        scale.setPriceScale(2);
+        scale.setQuantityScale(3);
+        properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
+        properties.getBinanceApi().setSymbolAliases(Map.of("SPOT:BTCUSDT", "1"));
+        OrderService orderService = mock(OrderService.class);
+        UUID commandId = UUID.randomUUID();
+        when(orderService.cancelCommand(any(CancelOrderRequest.class))).thenReturn(
+                new OrderCommandReceipt(commandId, "NOT_ACCEPTED", "NOT_CONNECTED",
+                        "cluster unavailable", OrderCommandReceipt.commandResultUrl(commandId),
+                        List.of(), null, -1L));
+
+        OpenApiController controller = OpenApiTestSupport.controller(properties,
+                mock(InstrumentService.class), orderService,
+                mock(AccountService.class), mock(MatchingMarketDataService.class),
+                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class),
+                bearerAuth(), mock(ComplianceService.class), mock(CustodyWalletClient.class),
+                mock(CustodyWithdrawalService.class), new ObjectMapper());
+
+        MockHttpServletRequest request = new MockHttpServletRequest("DELETE", "/api/v3/order");
+        request.addHeader("Authorization", "Bearer token");
+        request.setParameter("symbol", "BTCUSDT");
+        request.setParameter("orderId", "100");
+
+        ResponseEntity<byte[]> response = controller.handle(request, null);
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        Map<?, ?> body = new ObjectMapper().readValue(response.getBody(), Map.class);
+        assertThat(String.valueOf(body.get("msg"))).contains("NOT_CONNECTED");
+        verify(orderService).cancelCommand(any(CancelOrderRequest.class));
     }
 
     private OpenApiController controller(GatewayProperties properties, AuthService authService,

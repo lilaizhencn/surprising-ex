@@ -186,9 +186,9 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     static ThreadingMode clientThreadingMode() {
-        String configured = System.getProperty("surprising.aeron.client.threading-mode");
-        if (configured == null || configured.isBlank()) {
-            configured = System.getenv().getOrDefault("AERON_CLIENT_THREADING_MODE", "SHARED");
+        String configured = System.getProperty("surprising.aeron.client.threading-mode", "SHARED");
+        if (configured.isBlank()) {
+            configured = "SHARED";
         }
         try {
             return ThreadingMode.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));

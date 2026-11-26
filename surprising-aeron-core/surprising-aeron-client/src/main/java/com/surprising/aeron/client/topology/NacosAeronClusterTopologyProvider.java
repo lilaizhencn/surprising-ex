@@ -53,7 +53,7 @@ public class NacosAeronClusterTopologyProvider implements AeronClusterTopologyPr
         this.ownsNamingService = ownsNamingService;
         this.serviceName = (serviceName == null || serviceName.isBlank()) ? "surprising-aeron-core" : serviceName.trim();
         this.group = (group == null || group.isBlank()) ? "DEFAULT_GROUP" : group.trim();
-        this.fallback = fallback != null ? fallback : AeronClusterTopologyProvider.ofStatic(List.of("127.0.0.1"));
+        this.fallback = fallback;
     }
 
     private static NamingService createNamingService(String serverAddr) {
@@ -100,8 +100,11 @@ public class NacosAeronClusterTopologyProvider implements AeronClusterTopologyPr
             return cached;
         }
 
-        // 回退兜底配置
-        return fallback.lookupHostnames(productLine);
+        if (fallback != null) {
+            return fallback.lookupHostnames(productLine);
+        }
+        throw new IllegalStateException("Failed to resolve Aeron cluster topology from Nacos for productLine="
+                + productLine + " (serviceName=" + serviceName + ", group=" + group + ") and no fallback is configured");
     }
 
     private int extractNodeId(Instance instance) {

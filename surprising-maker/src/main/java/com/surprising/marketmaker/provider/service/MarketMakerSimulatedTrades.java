@@ -9,8 +9,8 @@ import com.surprising.marketmaker.provider.model.StrategyRuntimeState;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.OrderBatchResponse;
-import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.PlaceOrderRequest;
@@ -22,9 +22,9 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.random.RandomGenerator;
 import lombok.extern.slf4j.Slf4j;
 
-/** 做市模拟吃单执行与短期价格波动率观测协作器。 */
+/** 做市模拟吃单与短期价格波动率观测协作器。 */
 @Slf4j
-final class MarketMakerTradeExecutor {
+final class MarketMakerSimulatedTrades {
     private final MarketMakerService service;
     private final MarketMakerProperties properties;
     private final MakerAeronTradingGateway aeronGateway;
@@ -32,11 +32,11 @@ final class MarketMakerTradeExecutor {
     private final MarketMakerMarketFeed marketFeed;
     private final Map<String, PriceState> priceStates = new ConcurrentHashMap<>();
 
-    MarketMakerTradeExecutor(MarketMakerService service,
-                             MarketMakerProperties properties,
-                             MakerAeronTradingGateway aeronGateway,
-                             ReferenceMarketProvider referenceMarketProvider,
-                             MarketMakerMarketFeed marketFeed) {
+    MarketMakerSimulatedTrades(MarketMakerService service,
+                               MarketMakerProperties properties,
+                               MakerAeronTradingGateway aeronGateway,
+                               ReferenceMarketProvider referenceMarketProvider,
+                               MarketMakerMarketFeed marketFeed) {
         this.service = service;
         this.properties = properties;
         this.aeronGateway = aeronGateway;

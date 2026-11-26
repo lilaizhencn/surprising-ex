@@ -28,7 +28,7 @@ final class MarketMakerMetricsAssembler {
     private final QuotePlanner quotePlanner;
     private final ReferenceMarketProvider referenceMarketProvider;
     private final MarketMakerMarketFeed marketFeed;
-    private final MarketMakerTradeExecutor tradeExecutor;
+    private final MarketMakerSimulatedTrades simulatedTrades;
     private final String nodeId;
 
     MarketMakerMetricsAssembler(MarketMakerService service,
@@ -36,14 +36,14 @@ final class MarketMakerMetricsAssembler {
                                 QuotePlanner quotePlanner,
                                 ReferenceMarketProvider referenceMarketProvider,
                                 MarketMakerMarketFeed marketFeed,
-                                MarketMakerTradeExecutor tradeExecutor,
+                                MarketMakerSimulatedTrades simulatedTrades,
                                 String nodeId) {
         this.service = service;
         this.properties = properties;
         this.quotePlanner = quotePlanner;
         this.referenceMarketProvider = referenceMarketProvider;
         this.marketFeed = marketFeed;
-        this.tradeExecutor = tradeExecutor;
+        this.simulatedTrades = simulatedTrades;
         this.nodeId = nodeId;
     }
 
@@ -111,7 +111,7 @@ final class MarketMakerMetricsAssembler {
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
                     : quotePlanner.plan(strategy, properties.getQuoting(), properties.getRisk(), instrument,
                     orderBook, markPrice, position.signedQuantitySteps(),
-                    tradeExecutor.currentVolatility(strategy, instrumentId), referenceOrderBook, 0L);
+                    simulatedTrades.currentVolatility(strategy, instrumentId), referenceOrderBook, 0L);
             long staleOwned = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
                     ? ownedLive.size() : 0;
             int desiredQuotes = plan.quotes().size();
