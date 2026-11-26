@@ -81,6 +81,34 @@ class SubAccountServiceTest {
         ProductTransferOperationRequest op = captor.getValue();
         assertEquals(1001L, op.userId());
         assertEquals(2001L, op.recipientUserId());
+        assertEquals(com.surprising.account.api.model.AccountType.SPOT, op.sourceAccountType());
+    }
+
+    @Test
+    @DisplayName("非现货产品线主子划转应映射到对应账户类型并校验资产代码")
+    void shouldMapDerivativeProductLineToMatchingAccountTypeAndValidateAsset() {
+        SubAccountRecord relation = new SubAccountRecord(
+                1L, 1001L, 2001L, "trader1", "TRADE_CONTRACT", "ACTIVE", Instant.now()
+        );
+        when(repository.findRelation(1001L, 2001L)).thenReturn(Optional.of(relation));
+
+        SubAccountTransferRequest blankAsset = new SubAccountTransferRequest(
+                2001L, true, " ", 100L, ProductLine.LINEAR_PERPETUAL
+        );
+        assertThrows(IllegalArgumentException.class, () -> service.transfer(1001L, blankAsset));
+
+        SubAccountTransferRequest perpTransfer = new SubAccountTransferRequest(
+                2001L, true, "usdt", 250_000000L, ProductLine.LINEAR_PERPETUAL
+        );
+        service.transfer(1001L, perpTransfer);
+
+        ArgumentCaptor<ProductTransferOperationRequest> captor = ArgumentCaptor.forClass(ProductTransferOperationRequest.class);
+        verify(accountGateway).transferOut(captor.capture());
+        ProductTransferOperationRequest op = captor.getValue();
+        assertEquals(com.surprising.account.api.model.AccountType.USDT_PERPETUAL, op.sourceAccountType());
+        assertEquals(com.surprising.account.api.model.AccountType.USDT_PERPETUAL, op.targetAccountType());
+        assertEquals("USDT", op.asset());
+        assertTrue(op.transferId() > 0);
     }
 
     @Test

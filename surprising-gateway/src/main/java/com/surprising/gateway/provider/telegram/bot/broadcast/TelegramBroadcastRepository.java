@@ -15,6 +15,7 @@ public class TelegramBroadcastRepository {
     private final JdbcTemplate jdbc;
     private final java.util.function.LongSupplier nanoTime;
     private final java.util.LinkedHashMap<String, RememberedChat> rememberedChats = new java.util.LinkedHashMap<>();
+    private final java.util.concurrent.locks.ReentrantLock chatCacheLock = new java.util.concurrent.locks.ReentrantLock();
     private static final long CHAT_RECHECK_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     private static final int MAX_REMEMBERED_CHATS = 4096;
     private record RememberedChat(long chatId, long checkedAt) {}
@@ -29,10 +30,17 @@ public class TelegramBroadcastRepository {
         this.nanoTime = nanoTime;
     }
 
-    public synchronized void rememberChat(String subject, long chatId) {
+    public void rememberChat(String subject, long chatId) {
         long now = nanoTime.getAsLong();
-        var previous = rememberedChats.get(subject);
-        if (previous != null && previous.chatId() == chatId && now - previous.checkedAt() < CHAT_RECHECK_NANOS) return;
+        chatCacheLock.lock();
+        try {
+            var previous = rememberedChats.get(subject);
+            if (previous != null && previous.chatId() == chatId && now - previous.checkedAt() < CHAT_RECHECK_NANOS) {
+                return;
+            }
+        } finally {
+            chatCacheLock.unlock();
+        }
         jdbc.update("""
                 INSERT INTO gateway_telegram_chats(subject, chat_id, updated_at)
                 VALUES (?, ?, now())
@@ -43,8 +51,15 @@ public class TelegramBroadcastRepository {
                 """, subject, chatId);
         // No caller transaction: only memoize a completed autocommit write.
         if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
-            rememberedChats.put(subject, new RememberedChat(chatId, now));
-            if (rememberedChats.size() > MAX_REMEMBERED_CHATS) rememberedChats.remove(rememberedChats.firstEntry().getKey());
+            chatCacheLock.lock();
+            try {
+                rememberedChats.put(subject, new RememberedChat(chatId, now));
+                if (rememberedChats.size() > MAX_REMEMBERED_CHATS) {
+                    rememberedChats.remove(rememberedChats.firstEntry().getKey());
+                }
+            } finally {
+                chatCacheLock.unlock();
+            }
         }
     }
 

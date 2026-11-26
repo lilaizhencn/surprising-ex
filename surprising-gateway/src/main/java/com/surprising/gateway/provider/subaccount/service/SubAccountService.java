@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +34,7 @@ public class SubAccountService {
     private final AccountCommandGateway accountCommandGateway;
     private AuthStateSync authStateSync;
     private final AccountService accountService;
+    private final AtomicLong transferSequence = new AtomicLong(0);
 
     public SubAccountService(SubAccountRepository subAccountRepository,
                              AuthPersistenceService authPersistenceService,
@@ -160,8 +162,9 @@ public class SubAccountService {
         if (parentUserId <= 0) {
             throw new IllegalArgumentException("parentUserId must be positive");
         }
-        if (request == null || request.subUserId() <= 0 || request.amountUnits() <= 0) {
-            throw new IllegalArgumentException("valid subUserId and amountUnits are required");
+        if (request == null || request.subUserId() <= 0 || request.amountUnits() <= 0
+                || request.asset() == null || request.asset().isBlank()) {
+            throw new IllegalArgumentException("valid subUserId, asset, and amountUnits are required");
         }
 
         // 校验父子关系
@@ -176,7 +179,9 @@ public class SubAccountService {
         long toUserId = request.fromParentToSub() ? request.subUserId() : parentUserId;
 
         ProductLine productLine = request.productLine() != null ? request.productLine() : ProductLine.SPOT;
-        long transferId = System.currentTimeMillis() * 1000 + (long) (Math.random() * 1000);
+        AccountType accountType = accountTypeFor(productLine);
+        String asset = request.asset().trim().toUpperCase(Locale.ROOT);
+        long transferId = nextTransferId();
         String refId = "sub-xfer-" + UUID.randomUUID().toString().substring(0, 8);
 
         ProductTransferOperationRequest opRequest = new ProductTransferOperationRequest(
@@ -184,9 +189,9 @@ public class SubAccountService {
                 fromUserId,
                 productLine,
                 productLine,
-                AccountType.SPOT,
-                AccountType.SPOT,
-                request.asset().toUpperCase(),
+                accountType,
+                accountType,
+                asset,
                 request.amountUnits(),
                 refId,
                 "SUB_ACCOUNT_INTERNAL_TRANSFER",
@@ -199,17 +204,39 @@ public class SubAccountService {
 
         // 1. 出账方扣除
         gateway.transferOut(opRequest);
-        // 2. 入账方到账
-        gateway.transferIn(opRequest);
-        // 3. 终态确认
-        gateway.completeTransfer(opRequest);
+        try {
+            // 2. 入账方到账
+            gateway.transferIn(opRequest);
+            // 3. 终态确认
+            gateway.completeTransfer(opRequest);
+        } catch (RuntimeException ex) {
+            log.error("SubAccount transfer failed after transferOut: transferId={}, refId={}, productLine={}, from={}, to={}, asset={}, amount={}, error={}",
+                    transferId, refId, productLine, fromUserId, toUserId, asset, request.amountUnits(), ex.getMessage(), ex);
+            throw ex;
+        }
 
-        log.info("SubAccount transfer success: from={}, to={}, asset={}, amount={}",
-                fromUserId, toUserId, request.asset(), request.amountUnits());
+        log.info("SubAccount transfer success: transferId={}, refId={}, productLine={}, from={}, to={}, asset={}, amount={}",
+                transferId, refId, productLine, fromUserId, toUserId, asset, request.amountUnits());
 
         return new SubAccountTransferResponse(
-                refId, fromUserId, toUserId, request.asset(), request.amountUnits(), "SUCCESS", Instant.now()
+                refId, fromUserId, toUserId, asset, request.amountUnits(), "SUCCESS", Instant.now()
         );
+    }
+
+    private long nextTransferId() {
+        long candidate = (System.currentTimeMillis() << 12) | (transferSequence.incrementAndGet() & 0xFFFL);
+        return candidate > 0 ? candidate : transferSequence.incrementAndGet();
+    }
+
+    private static AccountType accountTypeFor(ProductLine productLine) {
+        return switch (productLine) {
+            case SPOT -> AccountType.SPOT;
+            case LINEAR_PERPETUAL -> AccountType.USDT_PERPETUAL;
+            case INVERSE_PERPETUAL -> AccountType.COIN_PERPETUAL;
+            case LINEAR_DELIVERY -> AccountType.USDT_DELIVERY;
+            case INVERSE_DELIVERY -> AccountType.COIN_DELIVERY;
+            case OPTION -> AccountType.OPTION;
+        };
     }
 
     public SubAccountRecord requireOwnedRelation(long parentUserId, long subUserId) {

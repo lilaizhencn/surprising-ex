@@ -21,6 +21,7 @@ public class GridStrategyService {
     private final Map<Long, GridStrategyRecord> strategies = new ConcurrentHashMap<>();
     private final Map<Long, List<GridLevel>> strategyLevels = new ConcurrentHashMap<>();
     private final Map<String, String> levelClientOrderIds = new ConcurrentHashMap<>();
+    private final java.util.concurrent.locks.ReentrantLock reconcileLock = new java.util.concurrent.locks.ReentrantLock();
 
     public GridStrategyService(OrderService orderService) {
         this.orderService = orderService;
@@ -190,11 +191,23 @@ public class GridStrategyService {
      */
     @Scheduled(fixedDelay = 5000)
     public void reconcileActiveGrids() {
-        for (GridStrategyRecord record : strategies.values()) {
-            if (!"ACTIVE".equalsIgnoreCase(record.status()) && !"RUNNING".equalsIgnoreCase(record.status())) {
-                continue;
+        if (!reconcileLock.tryLock()) {
+            return;
+        }
+        try {
+            for (GridStrategyRecord record : strategies.values()) {
+                if (!"ACTIVE".equalsIgnoreCase(record.status()) && !"RUNNING".equalsIgnoreCase(record.status())) {
+                    continue;
+                }
+                try {
+                    reconcileStrategy(record.strategyId());
+                } catch (Exception ex) {
+                    log.error("Grid strategy reconcile failed strategyId={} userId={}: {}",
+                            record.strategyId(), record.userId(), ex.getMessage(), ex);
+                }
             }
-            reconcileStrategy(record.strategyId());
+        } finally {
+            reconcileLock.unlock();
         }
     }
 

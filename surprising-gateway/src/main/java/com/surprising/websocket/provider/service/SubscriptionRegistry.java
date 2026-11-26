@@ -41,14 +41,10 @@ public class SubscriptionRegistry {
     private final Map<String, Set<SubscriptionTopic>> sessionTopics = new ConcurrentHashMap<>();
     private final Map<SubscriptionTopic, Set<ClientConnection>> subscribers = new ConcurrentHashMap<>();
     private final Map<Long, Set<ClientConnection>> userConnections = new ConcurrentHashMap<>();
-    private record DepthBookKey(com.surprising.product.api.ProductLine productLine, String instrumentId) {}
-
-    // Last book accepted by each connection queue; immutable Core views are shared, never copied.
-    private final Map<SubscriptionTopic, Map<String, CoreOrderBookView>> depthBaselines = new ConcurrentHashMap<>();
-    private final Map<DepthBookKey, Set<SubscriptionTopic>> depthTopics = new ConcurrentHashMap<>();
     private final LongAdder fanoutBatches = new LongAdder();
     private final LongAdder fanoutMessages = new LongAdder();
     private final LongAdder backpressureRejections = new LongAdder();
+    private final DepthSubscriptionFanout depthFanout;
 
     @Autowired
     public SubscriptionRegistry(ObjectMapper objectMapper, WebSocketProperties properties, MeterRegistry meterRegistry) {
@@ -59,6 +55,8 @@ public class SubscriptionRegistry {
     public SubscriptionRegistry(ObjectMapper objectMapper, WebSocketProperties properties) {
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.depthFanout = new DepthSubscriptionFanout(
+                objectMapper, subscribers, fanoutBatches, fanoutMessages, backpressureRejections, this::disconnect);
     }
 
     public void add(ClientConnection connection) {
@@ -114,11 +112,7 @@ public class SubscriptionRegistry {
             // Install the local recipient first: a synchronous first Core baseline must not be lost.
             topics.add(topic);
             subscribers.computeIfAbsent(topic, ignored -> ConcurrentHashMap.newKeySet()).add(connection);
-            if (topic.channel() == WsChannel.DEPTH && topic.productLine() != null) {
-                depthTopics.computeIfAbsent(
-                        new DepthBookKey(topic.productLine(), topic.instrumentId()),
-                        ignored -> ConcurrentHashMap.newKeySet()).add(topic);
-            }
+            depthFanout.registerTopic(topic);
             if (topic.userId() != null) {
                 userConnections.computeIfAbsent(topic.userId(), ignored -> ConcurrentHashMap.newKeySet()).add(connection);
             }
@@ -145,22 +139,13 @@ public class SubscriptionRegistry {
     }
 
     private void removeSubscription(ClientConnection connection, SubscriptionTopic topic) {
-        removeDepthBaseline(topic, connection.id());
+        depthFanout.removeBaseline(topic, connection.id());
         Set<ClientConnection> connections = subscribers.get(topic);
         if (connections != null) {
             connections.remove(connection);
             if (connections.isEmpty()) {
                 subscribers.remove(topic, connections);
-                if (topic.channel() == WsChannel.DEPTH && topic.productLine() != null) {
-                    var key = new DepthBookKey(topic.productLine(), topic.instrumentId());
-                    Set<SubscriptionTopic> activeDepthTopics = depthTopics.get(key);
-                    if (activeDepthTopics != null) {
-                        activeDepthTopics.remove(topic);
-                        if (activeDepthTopics.isEmpty()) {
-                            depthTopics.remove(key, activeDepthTopics);
-                        }
-                    }
-                }
+                depthFanout.unregisterTopic(topic);
             }
         }
         Long userId = topic.userId();
@@ -184,8 +169,7 @@ public class SubscriptionRegistry {
 
     /** Failure notification is local only: no Redis calls on the receiver/conductor thread. */
     public void invalidateRealtime() {
-        depthBaselines.clear();
-        depthTopics.clear();
+        depthFanout.clear();
         for (ClientConnection connection : connections())
             connection.close(com.surprising.websocket.provider.session.WsCloseStatus.SERVICE_RESTARTED);
     }
@@ -207,106 +191,14 @@ public class SubscriptionRegistry {
         }
     }
 
-    private void removeDepthBaseline(SubscriptionTopic topic, String sessionId) {
-        var baselines = depthBaselines.get(topic);
-        if (baselines == null) return;
-        baselines.remove(sessionId);
-        if (baselines.isEmpty()) depthBaselines.remove(topic);
-    }
-
     public boolean hasDepthSubscribers(com.surprising.product.api.ProductLine productLine, String instrumentId) {
-        if (productLine == null || instrumentId == null) return false;
-        Set<SubscriptionTopic> active = depthTopics.get(new DepthBookKey(productLine, instrumentId));
-        return active != null && !active.isEmpty();
+        return depthFanout.hasSubscribers(productLine, instrumentId);
     }
 
     public void publishDepth(SubscriptionTopic topic,
-            CoreOrderBookView book,
-            String version, String entityId, Instant eventTime) {
-        if (topic.channel() != WsChannel.DEPTH || topic.productLine() == null)
-            throw new IllegalArgumentException("depth requires an explicit product line");
-        Set<SubscriptionTopic> active = depthTopics.get(new DepthBookKey(topic.productLine(), topic.instrumentId()));
-        if (active == null || active.isEmpty()) return;
-        for (SubscriptionTopic subscribedTopic : active) {
-            publishDepthForTopic(subscribedTopic, book, version, entityId, eventTime);
-        }
-    }
-
-    private static final class EncodedDepth {
-        static final EncodedDepth EMPTY = new EncodedDepth(null, null);
-        final String message;
-        final io.netty.buffer.ByteBuf frame;
-
-        EncodedDepth(String message, io.netty.buffer.ByteBuf frame) {
-            this.message = message;
-            this.frame = frame;
-        }
-    }
-
-    private void publishDepthForTopic(SubscriptionTopic topic,
-            CoreOrderBookView book,
-            String version, String entityId, Instant eventTime) {
-        var connections = subscribers.get(topic);
-        if (connections == null || connections.isEmpty()) return;
-        int maxDepth = topic.effectiveDepth();
-        var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new ConcurrentHashMap<>());
-        List<ClientConnection> failed = null;
-        var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, EncodedDepth>();
-        try {
-            synchronized (baselines) {
-                for (ClientConnection connection : connections) {
-                    var previous = baselines.get(connection.id());
-                    if (previous != null && book.exportSequence() <= previous.exportSequence()) continue;
-                    EncodedDepth encoded = encodedByBaseline.get(previous);
-                    if (encoded == null) {
-                        var update = DepthUpdate.between(previous, book, maxDepth);
-                        if (topic.depth() != null && previous != null && update.bids().isEmpty() && update.asks().isEmpty()) {
-                            encoded = EncodedDepth.EMPTY;
-                        } else {
-                            String message = encode(WsServerMessage.event(topic,
-                                    new RealtimeWebSocketBridge.VersionedEvent(version, entityId, update), eventTime));
-                            io.netty.buffer.ByteBuf frame = connection.supportsZeroCopyFrames()
-                                    ? io.netty.buffer.ByteBufUtil.writeUtf8(
-                                            io.netty.buffer.ByteBufAllocator.DEFAULT, message)
-                                    : null;
-                            encoded = new EncodedDepth(message, frame);
-                        }
-                        encodedByBaseline.put(previous, encoded);
-                    }
-                    if (encoded == EncodedDepth.EMPTY) continue;
-                    fanoutBatches.increment();
-                    fanoutMessages.increment();
-                    boolean accepted;
-                    if (connection.supportsZeroCopyFrames()) {
-                        io.netty.buffer.ByteBuf frame = encoded.frame != null
-                                ? encoded.frame
-                                : io.netty.buffer.ByteBufUtil.writeUtf8(
-                                        io.netty.buffer.ByteBufAllocator.DEFAULT, encoded.message);
-                        if (encoded.frame == null) {
-                            encoded = new EncodedDepth(encoded.message, frame);
-                            encodedByBaseline.put(previous, encoded);
-                        }
-                        accepted = connection.sendFrames(List.of(frame), List.of(encoded.message));
-                    } else {
-                        accepted = connection.send(encoded.message);
-                    }
-                    if (accepted) baselines.put(connection.id(), book);
-                    else {
-                        backpressureRejections.increment();
-                        if (failed == null) failed = new ArrayList<>();
-                        failed.add(connection);
-                    }
-                }
-            }
-        } finally {
-            for (EncodedDepth encoded : encodedByBaseline.values()) {
-                if (encoded.frame != null) {
-                    encoded.frame.release();
-                }
-            }
-        }
-        // Disconnect and lease cleanup may perform external I/O; never under the topic baseline lock.
-        if (failed != null) for (ClientConnection connection : failed) disconnect(connection);
+                             CoreOrderBookView book,
+                             String version, String entityId, Instant eventTime) {
+        depthFanout.publishDepth(topic, book, version, entityId, eventTime);
     }
 
     /** 将同一批次的事件一次性投递到每个连接的有界环形队列。 */

@@ -24,6 +24,7 @@ public class PriceBusinessSettingsService {
     private final MarkPriceProperties mark;
     private final ProductLine line;
     private final ApplicationEventPublisher events;
+    private final java.util.concurrent.locks.ReentrantLock settingsLock = new java.util.concurrent.locks.ReentrantLock();
     private volatile PriceSettingsSnapshot current;
 
     public PriceBusinessSettingsService(PriceBusinessSettingsRepository settings, ObjectMapper json,
@@ -44,16 +45,26 @@ public class PriceBusinessSettingsService {
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public synchronized PriceSettingsSnapshot save(PriceBusinessSettings value, long expectedVersion, String admin, String reason) {
-        var saved = settings.save(line, value, expectedVersion, admin, reason)
-                .orElseThrow(() -> new OptimisticLockingFailureException("price settings changed; reload before saving"));
-        install(saved);
-        return current;
+    public PriceSettingsSnapshot save(PriceBusinessSettings value, long expectedVersion, String admin, String reason) {
+        settingsLock.lock();
+        try {
+            var saved = settings.save(line, value, expectedVersion, admin, reason)
+                    .orElseThrow(() -> new OptimisticLockingFailureException("price settings changed; reload before saving"));
+            install(saved);
+            return current;
+        } finally {
+            settingsLock.unlock();
+        }
     }
-    public synchronized void reload() {
-        var value = settings.find(line);
-        if (value == null) throw new IllegalStateException("price settings missing");
-        if (current == null || value.version() > current.version()) install(value);
+    public void reload() {
+        settingsLock.lock();
+        try {
+            var value = settings.find(line);
+            if (value == null) throw new IllegalStateException("price settings missing");
+            if (current == null || value.version() > current.version()) install(value);
+        } finally {
+            settingsLock.unlock();
+        }
     }
     private void install(PriceSettingsSnapshot snapshot) {
         var values = snapshot.settings();

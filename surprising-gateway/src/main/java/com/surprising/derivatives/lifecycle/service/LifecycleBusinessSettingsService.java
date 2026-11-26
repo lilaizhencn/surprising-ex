@@ -29,6 +29,7 @@ public class LifecycleBusinessSettingsService {
     private final InsuranceProperties insurance;
     private final AdlProperties adl;
     private final ApplicationEventPublisher events;
+    private final java.util.concurrent.locks.ReentrantLock settingsLock = new java.util.concurrent.locks.ReentrantLock();
     private volatile LifecycleSettingsSnapshot current;
 
     public LifecycleBusinessSettingsService(LifecycleBusinessSettingsRepository settings, RiskProperties risk,
@@ -53,24 +54,34 @@ public class LifecycleBusinessSettingsService {
         return value;
     }
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public synchronized LifecycleSettingsSnapshot save(LifecycleBusinessSettings value, long expectedVersion, String admin, String reason) {
-        if (!line.isDerivative()) {
-            throw new IllegalArgumentException("spot product line has no derivatives lifecycle settings");
+    public LifecycleSettingsSnapshot save(LifecycleBusinessSettings value, long expectedVersion, String admin, String reason) {
+        settingsLock.lock();
+        try {
+            if (!line.isDerivative()) {
+                throw new IllegalArgumentException("spot product line has no derivatives lifecycle settings");
+            }
+            if (current().version() != expectedVersion)
+                throw new OptimisticLockingFailureException("lifecycle settings changed; reload before saving");
+            var saved = settings.save(line, value, expectedVersion, admin, reason)
+                    .orElseThrow(() -> new OptimisticLockingFailureException("lifecycle settings changed; reload before saving"));
+            install(saved);
+            return current;
+        } finally {
+            settingsLock.unlock();
         }
-        if (current().version() != expectedVersion)
-            throw new OptimisticLockingFailureException("lifecycle settings changed; reload before saving");
-        var saved = settings.save(line, value, expectedVersion, admin, reason)
-                .orElseThrow(() -> new OptimisticLockingFailureException("lifecycle settings changed; reload before saving"));
-        install(saved);
-        return current;
     }
-    public synchronized void reload() {
-        if (!line.isDerivative()) {
-            return;
+    public void reload() {
+        settingsLock.lock();
+        try {
+            if (!line.isDerivative()) {
+                return;
+            }
+            var value = settings.find(line);
+            if (value == null) throw new IllegalStateException("lifecycle business settings are missing");
+            if (current == null || value.version() > current.version()) install(value);
+        } finally {
+            settingsLock.unlock();
         }
-        var value = settings.find(line);
-        if (value == null) throw new IllegalStateException("lifecycle business settings are missing");
-        if (current == null || value.version() > current.version()) install(value);
     }
 
     private void install(LifecycleSettingsSnapshot value) {

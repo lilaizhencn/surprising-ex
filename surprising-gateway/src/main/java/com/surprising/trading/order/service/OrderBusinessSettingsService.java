@@ -18,6 +18,7 @@ public class OrderBusinessSettingsService {
     private final OrderBusinessSettingsRepository settings;
     private final TradingOrderProperties properties;
     private final ProductLine line;
+    private final java.util.concurrent.locks.ReentrantLock settingsLock = new java.util.concurrent.locks.ReentrantLock();
     private volatile OrderSettingsSnapshot current;
 
     public OrderBusinessSettingsService(OrderBusinessSettingsRepository settings, TradingOrderProperties properties) {
@@ -40,20 +41,30 @@ public class OrderBusinessSettingsService {
 
     // 保存独立提交后再发布本机规则；外层事务回滚不能留下未提交的内存版本。
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public synchronized OrderSettingsSnapshot save(ProductLine requested, OrderBusinessSettings value,
-                                                   long expectedVersion, String admin, String reason) {
-        current(requested);
-        var saved = settings.save(line, value, expectedVersion, admin, reason)
-                .orElseThrow(() -> new OptimisticLockingFailureException("order settings changed; reload before saving"));
-        // 此单表 CAS 在返回前已提交；只安装成功保存的数据库版本。
-        install(saved);
-        return current;
+    public OrderSettingsSnapshot save(ProductLine requested, OrderBusinessSettings value,
+                                      long expectedVersion, String admin, String reason) {
+        settingsLock.lock();
+        try {
+            current(requested);
+            var saved = settings.save(line, value, expectedVersion, admin, reason)
+                    .orElseThrow(() -> new OptimisticLockingFailureException("order settings changed; reload before saving"));
+            // 此单表 CAS 在返回前已提交；只安装成功保存的数据库版本。
+            install(saved);
+            return current;
+        } finally {
+            settingsLock.unlock();
+        }
     }
 
-    public synchronized void reload() {
-        var value = settings.find(line);
-        if (value == null) throw new IllegalStateException("order settings missing");
-        if (current == null || value.configurationVersion() > current.configurationVersion()) install(value);
+    public void reload() {
+        settingsLock.lock();
+        try {
+            var value = settings.find(line);
+            if (value == null) throw new IllegalStateException("order settings missing");
+            if (current == null || value.configurationVersion() > current.configurationVersion()) install(value);
+        } finally {
+            settingsLock.unlock();
+        }
     }
     private void install(OrderSettingsSnapshot snapshot) {
         var priceProtection = snapshot.settings().risk();
