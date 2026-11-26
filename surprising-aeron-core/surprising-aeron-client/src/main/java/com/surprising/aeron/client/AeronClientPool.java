@@ -32,11 +32,11 @@ public final class AeronClientPool implements AutoCloseable {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AeronClientPool.class);
 
-    private static final long DISPATCHER_CLOSE_TIMEOUT_MILLIS = 5_000L;
-    private static final long MIN_RECONNECT_MILLIS = 25L;
-    private static final long MAX_RECONNECT_MILLIS = 1_000L;
-    private static final long KEEP_ALIVE_INTERVAL_MILLIS = 1_000L;
-    private static final long KEEP_ALIVE_RETRY_MILLIS = 25L;
+    static final long DISPATCHER_CLOSE_TIMEOUT_MILLIS = 5_000L;
+    static final long MIN_RECONNECT_MILLIS = 25L;
+    static final long MAX_RECONNECT_MILLIS = 1_000L;
+    static final long KEEP_ALIVE_INTERVAL_MILLIS = 1_000L;
+    static final long KEEP_ALIVE_RETRY_MILLIS = 25L;
 
     public enum TryCommandResult {
         SENT,
@@ -70,24 +70,24 @@ public final class AeronClientPool implements AutoCloseable {
         Session open();
     }
 
-    private final String clientName;
-    private final ProductLine productLine;
+    final String clientName;
+    final ProductLine productLine;
     private final List<String> hostnames;
     private final String egressHostname;
-    private final Duration responseTimeout;
+    final Duration responseTimeout;
     private final String sourceIdentity;
     private final String sourceEpoch;
-    private final AeronClientCapacity capacity;
-    private final SessionFactory sessionFactory;
-    private final AgentLane[] commandAgents;
-    private final AgentLane reservedControlAgent;
-    private final EgressDispatcher egressDispatcher;
-    private final AtomicBoolean closed = new AtomicBoolean();
-    private final AtomicBoolean dispatcherStopped = new AtomicBoolean();
-    private final AtomicReference<MediaDriver> mediaDriver = new AtomicReference<>();
-    private final boolean ownsMediaDriver;
-    private final AtomicReference<RuntimeException> dispatcherFailure = new AtomicReference<>();
-    private final AtomicLong adminActionRetries = new AtomicLong();
+    final AeronClientCapacity capacity;
+    final SessionFactory sessionFactory;
+    final AeronAgentLane[] commandAgents;
+    final AeronAgentLane reservedControlAgent;
+    final AeronEgressDispatcher egressDispatcher;
+    final AtomicBoolean closed = new AtomicBoolean();
+    final AtomicBoolean dispatcherStopped = new AtomicBoolean();
+    final AtomicReference<MediaDriver> mediaDriver = new AtomicReference<>();
+    final boolean ownsMediaDriver;
+    final AtomicReference<RuntimeException> dispatcherFailure = new AtomicReference<>();
+    final AtomicLong adminActionRetries = new AtomicLong();
 
     public long adminActionRetries() { return adminActionRetries.get(); }
 
@@ -197,16 +197,16 @@ public final class AeronClientPool implements AutoCloseable {
         if (sessionFactory == null) {
             sharedMediaDriver();
         }
-        this.commandAgents = new AgentLane[capacity.commandSessions()];
+        this.commandAgents = new AeronAgentLane[capacity.commandSessions()];
         for (int index = 0; index < commandAgents.length; index++) {
-            commandAgents[index] = new AgentLane(capacity.commandMailboxCapacity(),
+            commandAgents[index] = new AeronAgentLane(this, capacity.commandMailboxCapacity(),
                     capacity.maxCommandInFlightPerSession(),
                     stableLong(this.sourceIdentity + ':' + productLine + ':' + this.sourceEpoch + ':' + index));
         }
-        this.reservedControlAgent = new AgentLane(capacity.queryMailboxCapacity(),
+        this.reservedControlAgent = new AeronAgentLane(this, capacity.queryMailboxCapacity(),
                 capacity.maxReservedInFlight(), stableLong(this.sourceIdentity + ':' + productLine + ':'
                         + this.sourceEpoch + ":control"));
-        this.egressDispatcher = new EgressDispatcher(startAgents);
+        this.egressDispatcher = new AeronEgressDispatcher(this, startAgents);
         if (startAgents) {
             egressDispatcher.start();
         }
@@ -225,8 +225,8 @@ public final class AeronClientPool implements AutoCloseable {
         if (closed.get()) {
             return CompletableFuture.completedFuture(CoreCommandOutcome.notAccepted(Publication.CLOSED));
         }
-        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
-        Request request = agent.commandOutcomeRequest(type, commandId, userId, safePayload);
+        AeronAgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        AeronPoolRequest request = agent.commandOutcomeRequest(type, commandId, userId, safePayload);
         if (request == null) {
             return CompletableFuture.completedFuture(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
         }
@@ -250,8 +250,8 @@ public final class AeronClientPool implements AutoCloseable {
             return CompletableFuture.failedFuture(
                     new CoreCommandOutcome.NotAcceptedException(CoreCommandOutcome.notAccepted(Publication.CLOSED)));
         }
-        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
-        Request request = agent.commandResponseRequest(type, commandId, userId, safePayload);
+        AeronAgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        AeronPoolRequest request = agent.commandResponseRequest(type, commandId, userId, safePayload);
         if (request == null) {
             return CompletableFuture.failedFuture(new CoreCommandOutcome.NotAcceptedException(
                     CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED)));
@@ -270,8 +270,8 @@ public final class AeronClientPool implements AutoCloseable {
         if (closed.get()) {
             return TryCommandResult.CLOSED;
         }
-        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
-        Request request = agent.oneWayFutureRequest(type, commandId, userId, safePayload);
+        AeronAgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        AeronPoolRequest request = agent.oneWayFutureRequest(type, commandId, userId, safePayload);
         if (request == null) {
             return TryCommandResult.BACK_PRESSURED;
         }
@@ -316,8 +316,8 @@ public final class AeronClientPool implements AutoCloseable {
             callback.onOrderCheck(commandId, TryCommandResult.CLOSED);
             return true;
         }
-        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
-        Request request = agent.oneWayCallbackRequest(type, commandId, userId, safePayload, callback);
+        AeronAgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        AeronPoolRequest request = agent.oneWayCallbackRequest(type, commandId, userId, safePayload, callback);
         if (request == null) {
             return false;
         }
@@ -388,7 +388,7 @@ public final class AeronClientPool implements AutoCloseable {
             CoreMessageType type, UUID queryId, long userId, byte[] payload) {
         Objects.requireNonNull(queryId, "queryId");
         byte[] safePayload = requirePayload(payload);
-        Request request = reservedControlAgent.queryRequest(type, queryId, userId, safePayload);
+        AeronPoolRequest request = reservedControlAgent.queryRequest(type, queryId, userId, safePayload);
         if (request == null) {
             return CompletableFuture.failedFuture(new CoreCommandOutcome.NotAcceptedException(
                     CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED)));
@@ -404,8 +404,8 @@ public final class AeronClientPool implements AutoCloseable {
             CoreMessageType type, UUID queryId, long userId, byte[] payload) {
         Objects.requireNonNull(queryId, "queryId");
         byte[] safePayload = requirePayload(payload);
-        AgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
-        Request request = agent.queryRequest(type, queryId, userId, safePayload);
+        AeronAgentLane agent = commandAgents[Math.floorMod(Long.hashCode(userId), commandAgents.length)];
+        AeronPoolRequest request = agent.queryRequest(type, queryId, userId, safePayload);
         if (request == null) {
             return CompletableFuture.failedFuture(new CoreCommandOutcome.NotAcceptedException(
                     CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED)));
@@ -443,18 +443,18 @@ public final class AeronClientPool implements AutoCloseable {
         if (message.header().productLine() != productLine) {
             throw new IllegalArgumentException("client pool and prepared message product line differ");
         }
-        Request request;
-        AgentLane lane;
+        AeronPoolRequest request;
+        AeronAgentLane lane;
         boolean commandRequest;
         if (message.header().kind() == WireMessageKind.COMMAND) {
             commandRequest = true;
             lane = commandAgents[Math.floorMod(Long.hashCode(message.header().sourceId()), commandAgents.length)];
-            request = lane.preparedRequest(message, RequestMode.COMMAND_OUTCOME);
+            request = lane.preparedRequest(message, AeronPoolRequest.Mode.COMMAND_OUTCOME);
         } else if (message.header().kind() == WireMessageKind.QUERY) {
             commandRequest = false;
             requireReservedControl(message.header().messageType());
             lane = reservedControlAgent;
-            request = lane.preparedRequest(message, RequestMode.QUERY);
+            request = lane.preparedRequest(message, AeronPoolRequest.Mode.QUERY);
         } else {
             throw new IllegalArgumentException("prepared message must be a command or reserved control query");
         }
@@ -540,7 +540,7 @@ public final class AeronClientPool implements AutoCloseable {
     }
 
     private static <T> T awaitPrepared(
-            Request request, long requestGeneration, UUID operationId, CompletableFuture<T> future) {
+            AeronPoolRequest request, long requestGeneration, UUID operationId, CompletableFuture<T> future) {
         try {
             return future.get();
         } catch (InterruptedException exception) {
@@ -562,7 +562,7 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
-    private static TryCommandResult mapTryCommandResult(long offerResult) {
+    static TryCommandResult mapTryCommandResult(long offerResult) {
         if (offerResult > 0) {
             return TryCommandResult.SENT;
         }
@@ -597,183 +597,6 @@ public final class AeronClientPool implements AutoCloseable {
         return result == 0 ? 1 : result;
     }
 
-    private final class AgentLane {
-        private final ArrayBlockingQueue<Request> mailbox;
-        private final java.util.concurrent.ConcurrentLinkedQueue<Request> availableRequests;
-        private final int maxInFlight;
-        private final long sourceId;
-        // Only the egress dispatcher assigns source sequence, in actual offer order.
-        private long nextSequence;
-        private final AtomicLong nextCorrelation = new AtomicLong();
-        // Insertion order is deadline order: only the dispatcher assigns the same timeout
-        // immediately after each successful offer.
-        private final LinkedHashMap<Long, Request> pending = new LinkedHashMap<>();
-        private final java.util.SequencedCollection<Request> pendingInDeadlineOrder = pending.sequencedValues();
-        // Dispatcher-owned for the lifetime of this lane: do not allocate a capturing
-        // callback on every empty response poll while an admitted request is pending.
-        private final java.util.function.BiConsumer<Long, CoreResponse> responseConsumer = (id, response) -> {
-            Request request = pending.remove(id);
-            if (request != null) request.terminal(response);
-        };
-        private final Set<Long> claimedCorrelations = ConcurrentHashMap.newKeySet();
-        private volatile Session session;
-        private long reconnectAtNanos;
-        private long reconnectMillis = MIN_RECONNECT_MILLIS;
-        private long keepAliveAtNanos;
-        // Dispatcher-owned, bounded to one unaccepted request. Later offers cannot overtake it.
-        private Request deferredAdminOffer;
-
-        private AgentLane(int mailboxCapacity, int maxInFlight, long sourceId) {
-            this.mailbox = new ArrayBlockingQueue<>(mailboxCapacity);
-            this.availableRequests = new java.util.concurrent.ConcurrentLinkedQueue<>();
-            for (int index = 0; index < mailboxCapacity + maxInFlight; index++) {
-                availableRequests.add(new Request(this));
-            }
-            this.maxInFlight = maxInFlight;
-            this.sourceId = sourceId;
-        }
-
-        private boolean sessionConnected() {
-            Session current = session;
-            return current != null && current.connected();
-        }
-
-        private Request commandOutcomeRequest(
-                CoreMessageType type, UUID commandId, long userId, byte[] payload) {
-            return commandRequest(type, commandId, userId, payload, RequestMode.COMMAND_OUTCOME, null);
-        }
-
-        private Request commandResponseRequest(
-                CoreMessageType type, UUID commandId, long userId, byte[] payload) {
-            return commandRequest(type, commandId, userId, payload, RequestMode.COMMAND_RESPONSE, null);
-        }
-
-        private Request oneWayFutureRequest(
-                CoreMessageType type, UUID commandId, long userId, byte[] payload) {
-            return commandRequest(type, commandId, userId, payload, RequestMode.ONE_WAY_FUTURE, null);
-        }
-
-        private Request oneWayCallbackRequest(CoreMessageType type, UUID commandId, long userId, byte[] payload,
-                                              CommandOrderCheckCallback callback) {
-            return commandRequest(type, commandId, userId, payload, RequestMode.ONE_WAY_CALLBACK, callback);
-        }
-
-
-        private Request commandRequest(CoreMessageType type, UUID commandId, long userId, byte[] payload,
-                                       RequestMode mode, CommandOrderCheckCallback callback) {
-            Request request = availableRequests.poll();
-            if (request == null) {
-                return null;
-            }
-            long correlationId = nextCorrelation.incrementAndGet();
-            if (mode.oneWay) {
-                correlationId = -correlationId;
-            }
-            request.reset(null, commandId, mode, callback, false);
-            request.correlationId = correlationId;
-            request.commandType = type;
-            request.commandUserId = userId;
-            request.commandSubmittedMillis = Instant.now().toEpochMilli();
-            // Preserve the API's defensive payload copy without allocating an intermediate message/header.
-            request.commandPayload = payload.length == 0 ? payload : java.util.Arrays.copyOf(payload, payload.length);
-            return request;
-        }
-
-        private Request queryRequest(CoreMessageType type, UUID queryId, long userId, byte[] payload) {
-            Request request = availableRequests.poll();
-            if (request == null) {
-                return null;
-            }
-            long correlationId = nextCorrelation.incrementAndGet();
-            CoreMessage message = new CoreMessage(CoreMessageHeader.query(type, queryId, productLine,
-                    CommandSource.GATEWAY, sourceId, 0, userId, Instant.now().toEpochMilli(),
-                    correlationId), payload);
-            request.reset(message, queryId, RequestMode.QUERY, null, false);
-            return request;
-        }
-
-        private Request preparedRequest(CoreMessage message, RequestMode mode) {
-            Request request = availableRequests.poll();
-            if (request != null) {
-                request.reset(message, message.header().commandId(), mode, null, true);
-            }
-            return request;
-        }
-
-        private boolean enqueue(Request request) {
-            if (request.preparedCorrelation) {
-                long correlationId = request.correlationId;
-                if (!claimedCorrelations.add(correlationId)) {
-                    request.fail(new IllegalStateException(
-                            "duplicate in-flight Aeron correlationId=" + correlationId));
-                    return true;
-                }
-                request.correlationClaimed = true;
-            }
-            RuntimeException failure = dispatcherFailure.get();
-            if (failure != null) {
-                request.fail(failure);
-                return true;
-            }
-            if (closed.get() || dispatcherStopped.get()) {
-                request.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
-                return true;
-            }
-            request.startQueueTimeout(responseTimeout.toNanos());
-            ClientTransportBoundary.record("queued", request.operationId);
-            if (!mailbox.offer(request)) {
-                request.releaseCorrelation();
-                return false;
-            }
-            if (egressDispatcher.parked) {
-                java.util.concurrent.locks.LockSupport.unpark(egressDispatcher.thread);
-            }
-            failure = dispatcherFailure.get();
-            if ((closed.get() || dispatcherStopped.get() || failure != null) && mailbox.remove(request)) {
-                if (failure == null) {
-                    request.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
-                } else {
-                    request.fail(failure);
-                }
-            }
-            return true;
-        }
-
-        private void rejectUnqueued(Request request, CoreCommandOutcome.NotAccepted rejection) {
-            request.notAccepted(rejection);
-        }
-
-        private void recycleUnqueued(Request request) {
-            request.recycle();
-        }
-
-        private void recycle(Request request) {
-            request.releaseCorrelation();
-            request.clear();
-            if (!availableRequests.offer(request)) {
-                dispatcherFailure.compareAndSet(null,
-                        new IllegalStateException("Aeron request slot returned twice"));
-            }
-        }
-
-        private void connected() {
-            reconnectAtNanos = 0;
-            reconnectMillis = MIN_RECONNECT_MILLIS;
-            keepAliveAtNanos = System.nanoTime()
-                    + TimeUnit.MILLISECONDS.toNanos(KEEP_ALIVE_INTERVAL_MILLIS);
-        }
-
-        private void reconnectLater() {
-            reconnectAtNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(reconnectMillis);
-            reconnectMillis = Math.min(MAX_RECONNECT_MILLIS, Math.multiplyExact(reconnectMillis, 2));
-            keepAliveAtNanos = 0;
-        }
-
-        private void releaseCorrelation(long correlationId) {
-            claimedCorrelations.remove(correlationId);
-        }
-    }
-
     /** Optional sparse transport trace; no request state or cross-JVM clock assumptions. */
     @jdk.jfr.Name("surprising.ClientTransportBoundary")
     @jdk.jfr.StackTrace(false)
@@ -791,674 +614,6 @@ public final class AeronClientPool implements AutoCloseable {
             event.commandIdLow = id.getLeastSignificantBits();
             event.observedNanos = observed;
             event.commit();
-        }
-    }
-
-    private final class EgressDispatcher implements Runnable {
-        private final AgentLane[] lanes;
-        private final Thread thread;
-        private volatile boolean parked;
-
-        private EgressDispatcher(boolean startAgents) {
-            this.lanes = new AgentLane[commandAgents.length + 1];
-            System.arraycopy(commandAgents, 0, lanes, 0, commandAgents.length);
-            lanes[lanes.length - 1] = reservedControlAgent;
-            this.thread = new Thread(this, clientName + "-egress-dispatcher");
-            this.thread.setDaemon(true);
-            if (!startAgents) {
-                rejectQueuedAsClosed();
-            }
-        }
-
-        private void start() {
-            thread.start();
-        }
-
-        @Override
-        public void run() {
-            try {
-                openSessions();
-                long idleNanos = 100_000L;
-                while (!closed.get()) {
-                    boolean worked = false;
-                    boolean hasRequests = false;
-                    for (AgentLane lane : lanes) {
-                        worked |= openSession(lane);
-                    }
-                    for (AgentLane lane : lanes) {
-                        worked |= pollSession(lane);
-                    }
-                    for (AgentLane lane : lanes) {
-                        worked |= keepAliveSession(lane);
-                    }
-                    for (AgentLane lane : lanes) {
-                        worked |= admitQueued(lane);
-                        expireQueued(lane);
-                        expireAdmitted(lane);
-                        hasRequests |= !lane.pending.isEmpty() || !lane.mailbox.isEmpty()
-                                || lane.deferredAdminOffer != null;
-                    }
-                    idleNanos = worked || hasRequests ? 100_000L : Math.min(idleNanos * 2, 1_000_000L);
-                    if (!worked) {
-                        long now = System.nanoTime();
-                        long waitNanos = idleNanos;
-                        for (AgentLane lane : lanes) {
-                            long deadline = lane.session == null ? lane.reconnectAtNanos : lane.keepAliveAtNanos;
-                            waitNanos = Math.min(waitNanos, Math.max(1L, deadline - now));
-                        }
-                        // Queue admission already unparks this thread. In-flight responses
-                        // retain the short poll; idle sessions still service heartbeats/reconnects.
-                        parked = true;
-                        try {
-                            if (!hasDispatchableRequests()) {
-                                java.util.concurrent.locks.LockSupport.parkNanos(this, waitNanos);
-                            }
-                        } finally {
-                            parked = false;
-                        }
-                        if (Thread.currentThread().isInterrupted()) {
-                            if (!closed.get()) {
-                                dispatcherFailure.compareAndSet(null,
-                                        new IllegalStateException("Aeron dispatcher interrupted"));
-                            }
-                            break;
-                        }
-                    }
-                }
-            } catch (RuntimeException exception) {
-                dispatcherFailure.compareAndSet(null, exception);
-            } finally {
-                dispatcherStopped.set(true);
-                rejectQueuedAsClosed();
-                completeAdmittedAsUnknown();
-                closeSessions();
-                closeMediaDriver();
-            }
-        }
-
-        /** Close the enqueue/unpark race only for work that can progress immediately.
-         * An admitted request, disconnected session, full window or ADMIN_ACTION retry
-         * must retain the short timed poll rather than defeating parking altogether.
-         */
-        private boolean hasDispatchableRequests() {
-            for (AgentLane lane : lanes) {
-                Request next = lane.mailbox.peek();
-                if (next != null && lane.deferredAdminOffer == null
-                        && lane.session != null && lane.session.connected()
-                        && (next.oneWay() || lane.pending.size() < lane.maxInFlight)) return true;
-            }
-            return false;
-        }
-
-        private void openSessions() {
-            for (AgentLane lane : lanes) {
-                if (closed.get()) {
-                    return;
-                }
-                openSession(lane);
-            }
-        }
-
-        private boolean openSession(AgentLane lane) {
-            if (closed.get() || lane.session != null || System.nanoTime() < lane.reconnectAtNanos) {
-                return false;
-            }
-            try {
-                lane.session = Objects.requireNonNull(sessionFactory.open(), "sessionFactory returned null");
-                return true;
-            } catch (RuntimeException exception) {
-                lane.session = null;
-                lane.reconnectLater();
-                return true;
-            }
-        }
-
-        private boolean pollSession(AgentLane lane) {
-            Session current = lane.session;
-            if (current == null) {
-                return false;
-            }
-            try {
-                int fragments = current.pollEgress(capacity.egressFragmentLimit());
-                if (!lane.pending.isEmpty()) current.drainResponses(lane.responseConsumer);
-                RuntimeException failure = current.sessionFailure();
-                if (failure != null) {
-                    lane.pending.values().forEach(Request::resultUnknown);
-                    lane.pending.clear();
-                    closeSession(lane);
-                }
-                if (failure == null && fragments > 0) {
-                    lane.connected();
-                }
-                return fragments > 0;
-            } catch (RuntimeException exception) {
-                lane.pending.values().forEach(Request::resultUnknown);
-                lane.pending.clear();
-                closeSession(lane);
-                return true;
-            }
-        }
-
-        private boolean keepAliveSession(AgentLane lane) {
-            Session current = lane.session;
-            long now = System.nanoTime();
-            if (current == null || now < lane.keepAliveAtNanos) {
-                return false;
-            }
-            try {
-                if (current.keepAlive()) {
-                    lane.connected();
-                    return true;
-                }
-                lane.keepAliveAtNanos = now + TimeUnit.MILLISECONDS.toNanos(KEEP_ALIVE_RETRY_MILLIS);
-                return false;
-            } catch (RuntimeException exception) {
-                lane.pending.values().forEach(Request::resultUnknown);
-                lane.pending.clear();
-                closeSession(lane);
-                return true;
-            }
-        }
-
-        private boolean admitQueued(AgentLane lane) {
-            if (lane.deferredAdminOffer != null) {
-                Request request = lane.deferredAdminOffer;
-                if (System.nanoTime() - request.queueDeadlineNanos >= 0) {
-                    lane.deferredAdminOffer = null;
-                    request.notAccepted(CoreCommandOutcome.notAccepted(Publication.ADMIN_ACTION));
-                    return true;
-                }
-                if (lane.session == null || !lane.session.connected()) return false;
-                lane.deferredAdminOffer = null;
-                admit(lane, request);
-                // One retry per round. Repeated ADMIN_ACTION is no progress, so the normal
-                // dispatcher idle policy still applies if no session has other work.
-                return lane.deferredAdminOffer == null;
-            }
-            boolean worked = false;
-            while (true) {
-                Request next = lane.mailbox.peek();
-                if (next == null || lane.session == null || !lane.session.connected()
-                        || (!next.oneWay() && lane.pending.size() >= lane.maxInFlight)) {
-                    return worked;
-                }
-                Request request = lane.mailbox.poll();
-                if (request == null) {
-                    return worked;
-                }
-                worked = true;
-                if (!request.beginOffer()) {
-                    request.recycle();
-                    continue;
-                }
-                admit(lane, request);
-                if (lane.deferredAdminOffer != null) return worked;
-            }
-        }
-
-        private void admit(AgentLane lane, Request request) {
-            Session current = lane.session;
-            if (current == null) {
-                request.notAccepted(CoreCommandOutcome.notAccepted(Publication.NOT_CONNECTED));
-                lane.reconnectLater();
-                return;
-            }
-            long offerResult;
-            try {
-                if (request.commandType != null) {
-                    request.message = CoreMessage.owned(CoreMessageHeader.command(request.commandType,
-                            request.operationId, productLine, CommandSource.GATEWAY, lane.sourceId,
-                            ++lane.nextSequence, request.commandUserId, request.commandSubmittedMillis,
-                            request.correlationId), request.commandPayload);
-                    request.commandType = null;
-                    request.commandPayload = null;
-                }
-                offerResult = current.offer(request.message);
-            } catch (RuntimeException exception) {
-                request.notAccepted(CoreCommandOutcome.notAccepted(Long.MIN_VALUE));
-                closeSession(lane);
-                return;
-            }
-            if (offerResult > 0) {
-                ClientTransportBoundary.record("offered", request.operationId);
-                lane.connected();
-                if (!request.oneWay()) {
-                    request.deadlineNanos = System.nanoTime() + responseTimeout.toNanos();
-                    lane.pending.put(request.message.header().correlationId(), request);
-                } else {
-                    request.acceptedOneWay(offerResult);
-                }
-            } else {
-                if (offerResult == Publication.ADMIN_ACTION && !request.oneWay()) {
-                    adminActionRetries.incrementAndGet();
-                    lane.deferredAdminOffer = request;
-                    return;
-                }
-                if ((offerResult == Publication.NOT_CONNECTED || offerResult == Publication.CLOSED)
-                        && request.isQuery()) {
-                    closeSession(lane);
-                    request.prepareForRetry();
-                    if (lane.mailbox.offer(request)) {
-                        return;
-                    }
-                    request.notAccepted(CoreCommandOutcome.notAccepted(Publication.BACK_PRESSURED));
-                    return;
-                }
-                request.notAccepted(CoreCommandOutcome.notAccepted(offerResult));
-                if (offerResult == Publication.NOT_CONNECTED
-                        || offerResult == Publication.CLOSED
-                        || offerResult == Publication.MAX_POSITION_EXCEEDED) {
-                    closeSession(lane);
-                }
-            }
-        }
-
-        private void expireAdmitted(AgentLane lane) {
-            if (lane.pendingInDeadlineOrder.isEmpty()) return;
-            long now = System.nanoTime();
-            boolean expired = now - lane.pendingInDeadlineOrder.getFirst().deadlineNanos >= 0;
-            if (expired) {
-                lane.pending.values().forEach(Request::resultUnknown);
-                lane.pending.clear();
-                closeSession(lane);
-            }
-        }
-
-        private void expireQueued(AgentLane lane) {
-            if (lane.mailbox.isEmpty()) return;
-            long now = System.nanoTime();
-            long rejection = lane.session == null || !lane.session.connected()
-                    ? Publication.NOT_CONNECTED
-                    : Publication.BACK_PRESSURED;
-            lane.mailbox.removeIf(request -> {
-                if (!request.queueExpired(now)) {
-                    return false;
-                }
-                request.notAccepted(CoreCommandOutcome.notAccepted(rejection));
-                return true;
-            });
-        }
-
-        private void rejectQueuedAsClosed() {
-            for (AgentLane lane : lanes) {
-                if (lane.deferredAdminOffer != null) {
-                    Request deferred = lane.deferredAdminOffer;
-                    lane.deferredAdminOffer = null;
-                    deferred.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
-                }
-                Request request;
-                while ((request = lane.mailbox.poll()) != null) {
-                    request.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
-                }
-            }
-        }
-
-        private void completeAdmittedAsUnknown() {
-            for (AgentLane lane : lanes) {
-                lane.pending.values().forEach(Request::resultUnknown);
-                lane.pending.clear();
-            }
-        }
-
-        private void closeSessions() {
-            for (AgentLane lane : lanes) {
-                try {
-                    closeSession(lane);
-                } catch (RuntimeException exception) {
-                    RuntimeException first = dispatcherFailure.get();
-                    if (first == null) {
-                        dispatcherFailure.compareAndSet(null, exception);
-                    } else {
-                        first.addSuppressed(exception);
-                    }
-                }
-            }
-        }
-
-        private void closeSession(AgentLane lane) {
-            Session current = lane.session;
-            lane.session = null;
-            try {
-                if (current != null) {
-                    current.close();
-                }
-            } finally {
-                if (!closed.get() && !dispatcherStopped.get()) {
-                    lane.reconnectLater();
-                }
-            }
-        }
-
-        private RuntimeException stop() {
-            boolean interrupted = false;
-            if (thread.isAlive()) {
-                long deadline = System.nanoTime()
-                        + TimeUnit.MILLISECONDS.toNanos(DISPATCHER_CLOSE_TIMEOUT_MILLIS);
-                while (thread.isAlive() && System.nanoTime() < deadline) {
-                    try {
-                        long remaining = Math.max(1L, deadline - System.nanoTime());
-                        TimeUnit.NANOSECONDS.timedJoin(thread, remaining);
-                    } catch (InterruptedException exception) {
-                        interrupted = true;
-                        thread.interrupt();
-                    }
-                }
-                if (thread.isAlive()) {
-                    thread.interrupt();
-                    deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-                    while (thread.isAlive() && System.nanoTime() < deadline) {
-                        try {
-                            long remaining = Math.max(1L, deadline - System.nanoTime());
-                            TimeUnit.NANOSECONDS.timedJoin(thread, remaining);
-                        } catch (InterruptedException exception) {
-                            interrupted = true;
-                            thread.interrupt();
-                        }
-                    }
-                }
-                if (interrupted) {
-                    dispatcherFailure.compareAndSet(null,
-                            new IllegalStateException("Interrupted while stopping Aeron dispatcher"));
-                }
-                if (thread.isAlive()) {
-                    dispatcherFailure.compareAndSet(null,
-                            new IllegalStateException("Aeron dispatcher did not terminate: " + thread.getName()));
-                }
-            } else {
-                rejectQueuedAsClosed();
-                completeAdmittedAsUnknown();
-                closeSessions();
-                closeMediaDriver();
-            }
-            if (interrupted) {
-                Thread.currentThread().interrupt();
-            }
-            return dispatcherFailure.get();
-        }
-
-        private boolean isAlive() {
-            return thread.isAlive();
-        }
-
-        private void closeMediaDriver() {
-            MediaDriver driver;
-            synchronized (mediaDriver) {
-                driver = mediaDriver.getAndSet(null);
-            }
-            if (driver == null || !ownsMediaDriver) {
-                return;
-            }
-            try {
-                driver.close();
-            } catch (RuntimeException exception) {
-                RuntimeException first = dispatcherFailure.get();
-                if (first == null) {
-                    dispatcherFailure.compareAndSet(null, exception);
-                } else {
-                    first.addSuppressed(exception);
-                }
-            }
-        }
-    }
-
-    private enum RequestMode {
-        COMMAND_OUTCOME(false),
-        COMMAND_RESPONSE(false),
-        QUERY(false),
-        ONE_WAY_FUTURE(true),
-        ONE_WAY_CALLBACK(true);
-
-        private final boolean oneWay;
-
-        RequestMode(boolean oneWay) {
-            this.oneWay = oneWay;
-        }
-    }
-
-    private static final class Request {
-        private final AgentLane owner;
-        private CoreMessage message;
-        private long correlationId;
-        private CoreMessageType commandType;
-        private long commandUserId;
-        private long commandSubmittedMillis;
-        private byte[] commandPayload;
-        private UUID operationId;
-        private RequestMode mode;
-        private CompletableFuture<CoreCommandOutcome> commandFuture;
-        private CompletableFuture<CoreResponse> responseFuture;
-        private CompletableFuture<Long> orderCheckFuture;
-        private CommandOrderCheckCallback orderCheckCallback;
-        private static final long PHASE_MASK = 3, QUEUED = 0, OFFERING = 1, CANCELLED = 2, COMPLETED = 3;
-        private static final java.lang.invoke.VarHandle LIFECYCLE;
-        static {
-            try { LIFECYCLE = java.lang.invoke.MethodHandles.lookup().findVarHandle(Request.class, "lifecycle", long.class); }
-            catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
-        }
-        // Generation and phase share one CAS: an old timeout cannot cancel a recycled slot.
-        // Only the current slot lease writes payload fields; the mailbox publishes them.
-        private volatile long lifecycle = COMPLETED;
-        private boolean preparedCorrelation;
-        private boolean correlationClaimed;
-        private long queueDeadlineNanos;
-        private long deadlineNanos;
-
-        private Request(AgentLane owner) {
-            this.owner = owner;
-        }
-
-        private void reset(CoreMessage message, UUID operationId, RequestMode mode,
-                           CommandOrderCheckCallback orderCheckCallback, boolean preparedCorrelation) {
-            this.message = message;
-            this.correlationId = message == null ? 0 : message.header().correlationId();
-            this.commandType = null;
-            this.commandPayload = null;
-            this.operationId = Objects.requireNonNull(operationId, "operationId");
-            this.mode = Objects.requireNonNull(mode, "mode");
-            this.commandFuture = mode == RequestMode.COMMAND_OUTCOME ? new CompletableFuture<>() : null;
-            this.responseFuture = mode == RequestMode.COMMAND_RESPONSE || mode == RequestMode.QUERY
-                    ? new CompletableFuture<>() : null;
-            this.orderCheckFuture = mode == RequestMode.ONE_WAY_FUTURE ? new CompletableFuture<>() : null;
-            this.orderCheckCallback = orderCheckCallback;
-            this.preparedCorrelation = preparedCorrelation;
-            this.correlationClaimed = false;
-            this.queueDeadlineNanos = 0;
-            this.deadlineNanos = 0;
-            long nextGeneration = Math.incrementExact(lifecycle >>> 2);
-            if (nextGeneration > (Long.MAX_VALUE >>> 1))
-                throw new IllegalStateException("Aeron request generation exhausted");
-            // Last reset write: all previous-generation cancellation attempts now fail.
-            lifecycle = nextGeneration << 2;
-        }
-
-        private long generation() {
-            return lifecycle >>> 2;
-        }
-
-        private boolean oneWay() {
-            return mode.oneWay;
-        }
-
-        private boolean beginOffer() {
-            long current = lifecycle;
-            return (current & PHASE_MASK) == QUEUED
-                    && LIFECYCLE.compareAndSet(this, current, current | OFFERING);
-        }
-
-        private void prepareForRetry() {
-            long current = lifecycle;
-            if ((current & PHASE_MASK) != OFFERING
-                    || !LIFECYCLE.compareAndSet(this, current, current & ~PHASE_MASK))
-                throw new IllegalStateException("query retry lost its request lease");
-        }
-
-        private void startQueueTimeout(long timeoutNanos) {
-            if (queueDeadlineNanos == 0) {
-                queueDeadlineNanos = Math.addExact(System.nanoTime(), timeoutNanos);
-            }
-        }
-
-        private boolean queueExpired(long now) {
-            long phase = lifecycle & PHASE_MASK;
-            return phase != OFFERING && (phase == CANCELLED || queueDeadlineNanos != 0 && now >= queueDeadlineNanos);
-        }
-
-        private boolean isQuery() {
-            return mode == RequestMode.QUERY;
-        }
-
-        private boolean cancelBeforeOffer(long expectedGeneration) {
-            long current = lifecycle;
-            while ((current >>> 2) == expectedGeneration) {
-                long phase = current & PHASE_MASK;
-                if (phase == OFFERING || phase == COMPLETED) return false;
-                if (LIFECYCLE.compareAndSet(this, current, (current & ~PHASE_MASK) | CANCELLED)) return true;
-                current = lifecycle;
-            }
-            return false;
-        }
-
-        private void acceptedOneWay(long offerResult) {
-            if (!claimCompletion()) {
-                return;
-            }
-            CompletableFuture<Long> future = orderCheckFuture;
-            CommandOrderCheckCallback callback = orderCheckCallback;
-            UUID commandId = operationId;
-            if (future != null) {
-                future.complete(offerResult);
-            }
-            try {
-                invokeCallback(callback, commandId, TryCommandResult.SENT);
-            } finally {
-                owner.recycle(this);
-            }
-        }
-
-        private void terminal(CoreResponse response) {
-            if (!claimCompletion()) {
-                return;
-            }
-            ClientTransportBoundary.record("delivered", operationId);
-            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
-            CompletableFuture<CoreResponse> result = responseFuture;
-            if (outcome != null) {
-                outcome.complete(new CoreCommandOutcome.Terminal(response));
-            } else if (result != null) {
-                result.complete(response);
-            }
-            owner.recycle(this);
-        }
-
-        private void notAccepted(CoreCommandOutcome.NotAccepted rejection) {
-            if (!claimCompletion()) {
-                return;
-            }
-            CompletableFuture<Long> orderCheck = orderCheckFuture;
-            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
-            CompletableFuture<CoreResponse> result = responseFuture;
-            CommandOrderCheckCallback callback = orderCheckCallback;
-            UUID commandId = operationId;
-            if (orderCheck != null) {
-                orderCheck.complete(rejection.rawOfferResult());
-            }
-            if (outcome != null) {
-                outcome.complete(rejection);
-            } else if (result != null) {
-                result.completeExceptionally(new CoreCommandOutcome.NotAcceptedException(rejection));
-            }
-            try {
-                invokeCallback(callback, commandId, mapTryCommandResult(rejection.rawOfferResult()));
-            } finally {
-                owner.recycle(this);
-            }
-        }
-
-        private void resultUnknown() {
-            if (!claimCompletion()) {
-                return;
-            }
-            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
-            CompletableFuture<CoreResponse> result = responseFuture;
-            UUID commandId = operationId;
-            if (outcome != null) {
-                outcome.complete(new CoreCommandOutcome.ResultUnknown(commandId));
-            } else if (result != null) {
-                result.completeExceptionally(new ResultUnknownException(commandId,
-                        "Aeron request was admitted but its result is unknown"));
-            }
-            owner.recycle(this);
-        }
-
-        private void fail(RuntimeException failure) {
-            if (!claimCompletion()) {
-                return;
-            }
-            CompletableFuture<Long> orderCheck = orderCheckFuture;
-            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
-            CompletableFuture<CoreResponse> result = responseFuture;
-            CommandOrderCheckCallback callback = orderCheckCallback;
-            UUID commandId = operationId;
-            if (orderCheck != null) {
-                orderCheck.completeExceptionally(failure);
-            }
-            if (outcome != null) {
-                outcome.completeExceptionally(failure);
-            } else if (result != null) {
-                result.completeExceptionally(failure);
-            }
-            try {
-                invokeCallback(callback, commandId, TryCommandResult.UNAVAILABLE);
-            } finally {
-                owner.recycle(this);
-            }
-        }
-
-        private void recycle() {
-            if (claimCompletion()) {
-                owner.recycle(this);
-            }
-        }
-
-        private boolean claimCompletion() {
-            long current = lifecycle;
-            while ((current & PHASE_MASK) != COMPLETED) {
-                if (LIFECYCLE.compareAndSet(this, current, current | COMPLETED)) return true;
-                current = lifecycle;
-            }
-            return false;
-        }
-
-        private void clear() {
-            message = null;
-            commandType = null;
-            commandPayload = null;
-            correlationId = 0;
-            operationId = null;
-            mode = null;
-            commandFuture = null;
-            responseFuture = null;
-            orderCheckFuture = null;
-            orderCheckCallback = null;
-            queueDeadlineNanos = 0;
-            deadlineNanos = 0;
-        }
-
-        private void releaseCorrelation() {
-            if (correlationClaimed) {
-                correlationClaimed = false;
-                owner.releaseCorrelation(correlationId);
-            }
-        }
-
-        private static void invokeCallback(
-                CommandOrderCheckCallback callback, UUID commandId, TryCommandResult result) {
-            if (callback != null) {
-                try {
-                    callback.onOrderCheck(commandId, result);
-                } catch (RuntimeException ignored) {
-                }
-            }
         }
     }
 }
