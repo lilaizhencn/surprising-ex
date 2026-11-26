@@ -16,6 +16,7 @@ public class TelegramBroadcastService {
     private final TelegramBroadcastRepository broadcasts;
     private final TelegramBotClient bot;
     private final java.util.function.LongSupplier nanoTime;
+    private final java.util.concurrent.locks.ReentrantLock drainLock = new java.util.concurrent.locks.ReentrantLock();
     private long nextUnconfiguredCheck;
     private boolean unconfiguredChecked;
 
@@ -47,34 +48,39 @@ public class TelegramBroadcastService {
         return broadcasts.list().stream().map(TelegramBroadcastService::view).toList();
     }
 
-    public synchronized void drain() {
-        if (!bot.isConfigured()) {
-            long now = nanoTime.getAsLong();
-            if (!unconfiguredChecked || now - nextUnconfiguredCheck >= 0) {
-                broadcasts.failOutstanding("Telegram Bot 未配置，通知没有发出");
-                nextUnconfiguredCheck = now + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
-                unconfiguredChecked = true;
+    public void drain() {
+        if (!drainLock.tryLock()) return;
+        try {
+            if (!bot.isConfigured()) {
+                long now = nanoTime.getAsLong();
+                if (!unconfiguredChecked || now - nextUnconfiguredCheck >= 0) {
+                    broadcasts.failOutstanding("Telegram Bot 未配置，通知没有发出");
+                    nextUnconfiguredCheck = now + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+                    unconfiguredChecked = true;
+                }
+                return;
             }
-            return;
-        }
-        unconfiguredChecked = false;
-        broadcasts.releaseStaleClaims();
-        List<PendingSend> batch = broadcasts.claim(15);
-        Set<Long> touched = new LinkedHashSet<>();
-        for (PendingSend row : batch) {
-            TelegramBotClient.SendOutcome outcome = bot.sendHtml(row.chatId(), row.html());
-            if (outcome.retry()) {
+            unconfiguredChecked = false;
+            broadcasts.releaseStaleClaims();
+            List<PendingSend> batch = broadcasts.claim(15);
+            Set<Long> touched = new LinkedHashSet<>();
+            for (PendingSend row : batch) {
+                TelegramBotClient.SendOutcome outcome = bot.sendHtml(row.chatId(), row.html());
+                if (outcome.retry()) {
+                    touched.add(row.broadcastId());
+                    continue;
+                }
+                if (outcome.accepted()) {
+                    broadcasts.complete(row.broadcastId(), row.subject(), "SENT", null);
+                } else {
+                    broadcasts.complete(row.broadcastId(), row.subject(), "FAILED", outcome.error());
+                }
                 touched.add(row.broadcastId());
-                continue;
             }
-            if (outcome.accepted()) {
-                broadcasts.complete(row.broadcastId(), row.subject(), "SENT", null);
-            } else {
-                broadcasts.complete(row.broadcastId(), row.subject(), "FAILED", outcome.error());
-            }
-            touched.add(row.broadcastId());
+            for (long id : touched) broadcasts.refresh(id);
+        } finally {
+            drainLock.unlock();
         }
-        for (long id : touched) broadcasts.refresh(id);
     }
 
     private static BroadcastView view(BroadcastRow row) {

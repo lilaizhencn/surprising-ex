@@ -12,6 +12,22 @@ class ProofOfReservesServiceTest {
     private final ProofOfReservesService service = new ProofOfReservesService();
 
     @Test
+    @DisplayName("未上线无真实余额时应诚实展示 0 值空快照，不编造假数据")
+    void shouldExposeZeroBaselineSnapshotWithoutFabricatedBalances() {
+        PorSnapshotSummary initial = service.getLatestSummary();
+        assertNotNull(initial);
+        assertEquals(0L, initial.totalLiabilityUsd());
+        assertEquals(0L, initial.totalReserveUsd());
+        assertEquals(0L, initial.reserveRatioPpm());
+        assertEquals(0, initial.totalUserCount());
+
+        PorSnapshotSummary triggered = service.triggerSnapshotFromDatabase(null);
+        assertEquals(0L, triggered.totalLiabilityUsd());
+        assertEquals(0L, triggered.totalReserveUsd());
+        assertEquals(0, triggered.totalUserCount());
+    }
+
+    @Test
     @DisplayName("测试生成储备证明快照并正确计算储备金率")
     void shouldGenerateSnapshotWithAccurateRatio() {
         Map<Long, Long> balances = Map.of(

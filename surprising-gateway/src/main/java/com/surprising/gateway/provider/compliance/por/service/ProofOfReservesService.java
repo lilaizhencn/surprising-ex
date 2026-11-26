@@ -7,6 +7,8 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -20,6 +22,8 @@ public class ProofOfReservesService {
     private final Map<String, PorSnapshotSummary> snapshots = new ConcurrentHashMap<>();
     private final Map<Long, UserPorProofResponse> userProofs = new ConcurrentHashMap<>();
     private final JdbcTemplate jdbcTemplate;
+    private final ReentrantLock snapshotLock = new ReentrantLock();
+    private final AtomicLong snapshotSequence = new AtomicLong(0);
     private volatile String latestSnapshotId;
 
     public ProofOfReservesService() {
@@ -29,25 +33,26 @@ public class ProofOfReservesService {
     @org.springframework.beans.factory.annotation.Autowired
     public ProofOfReservesService(@org.springframework.beans.factory.annotation.Autowired(required = false) @Nullable JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-        // 初始化一个基线储备证明快照
-        Map<Long, Long> baselineUsers = Map.of(
-                1001L, 150_000L,
-                1002L, 250_000L,
-                1003L, 500_000L,
-                1004L, 100_000L
-        );
-        generateSnapshot(baselineUsers, 1_100_000L); // 100万负债，110万链上储备，储备率 110%
+        recordEmptySnapshot();
     }
 
     /**
      * 根据全站用户权益和链上储备余额生成最新 Merkle 储备证明快照。
      */
-    public synchronized PorSnapshotSummary generateSnapshot(Map<Long, Long> userBalancesUsd, long totalReserveUsd) {
+    public PorSnapshotSummary generateSnapshot(Map<Long, Long> userBalancesUsd, long totalReserveUsd) {
         if (userBalancesUsd == null || userBalancesUsd.isEmpty()) {
             throw new IllegalArgumentException("user balances cannot be empty");
         }
+        snapshotLock.lock();
+        try {
+            return generateSnapshotLocked(userBalancesUsd, totalReserveUsd);
+        } finally {
+            snapshotLock.unlock();
+        }
+    }
 
-        String snapshotId = "por-" + System.currentTimeMillis();
+    private PorSnapshotSummary generateSnapshotLocked(Map<Long, Long> userBalancesUsd, long totalReserveUsd) {
+        String snapshotId = nextSnapshotId();
         Instant now = Instant.now();
 
         List<Long> userIds = new ArrayList<>(userBalancesUsd.keySet());
@@ -128,77 +133,79 @@ public class ProofOfReservesService {
     }
 
     /**
-     * 基于数据库当前资金投影与用户目录触发一次全新的 PoR 默克尔树快照。
+     * 基于数据库当前资金投影触发一次全新的 PoR 默克尔树快照。
+     * 无真实正余额记录时诚实展示 0 值空快照，禁止编造假用户余额或虚假储备率。
      */
-    public synchronized PorSnapshotSummary triggerSnapshotFromDatabase() {
+    public PorSnapshotSummary triggerSnapshotFromDatabase() {
         return triggerSnapshotFromDatabase(this.jdbcTemplate);
     }
 
     /**
      * 基于指定 JdbcTemplate 的资金投影触发 PoR 默克尔树快照。
      */
-    public synchronized PorSnapshotSummary triggerSnapshotFromDatabase(@Nullable JdbcTemplate jdbc) {
-        Map<Long, Long> userBalancesUsd = new LinkedHashMap<>();
-        if (jdbc != null) {
-            try {
-                // 汇总现货/产品账户最新余额（按资产折算近似 USD；USDT/USDC 1:1，无价资产按单位折算保护下限）
-                String sql = """
-                        WITH latest_prod AS (
-                            SELECT DISTINCT ON (user_id, account_type, asset) user_id, asset, balance_after_units
-                            FROM account_product_ledger_entries
-                            ORDER BY user_id, account_type, asset, entry_id DESC
-                        ),
-                        latest_base AS (
-                            SELECT DISTINCT ON (user_id, asset) user_id, asset, balance_after_units
-                            FROM account_ledger_entries
-                            ORDER BY user_id, asset, entry_id DESC
-                        ),
-                        combined AS (
-                            SELECT user_id, asset, balance_after_units FROM latest_prod WHERE balance_after_units > 0
-                            UNION ALL
-                            SELECT user_id, asset, balance_after_units FROM latest_base WHERE balance_after_units > 0
-                        )
-                        SELECT c.user_id,
-                               GREATEST(1, SUM((c.balance_after_units::numeric / NULLIF(a.scale_units, 0))
-                                   * CASE WHEN c.asset IN ('USDT','USDC','FDUSD','USD') THEN 1 ELSE 1 END)::bigint) AS total_usd
-                        FROM combined c
-                        JOIN assets a ON a.asset = c.asset
-                        GROUP BY c.user_id
-                        """;
-                jdbc.query(sql, rs -> {
-                    long uid = rs.getLong("user_id");
-                    long bal = rs.getLong("total_usd");
-                    if (uid > 0 && bal > 0) {
-                        userBalancesUsd.put(uid, bal);
-                    }
-                });
-            } catch (RuntimeException ex) {
-                log.debug("PoR database ledger query fallback: {}", ex.getMessage());
-            }
-            if (userBalancesUsd.isEmpty()) {
+    public PorSnapshotSummary triggerSnapshotFromDatabase(@Nullable JdbcTemplate jdbc) {
+        snapshotLock.lock();
+        try {
+            Map<Long, Long> userBalancesUsd = new LinkedHashMap<>();
+            if (jdbc != null) {
                 try {
-                    jdbc.query("SELECT user_id FROM gateway_users ORDER BY user_id ASC LIMIT 100", rs -> {
+                    String sql = """
+                            WITH latest_prod AS (
+                                SELECT DISTINCT ON (user_id, account_type, asset) user_id, asset, balance_after_units
+                                FROM account_product_ledger_entries
+                                ORDER BY user_id, account_type, asset, entry_id DESC
+                            ),
+                            latest_base AS (
+                                SELECT DISTINCT ON (user_id, asset) user_id, asset, balance_after_units
+                                FROM account_ledger_entries
+                                ORDER BY user_id, asset, entry_id DESC
+                            ),
+                            combined AS (
+                                SELECT user_id, asset, balance_after_units FROM latest_prod WHERE balance_after_units > 0
+                                UNION ALL
+                                SELECT user_id, asset, balance_after_units FROM latest_base WHERE balance_after_units > 0
+                            )
+                            SELECT c.user_id,
+                                   GREATEST(1, SUM((c.balance_after_units::numeric / NULLIF(a.scale_units, 0)))::bigint) AS total_usd
+                            FROM combined c
+                            JOIN assets a ON a.asset = c.asset
+                            GROUP BY c.user_id
+                            """;
+                    jdbc.query(sql, rs -> {
                         long uid = rs.getLong("user_id");
-                        if (uid > 0) {
-                            userBalancesUsd.put(uid, 10_000L);
+                        long bal = rs.getLong("total_usd");
+                        if (uid > 0 && bal > 0) {
+                            userBalancesUsd.put(uid, bal);
                         }
                     });
                 } catch (RuntimeException ex) {
-                    log.debug("PoR gateway_users fallback: {}", ex.getMessage());
+                    throw new IllegalStateException("PoR database ledger query failed: " + ex.getMessage(), ex);
                 }
             }
+            if (userBalancesUsd.isEmpty()) {
+                return recordEmptySnapshot();
+            }
+            // 未接入真实链上储备对账前不伪造超额储备，储备金额诚实记为 0
+            return generateSnapshotLocked(userBalancesUsd, 0L);
+        } finally {
+            snapshotLock.unlock();
         }
-        if (userBalancesUsd.isEmpty()) {
-            userBalancesUsd.putAll(Map.of(
-                    1001L, 150_000L,
-                    1002L, 250_000L,
-                    1003L, 500_000L,
-                    1004L, 100_000L
-            ));
-        }
-        long liability = userBalancesUsd.values().stream().mapToLong(Long::longValue).sum();
-        long reserve = Math.max(liability + 100_000L, Math.round(liability * 1.1037));
-        return generateSnapshot(userBalancesUsd, reserve);
+    }
+
+    private PorSnapshotSummary recordEmptySnapshot() {
+        String snapshotId = nextSnapshotId();
+        Instant now = Instant.now();
+        PorSnapshotSummary summary = new PorSnapshotSummary(
+                snapshotId, sha256("empty"), 0L, 0L, 0L, 0, now
+        );
+        userProofs.clear();
+        snapshots.put(snapshotId, summary);
+        latestSnapshotId = snapshotId;
+        return summary;
+    }
+
+    private String nextSnapshotId() {
+        return "por-" + System.currentTimeMillis() + "-" + snapshotSequence.incrementAndGet();
     }
 
     public UserPorProofResponse getUserProof(long userId) {

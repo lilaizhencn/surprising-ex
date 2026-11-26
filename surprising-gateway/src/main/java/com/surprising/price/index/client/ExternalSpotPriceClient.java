@@ -2,6 +2,7 @@ package com.surprising.price.index.client;
 
 import com.surprising.price.api.model.QuoteTransport;
 import com.surprising.price.api.model.SourceStatus;
+import com.surprising.price.index.client.ExternalSpotTickerParser.ParsedTicker;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.model.SourceQuote;
 import jakarta.annotation.PreDestroy;
@@ -78,7 +79,7 @@ public class ExternalSpotPriceClient {
     }
 
     Optional<SourceQuote> parseWebSocketPayload(IndexPriceProperties.SourceConfig source, JsonNode root,
-                                               Instant receivedAt) {
+                                                Instant receivedAt) {
         try {
             return Optional.ofNullable(toSourceQuote(source, root, receivedAt, null, true));
         } catch (Exception ex) {
@@ -91,7 +92,8 @@ public class ExternalSpotPriceClient {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IllegalArgumentException("ticker http status " + response.statusCode());
         }
-        ParsedTicker ticker = parseTicker(parser, objectMapper.readTree(response.body()));
+        ParsedTicker ticker = ExternalSpotTickerParser.parseTicker(
+                parser, objectMapper.readTree(response.body()), properties.getCalculation().getScale());
         return ticker.price();
     }
 
@@ -149,7 +151,7 @@ public class ExternalSpotPriceClient {
     private SourceQuote toSourceQuote(IndexPriceProperties.SourceConfig source, JsonNode root, Instant receivedAt,
                                       Long latencyMillis, boolean websocket) throws Exception {
         String parser = parser(source, websocket);
-        if (websocket && !matchesWebSocketAncestry(source, parser, root)) return null;
+        if (websocket && !ExternalSpotTickerParser.matchesWebSocketAncestry(source, parser, root)) return null;
         if ("OPTION_RISK_TICKER".equalsIgnoreCase(parser)) {
             if (!source.getSourceSymbol().equals(root.path("symbol").asString())
                     || !normalizedCurrency(source.getQuoteCurrency()).equals(normalizedCurrency(source.getTargetQuoteCurrency())))
@@ -167,8 +169,9 @@ public class ExternalSpotPriceClient {
                     source.getWeight(), SourceStatus.HEALTHY, null, timestamp, receivedAt, latencyMillis,
                     websocket ? QuoteTransport.PUBLIC_WEBSOCKET : QuoteTransport.REST, reference);
         }
-        ParsedTicker ticker = parseTicker(parser, root);
-        if (websocket && ticker.instrument() != null && !sameInstrument(ticker.instrument(), source.getSourceSymbol())) {
+        ParsedTicker ticker = ExternalSpotTickerParser.parseTicker(parser, root, properties.getCalculation().getScale());
+        if (websocket && ticker.instrument() != null
+                && !ExternalSpotTickerParser.sameInstrument(ticker.instrument(), source.getSourceSymbol())) {
             return null;
         }
         ConvertedTicker converted = convertToTargetQuote(source, ticker);
@@ -184,123 +187,6 @@ public class ExternalSpotPriceClient {
             return source.getWebsocketParser();
         }
         return source.getParser();
-    }
-
-    private boolean matchesWebSocketAncestry(IndexPriceProperties.SourceConfig source, String parser, JsonNode root) {
-        String expected = source.getSourceSymbol();
-        return switch (parser.toUpperCase(Locale.ROOT)) {
-            case "OKX_INDEX_TICKER" -> "index-tickers".equals(root.path("arg").path("channel").asString())
-                    && sameProtocolInstrument(root.path("arg").path("instId").asString(null), expected)
-                    && sameProtocolInstrument(root.path("data").path(0).path("instId").asString(null), expected)
-                    && sameProtocolInstrument(root.path("data").path(0).path("instId").asString(null),
-                            root.path("arg").path("instId").asString(null));
-            case "OKX_TICKER" -> matchesOptionalInstrument(root.path("data").path(0), "instId", expected);
-            case "BINANCE_BOOK_TICKER" -> {
-                JsonNode ticker = root.has("data") ? root.path("data") : root;
-                String actual = firstText(ticker, "symbol", "s");
-                yield actual == null || sameInstrument(actual, expected);
-            }
-            case "COINBASE_TICKER" -> "ticker".equals(root.path("type").asString())
-                    && matchesOptionalInstrument(root, "product_id", expected);
-            case "KRAKEN_TICKER" -> "ticker".equals(root.path("channel").asString())
-                    && matchesOptionalInstrument(root.path("data").path(0), "symbol", expected);
-            case "BYBIT_TICKER" -> expected != null && !expected.isBlank()
-                    && ("tickers." + expected).equals(root.path("topic").asString());
-            default -> true;
-        };
-    }
-
-    private boolean matchesOptionalInstrument(JsonNode ticker, String field, String expected) {
-        String actual = firstText(ticker, field);
-        return actual == null || sameInstrument(actual, expected);
-    }
-
-    private ParsedTicker parseTicker(String parser, JsonNode root) {
-        return switch (parser.toUpperCase(Locale.ROOT)) {
-            case "BINANCE_BOOK_TICKER" -> parseBinanceBookTicker(root);
-            case "OKX_TICKER" -> parseOkxTicker(root);
-            case "OKX_INDEX_TICKER" -> parseOkxIndexTicker(root);
-            case "BYBIT_TICKER" -> parseBybitTicker(root);
-            case "COINBASE_TICKER" -> parseCoinbaseTicker(root);
-            case "KRAKEN_TICKER" -> parseKrakenTicker(root);
-            default -> throw new IllegalArgumentException("Unsupported parser: " + parser);
-        };
-    }
-
-    private ParsedTicker parseBinanceBookTicker(JsonNode root) {
-        JsonNode ticker = root.has("data") ? root.path("data") : root;
-        BigDecimal bid = firstDecimal(ticker, "bidPrice", "b");
-        BigDecimal ask = firstDecimal(ticker, "askPrice", "a");
-        Instant sourceTime = ticker.hasNonNull("E") ? Instant.ofEpochMilli(ticker.path("E").asLong()) : Instant.now();
-        return new ParsedTicker(midOrLast(bid, ask, null), bid, ask, sourceTime,
-                firstText(ticker, "symbol", "s"));
-    }
-
-    private ParsedTicker parseOkxTicker(JsonNode root) {
-        JsonNode ticker = root.path("data").path(0);
-        BigDecimal bid = decimal(ticker, "bidPx");
-        BigDecimal ask = decimal(ticker, "askPx");
-        BigDecimal last = decimal(ticker, "last");
-        Instant sourceTime = epochMillis(ticker.path("ts").asString(null));
-        return new ParsedTicker(midOrLast(bid, ask, last), bid, ask, sourceTime, firstText(ticker, "instId"));
-    }
-
-    private ParsedTicker parseOkxIndexTicker(JsonNode root) {
-        JsonNode ticker = root.path("data").path(0);
-        BigDecimal indexPrice = decimal(ticker, "idxPx");
-        Instant sourceTime = epochMillis(ticker.path("ts").asString(null));
-        if (!positive(indexPrice)) {
-            throw new IllegalArgumentException("OKX index ticker has no valid idxPx");
-        }
-        return new ParsedTicker(indexPrice, null, null, sourceTime, firstText(ticker, "instId"));
-    }
-
-    private ParsedTicker parseBybitTicker(JsonNode root) {
-        JsonNode ticker = root.path("data");
-        if (ticker.isArray()) {
-            ticker = ticker.path(0);
-        }
-        if (ticker.isMissingNode() || ticker.isNull() || ticker.isEmpty()) {
-            ticker = root.path("result").path("list").path(0);
-        }
-        BigDecimal bid = decimal(ticker, "bid1Price");
-        BigDecimal ask = decimal(ticker, "ask1Price");
-        BigDecimal last = decimal(ticker, "lastPrice");
-        Instant sourceTime = root.hasNonNull("ts")
-                ? Instant.ofEpochMilli(root.path("ts").asLong())
-                : Instant.now();
-        return new ParsedTicker(midOrLast(bid, ask, last), bid, ask, sourceTime, firstText(ticker, "symbol"));
-    }
-
-    private ParsedTicker parseCoinbaseTicker(JsonNode root) {
-        BigDecimal bid = firstDecimal(root, "bid", "best_bid");
-        BigDecimal ask = firstDecimal(root, "ask", "best_ask");
-        BigDecimal price = decimal(root, "price");
-        Instant sourceTime = root.hasNonNull("time") ? Instant.parse(root.get("time").asString()) : Instant.now();
-        return new ParsedTicker(midOrLast(bid, ask, price), bid, ask, sourceTime, firstText(root, "product_id"));
-    }
-
-    private ParsedTicker parseKrakenTicker(JsonNode root) {
-        JsonNode data = root.path("data");
-        if (data.isArray() && !data.isEmpty()) {
-            JsonNode ticker = data.path(0);
-            BigDecimal bid = decimal(ticker, "bid");
-            BigDecimal ask = decimal(ticker, "ask");
-            BigDecimal last = decimal(ticker, "last");
-            return new ParsedTicker(midOrLast(bid, ask, last), bid, ask,
-                    Instant.parse(ticker.path("timestamp").asString()), firstText(ticker, "symbol"));
-        }
-
-        JsonNode result = root.path("result");
-        if (result.propertyNames().isEmpty()) {
-            throw new IllegalArgumentException("Kraken response has no ticker result");
-        }
-        String instrument = result.propertyNames().iterator().next();
-        JsonNode ticker = result.path(instrument);
-        BigDecimal bid = decimal(ticker.path("b"), 0);
-        BigDecimal ask = decimal(ticker.path("a"), 0);
-        BigDecimal last = decimal(ticker.path("c"), 0);
-        return new ParsedTicker(midOrLast(bid, ask, last), bid, ask, Instant.now(), instrument);
     }
 
     private ConvertedTicker convertToTargetQuote(IndexPriceProperties.SourceConfig source, ParsedTicker ticker) {
@@ -376,116 +262,6 @@ public class ExternalSpotPriceClient {
                 : source.getConversionOperation().trim().toUpperCase(Locale.ROOT);
     }
 
-    private BigDecimal midOrLast(BigDecimal bid, BigDecimal ask, BigDecimal last) {
-        if (positive(bid) && positive(ask)) {
-            return bid.add(ask).divide(BigDecimal.valueOf(2), properties.getCalculation().getScale(), RoundingMode.HALF_UP);
-        }
-        if (positive(last)) {
-            return last;
-        }
-        throw new IllegalArgumentException("ticker has no valid bid/ask/last price");
-    }
-
-    private boolean positive(BigDecimal value) {
-        return value != null && value.signum() > 0;
-    }
-
-    private BigDecimal firstDecimal(JsonNode node, String... fields) {
-        for (String field : fields) {
-            BigDecimal value = decimal(node, field);
-            if (value != null) {
-                return value;
-            }
-        }
-        return null;
-    }
-
-    private BigDecimal decimal(JsonNode node, String field) {
-        return decimalValue(node.path(field));
-    }
-
-    private BigDecimal decimal(JsonNode node, int index) {
-        return decimalValue(node.path(index));
-    }
-
-    private BigDecimal decimalValue(JsonNode value) {
-        if (value.isArray()) {
-            value = value.path(0);
-        }
-        if (value.isMissingNode() || value.isNull() || value.asString().isBlank()) {
-            return null;
-        }
-        return new BigDecimal(value.asString());
-    }
-
-    private String firstText(JsonNode node, String... fields) {
-        for (String field : fields) {
-            JsonNode value = node.path(field);
-            if (!value.isMissingNode() && !value.isNull() && !value.asString().isBlank()) {
-                return value.asString();
-            }
-        }
-        return null;
-    }
-
-    private Instant epochMillis(String value) {
-        if (value == null || value.isBlank()) {
-            return Instant.now();
-        }
-        return Instant.ofEpochMilli(Long.parseLong(value));
-    }
-
-    private boolean sameInstrument(String left, String right) {
-        return normalizeInstrument(left).equals(normalizeInstrument(right));
-    }
-
-    private boolean sameProtocolInstrument(String actual, String expected) {
-        if (actual == null || actual.isEmpty() || expected == null || expected.isEmpty()
-                || actual.length() != expected.length()) {
-            return false;
-        }
-        for (int index = 0; index < actual.length(); index++) {
-            char actualCharacter = actual.charAt(index);
-            char expectedCharacter = expected.charAt(index);
-            if (actualCharacter != expectedCharacter
-                    && (!isAsciiLetter(actualCharacter) || !isAsciiLetter(expectedCharacter)
-                    || asciiUppercase(actualCharacter) != asciiUppercase(expectedCharacter))) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean isAsciiLetter(char value) {
-        return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z';
-    }
-
-    private char asciiUppercase(char value) {
-        return value >= 'a' && value <= 'z' ? (char) (value - ('a' - 'A')) : value;
-    }
-
-    private String normalizeInstrument(String instrument) {
-        if (instrument == null) {
-            return "";
-        }
-        String upper = instrument.toUpperCase(Locale.ROOT);
-        StringBuilder filtered = null;
-        for (int i = 0; i < upper.length(); i++) {
-            char c = upper.charAt(i);
-            if (c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
-                if (filtered != null) filtered.append(c);
-            } else if (filtered == null) {
-                filtered = new StringBuilder(upper.length());
-                filtered.append(upper, 0, i);
-            }
-        }
-        String normalized = filtered == null ? upper : filtered.toString();
-        if (normalized.startsWith("XBT")) {
-            return "BTC" + normalized.substring(3);
-        }
-        return normalized;
-    }
-
     private SourceQuote error(IndexPriceProperties.SourceConfig source, SourceStatus status, String reason,
                               Instant receivedAt, Long latencyMillis) {
         return new SourceQuote(source.getName(), source.getSourceSymbol(), null, null, null, source.getWeight(),
@@ -500,15 +276,10 @@ public class ExternalSpotPriceClient {
         return Duration.between(start, end).toMillis();
     }
 
-    private record ParsedTicker(BigDecimal price, BigDecimal bidPrice, BigDecimal askPrice,
-                                Instant sourceTime, String instrument) {
-    }
-
     private record ConvertedTicker(BigDecimal price, BigDecimal bidPrice, BigDecimal askPrice,
                                    BigDecimal weightMultiplier, String reason) {
     }
 
     private record CachedConversionRate(BigDecimal rate, Instant updatedAt) {
     }
-
 }

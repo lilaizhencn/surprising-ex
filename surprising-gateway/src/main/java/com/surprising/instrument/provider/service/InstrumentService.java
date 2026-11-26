@@ -39,7 +39,8 @@ public class InstrumentService {
     private final MarketSummaryService marketSummaries;
     private final ApplicationEventPublisher eventPublisher;
     private final java.util.function.LongSupplier nanoTime;
-    private final Map<ProductLine, CatalogSnapshot> catalogSnapshots = new java.util.EnumMap<>(ProductLine.class);
+    private final Map<ProductLine, CatalogSnapshot> catalogSnapshots = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.locks.ReentrantLock snapshotLock = new java.util.concurrent.locks.ReentrantLock();
     private static final long CONFIG_RECHECK_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
     private record CatalogSnapshot(String version, InstrumentSnapshotResponse response, long checkedAt) {}
 
@@ -132,10 +133,8 @@ public class InstrumentService {
 
     public Map<String, Long> assetScales() {
         long now = nanoTime.getAsLong();
-        synchronized (this) {
-            for (CatalogSnapshot snapshot : catalogSnapshots.values()) {
-                if (now - snapshot.checkedAt() < CONFIG_RECHECK_NANOS) return snapshot.response().assetScales();
-            }
+        for (CatalogSnapshot snapshot : catalogSnapshots.values()) {
+            if (now - snapshot.checkedAt() < CONFIG_RECHECK_NANOS) return snapshot.response().assetScales();
         }
         return snapshot(ProductLine.SPOT).assetScales();
     }
@@ -148,28 +147,36 @@ public class InstrumentService {
     /**
      * 返回指定产品线的完整合约快照，供其他服务启动初始化和缓存修复使用。
      */
-    public synchronized InstrumentSnapshotResponse snapshot(ProductLine productLine) {
+    public InstrumentSnapshotResponse snapshot(ProductLine productLine) {
         if (productLine == null) throw new IllegalArgumentException("productLine is required");
         long now = nanoTime.getAsLong();
-        CatalogSnapshot previous = catalogSnapshots.get(productLine);
-        if (previous != null && now - previous.checkedAt() < CONFIG_RECHECK_NANOS) return previous.response();
-        var configuration = storageService.configuration(productLine, previous == null ? null : previous.version());
-        if (configuration == null) {
-            if (previous == null) throw new IllegalStateException("合约快照尚未就绪");
-            catalogSnapshots.put(productLine, new CatalogSnapshot(previous.version(), previous.response(), now));
-            return previous.response();
+        CatalogSnapshot cached = catalogSnapshots.get(productLine);
+        if (cached != null && now - cached.checkedAt() < CONFIG_RECHECK_NANOS) return cached.response();
+        snapshotLock.lock();
+        try {
+            now = nanoTime.getAsLong();
+            CatalogSnapshot previous = catalogSnapshots.get(productLine);
+            if (previous != null && now - previous.checkedAt() < CONFIG_RECHECK_NANOS) return previous.response();
+            var configuration = storageService.configuration(productLine, previous == null ? null : previous.version());
+            if (configuration == null) {
+                if (previous == null) throw new IllegalStateException("合约快照尚未就绪");
+                catalogSnapshots.put(productLine, new CatalogSnapshot(previous.version(), previous.response(), now));
+                return previous.response();
+            }
+            var rows = configuration.instruments().stream().map(InstrumentResponse::immutableCopy).toList();
+            var scales = Map.copyOf(configuration.assetScales());
+            long sequence = rows.stream().mapToLong(InstrumentResponse::lastChangeId).max().orElse(0L);
+            var response = new InstrumentSnapshotResponse(productLine, sequence, rows, scales);
+            catalogSnapshots.put(productLine, new CatalogSnapshot(configuration.version(), response, now));
+            return response;
+        } finally {
+            snapshotLock.unlock();
         }
-        var rows = configuration.instruments().stream().map(InstrumentResponse::immutableCopy).toList();
-        var scales = Map.copyOf(configuration.assetScales());
-        long sequence = rows.stream().mapToLong(InstrumentResponse::lastChangeId).max().orElse(0L);
-        var response = new InstrumentSnapshotResponse(productLine, sequence, rows, scales);
-        catalogSnapshots.put(productLine, new CatalogSnapshot(configuration.version(), response, now));
-        return response;
     }
 
     /** 本节点配置事务提交后失效；其他节点每五秒核对持久版本。 */
     @org.springframework.context.event.EventListener
-    public synchronized void onInstrumentEvent(InstrumentEvent event) {
+    public void onInstrumentEvent(InstrumentEvent event) {
         if (event != null) catalogSnapshots.remove(event.productLine());
     }
 

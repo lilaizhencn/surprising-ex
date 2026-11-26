@@ -21,8 +21,8 @@ public class WalletFundingService {
     private final CustodyWalletClient custody;
     private final UserDepositAddressRepository addressRepository;
     private final java.util.function.LongSupplier nanoTime;
-    private Map<String, List<FundingAsset>> catalog;
-    private long catalogLoadedAt;
+    private volatile Map<String, List<FundingAsset>> catalog;
+    private volatile long catalogLoadedAt;
     private static final long CATALOG_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
 
     public WalletFundingService(AssetRepository assets, AssetNetworkRepository networks, CustodyWalletClient custody) {
@@ -100,18 +100,29 @@ public class WalletFundingService {
         return "generic";
     }
 
-    public synchronized List<FundingAsset> catalog(String operation) {
+    private final java.util.concurrent.locks.ReentrantLock catalogLock = new java.util.concurrent.locks.ReentrantLock();
+
+    public List<FundingAsset> catalog(String operation) {
         if (!Set.of("deposit", "withdraw").contains(operation)) throw new IllegalArgumentException("invalid funding operation");
         long now = nanoTime.getAsLong();
-        if (catalog != null && now - catalogLoadedAt < CATALOG_NANOS) return catalog.get(operation);
-        var chains = Objects.requireNonNull(custody.chains(), "custody chains unavailable");
-        var routes = networks.enabled();
-        var configuredAssets = assets.list(false);
-        var refreshed = Map.of("deposit", buildCatalog("deposit", configuredAssets, routes, chains),
-                "withdraw", buildCatalog("withdraw", configuredAssets, routes, chains));
-        catalog = refreshed;
-        catalogLoadedAt = now;
-        return refreshed.get(operation);
+        var current = catalog;
+        if (current != null && now - catalogLoadedAt < CATALOG_NANOS) return current.get(operation);
+        catalogLock.lock();
+        try {
+            now = nanoTime.getAsLong();
+            current = catalog;
+            if (current != null && now - catalogLoadedAt < CATALOG_NANOS) return current.get(operation);
+            var chains = Objects.requireNonNull(custody.chains(), "custody chains unavailable");
+            var routes = networks.enabled();
+            var configuredAssets = assets.list(false);
+            var refreshed = Map.of("deposit", buildCatalog("deposit", configuredAssets, routes, chains),
+                    "withdraw", buildCatalog("withdraw", configuredAssets, routes, chains));
+            catalogLoadedAt = now;
+            catalog = refreshed;
+            return refreshed.get(operation);
+        } finally {
+            catalogLock.unlock();
+        }
     }
 
     private static List<FundingAsset> buildCatalog(String operation, List<Asset> assets, List<Network> routes,
