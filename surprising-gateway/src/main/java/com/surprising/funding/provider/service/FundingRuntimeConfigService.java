@@ -24,17 +24,15 @@ public class FundingRuntimeConfigService {
             Boolean settlementEnabled, Boolean coordinationEnabled, Long publishDelayMs, Long settleDelayMs,
             Integer batchSize, Integer maxPagesPerRun,
             Long maxMarkAgeMs, Long maxRateAgeMs, Long leaseDurationMs, String reason) {
-        synchronized (settings) {
-            var all = settings.current().settings();
-            var old = all.funding();
-            var next = new LifecycleBusinessSettings.Funding(value(calculationEnabled, old.calculationEnabled()),
-                    value(settlementEnabled, old.settlementEnabled()), value(coordinationEnabled, old.coordinationEnabled()),
-                    value(publishDelayMs, old.publishDelayMs()), value(maxMarkAgeMs, old.maxMarkAgeMs()), value(maxRateAgeMs, old.maxRateAgeMs()),
-                    value(settleDelayMs, old.settleDelayMs()), value(batchSize, old.batchSize()),
-                    value(maxPagesPerRun, old.maxPagesPerRun()), value(leaseDurationMs, old.leaseDurationMs()));
-            settings.save(new LifecycleBusinessSettings(next, all.liquidation(), all.insurance(), all.adl()), expectedVersion, admin, reason);
-            return current();
-        }
+        var all = settings.current().settings();
+        var old = all.funding();
+        var next = new LifecycleBusinessSettings.Funding(value(calculationEnabled, old.calculationEnabled()),
+                value(settlementEnabled, old.settlementEnabled()), value(coordinationEnabled, old.coordinationEnabled()),
+                value(publishDelayMs, old.publishDelayMs()), value(maxMarkAgeMs, old.maxMarkAgeMs()), value(maxRateAgeMs, old.maxRateAgeMs()),
+                value(settleDelayMs, old.settleDelayMs()), value(batchSize, old.batchSize()),
+                value(maxPagesPerRun, old.maxPagesPerRun()), value(leaseDurationMs, old.leaseDurationMs()));
+        settings.save(new LifecycleBusinessSettings(next, all.liquidation(), all.insurance(), all.adl()), expectedVersion, admin, reason);
+        return current();
     }
     private static <T> T value(T update, T previous) { return update == null ? previous : update; }
 }

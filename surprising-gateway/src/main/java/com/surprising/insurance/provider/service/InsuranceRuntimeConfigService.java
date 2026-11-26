@@ -16,13 +16,11 @@ public class InsuranceRuntimeConfigService {
                 "coverage", Map.of("enabled", value.enabled(), "scanDelayMs", value.scanDelayMs(), "batchSize", value.batchSize()));
     }
     public Map<String, Object> update(String admin, long expectedVersion, Boolean enabled, Long scanDelayMs, Integer batchSize, String reason) {
-        synchronized (settings) {
-            var all = settings.current().settings();
-            var old = all.insurance();
-            var next = new LifecycleBusinessSettings.Insurance(enabled == null ? old.enabled() : enabled,
-                    scanDelayMs == null ? old.scanDelayMs() : scanDelayMs, batchSize == null ? old.batchSize() : batchSize);
-            settings.save(new LifecycleBusinessSettings(all.funding(), all.liquidation(), next, all.adl()), expectedVersion, admin, reason);
-            return current();
-        }
+        var all = settings.current().settings();
+        var old = all.insurance();
+        var next = new LifecycleBusinessSettings.Insurance(enabled == null ? old.enabled() : enabled,
+                scanDelayMs == null ? old.scanDelayMs() : scanDelayMs, batchSize == null ? old.batchSize() : batchSize);
+        settings.save(new LifecycleBusinessSettings(all.funding(), all.liquidation(), next, all.adl()), expectedVersion, admin, reason);
+        return current();
     }
 }

@@ -21,7 +21,7 @@ public class GridStrategyService {
     private final Map<Long, GridStrategyRecord> strategies = new ConcurrentHashMap<>();
     private final Map<Long, List<GridLevel>> strategyLevels = new ConcurrentHashMap<>();
     private final Map<String, String> levelClientOrderIds = new ConcurrentHashMap<>();
-    private final java.util.concurrent.locks.ReentrantLock reconcileLock = new java.util.concurrent.locks.ReentrantLock();
+    private final java.util.concurrent.atomic.AtomicBoolean reconciling = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public GridStrategyService(OrderService orderService) {
         this.orderService = orderService;
@@ -191,7 +191,7 @@ public class GridStrategyService {
      */
     @Scheduled(fixedDelay = 5000)
     public void reconcileActiveGrids() {
-        if (!reconcileLock.tryLock()) {
+        if (!reconciling.compareAndSet(false, true)) {
             return;
         }
         try {
@@ -207,7 +207,7 @@ public class GridStrategyService {
                 }
             }
         } finally {
-            reconcileLock.unlock();
+            reconciling.set(false);
         }
     }
 

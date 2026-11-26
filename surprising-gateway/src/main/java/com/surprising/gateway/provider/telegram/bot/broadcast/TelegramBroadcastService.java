@@ -16,7 +16,7 @@ public class TelegramBroadcastService {
     private final TelegramBroadcastRepository broadcasts;
     private final TelegramBotClient bot;
     private final java.util.function.LongSupplier nanoTime;
-    private final java.util.concurrent.locks.ReentrantLock drainLock = new java.util.concurrent.locks.ReentrantLock();
+    private final java.util.concurrent.atomic.AtomicBoolean draining = new java.util.concurrent.atomic.AtomicBoolean(false);
     private long nextUnconfiguredCheck;
     private boolean unconfiguredChecked;
 
@@ -49,7 +49,7 @@ public class TelegramBroadcastService {
     }
 
     public void drain() {
-        if (!drainLock.tryLock()) return;
+        if (!draining.compareAndSet(false, true)) return;
         try {
             if (!bot.isConfigured()) {
                 long now = nanoTime.getAsLong();
@@ -79,7 +79,7 @@ public class TelegramBroadcastService {
             }
             for (long id : touched) broadcasts.refresh(id);
         } finally {
-            drainLock.unlock();
+            draining.set(false);
         }
     }
 

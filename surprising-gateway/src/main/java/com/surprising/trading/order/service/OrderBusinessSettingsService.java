@@ -18,8 +18,8 @@ public class OrderBusinessSettingsService {
     private final OrderBusinessSettingsRepository settings;
     private final TradingOrderProperties properties;
     private final ProductLine line;
-    private final java.util.concurrent.locks.ReentrantLock settingsLock = new java.util.concurrent.locks.ReentrantLock();
-    private volatile OrderSettingsSnapshot current;
+    private final java.util.concurrent.atomic.AtomicReference<OrderSettingsSnapshot> current =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     public OrderBusinessSettingsService(OrderBusinessSettingsRepository settings, TradingOrderProperties properties) {
         this.settings = settings;
@@ -35,38 +35,42 @@ public class OrderBusinessSettingsService {
 
     public OrderSettingsSnapshot current(ProductLine requested) {
         if (requested != line) throw new IllegalArgumentException("order settings product line mismatch");
-        if (current == null) throw new IllegalStateException("order settings not initialized");
-        return current;
+        var snapshot = current.get();
+        if (snapshot == null) throw new IllegalStateException("order settings not initialized");
+        return snapshot;
     }
 
     // 保存独立提交后再发布本机规则；外层事务回滚不能留下未提交的内存版本。
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public OrderSettingsSnapshot save(ProductLine requested, OrderBusinessSettings value,
                                       long expectedVersion, String admin, String reason) {
-        settingsLock.lock();
-        try {
-            current(requested);
-            var saved = settings.save(line, value, expectedVersion, admin, reason)
-                    .orElseThrow(() -> new OptimisticLockingFailureException("order settings changed; reload before saving"));
-            // 此单表 CAS 在返回前已提交；只安装成功保存的数据库版本。
-            install(saved);
-            return current;
-        } finally {
-            settingsLock.unlock();
-        }
+        current(requested);
+        var saved = settings.save(line, value, expectedVersion, admin, reason)
+                .orElseThrow(() -> new OptimisticLockingFailureException("order settings changed; reload before saving"));
+        // 此单表 CAS 在返回前已提交；只安装成功保存的数据库版本。
+        return installIfNewer(saved);
     }
 
     public void reload() {
-        settingsLock.lock();
-        try {
-            var value = settings.find(line);
-            if (value == null) throw new IllegalStateException("order settings missing");
-            if (current == null || value.configurationVersion() > current.configurationVersion()) install(value);
-        } finally {
-            settingsLock.unlock();
+        var value = settings.find(line);
+        if (value == null) throw new IllegalStateException("order settings missing");
+        installIfNewer(value);
+    }
+
+    private OrderSettingsSnapshot installIfNewer(OrderSettingsSnapshot snapshot) {
+        while (true) {
+            var previous = current.get();
+            if (previous != null && previous.configurationVersion() >= snapshot.configurationVersion()) {
+                return previous;
+            }
+            if (current.compareAndSet(previous, snapshot)) {
+                applyToProperties(snapshot);
+                return snapshot;
+            }
         }
     }
-    private void install(OrderSettingsSnapshot snapshot) {
+
+    private void applyToProperties(OrderSettingsSnapshot snapshot) {
         var priceProtection = snapshot.settings().risk();
         var risk = new TradingOrderProperties.Risk();
         risk.setMarketMaxSlippagePpm(priceProtection.marketMaxSlippagePpm());
@@ -88,6 +92,5 @@ public class OrderBusinessSettingsService {
 
         properties.setRisk(risk);
         properties.setAlgo(algo);
-        current = snapshot;
     }
 }

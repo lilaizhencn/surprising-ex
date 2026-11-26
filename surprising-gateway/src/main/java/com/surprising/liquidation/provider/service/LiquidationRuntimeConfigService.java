@@ -32,15 +32,13 @@ public class LiquidationRuntimeConfigService {
     }
     public Map<String, Object> update(String admin, long expectedVersion, Boolean enabled, Long feeRatePpm,
             Long delayMs, Integer workBatchSize, Integer maxPagesPerRun, Integer maxWorkBytes, String reason) {
-        synchronized (settings) {
-            var all = settings.current().settings();
-            var old = all.liquidation();
-            var next = new LifecycleBusinessSettings.Liquidation(value(enabled, old.enabled()), value(feeRatePpm, old.feeRatePpm()),
-                    value(delayMs, old.delayMs()), value(workBatchSize, old.workBatchSize()), value(maxPagesPerRun, old.maxPagesPerRun()),
-                    value(maxWorkBytes, old.maxWorkBytes()));
-            settings.save(new LifecycleBusinessSettings(all.funding(), next, all.insurance(), all.adl()), expectedVersion, admin, reason);
-            return current();
-        }
+        var all = settings.current().settings();
+        var old = all.liquidation();
+        var next = new LifecycleBusinessSettings.Liquidation(value(enabled, old.enabled()), value(feeRatePpm, old.feeRatePpm()),
+                value(delayMs, old.delayMs()), value(workBatchSize, old.workBatchSize()), value(maxPagesPerRun, old.maxPagesPerRun()),
+                value(maxWorkBytes, old.maxWorkBytes()));
+        settings.save(new LifecycleBusinessSettings(all.funding(), next, all.insurance(), all.adl()), expectedVersion, admin, reason);
+        return current();
     }
     private static <T> T value(T update, T previous) { return update == null ? previous : update; }
 }

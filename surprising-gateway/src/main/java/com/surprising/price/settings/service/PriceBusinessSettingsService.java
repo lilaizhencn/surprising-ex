@@ -24,8 +24,8 @@ public class PriceBusinessSettingsService {
     private final MarkPriceProperties mark;
     private final ProductLine line;
     private final ApplicationEventPublisher events;
-    private final java.util.concurrent.locks.ReentrantLock settingsLock = new java.util.concurrent.locks.ReentrantLock();
-    private volatile PriceSettingsSnapshot current;
+    private final java.util.concurrent.atomic.AtomicReference<PriceSettingsSnapshot> current =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     public PriceBusinessSettingsService(PriceBusinessSettingsRepository settings, ObjectMapper json,
             IndexPriceProperties index, MarkPriceProperties mark, ApplicationEventPublisher events) {
@@ -40,33 +40,38 @@ public class PriceBusinessSettingsService {
         reload();
     }
     public PriceSettingsSnapshot current() {
-        if (current == null) throw new IllegalStateException("price settings not initialized");
-        return current;
+        var snapshot = current.get();
+        if (snapshot == null) throw new IllegalStateException("price settings not initialized");
+        return snapshot;
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public PriceSettingsSnapshot save(PriceBusinessSettings value, long expectedVersion, String admin, String reason) {
-        settingsLock.lock();
-        try {
-            var saved = settings.save(line, value, expectedVersion, admin, reason)
-                    .orElseThrow(() -> new OptimisticLockingFailureException("price settings changed; reload before saving"));
-            install(saved);
-            return current;
-        } finally {
-            settingsLock.unlock();
-        }
+        var saved = settings.save(line, value, expectedVersion, admin, reason)
+                .orElseThrow(() -> new OptimisticLockingFailureException("price settings changed; reload before saving"));
+        return installIfNewer(saved);
     }
     public void reload() {
-        settingsLock.lock();
-        try {
-            var value = settings.find(line);
-            if (value == null) throw new IllegalStateException("price settings missing");
-            if (current == null || value.version() > current.version()) install(value);
-        } finally {
-            settingsLock.unlock();
+        var value = settings.find(line);
+        if (value == null) throw new IllegalStateException("price settings missing");
+        installIfNewer(value);
+    }
+
+    private PriceSettingsSnapshot installIfNewer(PriceSettingsSnapshot snapshot) {
+        while (true) {
+            var previous = current.get();
+            if (previous != null && previous.version() >= snapshot.version()) {
+                return previous;
+            }
+            if (current.compareAndSet(previous, snapshot)) {
+                applyToProperties(snapshot);
+                events.publishEvent(snapshot);
+                return snapshot;
+            }
         }
     }
-    private void install(PriceSettingsSnapshot snapshot) {
+
+    private void applyToProperties(PriceSettingsSnapshot snapshot) {
         var values = snapshot.settings();
         var indexCalculation = new IndexPriceProperties.Calculation();
         var markCalculation = new MarkPriceProperties.Calculation();
@@ -119,7 +124,5 @@ public class PriceBusinessSettingsService {
         index.setCoordination(indexCoordination);
         mark.setCalculation(markCalculation);
         mark.setCoordination(markCoordination);
-        current = snapshot;
-        events.publishEvent(snapshot);
     }
 }

@@ -29,8 +29,8 @@ public class LifecycleBusinessSettingsService {
     private final InsuranceProperties insurance;
     private final AdlProperties adl;
     private final ApplicationEventPublisher events;
-    private final java.util.concurrent.locks.ReentrantLock settingsLock = new java.util.concurrent.locks.ReentrantLock();
-    private volatile LifecycleSettingsSnapshot current;
+    private final java.util.concurrent.atomic.AtomicReference<LifecycleSettingsSnapshot> current =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     public LifecycleBusinessSettingsService(LifecycleBusinessSettingsRepository settings, RiskProperties risk,
             @Autowired(required = false) FundingProperties funding, LiquidationProperties liquidation,
@@ -41,7 +41,7 @@ public class LifecycleBusinessSettingsService {
     @PostConstruct
     public void initialize() {
         if (!line.isDerivative()) {
-            install(new LifecycleSettingsSnapshot(1L, LifecycleBusinessSettings.initial(),
+            installIfNewer(new LifecycleSettingsSnapshot(1L, LifecycleBusinessSettings.initial(),
                     "SYSTEM", "spot non-derivative", Instant.now()));
             return;
         }
@@ -49,42 +49,45 @@ public class LifecycleBusinessSettingsService {
         reload();
     }
     public LifecycleSettingsSnapshot current() {
-        var value = current;
+        var value = current.get();
         if (value == null) throw new IllegalStateException("lifecycle business settings are not initialized");
         return value;
     }
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public LifecycleSettingsSnapshot save(LifecycleBusinessSettings value, long expectedVersion, String admin, String reason) {
-        settingsLock.lock();
-        try {
-            if (!line.isDerivative()) {
-                throw new IllegalArgumentException("spot product line has no derivatives lifecycle settings");
-            }
-            if (current().version() != expectedVersion)
-                throw new OptimisticLockingFailureException("lifecycle settings changed; reload before saving");
-            var saved = settings.save(line, value, expectedVersion, admin, reason)
-                    .orElseThrow(() -> new OptimisticLockingFailureException("lifecycle settings changed; reload before saving"));
-            install(saved);
-            return current;
-        } finally {
-            settingsLock.unlock();
+        if (!line.isDerivative()) {
+            throw new IllegalArgumentException("spot product line has no derivatives lifecycle settings");
         }
+        if (current().version() != expectedVersion)
+            throw new OptimisticLockingFailureException("lifecycle settings changed; reload before saving");
+        var saved = settings.save(line, value, expectedVersion, admin, reason)
+                .orElseThrow(() -> new OptimisticLockingFailureException("lifecycle settings changed; reload before saving"));
+        return installIfNewer(saved);
     }
     public void reload() {
-        settingsLock.lock();
-        try {
-            if (!line.isDerivative()) {
-                return;
+        if (!line.isDerivative()) {
+            return;
+        }
+        var value = settings.find(line);
+        if (value == null) throw new IllegalStateException("lifecycle business settings are missing");
+        installIfNewer(value);
+    }
+
+    private LifecycleSettingsSnapshot installIfNewer(LifecycleSettingsSnapshot value) {
+        while (true) {
+            var previous = current.get();
+            if (previous != null && previous.version() >= value.version()) {
+                return previous;
             }
-            var value = settings.find(line);
-            if (value == null) throw new IllegalStateException("lifecycle business settings are missing");
-            if (current == null || value.version() > current.version()) install(value);
-        } finally {
-            settingsLock.unlock();
+            if (current.compareAndSet(previous, value)) {
+                applyToProperties(value);
+                events.publishEvent(value);
+                return value;
+            }
         }
     }
 
-    private void install(LifecycleSettingsSnapshot value) {
+    private void applyToProperties(LifecycleSettingsSnapshot value) {
         var settings = value.settings();
         var calculation = new FundingProperties.Calculation();
         var settlement = new FundingProperties.Settlement();
@@ -130,7 +133,5 @@ public class LifecycleBusinessSettingsService {
         liquidation.setCoordinator(coordinator);
         insurance.setCoverage(coverage);
         adl.setScanner(scanner);
-        current = value;
-        events.publishEvent(value);
     }
 }

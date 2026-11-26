@@ -19,15 +19,13 @@ public class AdlRuntimeConfigService {
     public Map<String, Object> update(String admin, long expectedVersion, Boolean enabled, Long scanDelayMs,
             Integer batchSize, Integer maxDeleveragesPerDeficit,
             Integer candidateMultiplier, String reason) {
-        synchronized (settings) {
-            var all = settings.current().settings();
-            var old = all.adl();
-            var next = new LifecycleBusinessSettings.Adl(value(enabled, old.enabled()), value(scanDelayMs, old.scanDelayMs()),
-                    value(batchSize, old.batchSize()), value(maxDeleveragesPerDeficit, old.maxDeleveragesPerDeficit()),
-                    value(candidateMultiplier, old.candidateMultiplier()));
-            settings.save(new LifecycleBusinessSettings(all.funding(), all.liquidation(), all.insurance(), next), expectedVersion, admin, reason);
-            return current();
-        }
+        var all = settings.current().settings();
+        var old = all.adl();
+        var next = new LifecycleBusinessSettings.Adl(value(enabled, old.enabled()), value(scanDelayMs, old.scanDelayMs()),
+                value(batchSize, old.batchSize()), value(maxDeleveragesPerDeficit, old.maxDeleveragesPerDeficit()),
+                value(candidateMultiplier, old.candidateMultiplier()));
+        settings.save(new LifecycleBusinessSettings(all.funding(), all.liquidation(), all.insurance(), next), expectedVersion, admin, reason);
+        return current();
     }
     private static <T> T value(T update, T previous) { return update == null ? previous : update; }
 }

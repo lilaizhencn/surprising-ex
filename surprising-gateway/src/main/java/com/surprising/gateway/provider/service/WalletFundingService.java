@@ -21,8 +21,8 @@ public class WalletFundingService {
     private final CustodyWalletClient custody;
     private final UserDepositAddressRepository addressRepository;
     private final java.util.function.LongSupplier nanoTime;
-    private volatile Map<String, List<FundingAsset>> catalog;
-    private volatile long catalogLoadedAt;
+    private record CatalogCache(Map<String, List<FundingAsset>> byOperation, long loadedAt) {}
+    private volatile CatalogCache catalogCache;
     private static final long CATALOG_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
 
     public WalletFundingService(AssetRepository assets, AssetNetworkRepository networks, CustodyWalletClient custody) {
@@ -105,20 +105,19 @@ public class WalletFundingService {
     public List<FundingAsset> catalog(String operation) {
         if (!Set.of("deposit", "withdraw").contains(operation)) throw new IllegalArgumentException("invalid funding operation");
         long now = nanoTime.getAsLong();
-        var current = catalog;
-        if (current != null && now - catalogLoadedAt < CATALOG_NANOS) return current.get(operation);
+        var current = catalogCache;
+        if (current != null && now - current.loadedAt() < CATALOG_NANOS) return current.byOperation().get(operation);
         catalogLock.lock();
         try {
             now = nanoTime.getAsLong();
-            current = catalog;
-            if (current != null && now - catalogLoadedAt < CATALOG_NANOS) return current.get(operation);
+            current = catalogCache;
+            if (current != null && now - current.loadedAt() < CATALOG_NANOS) return current.byOperation().get(operation);
             var chains = Objects.requireNonNull(custody.chains(), "custody chains unavailable");
             var routes = networks.enabled();
             var configuredAssets = assets.list(false);
             var refreshed = Map.of("deposit", buildCatalog("deposit", configuredAssets, routes, chains),
                     "withdraw", buildCatalog("withdraw", configuredAssets, routes, chains));
-            catalogLoadedAt = now;
-            catalog = refreshed;
+            catalogCache = new CatalogCache(refreshed, now);
             return refreshed.get(operation);
         } finally {
             catalogLock.unlock();
