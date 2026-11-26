@@ -14,28 +14,35 @@ import tools.jackson.databind.ObjectMapper;
 public class MarketMakerBusinessSettingsStore {
     private final ObjectMapper json;
     private final ProductLine product;
-    private Settings current;
+    private final java.util.concurrent.atomic.AtomicReference<Settings> current;
 
     public MarketMakerBusinessSettingsStore(MarketMakerProperties properties, ObjectMapper json) {
         this.json = json;
         product = properties.getProductLine();
-        current = copy(new Settings(new MarketMakerBusinessSettings(properties.getEngine(), properties.getQuoting(),
-                properties.getRisk(), properties.getTrade(), properties.getReferenceMarket()),
-                1, "SYSTEM:YAML", "Startup YAML configuration", Instant.now()));
+        current = new java.util.concurrent.atomic.AtomicReference<>(copy(new Settings(
+                new MarketMakerBusinessSettings(properties.getEngine(), properties.getQuoting(),
+                        properties.getRisk(), properties.getTrade(), properties.getReferenceMarket()),
+                1, "SYSTEM:YAML", "Startup YAML configuration", Instant.now())));
     }
 
-    public synchronized Settings load(ProductLine line) {
+    public Settings load(ProductLine line) {
         requireProduct(line);
-        return copy(current);
+        return copy(current.get());
     }
 
-    public synchronized Settings save(ProductLine line, MarketMakerBusinessSettings settings, long expectedVersion,
-                                      String admin, String reason) {
+    public Settings save(ProductLine line, MarketMakerBusinessSettings settings, long expectedVersion,
+                         String admin, String reason) {
         requireProduct(line);
-        if (expectedVersion != current.version())
-            throw new MarketMakerSettingsConflictException( "做市公共设置已更新，请重新加载");
-        current = copy(new Settings(settings, Math.addExact(current.version(), 1), admin, reason, Instant.now()));
-        return copy(current);
+        while (true) {
+            Settings previous = current.get();
+            if (expectedVersion != previous.version()) {
+                throw new MarketMakerSettingsConflictException("做市公共设置已更新，请重新加载");
+            }
+            Settings next = copy(new Settings(settings, Math.addExact(previous.version(), 1), admin, reason, Instant.now()));
+            if (current.compareAndSet(previous, next)) {
+                return copy(next);
+            }
+        }
     }
 
     private void requireProduct(ProductLine line) {

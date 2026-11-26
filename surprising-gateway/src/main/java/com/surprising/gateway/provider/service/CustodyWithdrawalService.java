@@ -135,8 +135,8 @@ public class CustodyWithdrawalService {
                             .matcher(request.toAddress().trim()).matches()) {
                         throw new IllegalArgumentException("invalid withdrawal destination address format for " + quote.chain());
                     }
-                } catch (java.util.regex.PatternSyntaxException ignored) {
-                    // Validated at asset configuration save time.
+                } catch (java.util.regex.PatternSyntaxException ex) {
+                    throw new IllegalStateException("invalid addressRegex configured for withdrawal chain " + quote.chain(), ex);
                 }
             }
         }

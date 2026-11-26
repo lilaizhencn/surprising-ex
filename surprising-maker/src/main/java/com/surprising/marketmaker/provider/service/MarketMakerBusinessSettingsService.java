@@ -13,7 +13,7 @@ public class MarketMakerBusinessSettingsService {
         this.properties = properties; this.store = store;
     }
     public MarketMakerBusinessSettingsStore.Settings current() { return store.load(properties.getProductLine()); }
-    public synchronized MarketMakerBusinessSettingsStore.Settings save(MarketMakerBusinessSettings settings, long version, String admin, String reason) {
+    public MarketMakerBusinessSettingsStore.Settings save(MarketMakerBusinessSettings settings, long version, String admin, String reason) {
         var candidate = new MarketMakerProperties();
         candidate.setProductLine(properties.getProductLine());
         candidate.install(settings);
