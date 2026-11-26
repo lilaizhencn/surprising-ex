@@ -73,13 +73,31 @@ class TelegramAffiliateHandlerTest {
     }
 
     @Test
-    void generatesReferralPosterWithQrCode() {
-        when(qrCodeService.generateQrCodePng(anyString(), anyInt(), anyInt())).thenReturn(new byte[]{1, 2, 3});
+    void generatesReferralPosterWithSameLogicAsAffiliateWebPage() {
+        AffiliateModels.Profile profile = new AffiliateModels.Profile(
+                "10086", "ABCD2345", true, true, 400000, Instant.now());
+        when(affiliateService.register(10086L, null)).thenReturn(profile);
+        when(affiliateService.overview(eq(10086L), anyString())).thenReturn(Map.of(
+                "counts", Map.of("direct", 15, "team", 48),
+                "rootRatePpm", 400000
+        ));
+        when(qrCodeService.generateInvitationPosterPng(
+                eq("ABCD2345"),
+                eq("https://app.surprising.exchange/auth/register?invite=ABCD2345"),
+                eq(40.0),
+                eq(10086L)
+        )).thenReturn(new byte[]{1, 2, 3});
 
         affiliateHandler.renderReferralPoster(123456L, testUser);
 
-        verify(qrCodeService).generateQrCodePng(contains("https://t.me/surprising_test_bot?start=aff_"), eq(320), eq(320));
-        verify(botClient).sendPhoto(eq(123456L), any(), contains("kol_invite_"), contains("专属 Telegram 推广裂变海报"), any());
+        verify(qrCodeService).generateInvitationPosterPng(
+                eq("ABCD2345"),
+                eq("https://app.surprising.exchange/auth/register?invite=ABCD2345"),
+                eq(40.0),
+                eq(10086L)
+        );
+        verify(botClient).sendPhoto(eq(123456L), any(), eq("aetern-invite-ABCD2345.png"),
+                contains("AETERN 专属邀请函海报"), any());
     }
 
     @Test

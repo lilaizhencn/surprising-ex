@@ -11,6 +11,8 @@ import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramInlin
 import com.surprising.gateway.provider.telegram.bot.model.keyboard.TelegramInlineKeyboardMarkup;
 import com.surprising.gateway.provider.telegram.bot.service.TelegramQrCodeService;
 import com.surprising.gateway.provider.telegram.bot.service.TelegramSessionService;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -54,8 +56,18 @@ public class TelegramAffiliateHandler {
         this.viewRenderer = new TelegramAffiliateViewRenderer(affiliateService, authHandler, qrCodeService, botClient);
     }
 
-    /** 获取或为用户生成专属默认邀请码 */
+    /** 获取或为用户生成专属短邀请码（与 Web 返佣页 AffiliateProfile.inviteCode 保持一致） */
     public String getOrCreateInviteCode(long userId) {
+        if (affiliateService != null) {
+            try {
+                AffiliateModels.Profile profile = affiliateService.register(userId, null);
+                if (profile != null && profile.inviteCode() != null && !profile.inviteCode().isBlank()) {
+                    return profile.inviteCode();
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to resolve affiliate profile invite code for user {}: {}", userId, ex.getMessage());
+            }
+        }
         if (affiliateRepository != null) {
             try {
                 List<AffiliateModels.Invitation> list = affiliateRepository.invitations(userId);
@@ -78,6 +90,17 @@ public class TelegramAffiliateHandler {
                 ? properties.getUsername()
                 : "surprising_ex_bot";
         return "https://t.me/" + botName + "?start=aff_" + inviteCode;
+    }
+
+    /** 构造与 Web 返佣页一致的专属注册邀请链接 */
+    public String buildRegistrationInviteLink(String inviteCode) {
+        String baseUrl = (properties != null && properties.getWebappUrl() != null && !properties.getWebappUrl().isBlank())
+                ? properties.getWebappUrl().trim()
+                : "https://app.surprising.exchange";
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        return baseUrl + "/auth/register?invite=" + URLEncoder.encode(inviteCode, StandardCharsets.UTF_8);
     }
 
     /** 1. KOL 推广数据看板 */
@@ -240,11 +263,17 @@ public class TelegramAffiliateHandler {
         viewRenderer.sendOrEdit(chatId, messageId, text, markup);
     }
 
-    /** 8. 生成专属裂变海报与二维码图片 */
+    /** 8. 生成专属邀请函海报（与 Web 返佣页同款逻辑与视觉） */
     public void renderReferralPoster(long chatId, TelegramUser tgUser) {
         long userId = authHandler.resolveUserId(tgUser);
         String inviteCode = getOrCreateInviteCode(userId);
-        viewRenderer.renderReferralPoster(chatId, inviteCode, buildTelegramDeepLink(inviteCode));
+        viewRenderer.renderReferralPoster(
+                chatId,
+                userId,
+                inviteCode,
+                buildRegistrationInviteLink(inviteCode),
+                buildTelegramDeepLink(inviteCode)
+        );
     }
 
     /** 处理新用户通过 Deep Link 点击进入：/start aff_CODE */

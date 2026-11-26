@@ -236,14 +236,23 @@ final class TelegramAffiliateViewRenderer {
         sendOrEdit(chatId, messageId, sb.toString(), markup);
     }
 
-    void renderReferralPoster(long chatId, String inviteCode, String deepLink) {
-        String caption = "🌟 <b>Surprising 专属 Telegram 推广裂变海报</b>\n" +
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-                "🔑 <b>您的专属邀请码:</b> <code>" + inviteCode + "</code>\n" +
-                "📲 <b>直达链接:</b> <code>" + deepLink + "</code>\n\n" +
-                "💡 <i>保存图片并分享给好友，好友使用 Telegram 扫码即可一键注册并自动绑定为您的高级合伙人成员！</i>";
+    void renderReferralPoster(long chatId, long userId, String inviteCode,
+                              String registrationLink, String deepLink) {
+        OverviewSummary summary = loadOverview(userId, true);
+        double rebateRatePercent = summary.ratePpm() / 10000.0;
+        String rateLabel = rebateRatePercent == Math.floor(rebateRatePercent)
+                ? String.format(Locale.ROOT, "%.0f", rebateRatePercent)
+                : String.format(Locale.ROOT, "%.1f", rebateRatePercent);
 
-        String shareText = "🚀 加入 Surprising 顶级交易平台！扫码立享专属交易手续费优惠！";
+        String caption = "🌟 <b>AETERN 专属邀请函海报</b>\n" +
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+                "🔑 <b>专属短邀请码:</b> <code>" + inviteCode + "</code>\n" +
+                "💎 <b>最高返佣比例:</b> <code>" + rateLabel + "%</code>\n" +
+                "🌐 <b>专属注册链接:</b> <code>" + registrationLink + "</code>\n" +
+                "📲 <b>TG 直达链接:</b> <code>" + deepLink + "</code>\n\n" +
+                "💡 <i>保存海报并分享给好友，扫码即可直达专属邀请注册页并自动绑定您的短邀请码！</i>";
+
+        String shareText = "🚀 受邀开启 AETERN 机构级数字资产交易体验！点击专属通道，最高享 " + rateLabel + "% 手续费返佣！";
         TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
                 .addRow(TelegramInlineKeyboardButton.url("🚀 立即转发到 TG", shareUrl(deepLink, shareText)))
                 .addRow(
@@ -253,10 +262,11 @@ final class TelegramAffiliateViewRenderer {
                 .build();
 
         try {
-            byte[] qrBytes = qrCodeService.generateQrCodePng(deepLink, 320, 320);
-            botClient.sendPhoto(chatId, qrBytes, "kol_invite_" + inviteCode + ".png", caption, markup);
+            byte[] posterBytes = qrCodeService.generateInvitationPosterPng(
+                    inviteCode, registrationLink, rebateRatePercent, userId);
+            botClient.sendPhoto(chatId, posterBytes, "aetern-invite-" + inviteCode + ".png", caption, markup);
         } catch (Exception ex) {
-            log.error("Failed to generate KOL poster: {}", ex.getMessage());
+            log.error("Failed to generate KOL invitation poster: {}", ex.getMessage());
             botClient.sendMessage(chatId, caption, markup);
         }
     }
