@@ -1,12 +1,13 @@
 package com.surprising.aeron.service.treasury;
 
+import com.surprising.aeron.service.settlement.TradeSettlementPosting;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.Arrays;
 
 /** 单命令或单项结算独占的原语资金变化缓冲。按资产、所有者类别、所有者编号和子账合并有符号金额，同键抵消为零就移除。跨线程消费必须先通过完成标记交接所有权，清空只重置有效长度并保留容量。 */
 public final class FundsTotal {
-    private static final TradeSettlement.Posting.OwnerKind[] OWNER_KINDS = TradeSettlement.Posting.OwnerKind.values();
-    private static final TradeSettlement.Posting.Subledger[] SUBLEDGERS = TradeSettlement.Posting.Subledger.values();
+    private static final TradeSettlementPosting.OwnerKind[] OWNER_KINDS = TradeSettlementPosting.OwnerKind.values();
+    private static final TradeSettlementPosting.Subledger[] SUBLEDGERS = TradeSettlementPosting.Subledger.values();
     private int[] assetIds;
     /** 各有效资金项所有者类别的本地 ordinal 字节列。 */
     private byte[] ownerKinds;
@@ -32,8 +33,8 @@ public final class FundsTotal {
     }
 
     /** 忽略零金额，检查资产与类别，线性查找同键并精确相加。抵消为零时用尾项填洞，否则更新或追加。本入口不额外校验所有者编号与类别的组合。 */
-    public void add(int assetId, TradeSettlement.Posting.OwnerKind ownerKind, long ownerId,
-             TradeSettlement.Posting.Subledger subledger, long deltaUnits) {
+    public void add(int assetId, TradeSettlementPosting.OwnerKind ownerKind, long ownerId,
+             TradeSettlementPosting.Subledger subledger, long deltaUnits) {
         if (deltaUnits == 0) return;
         if (assetId < 0 || ownerKind == null || subledger == null) {
             throw new IllegalArgumentException("invalid runtime funds posting");

@@ -35,7 +35,7 @@ class CommittedPortfolioSnapshotTest {
         // 合成品种、标记价、用户余额与持仓的交易状态。
         var state = state(type, NOW, 1_000, 20);
         // 捕获的只读单资产权益投影，complete 决定能否当作完整值使用。
-        var snapshot = CommittedPortfolioSnapshot.capture(state, NOW, NOW, 60_000, Set.of());
+        var snapshot = CommittedPortfolioSnapshotCapture.capture(state, NOW, NOW, 60_000, Set.of());
         // 用户七的权益结果，要求完整且资产 Map 不可修改。
         var user = snapshot.users().get(7L);
         assertTrue(user.complete());
@@ -53,7 +53,7 @@ class CommittedPortfolioSnapshotTest {
     @Test void unavailableOrFutureMarksCannotPublishPartialEquity() {
         for (long /* 当前变体的过期或未来标记生成时间。 */ markTime : new long[]{NOW - 60_001, NOW + 1}) {
             // 捕获的只读单资产权益投影，complete 决定能否当作完整值使用。
-            var snapshot = CommittedPortfolioSnapshot.capture(state(ContractType.LINEAR_PERPETUAL, markTime, 1000, 0), NOW, NOW, 60_000, Set.of());
+            var snapshot = CommittedPortfolioSnapshotCapture.capture(state(ContractType.LINEAR_PERPETUAL, markTime, 1000, 0), NOW, NOW, 60_000, Set.of());
             assertFalse(snapshot.users().get(7L).complete());
         }
     }
@@ -63,7 +63,7 @@ class CommittedPortfolioSnapshotTest {
      */
     @Test void balancesAreExactAboveLongAndDoubleRangesAndMarginIsNotCountedTwice() {
         // 捕获的只读单资产权益投影，complete 决定能否当作完整值使用。
-        var snapshot = CommittedPortfolioSnapshot.capture(state(ContractType.SPOT, NOW, Long.MAX_VALUE, Long.MAX_VALUE), NOW, NOW, 60_000, Set.of());
+        var snapshot = CommittedPortfolioSnapshotCapture.capture(state(ContractType.SPOT, NOW, Long.MAX_VALUE, Long.MAX_VALUE), NOW, NOW, 60_000, Set.of());
         assertEquals("18446744073709551614", snapshot.users().get(7L).netAssetUnits().get("USDT"));
     }
 
@@ -74,11 +74,11 @@ class CommittedPortfolioSnapshotTest {
         // 合成品种、标记价、用户余额与持仓的交易状态。
         var state = state(ContractType.SPOT, NOW, 1000, 0);
         // 已有与未建账户用户均被标为待划转的权益投影。
-        var pending = CommittedPortfolioSnapshot.capture(state, NOW, NOW, 60_000, Set.of(7L, 8L));
+        var pending = CommittedPortfolioSnapshotCapture.capture(state, NOW, NOW, 60_000, Set.of(7L, 8L));
         assertFalse(pending.users().get(7L).complete());
         assertFalse(pending.users().get(8L).complete());
         assertTrue(pending.users().get(8L).netAssetUnits().isEmpty());
-        assertThrows(IllegalArgumentException.class, () -> CommittedPortfolioSnapshot.capture(state, NOW + 1, NOW, 60_000, Set.of()));
+        assertThrows(IllegalArgumentException.class, () -> CommittedPortfolioSnapshotCapture.capture(state, NOW + 1, NOW, 60_000, Set.of()));
     }
 
     /**

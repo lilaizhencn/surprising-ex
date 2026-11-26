@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.settlement.TradeSettlementPlan;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreOrderStatus;
@@ -70,7 +71,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     boolean claimed;
     @Accessors(fluent = true, chain = false)
     @Getter
-    OrderBatchProcessor.PendingBatch orderBatch;
+    PendingOrderBatch orderBatch;
     @Accessors(fluent = true, chain = false)
     @Getter
     private Operation operation;
@@ -84,7 +85,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     private CommandFingerprint fingerprint;
     @Accessors(fluent = true, chain = false)
     @Getter
-    private Decoded decodedCommand;
+    private DecodedOrderCommand decodedCommand;
     /** 跨分片控制撤单已开始的 Owner 标记，防止重复派发。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -106,12 +107,12 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     static final class OrderCheckState {
         List<Long> preMatchingCancellationOrderIds = List.of();
         ReplaceOrderCheck orderCheck;
-        OrderCommand.PlaceOrderCheckEvent placeOrderCheck;
+        PlaceOrderCheckEvent placeOrderCheck;
         boolean placeOrderCheckOwnerCollected;
-        OrderCommand.ResolvedPlaceOrder realtimeResolvedTakerOrder;
+        ResolvedPlaceOrder realtimeResolvedTakerOrder;
         Order triggerOrderCheckOrder;
         com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger;
-        OrderCommand.ReplaceOrderCheckEvent replacementOrderCheck;
+        ReplaceOrderCheckEvent replacementOrderCheck;
         long deferredClusterTimestamp;
         long deferredClusterPosition;
         TradingCore.SourceKey deferredSourceKey;
@@ -144,7 +145,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     static final class SettlementState {
         TradeSettlement settlementContinuation;
-        TradeSettlement.Plan settlementPlan;
+        TradeSettlementPlan settlementPlan;
         long expectedLaneMask;
         long completedLaneMask;
         boolean ledgerDispatchClosed;
@@ -199,7 +200,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
             case PLACE -> first = decodedCommand.placeOrder().orderId();
             case CANCEL -> first = decodedCommand.cancelOrder().orderId();
             case REPLACE, AMEND -> {
-                OrderCommand.ReplaceOrderCheck value = orderCheckState.orderCheck;
+                ReplaceOrderCheck value = orderCheckState.orderCheck;
                 if (value != null) {
                     first = value.originalOrderId();
                     second = value.command().orderId();
@@ -214,7 +215,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     /** 目标已绑定正订单号时返回 Lane 写入接口，否则为空。 */
-    public com.surprising.aeron.service.order.OrderCommand.ResultTarget laneResultTarget() {
+    public com.surprising.aeron.service.order.OrderResultTarget laneResultTarget() {
         return settlementState.laneResultTarget.active() ? settlementState.laneResultTarget : null;
     }
 
@@ -233,7 +234,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /** 准备槽内固定的准入等待任务，Matcher 先等 Lane 收据再决定拒绝、先撤或调用原下单任务，避免每次分配捕获 lambda。 */
     java.util.function.Supplier<?> gateOrderCheck(TradingCore owner,
-            OrderCommand.PlaceOrderCheckEvent orderCheck, int matcherShard,
+            PlaceOrderCheckEvent orderCheck, int matcherShard,
             com.surprising.aeron.service.settlement.TradeSettlement settlement,
             java.util.function.Supplier<?> original) {
         matchingTasks.orderCheckMatching.prepare(owner, orderCheck, matcherShard, settlement, original);
@@ -243,7 +244,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 准备本槽普通下单任务，只接受一种已准入订单表示并保留结算事件租约。 */
     java.util.function.Supplier<?> preparePlaceMatching(TradingCore owner,
             int matcherShard, long userId,
-            OrderCommand.ResolvedPlaceOrder resolvedOrder,
+            ResolvedPlaceOrder resolvedOrder,
             TradeSettlement direct) {
         matchingTasks.orderMatching.preparePlace(owner, matcherShard, userId, resolvedOrder, null, direct);
         return matchingTasks.orderMatching;
@@ -266,7 +267,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 保存旧单号、替换准入和直达结算目标，执行时先处理共同的前置撤单，再由适配器执行撤旧下新。 */
     java.util.function.Supplier<?> prepareReplaceMatching(TradingCore owner,
             int matcherShard, long orderId, long userId,
-            long originalOrderId, String instrumentId, OrderCommand.ResolvedPlaceOrder replacement,
+            long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
             TradeSettlement direct) {
         matchingTasks.orderMatching.prepareReplace(owner, matcherShard, orderId, userId,
                 originalOrderId, instrumentId, replacement, direct);
@@ -354,7 +355,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 要求正序号、命令类消息和必需输入非空，清旧生命周期后绑定命令、指纹、解码及先撤列表，重置本次提交边界和业务阶段。 */
     OrderCommand initialize(long sequence, Operation operation, CoreMessage command,
                                CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
-                               OrderCommand.Decoded decodedCommand, OrderCommand.ReplaceOrderCheck orderCheck) {
+                               DecodedOrderCommand decodedCommand, ReplaceOrderCheck orderCheck) {
         if (sequence <= 0 || operation == null || command == null || preMatchingCancellationOrderIds == null
                 || fingerprint == null || decodedCommand == null
                 || command.header().kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
@@ -407,7 +408,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     }
 
     /** 替换可空的解析准入结果并返回同一槽，不重做准入或读取账户。 */
-    OrderCommand withOrderCheck(OrderCommand.ReplaceOrderCheck nextOrderCheck) {
+    OrderCommand withOrderCheck(ReplaceOrderCheck nextOrderCheck) {
         orderCheckState.orderCheck = nextOrderCheck;
         return this;
     }
@@ -426,17 +427,17 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 返回保留的 Core 序号，槽已回收后也可能仍保留旧值。 */
     public long sequence() { return coreSequence; }
     /** 返回可空的改撤等已解析准入信息。 */
-    public OrderCommand.ReplaceOrderCheck matchingOrderCheck() { return orderCheckState.orderCheck; }
+    public ReplaceOrderCheck matchingOrderCheck() { return orderCheckState.orderCheck; }
     /** 返回替换操作绑定的 Lane 准入事件。 */
-    com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent replacementOrderCheck() { return orderCheckState.replacementOrderCheck; }
+    com.surprising.aeron.service.order.ReplaceOrderCheckEvent replacementOrderCheck() { return orderCheckState.replacementOrderCheck; }
     /** 只允许 AMEND/REPLACE 首次绑定非空替换准入事件，重复或操作不符拒绝。 */
-    void replacementOrderCheck(com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent event) {
+    void replacementOrderCheck(com.surprising.aeron.service.order.ReplaceOrderCheckEvent event) {
         if (event == null || orderCheckState.replacementOrderCheck != null || operation != Operation.AMEND && operation != Operation.REPLACE)
             throw new IllegalStateException("invalid replacement admissionState.admission slot");
         orderCheckState.replacementOrderCheck = event;
     }
     /** 取走替换准入事件并清该引用，把后续使用责任交给调用方。 */
-    com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent takeReplaceOrderCheck() {
+    com.surprising.aeron.service.order.ReplaceOrderCheckEvent takeReplaceOrderCheck() {
         var value = orderCheckState.replacementOrderCheck; orderCheckState.replacementOrderCheck = null; return value;
     }
     /** 返回此命令保留的可空结算事件。 */
@@ -450,9 +451,9 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         return value;
     }
     /** 返回与当前事件配套的结算计划引用。 */
-    public com.surprising.aeron.service.settlement.TradeSettlement.Plan settlementPlan() { return settlementState.settlementPlan; }
+    public com.surprising.aeron.service.settlement.TradeSettlementPlan settlementPlan() { return settlementState.settlementPlan; }
     /** 返回普通下单的 Lane 准入事件。 */
-    public OrderCommand.PlaceOrderCheckEvent placeOrderCheck() {
+    public PlaceOrderCheckEvent placeOrderCheck() {
         return orderCheckState.placeOrderCheck;
     }
     /** 返回是否仍保留结算事件引用。 */
@@ -465,13 +466,13 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         return settlementState.settlementContinuation.complete();
     }
     /** 取出普通下单准入事件并清引用。 */
-    OrderCommand.PlaceOrderCheckEvent takePlaceOrderCheck() {
-        OrderCommand.PlaceOrderCheckEvent value = orderCheckState.placeOrderCheck;
+    PlaceOrderCheckEvent takePlaceOrderCheck() {
+        PlaceOrderCheckEvent value = orderCheckState.placeOrderCheck;
         orderCheckState.placeOrderCheck = null;
         return value;
     }
     /** 只允许 PLACE 首次绑定非空准入事件，其他操作或重复绑定拒绝。 */
-    public void placeOrderCheck(OrderCommand.PlaceOrderCheckEvent event) {
+    public void placeOrderCheck(PlaceOrderCheckEvent event) {
         if (event == null || orderCheckState.placeOrderCheck != null || operation != Operation.PLACE) {
             throw new IllegalStateException("invalid place admissionState.admission continuation");
         }
@@ -482,9 +483,9 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
     /** 标记下单准入已由 Owner 收集，不在此重新读 Lane。 */
     void markPlaceOrderCheckOwnerCollected() { orderCheckState.placeOrderCheckOwnerCollected = true; }
     /** 返回为实时推送保留的准入订单引用。 */
-    public OrderCommand.ResolvedPlaceOrder realtimeResolvedTakerOrder() { return orderCheckState.realtimeResolvedTakerOrder; }
+    public ResolvedPlaceOrder realtimeResolvedTakerOrder() { return orderCheckState.realtimeResolvedTakerOrder; }
     /** 保存可空实时准入订单引用，不复制对象。 */
-    public void realtimeResolvedTakerOrder(OrderCommand.ResolvedPlaceOrder order) { orderCheckState.realtimeResolvedTakerOrder = order; }
+    public void realtimeResolvedTakerOrder(ResolvedPlaceOrder order) { orderCheckState.realtimeResolvedTakerOrder = order; }
     /** 返回触发续步已经冻结的源触发单收据，避免再回读 Lane 客户端索引。 */
     public com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger() { return orderCheckState.sourceTrigger; }
     /** 首次绑定非空源触发单收据，重复绑定立即拒绝。 */
@@ -526,7 +527,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /** 要求事件和计划非空且尚无事件续步，再绑定二者，账户应用由后续流程执行。 */
     public void settlement(com.surprising.aeron.service.settlement.TradeSettlement event,
-                    com.surprising.aeron.service.settlement.TradeSettlement.Plan plan) {
+                    com.surprising.aeron.service.settlement.TradeSettlementPlan plan) {
         if (event == null || plan == null || hasLaneContinuation()) {
             throw new IllegalStateException("invalid matcher settlement continuation");
         }
@@ -845,7 +846,7 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
 
     /** 普通单笔/替换命令的 Lane 结果目标，最多保留两个身份、可复用订单副本和一个响应租约。 */
     static final class LaneResultTarget
-            implements com.surprising.aeron.service.order.OrderCommand.ResultTarget {
+            implements com.surprising.aeron.service.order.OrderResultTarget {
         private final long[] ids = new long[2];
         private final Order[] orders = new Order[2];
         private final Order[] orderCopies = new Order[2];
@@ -1002,1240 +1003,5 @@ public final class OrderCommand implements TradeSettlement.MatcherCompletionRout
         orderCheckState.deferredClusterPosition = 0;
         orderCheckState.deferredSourceKey = null;
     }
-
-public static final class Direct {
-    /** 创建槽时绑定的唯一所属 Owner，跨命令复用。 */
-    private final TradingCore owner;
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private CoreMessage command;
-    /** 本轮完整命令指纹，供幂等及终态保留核对。 */
-    private CommandFingerprint fingerprint;
-    private TradingCore.SourceKey sourceKey;
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private long commitFenceTimestamp;
-    private long commitFenceClusterPosition;
-
-    /** 返回是否已有直接命令占用本槽，不能据此判断业务是否成功。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private boolean active;
-    /** 该工作开始前的运行时修订，用于变化及回滚判断。 */
-    private long beforeRevision;
-    /** 命令开始前的账户回滚检查点。返回本命令开始前的账户回滚检查点。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private long checkpoint;
-    /** 命令开始前的持仓身份回滚检查点。 */
-    private long identityCheckpoint;
-    /** 当前业务或回滚续步，返回假时由 Owner 后续轮询推进。 */
-    private BooleanSupplier controlWork;
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private ResponseStatus status;
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private CoreResultCode resultCode;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    @Setter
-    private com.surprising.aeron.service.core.change.AccountPartitionCommit commitEvent;
-    /** 返回直接命令的收尾材料是否已准备，防止后续轮询重复准备。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private boolean finalizationPrepared;
-
-    private final FundingControlContinuation fundingControl = new FundingControlContinuation();
-    private final RiskScanControlContinuation riskScanControl = new RiskScanControlContinuation();
-    private final AdlControlContinuation adlControl = new AdlControlContinuation();
-    private final LiquidationResolutionControlContinuation liquidationResolutionControl =
-            new LiquidationResolutionControlContinuation();
-    private final AccountCommandService accountControl = new AccountCommandService();
-    private final BooleanSupplier accountControlWork;
-    private final TriggerControlContinuation triggerControl = new TriggerControlContinuation();
-    private static final BooleanSupplier COMPLETE_CONTROL = () -> true;
-
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private FundingSettlementService.FundingWork reusableFundingWork;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private AdlService.AdlWork reusableAdlWork;
-    private LiquidationService.ResolutionWork reusableResolutionWork;
-    private RiskScanner reusableRiskCoordinator;
-
-    public Direct(TradingCore owner) {
-        this.owner = Objects.requireNonNull(owner);
-        accountControlWork = () -> {
-            if (!accountControl.getAsBoolean()) return false;
-            if (accountControl.stateChanged()) this.owner.requestCommitPublication();
-            return true;
-        };
-    }
-
-    /** 拒绝覆盖仍占用的槽，保存非空命令、指纹及来源，再记下业务时间、日志位置与回滚检查点。 */
-    public void initialize(CoreMessage command, CommandFingerprint fingerprint,
-            TradingCore.SourceKey sourceKey, long timestamp, long position,
-            long beforeRevision,
-            long checkpoint, long identityCheckpoint) {
-        if (active) throw new IllegalStateException("direct command slot is occupied");
-        this.command = Objects.requireNonNull(command);
-        this.fingerprint = Objects.requireNonNull(fingerprint);
-        this.sourceKey = Objects.requireNonNull(sourceKey);
-        this.beforeRevision = beforeRevision;
-        this.checkpoint = checkpoint;
-        this.identityCheckpoint = identityCheckpoint;
-        commitFenceTimestamp = timestamp;
-        commitFenceClusterPosition = position;
-        active = true;
-    }
-
-    /** 返回是否还有控制续步，也可能是拒单后的回滚续步。 */
-    public boolean hasControlWork() { return controlWork != null; }
-    /** 保存调用方已经决定的状态和结果码，不在此检查非空或完成发布。 */
-    public void result(ResponseStatus status, CoreResultCode resultCode) {
-        this.status = status;
-        this.resultCode = resultCode;
-    }
-    /** 记下本条命令的收尾材料已经准备。 */
-    public void markFinalizationPrepared() { finalizationPrepared = true; }
-    /** 撤销收尾材料就绪标记，允许调用方按现有规则重新准备。 */
-    public void clearFinalizationPrepared() { finalizationPrepared = false; }
-
-    /** 只解除本槽对提交事件的引用，事件回收由原调用方负责。 */
-    public void clearCommitEvent() { commitEvent = null; }
-
-    /** 要求当前没有续步，再保存非空控制工作，供 Owner 后续轮询。 */
-    public void deferControl(BooleanSupplier work) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        controlWork = Objects.requireNonNull(work);
-    }
-
-    /** 要求没有旧续步，绑定资金费收集器并保留工作对象供后续命令复用。 */
-    public void deferFundingControl(FundingSettlementService.FundingWork work) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        reusableFundingWork = Objects.requireNonNull(work);
-        controlWork = fundingControl;
-    }
-
-    /** 绑定风险扫描和后续触发扫描所需信息。同一槽不能并存第二条控制续步。 */
-    public void deferRiskScanControl(RiskScanner risk, int symbolId,
-            String instrumentId, int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        riskScanControl.prepare(risk, symbolId, instrumentId, maxUsers, pendingBefore, startedAt,
-                beforeRevision);
-        controlWork = riskScanControl;
-    }
-
-    /** 绑定自动减仓续步，并记住原工作对象供后续复用。 */
-    public void deferAdlControl(AdlService.AdlWork work) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        reusableAdlWork = Objects.requireNonNull(work);
-        controlWork = adlControl;
-    }
-
-    /** 绑定强平结果确认续步，并保留原工作对象供后续命令复用。 */
-    public void deferLiquidationResolutionControl(LiquidationService.ResolutionWork work) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        reusableResolutionWork = Objects.requireNonNull(work);
-        controlWork = liquidationResolutionControl;
-    }
-
-    /** 返回上次保存的强平结果确认工作对象。 */
-    public LiquidationService.ResolutionWork reusableLiquidationResolutionWork() {
-        return reusableResolutionWork;
-    }
-
-    /** 首次用所属 Owner 的索引、运行时和身份表创建扫描器，之后重置本轮预算。 */
-    public RiskScanner reusableRiskScanCoordinator(int maxUsers) {
-        if (reusableRiskCoordinator == null) {
-            reusableRiskCoordinator = new RiskScanner(
-                    maxUsers, owner.positionUserIndex(), owner.accountBook(), owner.identities());
-        } else {
-            reusableRiskCoordinator.resetForCommand(maxUsers);
-        }
-        return reusableRiskCoordinator;
-    }
-
-    /** 准备所属用户的余额调整账户任务，并安装固定轮询函数。 */
-    public void deferBalanceAdjustment(long userId, String asset, long deltaUnits) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareBalanceAdjustment(owner.accountBook(), owner.identities(), userId, asset, deltaUnits);
-        controlWork = accountControlWork;
-    }
-
-    /** 准备所属用户的转出账户任务，完成和变化判断沿用账户任务自身回执。 */
-    public void deferTransferOut(long userId, TransferFundsCommand command) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareTransferOut(owner.accountBook(), owner.identities(), userId, command);
-        controlWork = accountControlWork;
-    }
-
-    /** 准备所属用户的划转完成任务，后续轮询成功且有变化时请求发布。 */
-    public void deferTransferComplete(long userId, long transferId) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareTransferCompletion(owner.accountBook(), userId, transferId);
-        controlWork = accountControlWork;
-    }
-
-    /** 准备杠杆变更账户任务，是否发生变化由账户回执判断。 */
-    public void deferLeverageChange(long userId, UpdateLeverageCommand command) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareLeverageChange(owner.accountBook(), owner.identities(), userId, command);
-        controlWork = accountControlWork;
-    }
-
-    /** 准备持仓模式变更账户任务，是否发生变化由账户回执判断。 */
-    public void deferPositionModeChange(long userId, UpdatePositionModeCommand command) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.preparePositionModeChange(owner.accountBook(), userId, command);
-        controlWork = accountControlWork;
-    }
-
-    /** 准备逐仓保证金调整账户任务，不在 Owner 直接改 Lane 状态。 */
-    public void deferPositionMarginAdjustment(long userId,
-                                       AdjustPositionMarginCommand command) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.preparePositionMarginAdjustment(owner.accountBook(), owner.identities(), userId, command);
-        controlWork = accountControlWork;
-    }
-
-    /** 把触发单变更参数放入固定槽，只派发给该用户所属 Lane，后续由同一对象收集完成。 */
-    public void deferTriggerMutationControl(long userId,
-            TriggerOrderCommands.Mutation mutation, long triggerOrderId, long arg1, long arg2,
-            long arg3, boolean flag, String text) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareMutation(userId, mutation, triggerOrderId, arg1, arg2, arg3,
-                flag, text);
-        owner.accountBook().dispatchControlLanes(
-                1L << owner.accountBook().topology().accountLaneId(userId), triggerControl);
-        controlWork = triggerControl;
-    }
-
-    /** 准备触发单写入任务并派发给用户所属 Lane，保留合约和持仓身份。 */
-    public void deferTriggerUpsertControl(long userId,
-            CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
-            boolean instrumentSettled) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareTriggerUpsert(userId, trigger, symbolId, positionKey,
-                instrumentSettled);
-        owner.accountBook().dispatchControlLanes(
-                1L << owner.accountBook().topology().accountLaneId(userId), triggerControl);
-        controlWork = triggerControl;
-    }
-
-    /** 准备互斥触发单对，共用一次所属账户 Lane 派发，第二条保存在同一续步内。 */
-    public void deferTriggerOcoPairControl(long userId,
-            CoreTriggerOrderStateView first, CoreTriggerOrderStateView second,
-            int symbolId, long positionKey, boolean instrumentSettled) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareTriggerUpsert(userId, first, symbolId, positionKey, instrumentSettled);
-        triggerControl.secondTrigger = second;
-        owner.accountBook().dispatchControlLanes(
-                1L << owner.accountBook().topology().accountLaneId(userId), triggerControl);
-        controlWork = triggerControl;
-    }
-
-    /** 准备算法单写入任务并派发给用户所属 Lane。 */
-    public void deferAlgoUpsertControl(long userId, CoreAlgoOrderCommand algo,
-            int symbolId, long clusterTimestamp) {
-        if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareAlgoUpsert(userId, algo, symbolId, clusterTimestamp);
-        owner.accountBook().dispatchControlLanes(
-                1L << owner.accountBook().topology().accountLaneId(userId), triggerControl);
-        controlWork = triggerControl;
-    }
-
-    /** 只允许 Owner 推进已占用槽。若拒绝前已有变化，先分轮完成账户及持仓身份回滚，再交运行时收尾。 */
-    public CoreResponse poll() {
-        owner.assertOwner();
-        if (!active) throw new IllegalStateException("no pending direct command");
-        if (status == null) {
-            try {
-                if (!controlWork.getAsBoolean()) return null;
-                status = ResponseStatus.APPLIED;
-                resultCode = CoreResultCode.NONE;
-            } catch (CoreStateRejectedException failure) {
-                status = ResponseStatus.REJECTED;
-                resultCode = CoreResultCode.fromRejectionCode(failure.code());
-            } catch (ArithmeticException failure) {
-                status = ResponseStatus.REJECTED;
-                resultCode = CoreResultCode.ARITHMETIC_OVERFLOW;
-            } catch (IllegalArgumentException failure) {
-                status = ResponseStatus.REJECTED;
-                resultCode = CoreResultCode.INVALID_COMMAND;
-            }
-            controlWork = null;
-        }
-        if (status != ResponseStatus.APPLIED
-                && (owner.commits.publication.dirty()
-                || owner.accountBook().revision() != beforeRevision
-                || owner.accountBook().hasUncommittedCommandChanges())) {
-            if (controlWork == null) {
-                owner.commits.publication.clearBatchState();
-                controlWork = owner.accountBook().beginCommandRollback(
-                        checkpoint, Math.incrementExact(owner.appliedCommandCount()));
-            }
-            if (!controlWork.getAsBoolean()) return null;
-            owner.identities().rollbackPositionKeys(identityCheckpoint);
-            controlWork = null;
-        }
-        return owner.finishDirectCommand(command, commitFenceTimestamp, commitFenceClusterPosition,
-                sourceKey, fingerprint, beforeRevision, checkpoint,
-                identityCheckpoint, status, resultCode);
-    }
-
-    /** 清除本条命令、各固定续步和提交标记，释放本轮引用。 */
-    public void clear() {
-        riskScanControl.clear();
-        accountControl.clear();
-        triggerControl.clear();
-        active = false;
-        command = null;
-        fingerprint = null;
-        sourceKey = null;
-        beforeRevision = checkpoint = identityCheckpoint = 0;
-        controlWork = null;
-        status = null;
-        resultCode = null;
-        commitEvent = null;
-        finalizationPrepared = false;
-        commitFenceTimestamp = commitFenceClusterPosition = 0;
-    }
-
-    /** 资金费工作完成后的 Owner 收集步骤，整理进度和受影响用户。 */
-    private final class FundingControlContinuation implements BooleanSupplier {
-        @Override public boolean getAsBoolean() {
-            var work = reusableFundingWork;
-            if (!work.poll()) return false;
-            var result = work.result();
-            owner.requestCommitPublication();
-            owner.resultBuilder.commandFundingProgress = result.progress();
-            owner.resultBuilder.addChangedUsersFromFundingPayments(result.payments());
-            owner.notifyReplayFundingObserver(result);
-            return true;
-        }
-    }
-
-    /** 在同一条风险命令内衔接风险扫描和剩余预算内的触发扫描，不建立新业务队列。 */
-    private final class RiskScanControlContinuation implements BooleanSupplier {
-        private RiskScanner risk;
-        private int symbolId;
-        private String instrumentId;
-        private int maxUsers;
-        private int pendingBefore;
-        private long startedAt;
-        /** 该工作开始前的运行时修订，用于变化及回滚判断。 */
-        private long beforeRevision;
-        private BooleanSupplier triggers;
-
-        /** 保存风险续扫输入并清空上一轮触发扫描续步。 */
-        void prepare(RiskScanner risk, int symbolId, String instrumentId,
-                int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
-            this.risk = risk;
-            this.symbolId = symbolId;
-            this.instrumentId = Objects.requireNonNull(instrumentId);
-            this.maxUsers = maxUsers;
-            this.pendingBefore = pendingBefore;
-            this.startedAt = startedAt;
-            this.beforeRevision = beforeRevision;
-            this.triggers = null;
-        }
-        /** 清除当前风险及触发续步引用和统计输入，保留外层可复用扫描器。 */
-        void clear() {
-            risk = null; instrumentId = null; triggers = null;
-            symbolId = maxUsers = pendingBefore = 0; startedAt = beforeRevision = 0;
-        }
-
-        /** 先收齐可空风险扫描工作，有修订变化则请求发布。 */
-        @Override public boolean getAsBoolean() {
-            if (triggers == null) {
-                if (risk != null && !risk.poll()) return false;
-                if (owner.accountBook().revision() != beforeRevision) owner.requestCommitPublication();
-                int remaining = maxUsers - (risk == null ? 0 : risk.completedWork());
-                var completedScan = owner.accountBook().riskScan(symbolId);
-                triggers = remaining > 0 && completedScan != null
-                        && !completedScan.triggerComplete()
-                        ? owner.pendingTriggerScan(instrumentId, remaining) : COMPLETE_CONTROL;
-            }
-            if (!triggers.getAsBoolean()) return false;
-            owner.logRiskScan("continuation", instrumentId, maxUsers, pendingBefore, startedAt);
-            return true;
-        }
-    }
-
-    /** 在 Owner 轮询自动减仓工作完成并请求发布的固定续步。 */
-    private final class AdlControlContinuation implements BooleanSupplier {
-        @Override public boolean getAsBoolean() {
-            var work = reusableAdlWork;
-            if (!work.getAsBoolean()) return false;
-            owner.requestCommitPublication();
-            return true;
-        }
-    }
-
-    /** 在 Owner 收集强平结果确认工作并请求发布的固定续步。 */
-    private final class LiquidationResolutionControlContinuation implements BooleanSupplier {
-        @Override public boolean getAsBoolean() {
-            var work = reusableResolutionWork;
-            if (!work.getAsBoolean()) return false;
-            owner.requestCommitPublication();
-            return true;
-        }
-    }
-
-    /** 触发单和算法单直接命令共用的固定槽：账户 Lane 执行变更，Owner 再轮询并收集结果。 */
-    private final class TriggerControlContinuation
-            implements BooleanSupplier, IntFunction<Object> {
-        private static final byte MUTATION = 1;
-        private static final byte TRIGGER_UPSERT = 2;
-        private static final byte ALGO_UPSERT = 3;
-        private byte kind;
-        private long userId, triggerOrderId, arg1, arg2, arg3;
-        private boolean flag;
-        private String text;
-        private TriggerOrderCommands.Mutation mutation;
-        private CoreTriggerOrderStateView trigger, secondTrigger;
-        private CoreAlgoOrderCommand algo;
-        private int symbolId;
-        private long positionKey;
-        private boolean instrumentSettled;
-
-        /** 清除旧参数，保存非空触发单变更种类与各原语输入。 */
-        void prepareMutation(long userId,
-                TriggerOrderCommands.Mutation mutation, long triggerOrderId, long arg1, long arg2,
-                long arg3, boolean flag, String text) {
-            clear(); kind = MUTATION; this.userId = userId;
-            this.mutation = Objects.requireNonNull(mutation); this.triggerOrderId = triggerOrderId;
-            this.arg1 = arg1; this.arg2 = arg2; this.arg3 = arg3; this.flag = flag; this.text = text;
-        }
-        /** 清除旧参数并保存非空触发单及其账户、合约、持仓身份。 */
-        void prepareTriggerUpsert(long userId,
-                CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
-                boolean instrumentSettled) {
-            clear(); kind = TRIGGER_UPSERT;
-            this.userId = userId; this.trigger = Objects.requireNonNull(trigger); this.symbolId = symbolId;
-            this.positionKey = positionKey; this.instrumentSettled = instrumentSettled;
-        }
-        /** 清除旧参数并保存非空算法单及其账户、合约身份。 */
-        void prepareAlgoUpsert(long userId, CoreAlgoOrderCommand algo,
-                int symbolId, long clusterTimestamp) {
-            clear(); kind = ALGO_UPSERT;
-            this.userId = userId; this.algo = Objects.requireNonNull(algo); this.symbolId = symbolId; this.arg1 = clusterTimestamp;
-        }
-        /** 清除本轮操作类别、引用与原语参数，固定续步对象本身继续复用。 */
-        void clear() {
-            kind = 0; mutation = null; trigger = null; secondTrigger = null; algo = null; text = null;
-            userId = triggerOrderId = arg1 = arg2 = arg3 = positionKey = 0;
-            flag = instrumentSettled = false; symbolId = 0;
-        }
-
-        /** 在已选中的账户 Lane 执行触发单变更、单条或互斥对写入、算法单写入。 */
-        @Override public Object apply(int ignoredLaneId) {
-            var accountBook = owner.accountBook();
-            return switch (kind) {
-                case MUTATION -> switch (mutation) {
-                    case CANCEL -> accountBook.triggerOrders().cancelTriggerOrder(userId, triggerOrderId);
-                    case CLAIM -> accountBook.triggerOrders().claimTriggerOrder(triggerOrderId, arg1, arg2, arg3);
-                    case COMPLETE -> accountBook.triggerOrders().completeTriggerOrder(triggerOrderId,
-                            flag, arg1, text == null ? "" : text, arg2);
-                    case TRAILING -> accountBook.triggerOrders().updateTrailingTriggerOrder(triggerOrderId,
-                            arg1, arg2, arg3);
-                    case EXPIRE -> accountBook.triggerOrders().expireTriggerOrder(triggerOrderId, arg1);
-                    case RETRY -> accountBook.triggerOrders().retryTriggerOrder(triggerOrderId, arg1, arg2);
-                };
-                case TRIGGER_UPSERT -> {
-                    if (secondTrigger == null) accountBook.triggerOrders().upsertTriggerOrder(userId, trigger, symbolId,
-                            positionKey, instrumentSettled);
-                    else accountBook.triggerOrders().placeOcoPair(userId, trigger, secondTrigger,
-                            symbolId, positionKey, instrumentSettled);
-                    yield secondTrigger == null ? accountBook.triggerOrder(trigger.triggerOrderId()).view()
-                            : java.util.List.of(accountBook.triggerOrder(trigger.triggerOrderId()).view(),
-                                    accountBook.triggerOrder(secondTrigger.triggerOrderId()).view());
-                }
-                case ALGO_UPSERT -> {
-                    accountBook.upsertAlgoOrder(userId, algo, symbolId, arg1);
-                    yield accountBook.algoOrder(algo.algoOrderId());
-                }
-                default -> throw new IllegalStateException("unknown trigger continuation");
-            };
-        }
-
-        /** 等账户控制派发完成，读取该用户 Lane 回执。 */
-        @Override public boolean getAsBoolean() {
-            if (!owner.accountBook().pollControlLanes()) return false;
-            Object result = owner.accountBook().controlLaneResult(
-                    owner.accountBook().topology().accountLaneId(userId));
-            if (kind == MUTATION) {
-                if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
-            } else if (kind == TRIGGER_UPSERT) {
-                owner.requestCommitPublication();
-                if (secondTrigger == null) owner.resultBuilder.commandTriggerOrderViews = java.util.List.of((CoreTriggerOrderStateView) result);
-                else {
-                    @SuppressWarnings("unchecked") var views = (java.util.List<CoreTriggerOrderStateView>) result;
-                    owner.resultBuilder.commandTriggerOrderViews = views;
-                }
-            } else {
-                owner.requestCommitPublication();
-            }
-            return true;
-        }
-    }
-}
-
-public static final class Decoded {
-
-    private Object value;
-    private PlaceOrderCommand placeSlot;
-    private PlaceOrderBatchCommand placeBatchSlot;
-    private CancelOrderCommand cancelSlot;
-    private CancelOrderBatchCommand cancelBatchSlot;
-    private AmendOrderCommand amendSlot;
-    private AmendOrderBatchCommand amendBatchSlot;
-    private ReplaceOrderCommand replaceSlot;
-    private boolean commandSlot;
-    private String routedSymbol;
-    private int routedShard;
-
-    /** 同标的复用本命令作用域缓存的 Matcher 分片，换标的才查适配器。调用方提供非空规范标的和匹配的拓扑，缓存不跨线程同步。 */
-    public int matcherShard(com.surprising.aeron.service.matcher.OrderBookEngine adapter, String instrumentId) {
-        if (!instrumentId.equals(routedSymbol)) {
-            routedShard = adapter.matcherShardId(instrumentId);
-            routedSymbol = instrumentId;
-        }
-        return routedShard;
-    }
-
-    /** 普通构造出来的实例不能按窗口槽接口清理或重解码。 */
-    private Decoded(Object value) {
-        bindValue(value);
-    }
-
-    /** 建立可反复解码和清理的空窗口槽，具体协议载体在首次需要时延迟创建。 */
-    public static Decoded commandSlot() {
-        var result = new Decoded(null);
-        result.commandSlot = true;
-        return result;
-    }
-
-    /** 只允许复用槽操作，先清旧值、路由及各载体，再按消息类型原位解码常用订单类型。 */
-    public void decodeInto(CoreMessage message) {
-        if (!commandSlot) throw new IllegalStateException("decoded command is not a window slot");
-        clearCommandSlot();
-        if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.PLACE_ORDER) {
-            if (placeSlot == null) placeSlot = PlaceOrderCommand.commandSlot();
-            TradingCommandCodec.decodePlaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), placeSlot);
-            bindValue(placeSlot);
-        } else if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.PLACE_ORDER_BATCH) {
-            if (placeBatchSlot == null) placeBatchSlot = PlaceOrderBatchCommand.commandSlot();
-            TradingOrderBatchCodec.decodePlaceOrderBatchInto(message.payloadUnsafe(), message.payloadLength(), placeBatchSlot);
-            bindValue(placeBatchSlot);
-        } else if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.CANCEL_ORDER) {
-            if (cancelSlot == null) cancelSlot = CancelOrderCommand.commandSlot();
-            TradingCommandCodec.decodeCancelOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), cancelSlot);
-            bindValue(cancelSlot);
-        } else if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.CANCEL_ORDER_BATCH) {
-            if (cancelBatchSlot == null) cancelBatchSlot = CancelOrderBatchCommand.commandSlot();
-            TradingOrderBatchCodec.decodeCancelOrderBatchInto(message.payloadUnsafe(), message.payloadLength(), cancelBatchSlot);
-            bindValue(cancelBatchSlot);
-        } else if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.AMEND_ORDER) {
-            if (amendSlot == null) amendSlot = AmendOrderCommand.commandSlot();
-            TradingCommandCodec.decodeAmendOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), amendSlot);
-            bindValue(amendSlot);
-        } else if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.AMEND_ORDER_BATCH) {
-            if (amendBatchSlot == null) amendBatchSlot = AmendOrderBatchCommand.commandSlot();
-            TradingOrderBatchCodec.decodeAmendOrderBatchInto(message.payloadUnsafe(), message.payloadLength(), amendBatchSlot);
-            bindValue(amendBatchSlot);
-        } else if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.REPLACE_ORDER) {
-            if (replaceSlot == null) replaceSlot = ReplaceOrderCommand.commandSlot();
-            TradingCommandCodec.decodeReplaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), replaceSlot);
-            bindValue(replaceSlot);
-        } else {
-            bindValue(decodeRawPayload(message));
-        }
-    }
-
-    /** 只允许复用槽清理：解除当前值和路由缓存，清空已创建的各协议载体，但保留载体对象供后续复用。 */
-    public void clearCommandSlot() {
-        if (!commandSlot) throw new IllegalStateException("cannot clear an immutable decoded command");
-        clearValues();
-        routedSymbol = null;
-        routedShard = 0;
-        if (placeSlot != null) placeSlot.clearCommandSlot();
-        if (placeBatchSlot != null) placeBatchSlot.clearCommandSlot();
-        if (cancelSlot != null) cancelSlot.clearCommandSlot();
-        if (cancelBatchSlot != null) cancelBatchSlot.clearCommandSlot();
-        if (amendSlot != null) amendSlot.clearCommandSlot();
-        if (amendBatchSlot != null) amendBatchSlot.clearCommandSlot();
-        if (replaceSlot != null) replaceSlot.clearCommandSlot();
-    }
-
-    /** 判断当前 value 是否非空。 */
-    public boolean isDecoded() { return value != null; }
-
-    private void clearValues() { value = null; }
-
-    private void bindValue(Object value) { this.value = value; }
-
-    private <T> T required(Class<T> type) {
-        if (!type.isInstance(value)) throw new IllegalStateException("decoded matching command type mismatch");
-        return type.cast(value);
-    }
-
-    /** 创建单次解码持有者，不借用本类的窗口复用槽。 */
-    public static Decoded decode(CoreMessage message) {
-        return new Decoded(decodeRawPayload(message));
-    }
-
-    private static Object decodeRawPayload(CoreMessage message) {
-        return switch (message.header().messageType()) {
-            case PLACE_ORDER -> TradingCommandCodec.decodePlaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null);
-            case PLACE_ORDER_BATCH -> TradingOrderBatchCodec.decodePlaceOrderBatch(message.payloadUnsafe(), message.payloadLength());
-            case CANCEL_ORDER -> TradingCommandCodec.decodeCancelOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null);
-            case CANCEL_ORDER_BATCH -> TradingOrderBatchCodec.decodeCancelOrderBatch(message.payloadUnsafe(), message.payloadLength());
-            case REPLACE_ORDER -> TradingCommandCodec.decodeReplaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null);
-            case AMEND_ORDER -> TradingCommandCodec.decodeAmendOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null);
-            case AMEND_ORDER_BATCH -> TradingOrderBatchCodec.decodeAmendOrderBatch(message.payloadUnsafe(), message.payloadLength());
-            case EXECUTE_TRIGGER_ORDER ->
-                    com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payloadUnsafe());
-            case EXECUTE_LIQUIDATION -> TradingCommandCodec.decodeExecuteLiquidation(message.payloadUnsafe());
-            case EXECUTE_LIQUIDATION_BATCH ->
-                    TradingCommandCodec.decodeExecuteLiquidationBatch(message.payloadUnsafe());
-            case SETTLE_INSTRUMENT -> TradingCommandCodec.decodeSettleInstrument(message.payloadUnsafe());
-            default -> message;
-        };
-    }
-
-    /** 核对并借出当前普通下单载体。 */
-    public PlaceOrderCommand placeOrder() { return required(PlaceOrderCommand.class); }
-    /** 核对并借出当前批量下单载体。 */
-    public PlaceOrderBatchCommand placeOrderBatch() { return required(PlaceOrderBatchCommand.class); }
-    /** 核对并借出当前普通撤单载体。 */
-    public CancelOrderCommand cancelOrder() { return required(CancelOrderCommand.class); }
-    /** 核对并借出当前批量撤单载体。 */
-    public CancelOrderBatchCommand cancelOrderBatch() { return required(CancelOrderBatchCommand.class); }
-    /** 核对并借出当前撤改重下命令载体。 */
-    public ReplaceOrderCommand replaceOrder() { return required(ReplaceOrderCommand.class); }
-    /** 核对并借出当前普通改单载体。 */
-    public AmendOrderCommand amendOrder() { return required(AmendOrderCommand.class); }
-    /** 核对并借出当前批量改单载体。 */
-    public AmendOrderBatchCommand amendOrderBatch() { return required(AmendOrderBatchCommand.class); }
-    /** 核对并借出当前单项强平执行参数。 */
-    public ExecuteLiquidationCommand liquidation() { return required(ExecuteLiquidationCommand.class); }
-    /** 核对并借出当前批量强平执行参数。 */
-    public ExecuteLiquidationBatchCommand liquidationBatch() { return required(ExecuteLiquidationBatchCommand.class); }
-    /** 核对并借出当前合约到期结算参数。 */
-    public SettleInstrumentCommand settlement() { return required(SettleInstrumentCommand.class); }
-    /** 核对并借出触发执行解码器返回的原 long 参数数组。字段顺序沿用现有协议，调用方不得跨槽清理保留引用。 */
-    public long[] trigger() { return required(long[].class); }
-}
-
-@NoArgsConstructor
-public static class ResolvedPlaceOrder {
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private PlaceOrderCommand intent;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private CoreInstrument instrument;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private int symbolId;
-    private boolean resolved;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long matchingPriceTicks;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long reservationPriceTicks;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long markPriceTicks;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long indexPriceTicks;
-    /** 本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long forwardPriceTicks;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private ReservationKind reservationKind;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private String reservationAsset;
-    /** Maker 费率，单位为百万分比，负数表示返佣。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long makerFeeRatePpm;
-    /** Taker 费率，单位为百万分比，且不能小于 Maker 费率。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long takerFeeRatePpm;
-
-    /** 校验并保存完整订单决策输入，包括指数、远期价格及冻结资产与费率。 */
-    public ResolvedPlaceOrder(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId,
-                              long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
-                              long indexPriceTicks, long forwardPriceTicks,
-                              ReservationKind reservationKind, String reservationAsset,
-                              long makerFeeRatePpm, long takerFeeRatePpm) {
-        initializeResolvedOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
-                markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
-                makerFeeRatePpm, takerFeeRatePpm);
-    }
-
-    /** 清除本对象保存的意图及全部决策字段，供后续安全复用。 */
-    public void clear() {
-        clearResolvedOrder();
-    }
-
-    /** 只允许初始化一次完整决策。若路由已先绑定，必须保持相同意图、币对对象和稠密编号，再校验价格与费率并发布已决策标记。 */
-    public final void initializeResolvedOrder(
-            PlaceOrderCommand intent, CoreInstrument instrument, int symbolId,
-            long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
-            long indexPriceTicks, long forwardPriceTicks, ReservationKind reservationKind,
-            String reservationAsset, long makerFeeRatePpm, long takerFeeRatePpm) {
-        if (resolved || intent == null || instrument == null || symbolId < 0
-                || (this.intent != null && (this.intent != intent || this.instrument != instrument || this.symbolId != symbolId))
-                || matchingPriceTicks <= 0 || reservationPriceTicks <= 0
-                || markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
-                || (forwardPriceTicks > 0 && indexPriceTicks == 0)
-                || reservationKind == null || reservationAsset == null || reservationAsset.isBlank()
-                || makerFeeRatePpm < -1_000_000 || makerFeeRatePpm > 1_000_000
-                || takerFeeRatePpm < -1_000_000 || takerFeeRatePpm > 1_000_000
-                || makerFeeRatePpm > takerFeeRatePpm) {
-            throw new IllegalArgumentException("invalid resolved place order");
-        }
-        // Owner 在投递前已固定路由身份，Lane 补决策时不能改写它。
-        if (this.intent == null) initializeOrderIntent(intent, instrument, symbolId);
-        this.matchingPriceTicks = matchingPriceTicks;
-        this.reservationPriceTicks = reservationPriceTicks;
-        this.markPriceTicks = markPriceTicks;
-        this.indexPriceTicks = indexPriceTicks;
-        this.forwardPriceTicks = forwardPriceTicks;
-        this.reservationKind = reservationKind;
-        this.reservationAsset = AssetBalance.normalizeAsset(reservationAsset);
-        this.makerFeeRatePpm = makerFeeRatePpm;
-        this.takerFeeRatePpm = takerFeeRatePpm;
-        resolved = true;
-    }
-
-    /** 先绑定订单意图和币对路由，确认两者币对编号一致。后续 Lane 只能补决策字段，不能换掉路由身份。 */
-    public final void initializeOrderIntent(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId) {
-        if (this.intent != null || intent == null || instrument == null || symbolId < 0
-                || !intent.instrumentId().equals(instrument.instrumentId()))
-            throw new IllegalArgumentException("invalid order routing input");
-        this.intent = intent;
-        this.instrument = instrument;
-        this.symbolId = symbolId;
-    }
-
-    /** 释放意图和币对引用，将价格、费率及身份字段清零，并撤销已决策标记。此时不能再读取依赖 intent 的订单属性。 */
-    public final void clearResolvedOrder() {
-        intent = null;
-        instrument = null;
-        symbolId = 0;
-        matchingPriceTicks = reservationPriceTicks = markPriceTicks = 0;
-        indexPriceTicks = forwardPriceTicks = 0;
-        reservationKind = null;
-        reservationAsset = null;
-        makerFeeRatePpm = takerFeeRatePpm = 0;
-        resolved = false;
-    }
-
-    /** 返回完整价格和预留决策是否已初始化，仅绑定路由不能算完成。 */
-    public final boolean resolvedOrderInitialized() { return resolved; }
-    /** 返回原下单意图中的唯一订单编号。 */
-    public long orderId() { return intent.orderId(); }
-    /** 返回原下单意图中的永久币对编号文本。 */
-    public String instrumentId() { return intent.instrumentId(); }
-    /** 返回原下单意图的买入或卖出方向。 */
-    public com.surprising.aeron.protocol.CoreOrderSide side() { return intent.side(); }
-    /** 返回原始请求的限价或现货市价保护边界，不等于所有类型实际使用的撮合价。 */
-    public long limitPriceTicks() { return intent.limitPriceTicks(); }
-    /** 返回原下单意图的数量步数。 */
-    public long quantitySteps() { return intent.quantitySteps(); }
-    /** 返回原下单意图是否只允许减少已有持仓。 */
-    public boolean reduceOnly() { return intent.reduceOnly(); }
-    /** 返回原下单意图的全仓或逐仓模式。 */
-    public com.surprising.aeron.protocol.CoreMarginMode marginMode() { return intent.marginMode(); }
-    /** 返回原下单意图对应的净持仓或双向持仓腿。 */
-    public com.surprising.aeron.protocol.CorePositionSide positionSide() { return intent.positionSide(); }
-    /** 返回原下单意图的限价或市价类型。 */
-    public com.surprising.aeron.protocol.CoreOrderType orderType() { return intent.orderType(); }
-    /** 返回原下单意图的有效期策略，如 GTC 或 IOC。 */
-    public com.surprising.aeron.protocol.CoreTimeInForce timeInForce() { return intent.timeInForce(); }
-    /** 返回原下单意图是否只允许成为挂单方。 */
-    public boolean postOnly() { return intent.postOnly(); }
-    public boolean hasIntent() { return intent != null; }
-    /** 返回原下单意图的客户端订单标识。 */
-    public String clientOrderId() { return intent == null ? "" : intent.clientOrderId(); }
-}
-
-/** 单笔下单与改单准入事件共用的 Lane 结果：完成位为 volatile，Owner 读到完成后才读取拒绝和平仓容量撤单。 */
-abstract static class OrderCheckEvent extends ResolvedPlaceOrder {
-    long openInterestSteps;
-
-    /** Lane 捕获的业务拒绝、算术或参数异常，完成后由 Owner 或 Matcher 读取。 */
-    RuntimeException rejection;
-
-    List<Long> closeCapacityCancellations = List.of();
-
-    volatile boolean completed;
-
-    public void bindOpenInterest(long openInterestSteps) {
-        this.openInterestSteps = openInterestSteps;
-    }
-
-    public long openInterestSteps() {
-        return openInterestSteps;
-    }
-
-    public boolean complete() {
-        return completed;
-    }
-
-    public RuntimeException rejection() {
-        if (!completed) throw new IllegalStateException("admission is incomplete");
-        return rejection;
-    }
-
-    public List<Long> closeCapacityCancellations() {
-        if (!completed) throw new IllegalStateException("admission is incomplete");
-        return rejection == null ? closeCapacityCancellations : List.of();
-    }
-
-    void clearBaseOrderCheck() {
-        clearResolvedOrder();
-        openInterestSteps = 0;
-        rejection = null;
-        closeCapacityCancellations = List.of();
-        completed = false;
-    }
-}
-
-public static final class PlaceOrderCheckEvent extends OrderCheckEvent implements AccountLaneCommand {
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long coreSequence;
-    /** position：命令的集群日志位置，用于订单状态和后续确定性提交。 */
-    private long timestamp, position;
-    /** 下单用户编号，只能由其所属账户 Lane 处理。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long userId;
-    private UUID commandId;
-    /** Owner 固定并借用的不可变账本事实，供 Lane 检查资金费及到期结算冲突。 */
-    private SystemFunds.SettlementStatus settlementStatus;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private int assetId;
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private int laneId;
-    private AccountBook accountBook;
-    private IdIndex identities;
-    /** Owner 绑定的本命令价格事实，Lane 据此完成价格决策。 */
-    private com.surprising.aeron.service.market.MarkPrice decisionMark;
-    private FeePolicyBook decisionPolicies;
-    /** Owner 固定的决策业务时间，价格鲜度、费率及到期检查使用此值。 */
-    private long decisionTimestamp;
-    /** Matcher 已读取或明确取消等待的发布位，可见后 Matcher 不得继续访问事件字段。 */
-    private volatile boolean matcherConsumed;
-
-    /** Owner 先绑定意图和币对路由，再保存价格、费率表及决策时间引用。 */
-    public void prepareDecision(com.surprising.aeron.protocol.PlaceOrderCommand intent,
-            com.surprising.aeron.service.instrument.CoreInstrument instrument, int symbolId,
-            com.surprising.aeron.service.market.MarkPrice mark, FeePolicyBook policies, long timestamp) {
-        if (policies == null || timestamp <= 0) throw new IllegalArgumentException("invalid place decision input");
-        initializeOrderIntent(intent, instrument, symbolId);
-        decisionMark = mark;
-        decisionPolicies = policies;
-        decisionTimestamp = timestamp;
-    }
-
-    /** 校验已绑定路由并固定命令、用户、资产、目标 Lane 和账本事实，重置回执及消费标记，按产品规则决定是否等待 OI。 */
-    public OrderCommand.PlaceOrderCheckEvent prepare(long coreSequence, long userId, UUID commandId,
-                                SystemFunds.SettlementStatus settlementStatus,
-                                int assetId, int laneId,
-                                AccountBook accountBook, IdIndex identities,
-                                long timestamp, long position) {
-        if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0
-                || intent() == null || commandId == null
-                || symbolId() < 0 || assetId < 0 || settlementStatus == null
-                || laneId < 0 || accountBook == null) {
-            throw new IllegalArgumentException("invalid place admission event");
-        }
-        this.coreSequence = coreSequence;
-        this.timestamp = timestamp;
-        this.position = position;
-        this.userId = userId;
-        this.commandId = commandId;
-        openInterestSteps = 0;
-        this.settlementStatus = settlementStatus;
-        this.identities = identities;
-        this.assetId = assetId;
-        this.laneId = laneId;
-        this.accountBook = accountBook;
-        rejection = null;
-        closeCapacityCancellations = List.of();
-        completed = false;
-        matcherConsumed = false;
-        return this;
-    }
-
-    /** 只有 Lane 已完成且需要的 Matcher 回执已经消费，才清理决策、引用和标记供池化复用。 */
-    @Override
-    public void clear() {
-        if (!complete()) throw new IllegalStateException("cannot recycle an incomplete place admission");
-        if (!matcherConsumed) {
-            throw new IllegalStateException("cannot recycle a place admission before matcher handoff");
-        }
-        clearBaseOrderCheck();
-        commandId = null;
-        settlementStatus = null;
-        accountBook = null;
-        identities = null;
-        decisionMark = null;
-        decisionPolicies = null;
-        decisionTimestamp = 0;
-        matcherConsumed = false;
-    }
-
-    /** 在目标 Lane 等账本输入就绪后，补决策、准备客户身份、计算预留和前置撤单，再写订单及冻结。可预期拒绝回退客户身份，最后记录分配计数并发布回执。 */
-    public void execute(AccountPartition lane) {
-        if (lane.laneId() != accountBook.topology().accountLaneId(userId)) {
-            throw new IllegalStateException("place admission reached the wrong Account Lane");
-        }
-        long preparedClientKey = 0;
-        try {
-            accountBook.enterLaneCommandScope(lane);
-            try {
-                boolean lifecycleSettled = settlementStatus.lifecycleSettled();
-                boolean fundingInProgress = settlementStatus.fundingInProgress();
-                if (!resolvedOrderInitialized())
-                    OrderCheckService.resolvePrepared(
-                            this, decisionMark, decisionPolicies, userId, decisionTimestamp, lifecycleSettled);
-                preparedClientKey = IdIndex.clientKeyValue(
-                        identities.prepareClientKeyInLane(lane, userId, clientOrderId()));
-                long positionKey = identities.findPositionKeyValueInLane(
-                        lane, userId, instrument(), positionSide());
-                int symbolId = symbolId();
-                long requiredReservation = OrderCheckService.requiredReservationPrepared(
-                        accountBook, lane, userId, this, openInterestSteps,
-                        preparedClientKey, positionKey,
-                        lifecycleSettled, fundingInProgress);
-                Position currentPosition = positionKey == 0 ? null : lane.position(positionKey);
-                if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
-                        && currentPosition != null && currentPosition.signedQuantitySteps() != 0
-                        && (currentPosition.signedQuantitySteps() > 0)
-                        != (side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-                    closeCapacityCancellations = Position.CloseCapacity.conflictsFor(
-                            lane, userId, symbolId, positionKey, positionSide(), side(), orderId(), quantitySteps());
-                }
-                if (!accountBook.selfTradeAllowed(userId)) {
-                    closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId,
-                            side(), matchingPriceTicks(), orderId(), orderId(), closeCapacityCancellations);
-                }
-                accountBook.placeOrderInLane(lane, userId, this, commandId,
-                        requiredReservation, preparedClientKey, symbolId, assetId, coreSequence, null, timestamp, position);
-            } finally {
-                accountBook.exitLaneCommandScope(lane);
-            }
-        } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
-            identities.rollbackClientKeyInLane(lane, userId, clientOrderId(), preparedClientKey);
-            rejection = failure;
-        }
-        AccountBook completionRuntime = accountBook;
-        lane.recordCommandOperation();
-        completed = true;
-        completionRuntime.publishPlaceOrderCheckReady(laneId, coreSequence);
-    }
-
-    /** 清理从未正式交给账户 Lane 的已准备事件。Lane 已完成时必须走对应交接路径，不能直接丢弃。 */
-    public void discard() {
-        if (complete()) throw new IllegalStateException("completed place admission must be collected");
-        clearBaseOrderCheck();
-        commandId = null;
-        settlementStatus = null;
-        accountBook = null;
-        identities = null;
-        decisionMark = null;
-        decisionPolicies = null;
-        decisionTimestamp = 0;
-        coreSequence = 0;
-        userId = 0;
-        laneId = 0;
-        matcherConsumed = false;
-    }
-
-    /** Matcher 最多等待三十秒取得 Lane 回执，区分成功、业务拒绝、溢出及非法参数并填入原结算事件。 */
-    public void awaitMatcherReceipt(TradeSettlement target) {
-        if (target == null) {
-            throw new IllegalArgumentException("place admission target is required");
-        }
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-        while (!completed) {
-            if (System.nanoTime() >= deadline) {
-                throw new IllegalStateException("timed out waiting for place admission sequence="
-                        + coreSequence + " lane=" + laneId);
-            }
-            Thread.onSpinWait();
-            if (Thread.currentThread().isInterrupted()) {
-                throw new IllegalStateException("place admission wait was interrupted");
-            }
-        }
-        CoreResultCode resultCode = rejection == null ? CoreResultCode.NONE
-                : rejection instanceof CoreStateRejectedException stateRejected
-                ? CoreResultCode.fromRejectionCode(stateRejected.code())
-                : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
-                : CoreResultCode.INVALID_COMMAND;
-        target.orderCheckReceipt(orderId(), rejection == null, resultCode.wireCode());
-        if (rejection == null) target.addOrderCheckCancellations(closeCapacityCancellations);
-        // Owner 可能立即清空池化事件。
-        // 消费位可见后 Matcher 只使用已捕获引用，不再读取事件字段。
-        // 消费位发布后，Owner 可以回收本事件，不再访问事件字段。
-        matcherConsumed = true;
-    }
-
-    /** 读取实际消费发布位。 */
-    public boolean matcherConsumed() { return matcherConsumed; }
-
-    /** 已完成的准入不再需要进入 Matcher 等待路径时，显式发布消费完成。 */
-    public void cancelMatcherWait() {
-        if (!complete() || matcherConsumed) {
-            throw new IllegalStateException("invalid matcher admission cancellation");
-        }
-        matcherConsumed = true;
-    }
-
-    /** 只有完整决策已完成且准入成功才交出本对象作为订单输入，不能把半成品或拒单当获准订单。 */
-    public OrderCommand.ResolvedPlaceOrder resolvedOrder() {
-        if (!complete() || !resolvedOrderInitialized() || rejection != null) {
-            throw new IllegalStateException("place admission is not accepted");
-        }
-        return this;
-    }
-
-    /** 返回已绑定的路由输入，供 Owner 预构建结算或 Matcher 借用。读取 Lane 补齐的价格和费率前仍必须等准入回执。 */
-    public OrderCommand.ResolvedPlaceOrder matchingOrder() {
-        if (intent() == null) throw new IllegalStateException("place admission is not prepared");
-        return this;
-    }
-}
-
-public static final class ReplaceOrderCheckEvent extends OrderCheckEvent implements AccountLaneCommand {
-    private long sequence, userId, originalOrderId;
-    /** Owner 固定的 Matcher 分片，完成通知按此唤醒原撮合续步。 */
-    private int matcherShard;
-    private AmendOrderCommand amend;
-    private ReplaceOrderCommand replace;
-    /** Owner 固定的币对决策输入，Lane 读取后写入本事件继承的解析字段。 */
-    private OrderCheckService.Context decision;
-    private AccountBook accountBook;
-    private IdIndex identities;
-    private OrderCommand.ReplaceOrderCheck orderCheck;
-
-    /** 要求改单和替换意图恰好提供一种，绑定原订单、用户、配置和 Matcher 分片，重置结果并按产品判断是否等待账本 OI。 */
-    public OrderCommand.ReplaceOrderCheckEvent prepare(long sequence, long userId, long originalOrderId,
-            AmendOrderCommand amend, ReplaceOrderCommand replace,
-            OrderCheckService.Context decision, int matcherShard,
-            AccountBook accountBook, IdIndex identities) {
-        if (sequence <= 0 || userId <= 0 || originalOrderId <= 0 || (amend == null) == (replace == null)
-                || decision == null || accountBook == null || identities == null
-                || matcherShard < 0 || matcherShard >= accountBook.topology().matchingEngineCount())
-            throw new IllegalArgumentException("invalid replacement admission");
-        this.sequence = sequence; this.userId = userId; this.originalOrderId = originalOrderId;
-        this.amend = amend; this.replace = replace; this.decision = decision;
-        this.matcherShard = matcherShard; openInterestSteps = 0; this.accountBook = accountBook; this.identities = identities;
-        orderCheck = null; rejection = null; completed = false; closeCapacityCancellations = List.of();
-        return this;
-    }
-
-    /** 在原单所属 Lane 核对原单存在、用户、OPEN 状态及可改单类型，解析新意图并排除原单占用计算预留。 */
-    @Override public void execute(AccountPartition lane) {
-        AccountBook completionRuntime = accountBook;
-        int completionShard = matcherShard;
-        int completionLane = lane.laneId();
-        if (completionLane != accountBook.topology().accountLaneId(userId))
-            throw new IllegalStateException("replacement admission crossed Account Lane");
-        accountBook.enterLaneCommandScope(lane);
-        try {
-            Order original = lane.order(originalOrderId);
-            if (original == null) throw rejected("ORDER_NOT_FOUND", "order does not exist");
-            if (original.userId() != userId) throw rejected("ORDER_OWNER_MISMATCH", "order belongs to another user");
-            if (original.status() != CoreOrderStatus.OPEN) throw rejected("INVALID_COMMAND", "order is not replaceable");
-            if (amend != null && original.orderType() != CoreOrderType.LIMIT)
-                throw rejected("INVALID_COMMAND", "order is not amendable");
-            PlaceOrderCommand command = replace == null ? amendCommand(original) : replace.replacement();
-            OrderCheckService.resolveInto(this, decision, userId, command);
-            long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
-            long required = OrderCheckService.requiredReplacementReservationPrepared(
-                    accountBook, lane, userId, this, openInterestSteps,
-                    original, identities.findClientKeyValueInLane(lane, userId, clientOrderId()), positionKey,
-                    decision.lifecycleSettled(), decision.fundingInProgress());
-            if (amend != null && accountBook.productLine() == com.surprising.product.api.ProductLine.SPOT) {
-                var reservation = lane.reservation(originalOrderId);
-                if (reservation == null || !reservationAsset().equals(identities.asset(reservation.assetId())))
-                    throw new IllegalStateException("spot amend original reservation is missing or mismatched");
-                var balance = accountBook.balance(userId, reservation.assetId());
-                if (balance == null || required > Math.addExact(balance.availableUnits(), reservation.reservedUnits()))
-                    throw rejected("INSUFFICIENT_AVAILABLE_BALANCE", "available balance is insufficient for amended order");
-            }
-            Position position = positionKey == 0 ? null : lane.position(positionKey);
-            if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
-                    && position != null && position.signedQuantitySteps() != 0
-                    && (position.signedQuantitySteps() > 0)
-                    != (side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-                closeCapacityCancellations = Position.CloseCapacity.conflictsFor(
-                        lane, userId, symbolId(), positionKey, positionSide(), side(), originalOrderId, quantitySteps());
-            }
-            if (!accountBook.selfTradeAllowed(userId)) {
-                closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId(),
-                        side(), matchingPriceTicks(), originalOrderId, orderId(), closeCapacityCancellations);
-            }
-            var user = lane.user(userId);
-            orderCheck = new OrderCommand.ReplaceOrderCheck(userId, originalOrderId, original.revision(),
-                    user == null ? 0 : user.revision(), command, this, required);
-        } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
-            rejection = failure;
-        } finally { accountBook.exitLaneCommandScope(lane); }
-        // 完成位可见后 Owner 可能推进回收或复用。
-        // 通知目标和分片必须提前捕获，发布后不再读取事件字段。
-        lane.recordCommandOperation();
-        completed = true;
-        completionRuntime.publishAccountOrderCheckReadyShard(completionShard);
-    }
-
-    private PlaceOrderCommand amendCommand(Order original) {
-        return new PlaceOrderCommand(amend.replacementOrderId(), decision.instrument().instrumentId(),
-                original.side(), amend.hasPriceTicks() ? amend.rawPriceTicks() : original.priceTicks(),
-                amend.hasQuantitySteps() ? amend.rawQuantitySteps() : original.remainingQuantitySteps(),
-                original.reduceOnly(), original.marginMode(), original.positionSide(), original.orderType(),
-                amend.timeInForce() == null ? original.timeInForce() : amend.timeInForce(),
-                amend.hasPostOnly() ? amend.isPostOnly() : original.postOnly(),
-                amend.newClientOrderId() == null ? "" : amend.newClientOrderId());
-    }
-
-    /** 返回本次改单命令的 Core 序号，准入结果和后续撮合沿用此序号。 */
-    public long coreSequence() { return sequence; }
-    /** 完成后返回新单、原单版本和账户版本组成的准入结果。 */
-    public OrderCommand.ReplaceOrderCheck orderCheck() { requireComplete(); return orderCheck; }
-
-    /** 要求 Lane 已完成后清理事件。关联命令仍需先结束对解析输入的使用，不能因看到完成位就提前复用。 */
-    @Override public void clear() {
-        requireComplete();
-        discard();
-    }
-
-    /** 清理意图、决策和结果引用并重置标记，供未投递清理或终态回收使用。 */
-    public void discard() {
-        clearBaseOrderCheck();
-        amend = null; replace = null; decision = null; accountBook = null; identities = null;
-        orderCheck = null;
-    }
-
-    private void requireComplete() {
-        if (!completed) throw new IllegalStateException("replacement admission is incomplete");
-    }
-    private static CoreStateRejectedException rejected(String code, String message) {
-        return new CoreStateRejectedException(code, message);
-    }
-}
-
-public record ReplaceOrderCheck(long userId, long originalOrderId, long originalOrderRevision,
-                                 long userRevision, PlaceOrderCommand command,
-                                 OrderCommand.ResolvedPlaceOrder resolved,
-                                 long requiredReservationUnits) {
-
-    public ReplaceOrderCheck {
-        if (userId <= 0 || originalOrderId <= 0 || originalOrderRevision < 0 || userRevision < 0
-                || command == null || resolved == null
-                || requiredReservationUnits < 0 || command.orderId() != resolved.orderId()) {
-            throw new IllegalArgumentException("invalid resolved matching admission");
-        }
-    }
-
-}
-
-public interface ResultTarget {
-    /** 返回本命令需要填充的结果槽数量。 */
-    int resultCount();
-    /** 返回指定结果槽主要查询的新单或当前订单编号。 */
-    long resultOrderId(int index);
-    /** 返回指定槽对应的原订单编号，没有改单或替换原单时可为 0。 */
-    long resultOriginalOrderId(int index);
-    /** 由所属 Lane 把该槽的最终订单及规范币对文本交给原命令捕获，订单已移除时允许为空。 */
-    void resultOrder(int index, Order order, String instrumentId);
-
-    /** 默认不额外读取无变化结果。 */
-    default boolean captureUnchangedResults() { return false; }
-
-    /** 判断该槽是否已由变化捕获填好，默认 false 让需要补读的实现自行决定。 */
-    default boolean resultPrepared(int index) { return false; }
-
-    /** 在最终 Lane 结果捕获后准备原命令响应，必须先于完成回执发布。 */
-    void prepareResponse();
-
-    /** 可选地记录当前批次项 Matcher 接受或拒绝结果，默认不额外存状态，原发布流程在最终释放边界前调用。 */
-    default void matcherResult(int index, boolean accepted) { }
-
-    /** 响应准备完成后交出后备字节数组，Owner 按原租约消费并结合逻辑长度读取有效前缀。 */
-    byte[] preparedResponse();
-
-    /** 返回已准备响应的有效字节长度，可能小于固定后备数组容量。 */
-    int preparedResponseLength();
-
-    /** 默认只沿用 Lane 中仍保留的订单。 */
-    default boolean includeTerminalAfterImage() { return false; }
-
-    /** 先处理本次变更命中的结果槽，按目标策略选 Lane 当前订单或变化缓冲终态后值，新编号缺失时再取原单。 */
-    static void capture(OrderCommand.ResultTarget target, AccountPartitionCommit.Delta changes,
-                        IdIndex identities, AccountPartition lane) {
-        for (int i = 0; i < target.resultCount(); i++) {
-            long id = target.resultOrderId(i);
-            long original = target.resultOriginalOrderId(i);
-            if (!changes.orders().containsKey(id) && (original == 0 || !changes.orders().containsKey(original))) continue;
-            Order order = lane.order(id);
-            if (target.includeTerminalAfterImage() && changes.orders().containsKey(id))
-                order = changes.orders().get(id);
-            if (order == null && original > 0) {
-                order = lane.order(original);
-                if (target.includeTerminalAfterImage() && changes.orders().containsKey(original))
-                    order = changes.orders().get(original);
-            }
-            target.resultOrder(i, order, order == null ? null : identities.instrumentId(order.symbolId()));
-        }
-        if (target.captureUnchangedResults()) captureUnchanged(target, identities, lane);
-        target.prepareResponse();
-    }
-
-    /** 仅补读尚未准备的结果槽，从所属 Lane 查询新编号或原单，不查询全局发布表。 */
-    static void captureUnchanged(OrderCommand.ResultTarget target,
-                                 IdIndex identities, AccountPartition lane) {
-        for (int index = 0; index < target.resultCount(); index++) {
-            if (target.resultPrepared(index)) continue;
-            Order order = lane.order(target.resultOrderId(index));
-            if (order == null) {
-                long original = target.resultOriginalOrderId(index);
-                if (original > 0) order = lane.order(original);
-            }
-            target.resultOrder(index, order, order == null ? null : identities.instrumentId(order.symbolId()));
-        }
-    }
-
-    /** 顺序批次结束后重新读取全部结果槽的 Lane 最终状态，纳入后续项对前面订单的影响，再准备整批响应。 */
-    static void captureFinal(OrderCommand.ResultTarget target,
-                             IdIndex identities, AccountPartition lane) {
-        for (int index = 0; index < target.resultCount(); index++) {
-            Order order = lane.order(target.resultOrderId(index));
-            long original = target.resultOriginalOrderId(index);
-            if (order == null && original > 0) order = lane.order(original);
-            target.resultOrder(index, order, order == null ? null : identities.instrumentId(order.symbolId()));
-        }
-        target.prepareResponse();
-    }
-}
 
 }

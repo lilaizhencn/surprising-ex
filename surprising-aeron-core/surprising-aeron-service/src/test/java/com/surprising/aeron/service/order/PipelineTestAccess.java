@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.DirectOrderCommand;
 /**
  * 只供测试读取/设置内部命令标记，以及向准入等待容器注入数量故障，生产命令入口不使用该类。
  */
@@ -27,16 +28,16 @@ public final class PipelineTestAccess {
     public static void overflowQueuedMatching(OrderCheckService orderCheck, int count) {
         orderCheck.queuedMatching.addAll(java.util.Collections.nCopies(count, null));
     }
-    public static java.util.function.BooleanSupplier controlWork(OrderCommand.Direct slot) {
+    public static java.util.function.BooleanSupplier controlWork(DirectOrderCommand slot) {
         try {
-            var field = OrderCommand.Direct.class.getDeclaredField("controlWork");
+            var field = DirectOrderCommand.class.getDeclaredField("controlWork");
             field.setAccessible(true);
             return (java.util.function.BooleanSupplier) field.get(slot);
         } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
     }
-    public static void replaceControlWork(OrderCommand.Direct slot, java.util.function.BooleanSupplier work) {
+    public static void replaceControlWork(DirectOrderCommand slot, java.util.function.BooleanSupplier work) {
         try {
-            var field = OrderCommand.Direct.class.getDeclaredField("controlWork");
+            var field = DirectOrderCommand.class.getDeclaredField("controlWork");
             field.setAccessible(true);
             field.set(slot, work);
         } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }

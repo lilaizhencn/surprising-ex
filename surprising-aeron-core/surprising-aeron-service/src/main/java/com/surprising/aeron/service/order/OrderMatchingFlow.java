@@ -213,7 +213,7 @@ public final class OrderMatchingFlow {
 
     /** 普通命令用缓存静态路由，批次按当前批次项的目标分片决定提交顺序。 */
     int pendingSubmissionShard(OrderCommand pending) {
-        OrderBatchProcessor.PendingBatch batch = pending.orderBatch;
+        PendingOrderBatch batch = pending.orderBatch;
         return batch == null ? matcherShard(pending) : owner.batches().orderBatchMatcherShard(batch);
     }
 
@@ -287,7 +287,7 @@ public final class OrderMatchingFlow {
                         : CoreResultCode.INVALID_COMMAND;
                 pending.rejectMatching(resultCode);
             } else {
-                OrderCommand.ResolvedPlaceOrder admitted = owner.accountBook().collectPlaceOrderCheck(orderCheck);
+                ResolvedPlaceOrder admitted = owner.accountBook().collectPlaceOrderCheck(orderCheck);
                 if (owner.realtimeCapture() != null) pending.realtimeResolvedTakerOrder(admitted);
             }
             pending.markPlaceOrderCheckOwnerCollected();
@@ -469,8 +469,8 @@ public static final class Progress {
                     break;
                 }
                 var orderCheck = pending.placeOrderCheck();
-                OrderBatchProcessor.PendingBatch orderBatch = pending.orderBatch;
-                OrderBatchProcessor.PlaceBatchCheckEvent batchOrderCheck = orderBatch == null
+                PendingOrderBatch orderBatch = pending.orderBatch;
+                PlaceBatchCheckEvent batchOrderCheck = orderBatch == null
                         ? null : orderBatch.placeBatchOrderCheckEvent;
                 if (pending != null && pending.hasMatchingRejection()) {
                     readyShardMask &= ~shardBit;
@@ -478,7 +478,7 @@ public static final class Progress {
                 }
                 if (orderCheck == null && batchOrderCheck == null) {
                     if (orderBatch != null && pending.clusterIndependent
-                            && orderBatch.kind == OrderBatchProcessor.Kind.CANCEL && orderBatch.activated()
+                            && orderBatch.kind == OrderBatchKind.CANCEL && orderBatch.activated()
                             && !pending.isMatchingSubmitted()) {
                         owner.matchingFlow.submitMatching(pending);
                     }
@@ -566,7 +566,7 @@ public static final class Progress {
     /** 比较最早延后命令和未激活批次的 Core 序号，先推进较早项。流水批次可尝试并行激活，顺序准入必须等到全局队首，使用原时间、位置和来源恢复延后命令。 */
     public void submitDeferredMatchingAfterBatch() {
         while (!owner.pendingMatching().isEmpty()) {
-            OrderBatchProcessor.PendingBatch batch = owner.batches().firstBatch();
+            PendingOrderBatch batch = owner.batches().firstBatch();
             OrderCommand deferredPending = owner.pendingMatching().firstDeferred();
             Long deferredSequence = deferredPending == null ? null : deferredPending.sequence();
             OrderCommand pending;
@@ -643,7 +643,7 @@ public static final class Progress {
     public boolean hasLocalMatchingWork() {
         if (readyShardMask != 0 || owner.commits.hasFinancialDispatchWork()) return true;
         OrderCommand head = owner.pendingMatching().get(owner.pendingMatching().firstSequence());
-        OrderBatchProcessor.PendingBatch batch = head == null ? null : head.orderBatch;
+        PendingOrderBatch batch = head == null ? null : head.orderBatch;
         // 交接和最终元数据提交可能没有新的结算通知，仍要推进这些有界 Owner 续步。
         return batch != null && (!batch.activated() || batch.laneCommitEvent != null || batch.itemOrderCheck != null)
                 || head != null && !head.isMatchingSubmitted() && head.placeOrderCheck() == null
@@ -707,7 +707,7 @@ final class ControlMatchCallback implements Supplier<Object> {
 final class AfterCheckMatchCallback implements Supplier<Object> {
     private final OrderCommand slot;
     private TradingCore owner;
-    private OrderCommand.PlaceOrderCheckEvent orderCheck;
+    private PlaceOrderCheckEvent orderCheck;
     private int matcherShard;
     private TradeSettlement settlement;
     private Supplier<?> original;
@@ -716,7 +716,7 @@ final class AfterCheckMatchCallback implements Supplier<Object> {
         this.slot = Objects.requireNonNull(slot);
     }
 
-    void prepare(TradingCore owner, OrderCommand.PlaceOrderCheckEvent orderCheck, int matcherShard,
+    void prepare(TradingCore owner, PlaceOrderCheckEvent orderCheck, int matcherShard,
                  TradeSettlement settlement, Supplier<?> original) {
         this.owner = Objects.requireNonNull(owner);
         this.orderCheck = Objects.requireNonNull(orderCheck);
@@ -777,7 +777,7 @@ final class OrderMatchCallback implements Supplier<Object> {
     private long orderId;
     private long originalOrderId;
     private int permanentSymbolId;
-    private OrderCommand.ResolvedPlaceOrder resolvedOrder;
+    private ResolvedPlaceOrder resolvedOrder;
     private Order admittedOrder;
     private TradeSettlement direct;
 
@@ -786,7 +786,7 @@ final class OrderMatchCallback implements Supplier<Object> {
     }
 
     void preparePlace(TradingCore owner, int matcherShard, long userId,
-                 OrderCommand.ResolvedPlaceOrder resolvedOrder, Order admittedOrder, TradeSettlement direct) {
+                 ResolvedPlaceOrder resolvedOrder, Order admittedOrder, TradeSettlement direct) {
         if ((resolvedOrder == null) == (admittedOrder == null)) {
             throw new IllegalArgumentException("exactly one admitted PLACE order representation is required");
         }
@@ -811,7 +811,7 @@ final class OrderMatchCallback implements Supplier<Object> {
     }
 
     void prepareReplace(TradingCore owner, int matcherShard, long orderId,
-            long userId, long originalOrderId, String instrumentId, OrderCommand.ResolvedPlaceOrder replacement,
+            long userId, long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
             TradeSettlement direct) {
         this.owner = Objects.requireNonNull(owner);
         this.action = Action.REPLACE;

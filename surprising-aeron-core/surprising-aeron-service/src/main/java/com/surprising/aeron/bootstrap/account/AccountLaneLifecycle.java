@@ -31,6 +31,12 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     /** 只借出指定 Lane 的工作入口，不暴露可替换的资源数组。 */
     public SettlementLaneWorker worker(int laneId) { return workers[laneId]; }
 
+    public void setParkOnIdle(boolean parkOnIdle) {
+        for (SettlementLaneWorker worker : workers) {
+            if (worker != null) worker.setParkOnIdle(parkOnIdle);
+        }
+    }
+
     public void start(TradingCpuAffinity affinity) {
         assertOwner.run();
         if (started) throw new IllegalStateException("account lanes are already started");

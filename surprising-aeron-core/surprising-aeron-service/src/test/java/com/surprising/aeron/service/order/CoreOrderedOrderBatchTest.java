@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.PendingOrderBatch;
+import com.surprising.aeron.service.order.DecodedOrderCommand;
+import com.surprising.aeron.service.order.ReplaceOrderCheckEvent;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
@@ -1176,7 +1179,7 @@ class CoreOrderedOrderBatchTest {
             // 故障批次第一项已经成功撮合的事实
             var acceptedFirst = awaitMatching(state, fatalSequence);
             // 当前命令原槽持有的批次上下文，等待首项游标实际前进
-            OrderBatchProcessor.PendingBatch activeBatch = state.batches().batch(fatalSequence);
+            PendingOrderBatch activeBatch = state.batches().batch(fatalSequence);
             // 首项账户和提交推进的有界等待截止点
             long firstDeadline = System.nanoTime() + 5_000_000_000L;
             while (activeBatch.nextIndex == 0) {
@@ -1765,7 +1768,7 @@ class CoreOrderedOrderBatchTest {
                 }
                 // 当前场景要推进的原批量消息
                 var batch = state.batches().acquireOrderBatchPending(
-                        com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND,
+                        com.surprising.aeron.service.order.OrderBatchKind.AMEND,
                         1, 2_000, 3);
                 batch.sequence = 1_000;
                 // 当前待测的批量改单消息或其单项输入
@@ -1792,7 +1795,7 @@ class CoreOrderedOrderBatchTest {
 
                 // 本场景预期被拒绝的输入、Core 响应或批次，具体角色见所在方法
                 var rejected = state.batches().acquireOrderBatchPending(
-                        com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND,
+                        com.surprising.aeron.service.order.OrderBatchKind.AMEND,
                         1, 2_001, 4);
                 rejected.sequence = 1_001;
                 rejected.addItem(13_203, 13_201, 13_203, new AmendOrderCommand(
@@ -1824,7 +1827,7 @@ class CoreOrderedOrderBatchTest {
      * @param event 本场景已经派发的替换准入事件，等待完成但不在辅助方法内回收
      */
     private static void awaitBatchAmendOrderCheck(TradingCore state,
-            com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent event) {
+            com.surprising.aeron.service.order.ReplaceOrderCheckEvent event) {
         // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
         while (!event.complete()) {
@@ -1917,7 +1920,7 @@ class CoreOrderedOrderBatchTest {
                 var single = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_101)), 1001);
                 // 当前普通撤单消息的类型化解码输入
-                var decoded = com.surprising.aeron.service.order.OrderCommand.Decoded.decode(single);
+                var decoded = com.surprising.aeron.service.order.DecodedOrderCommand.decode(single);
                 state.orderChecks().validatePendingCancel(single, decoded);
                 assertThat(state.orderChecks().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.CANCEL, decoded))
                         .isEqualTo("1");
@@ -1926,26 +1929,26 @@ class CoreOrderedOrderBatchTest {
                         TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(
                                 13_101, 13_103, "route-amend", 900L, 1L, CoreTimeInForce.GTC, false)), 1001);
                 assertThat(state.orderChecks().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.AMEND,
-                        com.surprising.aeron.service.order.OrderCommand.Decoded.decode(amendSingle)))
+                        com.surprising.aeron.service.order.DecodedOrderCommand.decode(amendSingle)))
                         .isEqualTo("1");
                 // 只用于查原单路由的普通替换消息
                 var replaceSingle = command(CoreMessageType.REPLACE_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeReplaceOrder(new com.surprising.aeron.protocol.ReplaceOrderCommand(
                                 13_101, place(13_103, "route-replace", 900))), 1001);
                 assertThat(state.orderChecks().matchingSymbol(com.surprising.aeron.service.order.OrderCommand.Operation.REPLACE,
-                        com.surprising.aeron.service.order.OrderCommand.Decoded.decode(replaceSingle)))
+                        com.surprising.aeron.service.order.DecodedOrderCommand.decode(replaceSingle)))
                         .isEqualTo("1");
                 // 请求用户尝试撤对方订单的普通消息
                 var foreignSingle = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_102)), 1001);
                 assertThatThrownBy(() -> state.orderChecks().validatePendingCancel(foreignSingle,
-                        com.surprising.aeron.service.order.OrderCommand.Decoded.decode(foreignSingle)))
+                        com.surprising.aeron.service.order.DecodedOrderCommand.decode(foreignSingle)))
                         .isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
                         .hasMessageContaining("another user");
                 for (/* 重复借用和归还批次的轮数 */ int round = 0; round < 4; round++) {
                     // 只含自有订单的临时撤单批次
                     var own = state.batches().acquireOrderBatchPending(
-                            com.surprising.aeron.service.order.OrderBatchProcessor.Kind.CANCEL,
+                            com.surprising.aeron.service.order.OrderBatchKind.CANCEL,
                             1, 2_000, 5);
                     own.addItem(13_101, 0, 0, new CancelOrderCommand(13_101));
                     state.batches().validateOrderBatchIdentity(own, 1001);
@@ -1954,7 +1957,7 @@ class CoreOrderedOrderBatchTest {
 
                     // 混入其他用户订单的临时撤单批次
                     var foreign = state.batches().acquireOrderBatchPending(
-                            com.surprising.aeron.service.order.OrderBatchProcessor.Kind.CANCEL,
+                            com.surprising.aeron.service.order.OrderBatchKind.CANCEL,
                             2, 2_000, 5);
                     foreign.addItem(13_101, 0, 0, new CancelOrderCommand(13_101));
                     foreign.addItem(13_102, 0, 0, new CancelOrderCommand(13_102));
@@ -1965,7 +1968,7 @@ class CoreOrderedOrderBatchTest {
 
                     // 当前待测的批量改单消息或其单项输入
                     var amend = state.batches().acquireOrderBatchPending(
-                            com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND,
+                            com.surprising.aeron.service.order.OrderBatchKind.AMEND,
                             1, 2_000, 5);
                     amend.addItem(13_103, 13_102, 13_103, new Object());
                     assertThatThrownBy(() -> state.batches().validateOrderBatchIdentity(amend, 1001))
@@ -1975,7 +1978,7 @@ class CoreOrderedOrderBatchTest {
 
                     // 只含缺失订单的临时撤单批次
                     var missing = state.batches().acquireOrderBatchPending(
-                            com.surprising.aeron.service.order.OrderBatchProcessor.Kind.CANCEL,
+                            com.surprising.aeron.service.order.OrderBatchKind.CANCEL,
                             1, 2_000, 5);
                     missing.addItem(999_999, 0, 0, new CancelOrderCommand(999_999));
                     state.batches().validateOrderBatchIdentity(missing, 1001);
@@ -2092,7 +2095,7 @@ class CoreOrderedOrderBatchTest {
         // 当前顺序批次第一项已经取得的 Matcher 事实
         var firstResult = awaitMatching(state, sequence);
         // 当前命令原槽持有的批次上下文，等待首项游标实际前进
-        OrderBatchProcessor.PendingBatch activeBatch = state.batches().batch(sequence);
+        PendingOrderBatch activeBatch = state.batches().batch(sequence);
         // 首项账户和提交推进的有界等待截止点
         long firstDeadline = System.nanoTime() + 5_000_000_000L;
         while (activeBatch.nextIndex == 0) {
@@ -2304,7 +2307,7 @@ class CoreOrderedOrderBatchTest {
             // 当前顺序批次第一项已经取得的 Matcher 事实
             var firstResult = awaitMatching(state, sequence);
             // 当前命令原槽持有的批次上下文，等待首项游标实际前进
-            OrderBatchProcessor.PendingBatch activeBatch = state.batches().batch(sequence);
+            PendingOrderBatch activeBatch = state.batches().batch(sequence);
             // 首项账户和提交推进的有界等待截止点
             long firstDeadline = System.nanoTime() + 5_000_000_000L;
             while (activeBatch.nextIndex == 0) {

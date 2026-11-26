@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.treasury;
 
+import com.surprising.aeron.service.settlement.TradeSettlementPosting;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.settlement.TradeSettlement;
@@ -227,19 +228,19 @@ public final class SystemFunds {
         if (accumulator == null) throw new IllegalArgumentException("funds accumulator is required");
         for (int index = 0; index < assetChanges.size(); index++) {
             int assetId = (int) assetChanges.keyAt(index);
-            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.FEE,
+            accumulator.add(assetId, TradeSettlementPosting.OwnerKind.TREASURY, 0, TradeSettlementPosting.Subledger.FEE,
                     Math.subtractExact(feeBalances.get(assetId), feeBefore[index]));
-            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.INSURANCE,
+            accumulator.add(assetId, TradeSettlementPosting.OwnerKind.TREASURY, 0, TradeSettlementPosting.Subledger.INSURANCE,
                     Math.subtractExact(insuranceBalances.get(assetId), insuranceBefore[index]));
-            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.DEFICIT,
+            accumulator.add(assetId, TradeSettlementPosting.OwnerKind.TREASURY, 0, TradeSettlementPosting.Subledger.DEFICIT,
                     Math.negateExact(Math.subtractExact(insuranceDeficits.get(assetId), deficitBefore[index])));
-            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.LIQUIDATION_FEE,
+            accumulator.add(assetId, TradeSettlementPosting.OwnerKind.TREASURY, 0, TradeSettlementPosting.Subledger.LIQUIDATION_FEE,
                     Math.subtractExact(liquidationFeeBalances.get(assetId), liquidationFeeBefore[index]));
-            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.FUNDING_RESIDUAL,
+            accumulator.add(assetId, TradeSettlementPosting.OwnerKind.TREASURY, 0, TradeSettlementPosting.Subledger.FUNDING_RESIDUAL,
                     Math.subtractExact(fundingResidualBalances.get(assetId), fundingResidualBefore[index]));
-            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.ROUNDING_RESIDUAL,
+            accumulator.add(assetId, TradeSettlementPosting.OwnerKind.TREASURY, 0, TradeSettlementPosting.Subledger.ROUNDING_RESIDUAL,
                     Math.subtractExact(roundingResidualBalances.get(assetId), roundingResidualBefore[index]));
-            accumulator.add(assetId, TradeSettlement.Posting.OwnerKind.TREASURY, 0, TradeSettlement.Posting.Subledger.CLEARING_PNL,
+            accumulator.add(assetId, TradeSettlementPosting.OwnerKind.TREASURY, 0, TradeSettlementPosting.Subledger.CLEARING_PNL,
                     Math.subtractExact(clearingPnlBalances.get(assetId), clearingPnlBefore[index]));
         }
     }

@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.trigger.command;
 
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
@@ -628,7 +629,7 @@ public final class TriggerOrderCommands {
         @Override public Object apply(int ignoredLaneId) {
             trigger = executableTrigger(owner.accountBook().triggerOrder(triggerId), triggerSequence, price, decision.symbolId());
             if (trigger == null) return null;
-            com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder order = null;
+            com.surprising.aeron.service.order.ResolvedPlaceOrder order = null;
             String failureReason = "";
             try {
                 order = com.surprising.aeron.service.order.OrderCheckService.resolve(

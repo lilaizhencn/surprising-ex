@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core.change;
 
+import com.surprising.aeron.service.settlement.TradeSettlementChanges;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
@@ -53,7 +54,7 @@ public class OwnerPublicationBenchmark {
     private final com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedIds =
             new com.surprising.aeron.support.collection.PrimitiveLongChangeSet(20);
     private long coreSequence;
-    private TradeSettlement.Changes settlement;
+    private TradeSettlementChanges settlement;
     private AccountPartition settlementLane;
     private final IdIndex identities = new IdIndex();
     private final Order[] settlementOrders = new Order[20];
@@ -66,7 +67,7 @@ public class OwnerPublicationBenchmark {
         }
         int laneId = accountBook.topology().accountLaneId(7);
         settlementLane = accountBook.accountLane(laneId);
-        settlement = new TradeSettlement.Changes(accountBook.topology().accountLaneCount());
+        settlement = new TradeSettlementChanges(accountBook.topology().accountLaneCount());
         settlement.ensureOrderCapacity(settlementOrders.length, 1L << laneId);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand(

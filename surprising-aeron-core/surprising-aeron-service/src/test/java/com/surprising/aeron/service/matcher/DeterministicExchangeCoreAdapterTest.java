@@ -4,7 +4,7 @@ import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 
 import static com.surprising.aeron.service.core.TradingCoreRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
@@ -438,7 +438,7 @@ class DeterministicExchangeCoreAdapterTest {
     /** 控制业务证据递增并保留原 Core 序号、UUID 和固定控制分片。 */
     @Test
     void matcherEvidenceAdvancesSequences() {
-        var ledger = new OrderBookEngine.MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
+        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
         var first = ledger.bindControl(1, new java.util.UUID(0, 1),
                 ledger.nextSequence(-1), new OrderMatchingResult.Control(true, "SUCCESS"));
         var second = ledger.bindControl(2, new java.util.UUID(0, 2),
@@ -456,7 +456,7 @@ class DeterministicExchangeCoreAdapterTest {
     /** 实际原生登记入口拒绝同一分片的倒退及重复，拒绝后仍能继续推进。 */
     @Test
     void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
-        var ledger = new OrderBookEngine.MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
+        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
         ledger.recordControlNative(0, 2);
         assertThatThrownBy(() -> ledger.recordControlNative(0, 1))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("native sequence is not strictly increasing");
@@ -683,7 +683,7 @@ class DeterministicExchangeCoreAdapterTest {
      * 构造默认订单一、币对一、两份数量的限价 GTC 买单。
      * @param priceTicks 测试订单价格
      */
-    private static OrderCommand.ResolvedPlaceOrder bid(long priceTicks) {
+    private static ResolvedPlaceOrder bid(long priceTicks) {
         return bid(1, priceTicks);
     }
 
@@ -692,7 +692,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static OrderCommand.ResolvedPlaceOrder bid(long orderId, long priceTicks) {
+    private static ResolvedPlaceOrder bid(long orderId, long priceTicks) {
         return bid(orderId, "1", priceTicks);
     }
 
@@ -702,7 +702,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param instrumentId 测试使用的永久币对十进制编号文本
      * @param priceTicks 测试订单价格
      */
-    private static OrderCommand.ResolvedPlaceOrder bid(long orderId, String instrumentId, long priceTicks) {
+    private static ResolvedPlaceOrder bid(long orderId, String instrumentId, long priceTicks) {
         return DirectMatcherTestInputs.order(
                 ProductLine.SPOT, orderId, instrumentId, CoreOrderSide.BUY, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, priceTicks, 2);
@@ -713,7 +713,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static OrderCommand.ResolvedPlaceOrder ask(long orderId, long priceTicks) {
+    private static ResolvedPlaceOrder ask(long orderId, long priceTicks) {
         return DirectMatcherTestInputs.order(
                 ProductLine.SPOT, orderId, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                 priceTicks, 2);
@@ -724,7 +724,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static OrderCommand.ResolvedPlaceOrder postOnlyBid(long orderId, long priceTicks) {
+    private static ResolvedPlaceOrder postOnlyBid(long orderId, long priceTicks) {
         return DirectMatcherTestInputs.order(
                 ProductLine.SPOT, orderId, "1", CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTX,
                 priceTicks, 2);
@@ -781,6 +781,6 @@ class DeterministicExchangeCoreAdapterTest {
         // 反射取得的 matcherEvidence 字段句柄，只用于读取内部进度。
         var field = OrderBookEngine.class.getDeclaredField("matcherEvidence");
         field.setAccessible(true);
-        return ((OrderBookEngine.MatcherEvidenceLedger) field.get(adapter)).snapshot();
+        return ((MatcherEvidenceLedger) field.get(adapter)).snapshot();
     }
 }

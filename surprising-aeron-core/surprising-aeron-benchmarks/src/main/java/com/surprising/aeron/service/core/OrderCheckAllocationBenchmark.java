@@ -16,7 +16,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.product.api.ProductLine;
@@ -43,7 +43,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Measurement(iterations = 3, time = 1)
 @Fork(1)
 public class OrderCheckAllocationBenchmark {
-    private OrderCommand.ResolvedPlaceOrder resolved;
+    private ResolvedPlaceOrder resolved;
     private final UUID commandId = new UUID(1, 1);
 
     @Setup public void setup() {
@@ -57,7 +57,7 @@ public class OrderCheckAllocationBenchmark {
         var intent = new PlaceOrderCommand(11, "1", CoreOrderSide.BUY, 100, 1,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-11");
-        resolved = new OrderCommand.ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100, 0, 0,
+        resolved = new ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100, 0, 0,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
 

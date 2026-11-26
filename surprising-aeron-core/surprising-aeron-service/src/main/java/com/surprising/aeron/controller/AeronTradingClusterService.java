@@ -83,8 +83,20 @@ public final class AeronTradingClusterService implements ClusteredService {
             LaneTopology laneTopology,
             CoreRuntimeConfiguration configuration,
             RealtimeConfiguration realtimeConfiguration,
-            @Autowired(required = false) List<ClusterRoleChangeListener> roleChangeListeners) {
-        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration, roleChangeListeners);
+            @Autowired(required = false) List<ClusterRoleChangeListener> roleChangeListeners,
+            @Autowired(required = false) com.surprising.aeron.service.export.CoreProjectionExportConfiguration exportConfiguration) {
+        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration, roleChangeListeners, exportConfiguration);
+    }
+
+    public AeronTradingClusterService(
+            ClusterTopology topology,
+            ClusterServiceEgress egress,
+            TradingCpuAffinity affinity,
+            LaneTopology laneTopology,
+            CoreRuntimeConfiguration configuration,
+            RealtimeConfiguration realtimeConfiguration,
+            List<ClusterRoleChangeListener> roleChangeListeners) {
+        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration, roleChangeListeners, null);
     }
 
     public AeronTradingClusterService(
@@ -94,20 +106,28 @@ public final class AeronTradingClusterService implements ClusteredService {
             LaneTopology laneTopology,
             CoreRuntimeConfiguration configuration,
             RealtimeConfiguration realtimeConfiguration) {
-        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration, null);
+        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration, null, null);
     }
 
     /** 独立工具与测试的完整装配入口，与 Spring 使用同一组初始化逻辑。 */
     public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
             TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration,
             RealtimeConfiguration realtimeConfiguration) {
-        this(productLine, egress, affinity, laneTopology, configuration, realtimeConfiguration, null);
+        this(productLine, egress, affinity, laneTopology, configuration, realtimeConfiguration, null, null);
     }
 
     public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
             TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration,
             RealtimeConfiguration realtimeConfiguration,
             List<ClusterRoleChangeListener> roleChangeListeners) {
+        this(productLine, egress, affinity, laneTopology, configuration, realtimeConfiguration, roleChangeListeners, null);
+    }
+
+    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
+            TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration,
+            RealtimeConfiguration realtimeConfiguration,
+            List<ClusterRoleChangeListener> roleChangeListeners,
+            com.surprising.aeron.service.export.CoreProjectionExportConfiguration exportConfiguration) {
         this.affinityConfiguration = java.util.Objects.requireNonNull(affinity);
         this.egress = java.util.Objects.requireNonNull(egress);
         this.snapshotTimeoutNanos = TimeUnit.SECONDS.toNanos(configuration.snapshotTimeoutSeconds());
@@ -118,7 +138,8 @@ public final class AeronTradingClusterService implements ClusteredService {
                 this::publishResponse,
                 laneTopology,
                 configuration,
-                realtimeConfiguration);
+                realtimeConfiguration,
+                exportConfiguration);
         this.input = coreOwner.ingress();
         this.roleChangeListeners = roleChangeListeners != null ? List.copyOf(roleChangeListeners) : List.of();
     }

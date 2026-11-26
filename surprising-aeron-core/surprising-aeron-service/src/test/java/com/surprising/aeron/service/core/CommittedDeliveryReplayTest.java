@@ -53,7 +53,7 @@ class CommittedDeliveryReplayTest {
             // 本次卖方结算后导出的现金变化页
             var page = replay.deliveryPage();
             assertThat(page).as("settlement progress " + progress).isNotNull();
-            assertThat(page.cashFlows()).containsExactly(new CommittedTradeReplay.DeliveryCashFlow(1,
+            assertThat(page.cashFlows()).containsExactly(new com.surprising.aeron.protocol.export.CommittedDeliveryPage.DeliveryCashFlow(1,
                     line == ProductLine.LINEAR_DELIVERY ? "USDT" : "BTC", -pnl, 100_000 - pnl));
             snapshot = replay.snapshot();
         }
@@ -66,7 +66,7 @@ class CommittedDeliveryReplayTest {
             replay.apply(encoded, now, sequence * 4096);
             CoreTestCompletion.applyAsynchronously(reference, message, now, sequence * 4096);
             assertThat(replay.businessHash()).isEqualTo(reference.stateHash());
-            assertThat(replay.deliveryPage().cashFlows()).containsExactly(new CommittedTradeReplay.DeliveryCashFlow(2,
+            assertThat(replay.deliveryPage().cashFlows()).containsExactly(new com.surprising.aeron.protocol.export.CommittedDeliveryPage.DeliveryCashFlow(2,
                     line == ProductLine.LINEAR_DELIVERY ? "USDT" : "BTC", pnl, 100_000 + pnl));
             // 重复买方结算前回放业务哈希
             long hash = replay.businessHash();

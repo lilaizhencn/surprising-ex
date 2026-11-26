@@ -8,7 +8,7 @@ import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.order.*;
 import com.surprising.aeron.service.order.Order;
-import com.surprising.aeron.service.order.OrderCommand.ResultTarget;
+import com.surprising.aeron.service.order.OrderResultTarget;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.risk.RiskScanner;
@@ -43,7 +43,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
     @Accessors(fluent = true, chain = false)
     @Getter
     private long committedLaneMask;
-    private OrderCommand.ResultTarget resultTarget;
+    private OrderResultTarget resultTarget;
     private IdIndex identities;
     private int resultLaneId;
 
@@ -200,7 +200,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
     }
 
     /** 要求结果所属 Lane 已参与事件，保存最终响应捕获目标及身份字典，并允许调用方指定真正要推进用户水位的提交位图。 */
-    public void prepareResponse(OrderCommand.ResultTarget target, IdIndex registry,
+    public void prepareResponse(OrderResultTarget target, IdIndex registry,
                          int laneId, long commitMask) {
         if (target == null || registry == null || (requiredLaneMask & (1L << laneId)) == 0)
             throw new IllegalArgumentException("batch response requires its account Lane");
@@ -222,7 +222,7 @@ public final class AccountPartitionCommit implements AccountLaneCommand {
         if ((committedLaneMask & laneBit) != 0)
             accountBook.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
         if (resultTarget != null && laneId == resultLaneId)
-            OrderCommand.ResultTarget.captureFinal(resultTarget, identities, lane);
+            OrderResultTarget.captureFinal(resultTarget, identities, lane);
         lane.recordSettlementOperation();
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {

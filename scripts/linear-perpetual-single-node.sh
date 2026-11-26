@@ -58,7 +58,7 @@ export JVM_XMX="${JVM_XMX:-1g}"
 export JVM_CORE_XMX="${JVM_CORE_XMX:-1g}"
 export JVM_GATEWAY_XMX="${JVM_GATEWAY_XMX:-1g}"
 export JVM_PROVIDER_XMX="${JVM_PROVIDER_XMX:-512m}"
-export JVM_GC="${JVM_GC:-G1GC}"
+export JVM_GC="${JVM_GC:-G1}"
 export JVM_ALWAYS_PRETOUCH="${JVM_ALWAYS_PRETOUCH:-false}"
 export AERON_THREADING_MODE="${AERON_THREADING_MODE:-SHARED}"
 # 默认关闭常驻 JFR 录制以降低 CPU/磁盘开销；排查性能时可设为 true 开启。

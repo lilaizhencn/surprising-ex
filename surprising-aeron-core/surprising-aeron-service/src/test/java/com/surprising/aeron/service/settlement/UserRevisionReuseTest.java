@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.service.settlement.TradeSettlementChanges;
 import com.surprising.aeron.service.realtime.TradingRealtimeBoundary;
 
 import com.surprising.aeron.protocol.CorePositionMode;
@@ -105,7 +106,7 @@ class UserRevisionReuseTest {
         var earlier = new StateChangeBuffer.Users();
         earlier.put(7, authority);
         // 为一个 Lane 保存修订增量及提交变化的结算对象。
-        var changes = new TradeSettlement.Changes(1);
+        var changes = new TradeSettlementChanges(1);
         changes.ensureActiveLanes(1);
         changes.addUserRevision(0, 7, 2);
         changes.addUserRevision(0, 7, 3);
@@ -155,7 +156,7 @@ class UserRevisionReuseTest {
                 Long.MAX_VALUE, CorePositionMode.ONE_WAY).laneValue();
         AccountLaneTestAccess.users(lane).put(7, overflowing);
         // 将要因用户修订溢出而失败的结算变化对象。
-        var failed = new TradeSettlement.Changes(1);
+        var failed = new TradeSettlementChanges(1);
         failed.ensureActiveLanes(1); failed.addUserRevision(0, 7, 1);
         assertThatThrownBy(() -> failed.applyUserRevisions(0, lane)).isInstanceOf(ArithmeticException.class);
         assertThat(lane.user(7)).isSameAs(overflowing);
@@ -165,7 +166,7 @@ class UserRevisionReuseTest {
 
         AccountLaneTestAccess.users(lane).put(8, new UserAccount(8).laneValue());
         // 用于确认失败没有泄漏借用收据的下一结算变化对象。
-        var next = new TradeSettlement.Changes(1);
+        var next = new TradeSettlementChanges(1);
         next.ensureActiveLanes(1); next.addUserRevision(0, 8, 3);
         next.applyUserRevisions(0, lane);
         assertThat(lane.user(8).revision()).isEqualTo(3);

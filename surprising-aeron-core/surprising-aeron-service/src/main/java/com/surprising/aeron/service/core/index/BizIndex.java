@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.settlement.TradeSettlementChanges;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.position.Position;
@@ -63,7 +64,7 @@ public final class BizIndex {
     }
 
     /** 账本消费 laneMask 指定的冻结持仓发布缓冲，逐 Lane 更新业务索引。外层在消费完成之前保留结算结果租约。 */
-    public void applySettlementPositions(TradeSettlement.Changes changes, long laneMask,
+    public void applySettlementPositions(TradeSettlementChanges changes, long laneMask,
             IdIndex identities) {
         while (laneMask != 0) {
             int laneId = Long.numberOfTrailingZeros(laneMask);

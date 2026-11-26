@@ -10,21 +10,34 @@ import net.openhft.affinity.Affinity;
 public final class TradingCpuAffinity {
     /** 记录绑定是否生效及对应线程，方便核对部署配置。 */
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TradingCpuAffinity.class);
-    private static final TradingCpuAffinity DISABLED = new TradingCpuAffinity(false, -1, -1, -1, -1);
+    private static final TradingCpuAffinity DISABLED = new TradingCpuAffinity(false, false, -1, -1, -1, -1);
+    private static final TradingCpuAffinity PARKED = new TradingCpuAffinity(false, true, -1, -1, -1, -1);
     /** 表示本次没有改过 CPU 范围，关闭这个凭据时也不需要恢复。 */
     private static final Binding UNBOUND = new Binding(null);
     private final boolean enabled;
+    private final boolean parkOnIdle;
     /** 四个 CPU 编号，顺序固定为 Owner、Matcher 0、Lane 0、Lane 1。 */
     private final int[] cpus;
 
     /** 固定四种线程角色的 CPU 配置。这里只保存编号，不改变调用线程。 */
     public TradingCpuAffinity(boolean enabled, int owner, int matcher, int lane0, int lane1) {
+        this(enabled, false, owner, matcher, lane0, lane1);
+    }
+
+    private TradingCpuAffinity(boolean enabled, boolean parkOnIdle, int owner, int matcher, int lane0, int lane1) {
         this.enabled = enabled;
+        this.parkOnIdle = parkOnIdle;
         this.cpus = new int[]{owner, matcher, lane0, lane1};
     }
 
     /** 返回不做任何 CPU 绑定的共用配置，供未开启绑定的节点和测试使用。 */
     public static TradingCpuAffinity disabled() { return DISABLED; }
+
+    /** 返回空闲时自动休眠的配置，供只读回放副本使用，避免空转占满 CPU。 */
+    public static TradingCpuAffinity parked() { return PARKED; }
+
+    public boolean enabled() { return enabled; }
+    public boolean parkOnIdle() { return parkOnIdle; }
 
     /** 在启动工作线程前检查平台、CPU 编号和线程数量，防止运行到一半才发现配置不可用。 */
     public void validateConfiguration(LaneTopology topology) {

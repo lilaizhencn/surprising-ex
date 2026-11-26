@@ -117,7 +117,7 @@ public final class OrderCommitService {
         owner.assertOwner();
         if (pending == null || matchingResult == null) return null;
         long sequence = pending.sequence();
-        OrderBatchProcessor.PendingBatch waitingBatch = pending.orderBatch() != null ? pending.orderBatch() : owner.batches().batch(sequence);
+        PendingOrderBatch waitingBatch = pending.orderBatch() != null ? pending.orderBatch() : owner.batches().batch(sequence);
         try {
             owner.accountBook().assertAccountLanesHealthy();
         } catch (RuntimeException failure) {
@@ -125,7 +125,7 @@ public final class OrderCommitService {
             throw owner.failMatching(pending, "account lane settlement failed; snapshot/log recovery is required", failure);
         }
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
-            OrderBatchProcessor.PendingBatch failedBatch = waitingBatch != null ? waitingBatch : owner.batches().batch(sequence);
+            PendingOrderBatch failedBatch = waitingBatch != null ? waitingBatch : owner.batches().batch(sequence);
             Throwable failure = failedBatch == null ? null : failedBatch.pipelinedMatchingFailure();
             String detail = "matcher continuation returned " + matchingResult.resultCode()
                     + (failure == null || failure.getMessage() == null ? "" : ": " + failure.getMessage());
@@ -191,8 +191,8 @@ public final class OrderCommitService {
             }
         }
         if (waitingBatch != null && waitingBatch.pipelined() && !waitingBatch.commitStarted()) {
-            OrderBatchProcessor.PlaceBatchCheckEvent orderCheck = waitingBatch.placeBatchOrderCheckEvent();
-            boolean preparedCancel = pending.clusterIndependent() && waitingBatch.kind() == OrderBatchProcessor.Kind.CANCEL;
+            PlaceBatchCheckEvent orderCheck = waitingBatch.placeBatchOrderCheckEvent();
+            boolean preparedCancel = pending.clusterIndependent() && waitingBatch.kind() == OrderBatchKind.CANCEL;
             if (preparedCancel || (orderCheck != null && orderCheck.complete() && orderCheck.rejection() == null)) {
                 owner.batches().beginPipelinedOrderBatchCommit(waitingBatch, pending);
             }
@@ -215,7 +215,7 @@ public final class OrderCommitService {
         }
         if (waitingBatch != null && pending.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
         if (waitingBatch != null && pending.clusterIndependent()
-                && waitingBatch.kind() == OrderBatchProcessor.Kind.CANCEL && !waitingBatch.commitStarted()) {
+                && waitingBatch.kind() == OrderBatchKind.CANCEL && !waitingBatch.commitStarted()) {
             owner.batches().beginPipelinedOrderBatchCommit(waitingBatch, pending);
         }
         // 顺序批次子项已持有预备直达事件，Lane 可能先于 Owner 保存 Matcher 事实而完成。
@@ -240,7 +240,7 @@ public final class OrderCommitService {
                 validateMatchingEvidence(pending, directResult);
                 applyMatcherProgress(directResult);
                 waitingBatch.lastMatchingResult(directResult);
-                if (waitingBatch.kind() == OrderBatchProcessor.Kind.CANCEL) {
+                if (waitingBatch.kind() == OrderBatchKind.CANCEL) {
                     return owner.batches().completeOrderBatchMatching(
                             sequence, directResult, clusterTimestamp, clusterPosition);
                 }
@@ -284,7 +284,7 @@ public final class OrderCommitService {
             owner.batches().beginPipelinedOrderBatchCommit(waitingBatch, pending);
         }
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
-            OrderBatchProcessor.PendingBatch failedBatch = owner.batches().batch(sequence);
+            PendingOrderBatch failedBatch = owner.batches().batch(sequence);
             Throwable failure = failedBatch == null ? null : failedBatch.pipelinedMatchingFailure();
             String detail = "matcher continuation returned " + matchingResult.resultCode()
                     + (failure == null || failure.getMessage() == null ? "" : ": " + failure.getMessage());
@@ -791,7 +791,7 @@ public final class OrderCommitService {
         long first = owner.pendingMatching().firstSequence();
         if (first > throughSequence) return;
         OrderCommand pending = owner.pendingMatching().get(first);
-        OrderBatchProcessor.PendingBatch head = pending == null ? null : pending.orderBatch();
+        PendingOrderBatch head = pending == null ? null : pending.orderBatch();
         if (head != null && !head.activated()) {
             owner.batches().activateOrderBatch(head, pending, true);
         }
@@ -833,7 +833,7 @@ public final class OrderCommitService {
     private TradeSettlement financialDispatchEvent(OrderCommand pending) {
         // 控制命令和顺序批次在同一 Core 命令内还可能产生后续资金。
         if (pending == null || pending.controlPending() || pending.ledgerDispatchClosed()) return null;
-        OrderBatchProcessor.PendingBatch batch = pending.orderBatch();
+        PendingOrderBatch batch = pending.orderBatch();
         TradeSettlement event = batch == null ? pending.settlementEvent()
                 : batch.itemSettlementEvent() != null ? batch.itemSettlementEvent() : batch.settlementEvent();
         return event != null && event.ready() && event.dispatched() ? event : null;
@@ -848,7 +848,7 @@ public final class OrderCommitService {
     private boolean financialHeadReady(OrderCommand pending) {
         if (pending.sequence() != owner.pendingMatching().firstSequence()) return false;
         if (pending.hasMatchingRejection() || owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) return true;
-        OrderBatchProcessor.PendingBatch batch = pending.orderBatch();
+        PendingOrderBatch batch = pending.orderBatch();
         if (batch == null) return owner.accountBook().pollMatcherFinancialSettlement(pending.settlementEvent());
         if (batch.itemSettlementEvent() != null
                 && !owner.accountBook().pollMatcherFinancialSettlement(batch.itemSettlementEvent())) return false;
@@ -868,7 +868,7 @@ public final class OrderCommitService {
             return pending.matchingResult() != null || pending.hasMatchingCompletion();
         }
         if (!financialHeadReady(pending)) return false;
-        OrderBatchProcessor.PendingBatch batch = pending.orderBatch();
+        PendingOrderBatch batch = pending.orderBatch();
         // 批次账户工作尚未完成时，仅有撮合结果不能作为提交就绪。
         if (batch != null && (!batch.activated() || !batch.laneWorkComplete())) return false;
         if (batch != null && batch.itemOrderCheck() != null) return true;

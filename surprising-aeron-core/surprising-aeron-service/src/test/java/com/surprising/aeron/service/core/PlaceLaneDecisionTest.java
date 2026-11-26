@@ -20,7 +20,7 @@ import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.OrderCheckService;
-import com.surprising.aeron.service.order.OrderCommand.PlaceOrderCheckEvent;
+import com.surprising.aeron.service.order.PlaceOrderCheckEvent;
 import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
@@ -135,7 +135,7 @@ class PlaceLaneDecisionTest {
      * @param runtime 拥有真实账户工作资源的原运行时
      * @param event 已派发且仍保留租约的准入事件
      */
-    private static void await(AccountBook accountBook, OrderCommand.PlaceOrderCheckEvent event) {
+    private static void await(AccountBook accountBook, PlaceOrderCheckEvent event) {
         // 等本次准入完成的三秒单调时钟截止时间
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!event.complete()) {

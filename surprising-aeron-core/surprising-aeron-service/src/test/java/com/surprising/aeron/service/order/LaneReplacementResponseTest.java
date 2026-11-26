@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.OrderResultTarget;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 
 import com.surprising.aeron.protocol.*;
@@ -67,7 +68,7 @@ class LaneReplacementResponseTest {
             // 当前测试响应槽分配器
             var 槽池 = new ResponseSlotPool(1, 4096);
             target.bind(11, 12, 槽池);
-            com.surprising.aeron.service.order.OrderCommand.ResultTarget.capture(target,
+            com.surprising.aeron.service.order.OrderResultTarget.capture(target,
                     new com.surprising.aeron.service.core.change.AccountPartitionCommit.Delta(), identities, lane);
             assertThat(target.resultPrepared(0)).isTrue();
             assertThat(target.resultPrepared(1)).isTrue();
@@ -80,7 +81,7 @@ class LaneReplacementResponseTest {
             target.bind(11, 0, 槽池);
             assertThat(target.resultPrepared(0)).isFalse();
             target.resultOrder(0, order(11, true), "1");
-            com.surprising.aeron.service.order.OrderCommand.ResultTarget.capture(target,
+            com.surprising.aeron.service.order.OrderResultTarget.capture(target,
                     new com.surprising.aeron.service.core.change.AccountPartitionCommit.Delta(), identities, lane);
             view = CoreCommandResultCodec.decode(Arrays.copyOf(
                     target.preparedResponse(), target.preparedResponseLength()));

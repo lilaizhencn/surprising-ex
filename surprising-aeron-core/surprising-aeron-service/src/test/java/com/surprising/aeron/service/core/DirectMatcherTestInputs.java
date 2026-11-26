@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
@@ -33,7 +33,7 @@ public final class DirectMatcherTestInputs {
     private DirectMatcherTestInputs() {}
 
     /** 测试直接准备真实准入输入，生产 Matcher 不再维护另一种最小订单 DTO。 */
-    public static OrderCommand.ResolvedPlaceOrder order(ProductLine product, long orderId, String instrumentId,
+    public static ResolvedPlaceOrder order(ProductLine product, long orderId, String instrumentId,
             com.surprising.aeron.protocol.CoreOrderSide side,
             com.surprising.aeron.protocol.CoreOrderType type, CoreTimeInForce timeInForce,
             long price, long quantity) {
@@ -46,7 +46,7 @@ public final class DirectMatcherTestInputs {
         boolean spot = product == ProductLine.SPOT;
         String asset = spot && side == com.surprising.aeron.protocol.CoreOrderSide.SELL
                 ? instrument.baseAsset() : instrument.settleAsset();
-        return new OrderCommand.ResolvedPlaceOrder(intent, instrument, 0, price, price, price, 0, 0,
+        return new ResolvedPlaceOrder(intent, instrument, 0, price, price, price, 0, 0,
                 spot ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN, asset, 0, 0);
     }
 
@@ -60,7 +60,7 @@ public final class DirectMatcherTestInputs {
      * @param order 已构造的 Matcher 订单输入，本辅助按它的标的及数量准备路由
      */
     public static TradeSettlement preparePlace(OrderBookEngine adapter,
-            long sequence, UUID commandId, long timestamp, long userId, OrderCommand.ResolvedPlaceOrder order) {
+            long sequence, UUID commandId, long timestamp, long userId, ResolvedPlaceOrder order) {
         return preparePlace(adapter, sequence, commandId, timestamp, userId, order, List.of());
     }
 
@@ -75,7 +75,7 @@ public final class DirectMatcherTestInputs {
      * @param cancellations 本次新单之前需要记录的既有撤单 ID 清单
      */
     public static TradeSettlement preparePlace(OrderBookEngine adapter,
-            long sequence, UUID commandId, long timestamp, long userId, OrderCommand.ResolvedPlaceOrder order,
+            long sequence, UUID commandId, long timestamp, long userId, ResolvedPlaceOrder order,
             List<Long> cancellations) {
         try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var accountBook = new AccountBook()) {
             // 局部资产和标的身份表，供事件路由准备使用
@@ -112,7 +112,7 @@ public final class DirectMatcherTestInputs {
      * @param order 已构造的 Matcher 订单输入，本辅助按它的标的及数量准备路由
      */
     public static TradeSettlement placeDirect(OrderBookEngine adapter,
-            long sequence, UUID commandId, long timestamp, long userId, OrderCommand.ResolvedPlaceOrder order) {
+            long sequence, UUID commandId, long timestamp, long userId, ResolvedPlaceOrder order) {
         // 已保留 Matcher 发布租约的 Direct 事件，供适配器写入证据及订单簿结果
         var target = preparePlace(adapter, sequence, commandId, timestamp, userId, order);
         adapter.placeDirect(adapter.matcherShardId(order.instrumentId()), sequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
@@ -127,7 +127,7 @@ public final class DirectMatcherTestInputs {
      * @param order 已构造的 Matcher 订单输入，本辅助按它的标的及数量准备路由
      */
     public static TradeSettlement placeDirect(OrderBookEngine adapter,
-            long userId, OrderCommand.ResolvedPlaceOrder order) {
+            long userId, ResolvedPlaceOrder order) {
         return placeDirect(adapter, order.orderId(), new UUID(userId, order.orderId()), 1000, userId, order);
     }
 

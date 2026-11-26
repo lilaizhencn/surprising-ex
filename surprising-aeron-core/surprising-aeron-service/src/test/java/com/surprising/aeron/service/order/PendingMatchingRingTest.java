@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.DecodedOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -211,7 +212,7 @@ class PendingMatchingRingTest {
         CoreMessage command = command(commandId, userId);
         return ring.acquire(sequence, OrderCommand.Operation.PLACE, command,
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
-                OrderCommand.Decoded.decode(command), null);
+                DecodedOrderCommand.decode(command), null);
     }
 
     /**

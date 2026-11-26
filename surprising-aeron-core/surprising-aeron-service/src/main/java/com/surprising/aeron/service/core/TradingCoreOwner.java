@@ -39,6 +39,8 @@ public final class TradingCoreOwner {
 
     private final ResponseSink responseSink;
     private final TradingRealtimeBoundary realtimeBoundary;
+    private final com.surprising.aeron.service.export.CoreProjectionExporter projectionExporter;
+    private final com.surprising.aeron.service.export.CoreProjectionTap projectionTap;
 
     /** 交易终态的出口契约，隔离 Owner 的业务推进与 Cluster 回调线程的网络发送。 */
     public @FunctionalInterface
@@ -69,6 +71,12 @@ public final class TradingCoreOwner {
 
     public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink, LaneTopology startupTopology,
             CoreRuntimeConfiguration configuration, RealtimeConfiguration realtimeConfiguration) {
+        this(productLine, responseSink, startupTopology, configuration, realtimeConfiguration, null);
+    }
+
+    public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink, LaneTopology startupTopology,
+            CoreRuntimeConfiguration configuration, RealtimeConfiguration realtimeConfiguration,
+            com.surprising.aeron.service.export.CoreProjectionExportConfiguration exportConfiguration) {
         this.configuration = java.util.Objects.requireNonNull(configuration);
         if (productLine == null) {
             throw new IllegalArgumentException("product line is required");
@@ -77,6 +85,11 @@ public final class TradingCoreOwner {
         this.startupTopology = java.util.Objects.requireNonNull(startupTopology, "startupTopology");
         this.responseSink = java.util.Objects.requireNonNull(responseSink, "response sink");
         this.realtimeBoundary = new TradingRealtimeBoundary(productLine, realtimeConfiguration);
+        this.projectionExporter = exportConfiguration == null ? null
+                : new com.surprising.aeron.service.export.CoreProjectionExporter(productLine, exportConfiguration);
+        this.projectionTap = (projectionExporter == null || !projectionExporter.enabled()) ? null
+                : new com.surprising.aeron.service.export.CoreProjectionTap(
+                        projectionExporter, exportConfiguration.getActivityIntervalMillis());
         commandPipeline = new OrderCommandQueue.PipelineState(configuration.ownerCommandWindow());
         matchingCommitHandler = commandPipeline::completeControlMatching;
     }
@@ -87,6 +100,12 @@ public final class TradingCoreOwner {
         if (state == null) state = new TradingCore(productLine, startupTopology, configuration);
         commandPipeline.reset();
         log.info("Aeron core role productLine={} role={}", productLine, logContext.role());
+        if (projectionTap != null && projectionTap.enabled()) {
+            realtimeBoundary.enableProjection(projectionTap::onLiquidation);
+            projectionExporter.setLeader(logContext.role() == Cluster.Role.LEADER);
+            projectionExporter.start();
+            projectionTap.attach(state);
+        }
         realtimeBoundary.start(logContext.role(), logContext.position(), state);
     }
 
@@ -149,6 +168,7 @@ public final class TradingCoreOwner {
                 commandPipeline.beginControl(next);
                 state.assertClusterCallbackComplete();
                 beginCapture(next.position(), next.timestamp());
+                if (projectionTap != null) projectionTap.beginControlCommand(state, next.command());
                 commandPipeline.startProgressDeadline();
                 commandPipeline.controlResponse(state.applyDecodedCommand(next.command(), next.timestamp(), next.position(),
                         window.decodedIfPresent(next.command()), false, next.fingerprint()));
@@ -189,6 +209,7 @@ public final class TradingCoreOwner {
         commandPipeline.beginHeadCommit();
         var last = commandPipeline.committingHead();
         beginCapture(last.position, last.timestamp);
+        if (projectionTap != null) projectionTap.beginPipelinedCommit();
         commandPipeline.startProgressDeadline();
     }
 
@@ -219,7 +240,10 @@ public final class TradingCoreOwner {
             }
             if (window.size() == 1) state.assertClusterCallbackComplete();
             if (realtimeBoundary.enabled()) {
-                realtimeBoundary.commit(state, last.position);
+                var projectionFrames = realtimeBoundary.commitAndDrainProjection(state, last.position);
+                if (projectionTap != null) {
+                    projectionTap.commitCommand(state, last.request, last.response, last.position, last.timestamp, projectionFrames);
+                }
             }
             if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
             if (last.sessionId != NO_SESSION_ID) offerResponse(last.sessionId, last.request, last.response);
@@ -256,7 +280,10 @@ public final class TradingCoreOwner {
         }
         state.assertClusterCallbackComplete();
         if (realtimeBoundary.enabled()) {
-            realtimeBoundary.commit(state, activeControl.position());
+            var projectionFrames = realtimeBoundary.commitAndDrainProjection(state, activeControl.position());
+            if (projectionTap != null) {
+                projectionTap.commitCommand(state, request, commandPipeline.controlResponse(), activeControl.position(), activeControl.timestamp(), projectionFrames);
+            }
         }
         if (activeControl.sessionId() != NO_SESSION_ID) {
             offerResponse(activeControl.sessionId(), request, commandPipeline.controlResponse());
@@ -385,6 +412,7 @@ public final class TradingCoreOwner {
 
     /** 更新实时边界的角色并记录日志。外层负责更新 Owner 日志上下文和先前命令的完成边界。 */
     public void roleChange(Cluster.Role newRole) {
+        if (projectionExporter != null) projectionExporter.setLeader(newRole == Cluster.Role.LEADER);
         realtimeBoundary.roleChange(newRole);
         log.info("Aeron core role-change productLine={} role={}", productLine, newRole);
     }
@@ -398,6 +426,7 @@ public final class TradingCoreOwner {
         log.info("Aeron core command-window productLine={} {}",
                 productLine, commandPipeline.terminationSummary());
         this.logContext = null;
+        if (projectionExporter != null) projectionExporter.close();
         realtimeBoundary.close();
         try {
             if (state != null) state.close();
@@ -471,6 +500,7 @@ public final class TradingCoreOwner {
     private void replaceState(TradingCore restored) {
         state.close();
         state = restored;
+        if (projectionTap != null) projectionTap.attach(state);
         realtimeBoundary.rebindState(state);
     }
 

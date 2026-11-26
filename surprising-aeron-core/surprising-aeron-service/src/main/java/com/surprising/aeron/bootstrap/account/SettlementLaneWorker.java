@@ -1,5 +1,6 @@
 package com.surprising.aeron.bootstrap.account;
 
+import com.surprising.aeron.service.order.ReplaceOrderCheckEvent;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.config.TradingCpuAffinity;
@@ -50,6 +51,12 @@ public final class SettlementLaneWorker implements AutoCloseable {
     /** 线程已完成初始绑定或已发布启动故障的可见标记，供构造方等待。 */
     private volatile boolean started;
     private volatile boolean running = true;
+    private volatile boolean parked;
+    private volatile boolean parkOnIdle;
+
+    public void setParkOnIdle(boolean parkOnIdle) {
+        this.parkOnIdle = parkOnIdle;
+    }
     /** 账户线程已保存的原 Throwable，健康检查及关闭按原类型传播。读取已经发布的可空账户线程故障。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -134,6 +141,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
         commands[(int) next & indexMask] = command;
         producerSequence.value = next + 1;
+        if (parked) java.util.concurrent.locks.LockSupport.unpark(thread);
         return next + 1;
     }
 
@@ -151,6 +159,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
         orderCheckCommands[(int) next & orderCheckIndexMask] = command;
         orderCheckProducerSequence.value = next + 1;
+        if (parked) java.util.concurrent.locks.LockSupport.unpark(thread);
         return next + 1;
     }
 
@@ -168,6 +177,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
             Thread.onSpinWait();
         }
         long position = ring.publish(event);
+        if (parked) java.util.concurrent.locks.LockSupport.unpark(thread);
         return position + 1;
     }
 
@@ -202,6 +212,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
             started = true;
             long reboundHandoff = 0;
             int payloadWaitSpins = 0;
+            this.parkOnIdle = this.parkOnIdle || (configuration != null && configuration.parkOnIdle());
+            int idleSpins = 0;
             while (running || next < (cachedProducerSeq = producerSequence.value)
                     || orderCheckNext < (cachedOrderCheckProducerSeq = orderCheckProducerSequence.value)
                     || hasMatcherSettlementWork()) {
@@ -223,6 +235,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     AccountLaneCommand orderCheck = orderCheckCommands[orderCheckIndex];
                     if (orderCheck == null) throw new IllegalStateException("admission publication gap");
                     if (ready(orderCheck)) {
+                        idleSpins = 0;
                         orderCheckCommands[orderCheckIndex] = null;
                         orderCheckNext++;
                         orderCheckConsumerSequence.value = orderCheckNext;
@@ -238,6 +251,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                 TradeSettlement direct = peekMatcherSettlement();
                 AccountLaneCommand main = next < cachedProducerSeq ? commands[(int) next & indexMask] : null;
                 if (direct != null && shouldRunMatcherSettlement(direct, main)) {
+                    idleSpins = 0;
                     pollMatcherSettlement(direct);
                     execute(direct);
                     payloadWaitSpins = 0;
@@ -248,6 +262,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     AccountLaneCommand command = commands[index];
                     if (command == null) throw new IllegalStateException("settlement lane publication gap");
                     if (ready(command)) {
+                        idleSpins = 0;
                         commands[index] = null;
                         next++;
                         consumerSequence.value = next;
@@ -260,7 +275,14 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     backoffPayloadWait(payloadWaitSpins++);
                     continue;
                 }
-                Thread.onSpinWait();
+                if (parkOnIdle && idleSpins >= 1024) {
+                    parked = true;
+                    java.util.concurrent.locks.LockSupport.parkNanos(200_000L);
+                    parked = false;
+                } else {
+                    idleSpins++;
+                    Thread.onSpinWait();
+                }
             }
         } catch (Throwable laneFailure) {
             failure = laneFailure;
@@ -350,9 +372,9 @@ public final class SettlementLaneWorker implements AutoCloseable {
         if (command instanceof TradeSettlement event) return event.coreSequence();
         if (command instanceof com.surprising.aeron.service.core.change.AccountPartitionCommit event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.order.OrderBatchProcessor.PlaceBatchCheckEvent event)
+        if (command instanceof com.surprising.aeron.service.order.PlaceBatchCheckEvent event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent event)
+        if (command instanceof com.surprising.aeron.service.order.ReplaceOrderCheckEvent event)
             return event.coreSequence();
         return 0;
     }

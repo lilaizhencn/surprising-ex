@@ -1,8 +1,9 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.service.settlement.TradeSettlementPlan;
 import com.surprising.aeron.service.order.*;
 
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.config.LaneTopology;
@@ -415,7 +416,7 @@ class MatcherSettlementPlanTest {
             while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
             var taker = order(11, takerUser, symbol, CoreOrderSide.BUY, 3);
             accountBook.putOrder(taker);
-            var slot = new TradeSettlement.Plan();
+            var slot = new TradeSettlementPlan();
             var result = nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                     List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false)));
             slot.buildDirectNative(1, taker, instrument(), result, accountBook);
@@ -454,7 +455,7 @@ class MatcherSettlementPlanTest {
             var taker = order(11, takerUser, symbol, CoreOrderSide.BUY, 20);
             var events = new java.util.ArrayList<MatcherResult.MatcherEvent>();
             for (int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10, 20, 100, 1, false, false));
-            var slot = new TradeSettlement.Plan();
+            var slot = new TradeSettlementPlan();
             slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1, events), accountBook);
             int makerLane = topology.accountLaneId(20), count = 0;
             for (int event = slot.firstMatcherEvent(makerLane); event >= 0; event = slot.nextMatcherEvent(event, makerLane)) count++;
@@ -505,7 +506,7 @@ class MatcherSettlementPlanTest {
             var identities = new IdIndex();
             int symbol = identities.symbolId("1");
             var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
-            var slot = new TradeSettlement.Plan();
+            var slot = new TradeSettlementPlan();
             slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                     List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), accountBook);
             long[] cancellations = {12};
@@ -538,7 +539,7 @@ class MatcherSettlementPlanTest {
         try (var accountBook = new AccountBook()) {
             var identities = new IdIndex();
             int symbol = identities.symbolId("1");
-            var slot = new TradeSettlement.Plan();
+            var slot = new TradeSettlementPlan();
             slot.buildDirectNative(1, order(11, 21, symbol, CoreOrderSide.BUY, 3), instrument(),
                     nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                             List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), accountBook);
@@ -553,7 +554,7 @@ class MatcherSettlementPlanTest {
     @Test
     void primitiveOrderPrefixTracksClearAndReuse() {
         try (var accountBook = new AccountBook()) {
-            var slot = new TradeSettlement.Plan();
+            var slot = new TradeSettlementPlan();
             slot.buildDirectNativeCancellation(1, 21, 11,
                     nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), accountBook);
             assertThat(slot.orderCount()).isOne();
@@ -571,7 +572,7 @@ class MatcherSettlementPlanTest {
     @Test
     void acceptedCancellationsAppendInExecutionOrderAndIgnoreUnusedTail() {
         try (var accountBook = new AccountBook()) {
-            var slot = new TradeSettlement.Plan();
+            var slot = new TradeSettlementPlan();
             slot.buildDirectNativeCancellation(1, 21, 11,
                     nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), accountBook);
             slot.acceptedReplacementCancellation(10);
@@ -599,7 +600,7 @@ class MatcherSettlementPlanTest {
             var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             accountBook.putOrder(maker);
             accountBook.putOrder(taker);
-            var slot = new TradeSettlement.Plan();
+            var slot = new TradeSettlementPlan();
             assertThatThrownBy(() -> slot.buildDirectNative(1, taker, instrument(),
                     nativeResult(CommandResultCode.SUCCESS, symbol, 1,
                             List.of(MatcherEventFixtures.trade(10, 20, 100, 4, false, false))), accountBook))

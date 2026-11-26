@@ -16,7 +16,7 @@ import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.OrderCheckService;
-import com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent;
+import com.surprising.aeron.service.order.ReplaceOrderCheckEvent;
 import com.surprising.aeron.service.order.OrderFundsReservation.Snapshot;
 import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -45,7 +45,7 @@ public class ReplaceOrderCheckBenchmark {
     private IdIndex identities;
     private OrderCheckService.Context decision;
     private final AmendOrderCommand[] commands = new AmendOrderCommand[WINDOW];
-    private final OrderCommand.ReplaceOrderCheckEvent[] pending = new OrderCommand.ReplaceOrderCheckEvent[WINDOW];
+    private final ReplaceOrderCheckEvent[] pending = new ReplaceOrderCheckEvent[WINDOW];
     private long sequence;
 
     @Setup public void setup() {

@@ -8,7 +8,7 @@ import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.service.treasury.SystemFunds;
@@ -34,7 +34,7 @@ public class HotCommandSlotAllocationBenchmark {
     private static final int WINDOW = 256, SYMBOL = 10_001;
     @Param({"EMPTY", "ASCII", "UNICODE"}) public String clientId;
     private final UUID commandId = new UUID(1, 2);
-    private final OrderCommand.ResolvedPlaceOrder[] resolved = new OrderCommand.ResolvedPlaceOrder[WINDOW];
+    private final ResolvedPlaceOrder[] resolved = new ResolvedPlaceOrder[WINDOW];
     private final PlaceOrderCommand[] decoded = new PlaceOrderCommand[WINDOW];
     private final StateChangeBuffer.Orders[] changes = new StateChangeBuffer.Orders[WINDOW];
     private final StateChangeBuffer.Positions[] positionChanges = new StateChangeBuffer.Positions[WINDOW];
@@ -76,7 +76,7 @@ public class HotCommandSlotAllocationBenchmark {
             String client = switch (clientId) { case "EMPTY" -> ""; case "ASCII" -> "client-" + index; default -> "客户-" + index; };
             var order = new PlaceOrderCommand(index + 1, "1", CoreOrderSide.BUY, 100, 10, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, client);
-            resolved[index] = new OrderCommand.ResolvedPlaceOrder(order, instrument, 0, 100, 100, 100, 0, 0,
+            resolved[index] = new ResolvedPlaceOrder(order, instrument, 0, 100, 100, 100, 0, 0,
                     ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
             sourceOrders[index] = AccountBook.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7,
                     resolved[index], commandId, 0, 1, 1);

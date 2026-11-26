@@ -9,7 +9,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.math.BigInteger;
 import lombok.AccessLevel;
@@ -272,7 +272,7 @@ public final class CoreContractMath {
 
     /** 按单步费用计算冻结额度，避免先计算整笔费用时的分片舍入造成少冻结。 */
     public static long fragmentationSafeFeeDebit(CoreInstrument instrument,
-                                                  OrderCommand.ResolvedPlaceOrder order) {
+                                                  ResolvedPlaceOrder order) {
         long feePerStep = feeDeltaUnits(
                 instrument, order.reservationPriceTicks(), 1, order.takerFeeRatePpm());
         long debitPerStep = Math.max(0, Math.negateExact(feePerStep));

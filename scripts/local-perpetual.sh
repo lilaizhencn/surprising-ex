@@ -53,14 +53,14 @@ export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS PRICE_INDEX_REQUIRED_INSTRUMENT_ID
 FRONTEND_DIR="${FRONTEND_DIR:-$ROOT/../surprising-ex-web}"
 backend() { "$ROOT/scripts/linear-perpetual-single-node.sh" "$@"; }
 spot_core() {
-  ACTION="$1" CORE_ONLY=true REALTIME_ENABLED=true PRODUCT_LINE=SPOT RUN_ID=local-spot \
+  ACTION="$1" CORE_ONLY=true PRODUCT_LINE=SPOT RUN_ID=local-spot \
     REALTIME_PUBLISH_CHANNEL="aeron:udp?endpoint=127.0.0.1:21010" \
     REALTIME_CORE_CONTROL_CHANNEL="aeron:udp?endpoint=127.0.0.1:20020" \
     AERON_CLUSTER_HOSTNAMES=127.0.0.1 AERON_HOSTNAMES=127.0.0.1 AERON_EGRESS_HOSTNAME=127.0.0.1 \
     SURPRISING_AERON_ACCOUNT_LANES=1 SURPRISING_AERON_MATCHING_ENGINES=1 \
     POSTGRES_MODE=native JFR_ENABLED="${JFR_ENABLED:-false}" JFR_SETTINGS="${JFR_SETTINGS:-default}" \
-    JVM_XMS="${JVM_XMS:-256m}" JVM_XMX="${JVM_XMX:-1g}" \
-    JVM_GC="${JVM_GC:-G1GC}" JVM_ALWAYS_PRETOUCH="${JVM_ALWAYS_PRETOUCH:-false}" \
+    JVM_XMS="${JVM_XMS:-256m}" JVM_XMX="${JVM_XMX:-1g}" JVM_CORE_XMX="${JVM_CORE_XMX:-512m}" \
+    JVM_GC="${JVM_GC:-G1}" JVM_ALWAYS_PRETOUCH="${JVM_ALWAYS_PRETOUCH:-false}" \
     AERON_THREADING_MODE="${AERON_THREADING_MODE:-SHARED}" \
     "$ROOT/scripts/start-product-line-providers.sh"
 }
@@ -215,6 +215,7 @@ else
       PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$ROOT/init.sql" > "$LOCAL_DIR/logs/schema.log" 2>&1
       fi
       PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$ROOT/deployment/local-perpetual/catalog.sql" >> "$LOCAL_DIR/logs/schema.log" 2>&1
+      PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "UPDATE instruments SET min_valid_index_sources = 1;" >> "$LOCAL_DIR/logs/schema.log" 2>&1
       touch "$LOCAL_DIR/catalog-ready"
     fi
   fi
@@ -279,6 +280,14 @@ KAFKA
          "$LOCAL_DIR/runtime/local-spot/data/kafka-streams" "$LOCAL_DIR/runtime/local-spot/candlestick-state" \
          "$LOCAL_DIR/runtime/$RUN_ID/trade-export-checkpoint"*
   redis-cli -h "$VALKEY_HOST" -p "$VALKEY_PORT" FLUSHALL >/dev/null 2>&1 || true
+  PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+    DO \$\$ DECLARE r record;
+    BEGIN
+      FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'core_%' LOOP
+        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' CASCADE';
+      END LOOP;
+    END \$\$;
+  " >/dev/null
   spot_core up
   backend up
 fi

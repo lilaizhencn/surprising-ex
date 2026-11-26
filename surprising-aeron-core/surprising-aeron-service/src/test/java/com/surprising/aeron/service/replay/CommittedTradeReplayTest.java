@@ -158,8 +158,8 @@ class CommittedTradeReplayTest {
             var receipt = replay.commandResult();
             assertThat(receipt.code()).isEqualTo(CoreResultCode.NONE);
             assertThat(receipt.cancelResults()).containsExactly(
-                    new CommittedTradeReplay.CancelBatchItem(0, 201, true, "NONE"),
-                    new CommittedTradeReplay.CancelBatchItem(1, 999, false, "ORDER_NOT_FOUND"));
+                    new com.surprising.aeron.protocol.export.CommittedCommandResult.CancelBatchItem(0, 201, true, "NONE"),
+                    new com.surprising.aeron.protocol.export.CommittedCommandResult.CancelBatchItem(1, 999, false, "ORDER_NOT_FOUND"));
             for (/* 推动近期结果缓存的一百四十次命令计数 */ int i = 0; i < 140; i++) send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
             assertThat(receipt.cancelResults().get(1).code()).isEqualTo("ORDER_NOT_FOUND");
@@ -445,7 +445,7 @@ class CommittedTradeReplayTest {
      */
     @Test void committedRejectionWithoutAnOrderHasAnImmutableReceiptAfterTheCacheMovesOn() {
         // 单独保存在回放实例外的不可变拒绝收据
-        CommittedTradeReplay.CommittedCommandResult rejected;
+        com.surprising.aeron.protocol.export.CommittedCommandResult rejected;
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
             assertThat(send(replay, ProductLine.SPOT, CoreMessageType.CANCEL_ORDER, 7,
                     TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(999)))).isEmpty();
@@ -463,7 +463,7 @@ class CommittedTradeReplayTest {
 
     @Test void balanceAdjustmentKeepsItsOriginalTotalAndRetryAfterSnapshotCreatesNoNewFact() {
         var line = ProductLine.SPOT;
-        CommittedTradeReplay.CommittedBalanceFlow original;
+        com.surprising.aeron.protocol.export.CommittedBalanceFlow original;
         byte[] snapshot;
         try (var replay = new CommittedTradeReplay(line, null)) {
             send(replay, line, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(

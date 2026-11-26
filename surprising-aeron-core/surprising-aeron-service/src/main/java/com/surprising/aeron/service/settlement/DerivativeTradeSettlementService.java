@@ -30,7 +30,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 public final class DerivativeTradeSettlementService {
 
     /** 在线所属 Lane 入口：至多一次成交直接应用，多笔成交复用累加器。 */
-    static void applyLane(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
+    static void applyLane(long takerOrderId, TradeSettlementPlan plan, AccountPartition lane, int laneId,
                           AccountBook accountBook, IdIndex identities,
                           CoreInstrument instrument, int settleAssetId,
                           SystemFundsChange systemFundsChange,
@@ -59,7 +59,7 @@ public final class DerivativeTradeSettlementService {
     }
 
     /** maker 完全成交时释放预留，保留原事件顺序。 */
-    private static void applyLaneDirect(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
+    private static void applyLaneDirect(long takerOrderId, TradeSettlementPlan plan, AccountPartition lane, int laneId,
                                         AccountBook accountBook, IdIndex identities,
                                         CoreInstrument instrument, int settleAssetId,
                                         SystemFundsChange systemFundsChange,
@@ -90,7 +90,7 @@ public final class DerivativeTradeSettlementService {
     }
 
     /** 借用当前 Lane 的连续成交累加器，按原事件顺序计算本地各订单，最后发布剩余游标。无论成功与否都清理暂存引用，已写回变化的回滚由外层负责。 */
-    private static void applyLaneAccumulated(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
+    private static void applyLaneAccumulated(long takerOrderId, TradeSettlementPlan plan, AccountPartition lane, int laneId,
                                              AccountBook accountBook, IdIndex identities,
                                              CoreInstrument instrument, int settleAssetId,
                                              SystemFundsChange systemFundsChange,

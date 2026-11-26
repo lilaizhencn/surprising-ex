@@ -21,7 +21,7 @@ import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.OrderCheckService;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.instrument.api.model.ContractType;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -145,7 +145,7 @@ class CoreOrderDecisionResolverTest {
                 CoreTimeInForce.IOC, false, "client-91");
 
         // 决策入口返回的确定输入，核对实际撮合边界、预留价格、资产及费率。
-        OrderCommand.ResolvedPlaceOrder resolved = OrderCheckService.resolve(accountBook, identities, 1001, intent, 1_500);
+        ResolvedPlaceOrder resolved = OrderCheckService.resolve(accountBook, identities, 1001, intent, 1_500);
 
         assertThat(resolved.matchingPriceTicks()).isEqualTo(60_600);
         assertThat(resolved.reservationPriceTicks()).isEqualTo(60_600);
@@ -200,7 +200,7 @@ class CoreOrderDecisionResolverTest {
                 CoreTimeInForce.GTC, false, "client-91");
 
         // 决策入口返回的确定输入，核对实际撮合边界、预留价格、资产及费率。
-        OrderCommand.ResolvedPlaceOrder resolved = OrderCheckService.resolve(accountBook, identities, 1001, intent, 1_500);
+        ResolvedPlaceOrder resolved = OrderCheckService.resolve(accountBook, identities, 1001, intent, 1_500);
 
         assertThat(resolved.matchingPriceTicks()).isEqualTo(60_000);
         assertThat(resolved.reservationPriceTicks()).isEqualTo(60_000);

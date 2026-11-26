@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.*;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.aeron.support.math.OptionContractMath;
@@ -46,7 +46,7 @@ public final class OptionTradingRules implements ProductTradingRules {
     /** 按期权专有公式计算冻结，区分买方权利金、卖方开仓保证金以及已有仓位可释放的保证金。 */
     @Override
     public long reservationUnits(CoreInstrument instrument, Position position,
-                                 OrderCommand.ResolvedPlaceOrder order, long leverage,
+                                 ResolvedPlaceOrder order, long leverage,
                                  long pendingQuantitySteps) {
         long current = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = order.side() == CoreOrderSide.BUY

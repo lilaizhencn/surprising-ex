@@ -9,8 +9,8 @@ public record CoreExecutionView(
         long quantitySteps) {
 
     public CoreExecutionView {
-        if (takerOrderId <= 0 || makerOrderId <= 0 || takerUserId <= 0 || makerUserId <= 0
-                || takerUserId == makerUserId || priceTicks <= 0 || quantitySteps <= 0) {
+        if (takerOrderId <= 0 || makerOrderId <= 0 || takerOrderId == makerOrderId
+                || takerUserId <= 0 || makerUserId <= 0 || priceTicks <= 0 || quantitySteps <= 0) {
             throw new IllegalArgumentException("invalid execution view");
         }
     }

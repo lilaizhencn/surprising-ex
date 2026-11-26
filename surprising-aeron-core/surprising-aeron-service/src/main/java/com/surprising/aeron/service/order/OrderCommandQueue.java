@@ -112,7 +112,7 @@ public final class OrderCommandQueue {
     OrderCommand acquire(long sequence, OrderCommand.Operation operation, CoreMessage command,
                         com.surprising.aeron.protocol.CommandFingerprint fingerprint,
                         java.util.List<Long> preMatchingCancellationOrderIds,
-                        OrderCommand.Decoded decodedCommand, OrderCommand.ReplaceOrderCheck orderCheck) {
+                        DecodedOrderCommand decodedCommand, ReplaceOrderCheck orderCheck) {
         OrderCommand context = contexts.claim(sequence);
         OrderCommand pending = context.initialize(sequence, operation, command, fingerprint,
                 preMatchingCancellationOrderIds, decodedCommand, orderCheck);
@@ -584,9 +584,9 @@ public static final class IngressWindow {
     /** 产生候选路由时的解码来源请求引用，防止旧解码被误用于新请求。 */
     private CoreMessage routedSource;
     private CoreMessage decodedSource;
-    private OrderCommand.Decoded decoded;
+    private DecodedOrderCommand decoded;
     /** Owner 准备下一入口时使用的可复用解码槽，准入时与 Entry 备用槽交换。 */
-    private OrderCommand.Decoded candidateDecoder = OrderCommand.Decoded.commandSlot();
+    private DecodedOrderCommand candidateDecoder = DecodedOrderCommand.commandSlot();
 
     /** 从系统属性读取窗口容量，未配置默认二百五十六，再按显式容量构造。 */
     public IngressWindow() {
@@ -678,7 +678,7 @@ public static final class IngressWindow {
     }
 
     /** 按请求对象身份缓存解码，换请求时使用候选预分配槽 decodeInto，同一请求重试直接返回。 */
-    public OrderCommand.Decoded decoded(CoreMessage request) {
+    public DecodedOrderCommand decoded(CoreMessage request) {
         if (decodedSource != request) {
             decodedSource = request;
             decoded = null;
@@ -691,7 +691,7 @@ public static final class IngressWindow {
     }
 
     /** 只有请求对象与缓存来源相同才返回已解码引用，不触发新解码。 */
-    public OrderCommand.Decoded decodedIfPresent(CoreMessage request) {
+    public DecodedOrderCommand decodedIfPresent(CoreMessage request) {
         return decodedSource == request ? decoded : null;
     }
 
@@ -819,7 +819,7 @@ public static final class IngressWindow {
 
     /** 固定响应窗口条目，保存该请求的会话、序号、日志元数据和解码租约，退休后原位清理并复用，不是永久命令历史。 */
     public static final class Entry {
-        private OrderCommand.Decoded decodedSlot = OrderCommand.Decoded.commandSlot();
+        private DecodedOrderCommand decodedSlot = DecodedOrderCommand.commandSlot();
         private long absSeq;
         public long sessionId = NO_SESSION_ID;
         public CoreMessage request;

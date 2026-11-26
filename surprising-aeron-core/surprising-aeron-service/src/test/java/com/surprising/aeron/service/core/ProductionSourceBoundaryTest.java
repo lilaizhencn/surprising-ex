@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.OrderResultTarget;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.risk.RiskScanner;
 import com.surprising.aeron.service.settlement.TradeSettlement;
@@ -11,8 +12,8 @@ import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow;
 import com.surprising.aeron.service.order.OrderCommand;
-import com.surprising.aeron.service.order.OrderCommand.Direct;
-import com.surprising.aeron.service.order.OrderBatchProcessor.PendingBatch;
+import com.surprising.aeron.service.order.DirectOrderCommand;
+import com.surprising.aeron.service.order.PendingOrderBatch;
 import com.surprising.aeron.service.order.OrderCommandQueue.PipelineState;
 import com.surprising.aeron.service.order.OrderCommandQueue;
 import com.surprising.aeron.service.order.OrderCommitService;
@@ -31,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.aeron.service.query.StateQueries;
 
 /**
- * 用反射及有限源码检查约束已有架构：具体运行时依赖、单输入环、Direct 撮合、显式 Lane 查询和业务状态所有权。它检查列出的结构与文本，不代替运行时线程、资金或恢复验证；正则扫描也不是完整语法分析。
+ * 用反射及有限源码检查约束已有架构：具体运行时依赖、单输入环、DirectOrderCommand 撮合、显式 Lane 查询和业务状态所有权。它检查列出的结构与文本，不代替运行时线程、资金或恢复验证；正则扫描也不是完整语法分析。
  */
 class ProductionSourceBoundaryTest {
     /**
@@ -54,7 +55,7 @@ class ProductionSourceBoundaryTest {
             assertThat(java.util.Arrays.stream(processor.getDeclaredFields()).map(java.lang.reflect.Field::getName))
                     .doesNotContain("owner");
         }
-        assertThat(OrderCommand.Direct.class.getDeclaredField("owner").getType()).isEqualTo(TradingCore.class);
+        assertThat(DirectOrderCommand.class.getDeclaredField("owner").getType()).isEqualTo(TradingCore.class);
         // 从当前目录向上找到的交易仓库根，找不到即测试失败
         Path root = Path.of("").toAbsolutePath();
         while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {
@@ -88,7 +89,7 @@ class ProductionSourceBoundaryTest {
     }
 
     /**
-     * 按列出的旧 API、字段与文件名检查已删除的撮合及结算旁路不再存在，保留 Direct 撮合和所属 Lane 结算入口。
+     * 按列出的旧 API、字段与文件名检查已删除的撮合及结算旁路不再存在，保留 DirectOrderCommand 撮合和所属 Lane 结算入口。
      */
     @Test
     void d3TradingHasOnlyDirectApisAndNoOwnerSettlementFallback() throws Exception {
@@ -109,7 +110,7 @@ class ProductionSourceBoundaryTest {
                         "dispatchReadyPlaceSettlements", "dispatchPartitionSettlements", "completeDispatchedCancel");
         assertThat(java.util.Arrays.stream(OrderCommand.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("cancelEvent", "settlementPlanBuffer", "dispatchOnly");
-        assertThat(java.util.Arrays.stream(OrderBatchProcessor.PendingBatch.class.getDeclaredFields())
+        assertThat(java.util.Arrays.stream(PendingOrderBatch.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getName)).doesNotContain("pipelinedMatchingResults",
                         "pipelinedMatchingResultCount", "deferredSettlementItemIndexes", "deferredCancellationOrderIds");
         assertThat(java.util.Arrays.stream(OrderCommandQueue.class.getDeclaredMethods())
@@ -138,13 +139,13 @@ class ProductionSourceBoundaryTest {
         assertThat(java.util.Arrays.stream(com.surprising.aeron.service.settlement.TradeSettlement.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName))
                 .doesNotContain("markMatcherOwnedPublication", "matcherOwnedPublication");
-        assertThat(java.util.Arrays.stream(OrderBatchProcessor.PendingBatch.class.getDeclaredConstructors())
+        assertThat(java.util.Arrays.stream(PendingOrderBatch.class.getDeclaredConstructors())
                 .mapToInt(java.lang.reflect.Constructor::getParameterCount)).containsOnly(2);
         assertThat(java.util.Arrays.stream(com.surprising.aeron.service.core.index.ActiveOrderIndex.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName)).doesNotContain("ids");
         for (String /* 本次必须由 Lane 实际实现的响应方法名 */ name : java.util.List.of("preparedResponse", "preparedResponseLength")) {
             // 反射取得的 Lane 响应方法，检查不是默认实现
-            var method = com.surprising.aeron.service.order.OrderCommand.ResultTarget.class.getMethod(name);
+            var method = com.surprising.aeron.service.order.OrderResultTarget.class.getMethod(name);
             assertThat(method.isDefault()).as("Lane response contract %s", name).isFalse();
         }
     }

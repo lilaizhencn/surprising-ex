@@ -12,7 +12,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.core.AccountBook;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.Order;
 import java.util.List;
 import java.util.UUID;
@@ -123,11 +123,11 @@ class ControlOrderMetadataLeaseTest {
      * 构造合约一、买入两步的已解析限价下单意图，带衍生品保证金预留类型供控制任务建立订单。
      * @param id 测试订单编号，同时用于固定的客户号文本
      */
-    private static OrderCommand.ResolvedPlaceOrder intent(long id) {
+    private static ResolvedPlaceOrder intent(long id) {
         // 构造已解析意图所用的限价下单业务命令。
         var command = new PlaceOrderCommand(id, "1", CoreOrderSide.BUY, 100, 2, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "control-" + id);
-        return new OrderCommand.ResolvedPlaceOrder(command, CoreStateTestFixtures.runtimeInstrument(), 5,
+        return new ResolvedPlaceOrder(command, CoreStateTestFixtures.runtimeInstrument(), 5,
                 100, 100, 100, 0, 0, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
 

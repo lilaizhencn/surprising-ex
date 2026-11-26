@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.PendingOrderBatch;
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.*;
@@ -70,7 +71,7 @@ public class AccountLaneCommitBenchmark {
         private java.util.List<Long> metadataUsers;
         private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap metadataOrders;
         private AccountPartitionCommit[] commits;
-        private OrderBatchProcessor.PendingBatch[] responses;
+        private PendingOrderBatch[] responses;
         private com.surprising.aeron.service.core.identity.IdIndex identities;
         private long sequence;
         private String previousAccountLanes;
@@ -84,13 +85,13 @@ public class AccountLaneCommitBenchmark {
             accountBook = new AccountBook(topology);
             users = new long[accountLanes];
             commits = new AccountPartitionCommit[maxInFlight];
-            responses = new OrderBatchProcessor.PendingBatch[maxInFlight];
+            responses = new PendingOrderBatch[maxInFlight];
             identities = new com.surprising.aeron.service.core.identity.IdIndex();
             int symbolId = identities.symbolId("1");
             var responseArena = new ResponseSlotPool(maxInFlight, 4096);
             for (int index = 0; index < responses.length; index++) {
-                var response = new OrderBatchProcessor.PendingBatch(1, responseArena);
-                response.kind = com.surprising.aeron.service.order.OrderBatchProcessor.Kind.AMEND;
+                var response = new PendingOrderBatch(1, responseArena);
+                response.kind = com.surprising.aeron.service.order.OrderBatchKind.AMEND;
                 response.addItem(10000, 10000, 10000, null);
                 response.items.getFirst().status = ResponseStatus.APPLIED;
                 response.items.getFirst().resultCode = CoreResultCode.NONE;

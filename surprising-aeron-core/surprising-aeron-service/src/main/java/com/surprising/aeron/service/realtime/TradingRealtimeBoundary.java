@@ -49,6 +49,8 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     private boolean leader;
     private long committedPosition;
     private long nextSnapshotNanos;
+    private boolean projectionEnabled;
+    private java.util.function.Consumer<com.surprising.aeron.protocol.export.LiquidationChange> projectionLiquidationObserver;
 
     /** 要求指定所属产品线，建立固定容量请求队列，此时不启动实时传输。 */
     public TradingRealtimeBoundary(ProductLine productLine) {
@@ -60,15 +62,31 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
         this.productLine = java.util.Objects.requireNonNull(productLine, "product line is required");
     }
 
+    public void enableProjection(
+            java.util.function.Consumer<com.surprising.aeron.protocol.export.LiquidationChange> liquidationObserver) {
+        this.projectionEnabled = true;
+        this.projectionLiquidationObserver = liquidationObserver;
+    }
+
     /** 先更新角色、非负初始日志位置并重置请求节流，再使用已绑定的实时通道配置。否则创建 outbox、接入状态捕获与发送器，控制通道非空时再创建请求接收器。 */
     public void start(Cluster.Role role, long logPosition, TradingCore state) {
         leader = role == Cluster.Role.LEADER;
         committedPosition = Math.max(0, logPosition);
         nextSnapshotNanos = 0;
-        if (configuration.channel().isEmpty() || outbox != null) return;
+        if ((configuration.channel().isEmpty() && !projectionEnabled) || outbox != null) return;
         try {
             outbox = new RealtimeOutbox(8192, 8 * 1024 * 1024);
             capture = state.attachRealtime(outbox);
+            if (projectionEnabled && projectionLiquidationObserver != null) {
+                capture.liquidationObserver(projectionLiquidationObserver);
+            }
+            if (configuration.channel().isEmpty()) {
+                capture.orderProjectionOnly(true);
+                return;
+            }
+            if (projectionEnabled) {
+                capture.enableProjectionMirror();
+            }
             sender = new AeronRealtimeSender(outbox, configuration.directory(),
                     configuration.channel(), configuration.stream());
             if (!configuration.controlChannel().isEmpty()) {
@@ -108,6 +126,29 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     public void commit(TradingCore state, long position) {
         committedPosition = position;
         if (capture != null) capture.commit(state.realtimeExportSequence());
+    }
+
+    /** 提交并提取投影所需的 ORDER/EXECUTION/TRIGGER/TRADE 帧（支持无外部 sender 独占模式，或外部 sender 并存镜像模式）。 */
+    public List<RealtimeFrame> commitAndDrainProjection(TradingCore state, long position) {
+        committedPosition = position;
+        if (capture == null) return List.of();
+        capture.commit(state.realtimeExportSequence());
+        if (sender != null) {
+            return capture.drainProjectionMirror();
+        }
+        if (outbox == null) return List.of();
+        var frames = new ArrayList<RealtimeFrame>();
+        byte[] encoded;
+        while ((encoded = outbox.poll()) != null) {
+            var frame = RealtimeFrameCodec.decode(encoded);
+            if (frame.kind() == RealtimeFrame.Kind.TRADE
+                    || frame.kind() == RealtimeFrame.Kind.ORDER
+                    || frame.kind() == RealtimeFrame.Kind.EXECUTION
+                    || frame.kind() == RealtimeFrame.Kind.TRIGGER) {
+                frames.add(frame);
+            }
+        }
+        return frames.isEmpty() ? List.of() : List.copyOf(frames);
     }
 
     /** 更新 Leader 标记并撤销当前未完成捕获，不清已排队的实时请求。 */
@@ -184,18 +225,34 @@ public static final class StateCapture {
     @Accessors(fluent = true, chain = false)
     @Setter
     private boolean orderProjectionOnly;
+    private ArrayList<RealtimeFrame> projectionMirror;
+
+    void enableProjectionMirror() {
+        if (projectionMirror == null) projectionMirror = new ArrayList<>(16);
+    }
+
+    List<RealtimeFrame> drainProjectionMirror() {
+        if (projectionMirror == null || projectionMirror.isEmpty()) return List.of();
+        var result = List.copyOf(projectionMirror);
+        projectionMirror.clear();
+        return result;
+    }
 
     @Accessors(fluent = true, chain = false)
     @Setter
-    private java.util.function.Consumer<LiquidationChange> liquidationObserver;
-
-    /** 原已提交日志位置、业务时间和不可变强平后值，不复制账户状态。 */
-    public record LiquidationChange(RiskScanner.LiquidationOrder state, long logPosition, long occurredAt) {}
+    private java.util.function.Consumer<com.surprising.aeron.protocol.export.LiquidationChange> liquidationObserver;
 
     /** Owner 收齐 Lane 回执后交出本次变化，观察异常由原捕获失败边界处理。 */
     public void liquidation(RiskScanner.LiquidationOrder value) {
-        if (active() && value != null && liquidationObserver != null)
-            liquidationObserver.accept(new LiquidationChange(value, sequence, timestamp));
+        if (active() && value != null && liquidationObserver != null) {
+            var order = new com.surprising.aeron.protocol.export.LiquidationOrder(
+                    value.liquidationId(), value.userId(), value.instrument().instrumentId(),
+                    value.instrument().contractType().name(), value.instrument().settleAsset(),
+                    value.marginMode(), value.positionSide(), value.triggerPriceSequence(), value.signedQuantitySteps(),
+                    value.closeQuantitySteps(), value.executionPriceTicks(), value.liquidationFeeRatePpm(),
+                    value.liquidationFeeUnits(), value.status().name());
+            liquidationObserver.accept(new com.surprising.aeron.protocol.export.LiquidationChange(order, sequence, timestamp));
+        }
     }
 
     private long sequence, timestamp, snapshotId;
@@ -220,6 +277,7 @@ public static final class StateCapture {
         timestamp = time;
         snapshotId = snapshot;
         ordinal = 0;
+        if (projectionMirror != null) projectionMirror.clear();
         outbox.begin();
         if (snapshot == 0) {
             outbox.stage(RealtimeFrameCodec.encodeLongPayload(
@@ -266,18 +324,27 @@ public static final class StateCapture {
     public void emit(
             RealtimeFrame.Kind kind, long userId, String instrumentId, String key, byte[] payload) {
         if (!active()) return;
+        int currentOrdinal = ordinal++;
         outbox.stage(
                 RealtimeFrameCodec.encode(
                                 product,
                                 kind,
                                 userId,
                                 sequence,
-                                ordinal++,
+                                currentOrdinal,
                                 timestamp,
                                 snapshotId,
                                 instrumentId,
                                 key,
                                 payload));
+        if (projectionMirror != null && snapshotId == 0
+                && (kind == RealtimeFrame.Kind.TRADE
+                        || kind == RealtimeFrame.Kind.ORDER
+                        || kind == RealtimeFrame.Kind.EXECUTION
+                        || kind == RealtimeFrame.Kind.TRIGGER)) {
+            projectionMirror.add(new RealtimeFrame(
+                    product, kind, userId, sequence, currentOrdinal, timestamp, snapshotId, instrumentId, key, payload));
+        }
     }
 
     /** 把 Lane 已冻结的用户快照转为协议用户视图，余额与预留/持仓的内部编号在此还原文本。 */
@@ -494,7 +561,11 @@ public static final class StateCapture {
     /** 捕获活跃时直接编码已组装协议订单视图并暂存，不在此再次检查空值或捕获异常。 */
     public void order(CoreOrderStateView o) {
         if (!active()) return;
-        outbox.stage(RealtimeFrameCodec.encodeOrder(o, sequence, ordinal++, timestamp, snapshotId));
+        byte[] encoded = RealtimeFrameCodec.encodeOrder(o, sequence, ordinal++, timestamp, snapshotId);
+        outbox.stage(encoded);
+        if (projectionMirror != null && snapshotId == 0) {
+            projectionMirror.add(RealtimeFrameCodec.decode(encoded));
+        }
     }
 
     /** 捕获活跃且触发单存在时编码一项触发视图，以触发单业务 ID 作实体键。 */
@@ -547,9 +618,13 @@ public static final class StateCapture {
                         + ":"
                         + fillIndex;
         String instrumentId = identities.instrumentId(takerSymbolId);
-        outbox.stage(RealtimeFrameCodec.encodeTradePayload(
+        byte[] encodedTrade = RealtimeFrameCodec.encodeTradePayload(
                 product, sequence, ordinal++, timestamp, snapshotId, instrumentId, id,
-                price, quantity, matcherSequence, (byte) takerSide.ordinal()));
+                price, quantity, matcherSequence, (byte) takerSide.ordinal());
+        outbox.stage(encodedTrade);
+        if (projectionMirror != null && snapshotId == 0) {
+            projectionMirror.add(RealtimeFrameCodec.decode(encodedTrade));
+        }
         execution(
                 takerUserId,
                 takerOrderId,
@@ -579,9 +654,13 @@ public static final class StateCapture {
             long quantity,
             CoreOrderSide side,
             boolean maker) {
-        outbox.stage(RealtimeFrameCodec.encodeExecutionPayload(
+        byte[] encodedExecution = RealtimeFrameCodec.encodeExecutionPayload(
                 product, user, sequence, ordinal++, timestamp, snapshotId, instrumentId, id,
-                order, price, quantity, (byte) side.ordinal(), maker));
+                order, price, quantity, (byte) side.ordinal(), maker);
+        outbox.stage(encodedExecution);
+        if (projectionMirror != null && snapshotId == 0) {
+            projectionMirror.add(RealtimeFrameCodec.decode(encodedExecution));
+        }
     }
 
     /** 非订单投影且有风险、捕获活跃时编码指定持仓方向的权益、未实现盈亏、维持保证金、比率和风险状态。 */

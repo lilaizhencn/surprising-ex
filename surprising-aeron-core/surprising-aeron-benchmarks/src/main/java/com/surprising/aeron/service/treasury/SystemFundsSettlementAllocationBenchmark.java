@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.treasury;
 
+import com.surprising.aeron.service.settlement.TradeSettlementPosting;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
@@ -41,7 +42,7 @@ public class SystemFundsSettlementAllocationBenchmark {
         int asset = nextAsset;
         long sign = direction;
         applyContributions(asset, sign);
-        funds.add(asset, TradeSettlement.Posting.OwnerKind.USER, 42, TradeSettlement.Posting.Subledger.AVAILABLE, -11 * sign);
+        funds.add(asset, TradeSettlementPosting.OwnerKind.USER, 42, TradeSettlementPosting.Subledger.AVAILABLE, -11 * sign);
         systemFunds.appendFundsDelta(funds);
         funds.requireConserved(false);
         funds.clear();
@@ -64,7 +65,7 @@ public class SystemFundsSettlementAllocationBenchmark {
         delta.apply(systemFunds);
         for (int asset = 0; asset < assetCount; asset++) {
             systemFunds.setLiquidationFee(asset, systemFunds.liquidationFee(asset) + 2 * sign);
-            funds.add(asset, TradeSettlement.Posting.OwnerKind.USER, 42, TradeSettlement.Posting.Subledger.AVAILABLE, -11 * sign);
+            funds.add(asset, TradeSettlementPosting.OwnerKind.USER, 42, TradeSettlementPosting.Subledger.AVAILABLE, -11 * sign);
         }
         systemFunds.appendFundsDelta(funds);
         funds.requireConserved(false);

@@ -130,6 +130,12 @@ public final class OrderBookRouter implements AutoCloseable {
         return maximum;
     }
 
+    public void setParkOnIdle(boolean parkOnIdle) {
+        for (ShardPipeline shard : shards) {
+            shard.setParkOnIdle(parkOnIdle);
+        }
+    }
+
     private ShardPipeline shard(int shardId) {
         if (shardId < 0 || shardId >= shards.length) {
             throw new IllegalArgumentException("matcher shard is outside configured topology");
@@ -172,6 +178,12 @@ public final class OrderBookRouter implements AutoCloseable {
         private final int requestedCapacity;
         private final int mask;
         private volatile Thread worker;
+        private volatile boolean parked;
+        private volatile boolean parkOnIdle;
+
+        void setParkOnIdle(boolean parkOnIdle) {
+            this.parkOnIdle = parkOnIdle;
+        }
         private Runnable startupAction;
         private long cachedConsumedPosition;
         private long cachedCompletedPosition;
@@ -289,6 +301,7 @@ public final class OrderBookRouter implements AutoCloseable {
             slot.resultTarget = resultTarget;
             slot.directSettlement = settlement != null && settlement.direct();
             CURSORS.setVolatile(cursors, SUBMITTED, position + 1);
+            if (parked) java.util.concurrent.locks.LockSupport.unpark(worker);
             int depth = Math.toIntExact(position + 1 - cachedConsumedPosition);
             if (depth > submissionHighWaterMark) {
                 cachedConsumedPosition = (long) CURSORS.getVolatile(cursors, CONSUMED);
@@ -380,6 +393,7 @@ public final class OrderBookRouter implements AutoCloseable {
 
         private void run(TradingCpuAffinity configuration) {
             try (var affinity = configuration.matcher(workerId)) {
+                this.parkOnIdle = this.parkOnIdle || configuration.parkOnIdle();
                 runMatching();
             } catch (Throwable failure) {
                 if (!started) {
@@ -407,12 +421,14 @@ public final class OrderBookRouter implements AutoCloseable {
             long position = (long) CURSORS.getVolatile(cursors, COMPLETED);
             long cachedSubmitted = (long) CURSORS.getVolatile(cursors, SUBMITTED);
             long cachedConsumed = (long) CURSORS.getVolatile(cursors, CONSUMED);
+            int idleSpins = 0;
             try {
                 while (accepting || position < (cachedSubmitted = (long) CURSORS.getVolatile(cursors, SUBMITTED))) {
                     BackgroundRead<?> read = backgroundReads.peek();
                     if (read != null) {
                         cachedSubmitted = (long) CURSORS.getVolatile(cursors, SUBMITTED);
                         if (position >= read.fence()) {
+                            idleSpins = 0;
                             backgroundReads.poll();
                             read.execute();
                             continue;
@@ -421,10 +437,18 @@ public final class OrderBookRouter implements AutoCloseable {
                     if (position >= cachedSubmitted) {
                         cachedSubmitted = (long) CURSORS.getVolatile(cursors, SUBMITTED);
                         if (position >= cachedSubmitted) {
-                            Thread.onSpinWait();
+                            if (parkOnIdle && idleSpins >= 1024) {
+                                parked = true;
+                                java.util.concurrent.locks.LockSupport.parkNanos(200_000L);
+                                parked = false;
+                            } else {
+                                idleSpins++;
+                                Thread.onSpinWait();
+                            }
                             continue;
                         }
                     }
+                    idleSpins = 0;
                     Slot slot = slots[(int) position & mask];
                     Supplier<?> command = slot.command;
                     if (command == null || slot.token == 0) {

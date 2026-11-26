@@ -55,7 +55,7 @@ class CommittedOptionExerciseReplayTest {
                 apply(replay,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now,
                         "1", underlying, 0, 1, 0, 10)));
                 if(cashPerContract==0) assertThat(replay.deliveryPage()).isNull();
-                else assertThat(replay.deliveryPage().cashFlows()).containsExactly(new CommittedTradeReplay.DeliveryCashFlow(1,"USDT",-2*cashPerContract,100_020-2*cashPerContract));
+                else assertThat(replay.deliveryPage().cashFlows()).containsExactly(new com.surprising.aeron.protocol.export.CommittedDeliveryPage.DeliveryCashFlow(1,"USDT",-2*cashPerContract,100_020-2*cashPerContract));
                 snapshot=replay.snapshot();
             }
             try(/* 本轮新建或恢复的期权已提交日志回放资源 */ var replay=new CommittedTradeReplay(ProductLine.OPTION,snapshot)) {
@@ -69,7 +69,7 @@ class CommittedOptionExerciseReplayTest {
                     assertThat(CoreSettlementProgressCodec.decode(result.responseData()).complete()).isTrue();
                 }
                 if(cashPerContract==0) assertThat(replay.deliveryPage()).isNull();
-                else assertThat(replay.deliveryPage().cashFlows()).containsExactly(new CommittedTradeReplay.DeliveryCashFlow(2,"USDT",2*cashPerContract,99_980+2*cashPerContract));
+                else assertThat(replay.deliveryPage().cashFlows()).containsExactly(new com.surprising.aeron.protocol.export.CommittedDeliveryPage.DeliveryCashFlow(2,"USDT",2*cashPerContract,99_980+2*cashPerContract));
                 // 重复提交买方结算前的回放业务哈希
                 long hash=replay.businessHash();
                 replay.apply(CoreMessageCodec.encode(command),now,(sequence+1)*4096);

@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.settlement.TradeSettlementPlan;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.InstrumentId;
 import com.surprising.aeron.protocol.ReservationKind;
@@ -505,7 +506,7 @@ public static final class PendingTracker {
     }
 
     /** 按已经确定的撮合结算计划撤销同序号的 Owner 路由。 */
-    public void unindexMatcherPendingReservations(TradeSettlement.Plan plan) {
+    public void unindexMatcherPendingReservations(TradeSettlementPlan plan) {
         if (plan == null || !pendingReservationsBySequence.containsKey(plan.coreSequence())) return;
         LongIntHashMap removedByUser = matcherRemovedByUserScratch;
         removedByUser.clear();

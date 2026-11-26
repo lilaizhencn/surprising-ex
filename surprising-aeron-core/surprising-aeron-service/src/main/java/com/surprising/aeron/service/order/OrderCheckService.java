@@ -155,7 +155,7 @@ public final class OrderCheckService {
     /** 复用已经解码的输入借槽，前置撤单先为空。 */
     OrderCommand newPendingMatching(long sequence, OrderCommand.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint,
-                                   OrderCommand.Decoded decodedCommand) {
+                                   DecodedOrderCommand decodedCommand) {
         return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
                 decodedCommand, null);
     }
@@ -188,7 +188,7 @@ public final class OrderCheckService {
     CoreResponse prepareMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                          TradingCore.SourceKey sourceKey, OrderCommand.Operation operation,
                                          CommandFingerprint fingerprint, OrderCommand deferredPending) {
-        OrderCommand.Decoded decodedCommand;
+        DecodedOrderCommand decodedCommand;
         try {
             decodedCommand = deferredPending == null
                     ? owner.decodeMatchingCommand(message) : deferredPending.decodedCommand();
@@ -217,8 +217,8 @@ public final class OrderCheckService {
         }
         long sequence = deferredPending == null
                 ? Math.incrementExact(owner.appliedCommandCount()) : deferredPending.sequence();
-        com.surprising.aeron.service.order.OrderCommand.PlaceOrderCheckEvent placeOrderCheck = null;
-        com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent replacementOrderCheck = null;
+        com.surprising.aeron.service.order.PlaceOrderCheckEvent placeOrderCheck = null;
+        com.surprising.aeron.service.order.ReplaceOrderCheckEvent replacementOrderCheck = null;
         owner.resultBuilder.beginCommand();
         try {
             switch (operation) {
@@ -275,7 +275,7 @@ public final class OrderCheckService {
     CoreResponse deferMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                        TradingCore.SourceKey sourceKey, OrderCommand.Operation operation,
                                        CommandFingerprint fingerprint) {
-        OrderCommand.Decoded decodedCommand;
+        DecodedOrderCommand decodedCommand;
         try {
             decodedCommand = owner.decodeMatchingCommand(message);
         } catch (CoreStateRejectedException rejection) {
@@ -313,7 +313,7 @@ public final class OrderCheckService {
     }
 
     /** 从活动订单路由检查原单存在且归请求用户，记下受影响用户和订单，不在此直接读写账户 Lane 订单。 */
-    void validatePendingCancel(CoreMessage message, OrderCommand.Decoded decodedCommand) {
+    void validatePendingCancel(CoreMessage message, DecodedOrderCommand decodedCommand) {
         var command = decodedCommand.cancelOrder();
         var order = owner.activeOrderIndex().activeOrderRoute(command.orderId());
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
@@ -325,8 +325,8 @@ public final class OrderCheckService {
     }
 
     /** 找原单并核对归属。 */
-    com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheckEvent dispatchReplaceOrderCheck(
-            CoreMessage message, OrderCommand.Decoded decodedCommand, boolean amend, long sequence) {
+    com.surprising.aeron.service.order.ReplaceOrderCheckEvent dispatchReplaceOrderCheck(
+            CoreMessage message, DecodedOrderCommand decodedCommand, boolean amend, long sequence) {
         long originalOrderId = amend ? decodedCommand.amendOrder().originalOrderId()
                 : decodedCommand.replaceOrder().originalOrderId();
         var order = owner.activeOrderIndex().activeOrderRoute(originalOrderId);
@@ -346,7 +346,7 @@ public final class OrderCheckService {
     }
 
     /** 要求强平计划仍有路由，登记该用户及本页活动订单。 */
-    void validatePendingLiquidation(OrderCommand.Decoded decodedCommand) {
+    void validatePendingLiquidation(DecodedOrderCommand decodedCommand) {
         var command = decodedCommand.liquidation();
         var route = owner.liquidationIndex().route(command.liquidationId());
         if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
@@ -356,7 +356,7 @@ public final class OrderCheckService {
     }
 
     /** 核对可选风险续扫预算和游标，逐有效强平动作校验用户、品种、正执行价及生命周期范围，拒绝重复用户加品种。 */
-    void validatePendingLiquidationBatch(OrderCommand.Decoded decodedCommand) {
+    void validatePendingLiquidationBatch(DecodedOrderCommand decodedCommand) {
         var command = decodedCommand.liquidationBatch();
         if (command.riskScanContinuation() != null) {
             var control = owner.accountBook().riskScanControl();
@@ -413,7 +413,7 @@ public final class OrderCheckService {
     }
 
     /** 已注册品种先检查产品到期规则，再核结算编号、价格和分页游标。 */
-    void validatePendingSettlement(OrderCommand.Decoded decodedCommand) {
+    void validatePendingSettlement(DecodedOrderCommand decodedCommand) {
         var command = decodedCommand.settlement();
         var instrument = owner.accountBook().instrument(command.instrumentId());
         if (instrument != null) ProductTradingRules.forInstrument(instrument)
@@ -445,7 +445,7 @@ public final class OrderCheckService {
 
     /** 单笔强平和到期结算按完整生命周期范围检查，其他操作先按现有用户和路由品种检查。 */
     void rejectLifecycleOverlap(CoreMessage message, OrderCommand.Operation operation,
-                                        OrderCommand.Decoded decodedCommand) {
+                                        DecodedOrderCommand decodedCommand) {
         if (operation == OrderCommand.Operation.LIQUIDATION) {
             var command = decodedCommand.liquidation();
             var route = owner.liquidationIndex().route(command.liquidationId());
@@ -619,7 +619,7 @@ public final class OrderCheckService {
 
     /** 下单取解码合约，撤改单取原活动订单路由，触发子单取源触发路由并要求品种仍存在。 */
     String matchingSymbol(OrderCommand.Operation operation,
-                                  OrderCommand.Decoded decodedCommand) {
+                                  DecodedOrderCommand decodedCommand) {
         return switch (operation) {
             case PLACE -> decodedCommand.placeOrder().instrumentId();
             case CANCEL -> {
@@ -688,14 +688,14 @@ public final class OrderCheckService {
     /** 普通订单准入的便捷入口，不排除已有订单，继续取得身份并计算所需预留。 */
     public static long requiredReservation(
             AccountBook accountBook, IdIndex identities, long userId,
-            OrderCommand.ResolvedPlaceOrder order, long openInterestSteps) {
+            ResolvedPlaceOrder order, long openInterestSteps) {
         return requiredReservation(accountBook, identities, userId, order, openInterestSteps, 0);
     }
 
     /** 定位用户所属 Lane，准备客户、币对、持仓及账本身份。 */
     public static long requiredReservation(
             AccountBook accountBook, IdIndex identities, long userId,
-            OrderCommand.ResolvedPlaceOrder order, long openInterestSteps,
+            ResolvedPlaceOrder order, long openInterestSteps,
             long excludedOrderId) {
         if (accountBook == null || identities == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission input");
@@ -713,7 +713,7 @@ public final class OrderCheckService {
 
     /** 直接使用已准备的 primitive 身份值和生命周期标记执行普通订单准入，不额外构造身份记录。 */
     public static long requiredReservationPrepared(
-            AccountBook accountBook, AccountPartition lane, long userId, OrderCommand.ResolvedPlaceOrder order,
+            AccountBook accountBook, AccountPartition lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps,
             long clientKey, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress) {
@@ -726,7 +726,7 @@ public final class OrderCheckService {
 
     /** 改单准入直接接收已读取的原单引用，排除原单占用并校验新单预留，消除多重哈希查找。 */
     public static long requiredReplacementReservationPrepared(
-            AccountBook accountBook, AccountPartition lane, long userId, OrderCommand.ResolvedPlaceOrder order,
+            AccountBook accountBook, AccountPartition lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, Order original,
             long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
         return requiredReservation(accountBook, lane, userId, order, openInterestSteps,
@@ -735,7 +735,7 @@ public final class OrderCheckService {
 
     /** 预检只读取显式所属 Lane 和 Owner 捕获的币对配置。 */
     public static long requiredReservationForQuery(AccountBook accountBook, AccountPartition lane, long userId,
-            OrderCommand.ResolvedPlaceOrder order, long openInterestSteps, int symbolId, long clientKey, long positionKey,
+            ResolvedPlaceOrder order, long openInterestSteps, int symbolId, long clientKey, long positionKey,
             com.surprising.aeron.service.treasury.SystemFunds.SettlementStatus settlementStatus) {
         if (lane == null || accountBook.topology().accountLaneId(userId) != lane.laneId()
                 || order == null || settlementStatus == null)
@@ -747,7 +747,7 @@ public final class OrderCheckService {
     }
 
     private static long requiredReservation(
-            AccountBook accountBook, AccountPartition lane, long userId, OrderCommand.ResolvedPlaceOrder order,
+            AccountBook accountBook, AccountPartition lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, Order excluded,
             long clientKey, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, CoreInstrument queryInstrument) {
@@ -796,7 +796,7 @@ public final class OrderCheckService {
     }
 
     private static void validateReservation(
-            boolean derivative, CoreInstrument instrument, OrderCommand.ResolvedPlaceOrder order) {
+            boolean derivative, CoreInstrument instrument, ResolvedPlaceOrder order) {
         String asset = order.reservationAsset();
         if (asset == null) {
             throw rejected("INVALID_RESERVATION_ASSET", "reservation asset is required");
@@ -824,7 +824,7 @@ public final class OrderCheckService {
     }
 
     private static void validatePositionIdentity(
-            CorePositionMode mode, Position position, OrderCommand.ResolvedPlaceOrder order,
+            CorePositionMode mode, Position position, ResolvedPlaceOrder order,
             OrderCheckSummary orderCheckSummary, CoreMarginMode conflictingMode, Order excluded) {
         if ((mode == CorePositionMode.ONE_WAY && order.positionSide().hedgeSide())
                 || (mode == CorePositionMode.HEDGE && !order.positionSide().hedgeSide())) {
@@ -855,7 +855,7 @@ public final class OrderCheckService {
 
     /** 只减仓仅支持衍生品且必须逆向减少已有非零持仓。 */
     private static void validateReduceOnly(
-            boolean derivative, Position position, OrderCommand.ResolvedPlaceOrder order,
+            boolean derivative, Position position, ResolvedPlaceOrder order,
             OrderCheckSummary orderCheckSummary, long userId, Order excluded) {
         if (!order.reduceOnly()) return;
         if (!derivative) throw rejected("REDUCE_ONLY_UNSUPPORTED", "spot order cannot be reduce-only");
@@ -876,7 +876,7 @@ public final class OrderCheckService {
     }
 
     private static void validateRiskLimits(CoreInstrument instrument, Position position,
-            OrderCommand.ResolvedPlaceOrder order, OrderCheckSummary orderCheckSummary, long userId, long openInterestSteps,
+            ResolvedPlaceOrder order, OrderCheckSummary orderCheckSummary, long userId, long openInterestSteps,
             Order excluded, long leverage) {
         if (!instrument.contractType().productLine().isDerivative() || order.reduceOnly()) return;
         long current = position == null ? 0 : position.signedQuantitySteps();
@@ -916,7 +916,7 @@ public final class OrderCheckService {
 
     private static long effectiveLeverage(
             AccountPartition lane, CoreInstrument instrument,
-            OrderCommand.ResolvedPlaceOrder order, long userId) {
+            ResolvedPlaceOrder order, long userId) {
         if (!instrument.contractType().productLine().isDerivative() || instrument.contractType().isOption()) return 0;
         if (lane.leverageValuesEmpty()) return instrument.maxLeveragePpm();
         var lookup = lane.leverageLookup();
@@ -951,7 +951,7 @@ public final class OrderCheckService {
         }
     }
 
-    public static OrderCommand.ResolvedPlaceOrder resolve(AccountBook accountBook, IdIndex identities,
+    public static ResolvedPlaceOrder resolve(AccountBook accountBook, IdIndex identities,
                                              long userId, PlaceOrderCommand intent, long clusterTimestamp) {
         if (accountBook == null || identities == null || intent == null || userId <= 0 || clusterTimestamp <= 0) {
             throw new IllegalArgumentException("invalid order decision input");
@@ -964,7 +964,7 @@ public final class OrderCheckService {
                 clusterTimestamp, accountBook.systemFunds().lifecycleSettlement(symbolId) != 0, intent, false);
     }
 
-    public static void prepare(OrderCommand.PlaceOrderCheckEvent target, AccountBook accountBook,
+    public static void prepare(PlaceOrderCheckEvent target, AccountBook accountBook,
                                IdIndex identities, long userId, PlaceOrderCommand intent, long clusterTimestamp) {
         if (target == null || accountBook == null || identities == null || intent == null
                 || userId <= 0 || clusterTimestamp <= 0)
@@ -980,7 +980,7 @@ public final class OrderCheckService {
         target.prepareDecision(intent, instrument, symbolId, accountBook.markPrice(symbolId), accountBook.feePolicyBook(), clusterTimestamp);
     }
 
-    public static void resolvePrepared(OrderCommand.PlaceOrderCheckEvent target, MarkPrice mark,
+    public static void resolvePrepared(PlaceOrderCheckEvent target, MarkPrice mark,
                                        FeePolicyBook policies, long userId, long clusterTimestamp, boolean lifecycleSettled) {
         resolveValues(target, target.instrument(), target.symbolId(), mark, policies, userId,
                 clusterTimestamp, lifecycleSettled, target.intent(), true);
@@ -993,14 +993,14 @@ public final class OrderCheckService {
         public boolean fundingInProgress() { return settlementStatus.fundingInProgress(); }
     }
 
-    public static <T extends OrderCommand.ResolvedPlaceOrder> T resolveInto(T target, Context context, long userId, PlaceOrderCommand intent) {
+    public static <T extends ResolvedPlaceOrder> T resolveInto(T target, Context context, long userId, PlaceOrderCommand intent) {
         if (target == null || context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
         resolveValues(target, context.instrument(), context.symbolId(), context.mark(), context.policies(), userId,
                 context.clusterTimestamp(), context.lifecycleSettled(), intent, false);
         return target;
     }
 
-    public static OrderCommand.ResolvedPlaceOrder resolve(Context context, long userId, PlaceOrderCommand intent) {
+    public static ResolvedPlaceOrder resolve(Context context, long userId, PlaceOrderCommand intent) {
         if (context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
         return resolveValues(null, context.instrument(), context.symbolId(), context.mark(), context.policies(), userId,
                 context.clusterTimestamp(), context.lifecycleSettled(), intent, false);
@@ -1041,7 +1041,7 @@ public final class OrderCheckService {
                 source.settlementStatus());
     }
 
-    private static OrderCommand.ResolvedPlaceOrder resolveValues(OrderCommand.ResolvedPlaceOrder target,
+    private static ResolvedPlaceOrder resolveValues(ResolvedPlaceOrder target,
                                                     CoreInstrument instrument, int symbolId,
                                                     MarkPrice mark, FeePolicyBook policies, long userId,
                                                     long clusterTimestamp, boolean lifecycleSettled,
@@ -1079,7 +1079,7 @@ public final class OrderCheckService {
         long makerFee = fee == null ? instrument.makerFeeRatePpm() : fee.makerFeeRatePpm();
         long takerFee = fee == null ? instrument.takerFeeRatePpm() : fee.takerFeeRatePpm();
         if (target == null) {
-            return new OrderCommand.ResolvedPlaceOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
+            return new ResolvedPlaceOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
                     markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
                     makerFee, takerFee);
         }

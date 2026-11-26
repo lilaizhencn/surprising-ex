@@ -25,7 +25,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 public final class SpotTradeSettlementService {
 
     /** 在线所属 Lane 入口，至多一笔成交直接应用，多笔复用现货累加器。 */
-    static void applyLane(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
+    static void applyLane(long takerOrderId, TradeSettlementPlan plan, AccountPartition lane, int laneId,
                           AccountBook accountBook, CoreInstrument instrument,
                           int baseAssetId, int quoteAssetId, SystemFundsChange systemFundsChange,
                           long commitTimestamp, long commitPosition) {
@@ -52,7 +52,7 @@ public final class SpotTradeSettlementService {
         }
     }
 
-    private static void applyLaneDirect(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
+    private static void applyLaneDirect(long takerOrderId, TradeSettlementPlan plan, AccountPartition lane, int laneId,
                                         AccountBook accountBook, CoreInstrument instrument,
                                         int baseAssetId, int quoteAssetId,
                                         SystemFundsChange systemFundsChange,
@@ -80,7 +80,7 @@ public final class SpotTradeSettlementService {
     }
 
     /** 借用所属 Lane 的现货累加器，按原事件顺序计算本地各订单，先发布余额再发布订单和预留，finally 清理暂存。故障回滚仍由外层结算边界负责。 */
-    private static void applyLaneAccumulated(long takerOrderId, TradeSettlement.Plan plan, AccountPartition lane, int laneId,
+    private static void applyLaneAccumulated(long takerOrderId, TradeSettlementPlan plan, AccountPartition lane, int laneId,
                                              AccountBook accountBook, CoreInstrument instrument,
                                              int baseAssetId, int quoteAssetId,
                                              SystemFundsChange systemFundsChange,

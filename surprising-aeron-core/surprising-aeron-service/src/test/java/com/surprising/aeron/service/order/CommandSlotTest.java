@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.PendingOrderBatch;
+import com.surprising.aeron.service.order.DecodedOrderCommand;
+import com.surprising.aeron.service.order.DirectOrderCommand;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -34,7 +37,7 @@ class CommandSlotTest {
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
         CoreMessage command = command(1000);
         var pending = new OrderCommand().initialize(1000, OrderCommand.Operation.PLACE, command,
-                CommandFingerprint.of(command), List.of(), OrderCommand.Decoded.decode(command), null);
+                CommandFingerprint.of(command), List.of(), DecodedOrderCommand.decode(command), null);
         pending.prepareLaneResultTarget(new ResponseSlotPool(1, 16));
         // 普通命令槽提供的 Lane 结果写入接口。
         var target = pending.laneResultTarget();
@@ -67,7 +70,7 @@ class CommandSlotTest {
             // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
             CoreMessage command = command(1);
             var pending = new OrderCommand().initialize(1, OrderCommand.Operation.PLACE, command,
-                    CommandFingerprint.of(command), List.of(), OrderCommand.Decoded.decode(command), null);
+                    CommandFingerprint.of(command), List.of(), DecodedOrderCommand.decode(command), null);
             pending.suspendCommitContext(builder, false);
             builder.commandChangedUserIds = List.of();
             builder.commandChangedOrderIds = List.of();
@@ -87,13 +90,13 @@ class CommandSlotTest {
     }
 
     /**
-     * 实际验证 OrderCommand.Direct：先写控制任务、拒绝结果和终结标记，清理后复用，要求旧任务和结果为空、边界及检查点换为新命令值。
+     * 实际验证 DirectOrderCommand：先写控制任务、拒绝结果和终结标记，清理后复用，要求旧任务和结果为空、边界及检查点换为新命令值。
      */
     @Test
     void clearsControlResultAndWorkBeforeReusingTheSameSlot() {
         try (var tradingCore = new TradingCore(ProductLine.LINEAR_PERPETUAL)) {
             // 本方法实际测试的直接命令槽。
-            OrderCommand.Direct slot = tradingCore.directCommand;
+            DirectOrderCommand slot = tradingCore.directCommand;
             // 首条直接命令，批次代际测试中则为当前代首个 Core 序号。
             CoreMessage first = command(1000);
             slot.initialize(first, CommandFingerprint.of(first), new TradingCore.SourceKey(
@@ -128,13 +131,13 @@ class CommandSlotTest {
         CoreMessage command = command(1000);
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
         var pending = new OrderCommand().initialize(1000, OrderCommand.Operation.PLACE, command,
-                CommandFingerprint.of(command), List.of(), OrderCommand.Decoded.decode(command), null);
+                CommandFingerprint.of(command), List.of(), DecodedOrderCommand.decode(command), null);
         // 人工绑定到槽上的批次上下文。
-        var batch = new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool(1, 4096));
+        var batch = new PendingOrderBatch(1, new ResponseSlotPool(1, 4096));
         pending.orderBatch = batch;
         pending.initialize(2000, OrderCommand.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(),
-                OrderCommand.Decoded.decode(command), null);
+                DecodedOrderCommand.decode(command), null);
         assertThat(pending.orderBatch).isNull();
     }
 
@@ -150,12 +153,12 @@ class CommandSlotTest {
                 // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
                 var pending = new OrderCommand[3];
                 // 本代三个批次上下文数组。
-                var batches = new OrderBatchProcessor.PendingBatch[3];
+                var batches = new PendingOrderBatch[3];
                 for (/* 当前创建或清理的三个批次/命令下标。 */ int i = 0; i < 3; i++) {
                     pending[i] = owner.orderChecks().newPendingMatching(first + i,
                             OrderCommand.Operation.PLACE, command(first + i));
                     owner.pendingMatching().put(pending[i]);
-                    batches[i] = new OrderBatchProcessor.PendingBatch(1, owner.responseSlotPool());
+                    batches[i] = new PendingOrderBatch(1, owner.responseSlotPool());
                     batches[i].sequence = first + i;
                     owner.batches().registerBatch(pending[i], batches[i]);
                     assertThat(owner.batches().batch(first + i)).isSameAs(pending[i].orderBatch).isSameAs(batches[i]);
@@ -194,7 +197,7 @@ class CommandSlotTest {
         CommandFingerprint fingerprint = CommandFingerprint.of(command);
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
         OrderCommand pending = new OrderCommand().initialize(7, OrderCommand.Operation.PLACE, command, fingerprint,
-                List.of(17L), OrderCommand.Decoded.decode(command), null);
+                List.of(17L), DecodedOrderCommand.decode(command), null);
 
         // 更新前保留的解码引用。
         var decoded = pending.decodedCommand();

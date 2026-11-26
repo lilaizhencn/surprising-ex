@@ -169,6 +169,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     public static MediaDriver newMediaDriver(String aeronDirectoryName) {
         MediaDriver.Context context = new MediaDriver.Context()
                 .threadingMode(clientThreadingMode())
+                .driverTimeoutMs(60_000L)
                 .dirDeleteOnStart(true)
                 .dirDeleteOnShutdown(true);
         if (aeronDirectoryName != null && !aeronDirectoryName.isBlank()) {

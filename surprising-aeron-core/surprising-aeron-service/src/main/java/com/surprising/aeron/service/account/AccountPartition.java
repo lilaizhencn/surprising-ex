@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.settlement.TradeSettlementChanges;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
 
 import com.surprising.aeron.service.order.*;
@@ -14,7 +15,7 @@ import com.surprising.aeron.service.core.LeverageLookup;
 import com.surprising.aeron.service.core.AccountBook;
 import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.core.identity.IdIndex;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.OrderCheckService.OrderCheckSummary;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
@@ -69,7 +70,7 @@ public final class AccountPartition {
     @Accessors(fluent = true, chain = false)
     @Getter
     @Setter
-    TradeSettlement.Changes matcherSettlementChanges;
+    TradeSettlementChanges matcherSettlementChanges;
 
     /** 创建一个分片的账户状态和派生索引，检查编号与队列容量，并计算初始空状态哈希。此时不启动工作线程。 */
     public AccountPartition(int laneId, int queueCapacity) {
@@ -150,7 +151,7 @@ public final class AccountPartition {
     }
 
     /** 在所属线程收取已跨过最终退休水位的订单，清除旧引用后放入有界复用池，再准备本次订单。 */
-    public Order preparedOrder(com.surprising.product.api.ProductLine product, long userId, OrderCommand.ResolvedPlaceOrder intent,
+    public Order preparedOrder(com.surprising.product.api.ProductLine product, long userId, ResolvedPlaceOrder intent,
             java.util.UUID commandId, int symbolId, long timestamp, long position, long retiredOwnerSequence) {
         assertOwner();
         Order ready;
@@ -827,7 +828,7 @@ public final class AccountPartition {
     public LongObjectHashMap<com.surprising.aeron.service.risk.RiskMarginCalculator.Snapshot> riskSnapshotsSnapshot() { return new LongObjectHashMap<>(cold.riskSnapshots); }
     public java.util.TreeMap<CoreLeverageKey, Long> leveragesSnapshot() { return new java.util.TreeMap<>(cold.leverages); }
 
-    public void requireAlgoChildOrderCheck(long userId, com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder child) {
+    public void requireAlgoChildOrderCheck(long userId, com.surprising.aeron.service.order.ResolvedPlaceOrder child) {
         String key = child.clientOrderId();
         if (key == null || !key.startsWith("algo-")) return;
         int separator = key.lastIndexOf('-');

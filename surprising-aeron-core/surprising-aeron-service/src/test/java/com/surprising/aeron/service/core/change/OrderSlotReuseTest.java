@@ -13,7 +13,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.AccountPartition;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -28,11 +28,11 @@ class OrderSlotReuseTest {
      * 创建指定编号、买入十步的已解析限价意图，带固定测试客户号及保证金预留参数。
      * @param id 测试订单编号，同时用于固定客户号
      */
-    private static OrderCommand.ResolvedPlaceOrder intent(long id) {
+    private static ResolvedPlaceOrder intent(long id) {
         // 用于构造已解析意图的限价下单业务命令。
         var order = new PlaceOrderCommand(id, "1", CoreOrderSide.BUY, 100, 10, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-" + id);
-        return new OrderCommand.ResolvedPlaceOrder(order, CoreStateTestFixtures.runtimeInstrument(), 0, 100, 100, 100, 0, 0,
+        return new ResolvedPlaceOrder(order, CoreStateTestFixtures.runtimeInstrument(), 0, 100, 100, 100, 0, 0,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
     /**

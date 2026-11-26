@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.settlement.TradeSettlementChanges;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.config.LaneTopology;
@@ -16,10 +17,10 @@ import com.surprising.aeron.service.core.change.AccountPartitionCommit;
 import com.surprising.aeron.service.core.change.StateChangeBuffer;
 import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.order.OrderFundsReservation.PendingTracker;
-import com.surprising.aeron.service.order.OrderBatchProcessor.PlaceBatchCheckEvent;
-import com.surprising.aeron.service.order.OrderBatchProcessor.PendingBatch;
+import com.surprising.aeron.service.order.PlaceBatchCheckEvent;
+import com.surprising.aeron.service.order.PendingOrderBatch;
 import com.surprising.aeron.service.result.ResponseSlotPool;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.order.OrderFundsReservation;
 import com.surprising.aeron.service.position.Position;
@@ -82,18 +83,18 @@ class AccountBookTest {
             // 当前用户所属 Lane 下标或回调提供的实际账户 Lane
             int lane = state.topology().accountLaneId(7);
             // 本次模拟未来批次发布的原 Matcher 变化缓冲
-            var changes = new TradeSettlement.Changes(state.topology().accountLaneCount());
+            var changes = new TradeSettlementChanges(state.topology().accountLaneCount());
             changes.ensureActiveLanes(1L << lane);
             changes.balancePatch(lane).add(7, 3, new AccountBalance(7, 3, 1000, 0), 0);
             changes.balancePatch(lane).after(7, 3, new AccountBalance(7, 3, 800, 200), 200);
             // 仅登记完成回执的未来原批次事件，不执行真实意图源
-            var orderCheck = new OrderBatchProcessor.PlaceBatchCheckEvent().prepare(2, 7, java.util.UUID.randomUUID(),
-                    new OrderCommand.ResolvedPlaceOrder[1], new long[1],
+            var orderCheck = new PlaceBatchCheckEvent().prepare(2, 7, java.util.UUID.randomUUID(),
+                    new ResolvedPlaceOrder[1], new long[1],
                     new Order[]{CoreStateTestFixtures.order(11, 7, 5, 2)},
                     1, lane, 0, state, changes, new IdIndex(),
-                    new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool()), 0, 0);
+                    new PendingOrderBatch(1, new ResponseSlotPool()), 0, 0);
             // 通过反射仅用于本测试标记该原批次已完成的字段
-            var complete = OrderBatchProcessor.PlaceBatchCheckEvent.class.getDeclaredField("completed");
+            var complete = PlaceBatchCheckEvent.class.getDeclaredField("completed");
             complete.setAccessible(true);
             complete.setBoolean(orderCheck, true);
             state.registerPlaceBatchOrderCheck(orderCheck);
@@ -349,7 +350,7 @@ class AccountBookTest {
     @Test
     void orderCheckOnlyPreallocatesWrittenBuffersInItsOwnerLane() throws Exception {
         // 只供反射建立指定 Lane 数结算变化缓冲的原构造器
-        var constructor = TradeSettlement.Changes.class.getDeclaredConstructor(int.class);
+        var constructor = TradeSettlementChanges.class.getDeclaredConstructor(int.class);
         constructor.setAccessible(true);
         // 本次模拟未来批次发布的原 Matcher 变化缓冲
         var changes = constructor.newInstance(4);

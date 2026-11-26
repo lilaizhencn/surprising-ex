@@ -5,7 +5,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.*;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.position.Position;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.instrument.api.model.ContractType;
@@ -18,7 +18,7 @@ public interface ProductTradingRules {
 
     /** 计算下单所需预留，不在计算过程中实际扣款或创建订单。 */
     long reservationUnits(CoreInstrument instrument, Position position,
-                          OrderCommand.ResolvedPlaceOrder order, long leverage,
+                          ResolvedPlaceOrder order, long leverage,
                           long pendingQuantitySteps);
 
     /** 返回本规则唯一支持的产品线，用于隔离运行时与账户。 */
@@ -132,7 +132,7 @@ public interface ProductTradingRules {
     /** 计算现货订单需要预留的资产，买单同时覆盖手续费扣款所需额度。 */
     @Override
     public long reservationUnits(CoreInstrument instrument, Position position,
-                                 OrderCommand.ResolvedPlaceOrder order, long leverage,
+                                 ResolvedPlaceOrder order, long leverage,
                                  long pendingQuantitySteps) {
         if (order.side() == CoreOrderSide.SELL) return CoreContractMath.spotBaseUnits(instrument, order.quantitySteps());
         long notional = CoreContractMath.spotQuoteUnits(instrument, order.reservationPriceTicks(), order.quantitySteps());
@@ -162,7 +162,7 @@ public interface ProductTradingRules {
 
     @Override
     public long reservationUnits(CoreInstrument instrument, Position position,
-                                 OrderCommand.ResolvedPlaceOrder order, long leverage, long pendingQuantitySteps) {
+                                 ResolvedPlaceOrder order, long leverage, long pendingQuantitySteps) {
         long current = position == null ? 0 : position.signedQuantitySteps();
 
         long openSteps = order.reduceOnly() ? 0 : order.quantitySteps();

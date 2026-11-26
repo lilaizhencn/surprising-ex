@@ -326,7 +326,7 @@ public final class Order {
 
     /** 首次创建或复用原命令槽，写入获准订单的身份、参数和初始状态，再标为只读撮合输入。 */
     public static Order prepareCommandOrder(Order target, ProductLine product, long userId,
-            OrderCommand.ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
+            ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
         if (target == null) { target = new Order(); target.commandSlotValue = true; }
         if (!target.commandSlotValue) throw new IllegalStateException("order is not a command slot");
         initializeOrderCheck(target, product, userId, intent, commandId, symbolId, timestamp, position);
@@ -336,7 +336,7 @@ public final class Order {
 
     /** 首次创建或复用 Lane 权威池对象，要求目标类型正确并初始化本单。 */
     public static Order preparePooled(Order target, ProductLine product, long userId,
-            OrderCommand.ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
+            ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
         if (intent == null || commandId == null || userId <= 0 || symbolId < 0 || timestamp < 0 || position < 0)
             throw new IllegalArgumentException("invalid pooled order admission");
         if (target == null) { target = new Order(); target.pooledAuthority = true; }
@@ -346,7 +346,7 @@ public final class Order {
     }
 
     private static void initializeOrderCheck(Order target, ProductLine product, long userId,
-            OrderCommand.ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
+            ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
         if (intent == null || commandId == null || product == null || userId <= 0 || symbolId < 0 || timestamp < 0 || position < 0)
             throw new IllegalArgumentException("invalid order admission");
         target.orderId = intent.orderId(); target.productLine = product; target.userId = userId;

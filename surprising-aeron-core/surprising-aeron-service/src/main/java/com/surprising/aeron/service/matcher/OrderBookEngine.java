@@ -24,7 +24,7 @@ import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.service.snapshot.state.TradingCoreState;
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import exchange.core2.core.SynchronousMatchingEngine;
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.CoreWaitStrategy;
@@ -67,12 +67,12 @@ public final class OrderBookEngine implements AutoCloseable {
     }
 
     private final CoreRuntimeConfiguration startupConfiguration;
-    private SynchronousMatchingEngine[] engines;
+    SynchronousMatchingEngine[] engines;
     /** 收集与导入快照模块字节的共享内存存储，导出后按快照号删除。 */
-    private final InMemorySerializationProcessor serializationProcessor =
+    final InMemorySerializationProcessor serializationProcessor =
             new InMemorySerializationProcessor();
     /** 品种字符串到永久数字编号的并发路由表，条目存在不表示原生已注册。 */
-    private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
+    final Map<String, Integer> symbols = new ConcurrentHashMap<>();
     /** 永久编号到原字符串的并发反向表，用于拒绝同编号字符串冲突。 */
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
     /** 启动配置或恢复快照确定的账户与 Matcher 分片拓扑。返回本适配器启动或恢复时确定的线程分片拓扑。 */
@@ -81,7 +81,8 @@ public final class OrderBookEngine implements AutoCloseable {
     private final LaneTopology topology;
     /** 只保存首个故障的跨线程标记，后续命令和完成结果据此停止。 */
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
-    private final MatcherEvidenceLedger matcherEvidence;
+    final MatcherEvidenceLedger matcherEvidence;
+    private final OrderBookSnapshotSupport snapshotSupport = new OrderBookSnapshotSupport(this);
     /** 延迟恢复动作，整体激活完成后清空。 */
     private Runnable deferredActivation;
     /** 全体分片激活完成标记，用 volatile 向其他线程发布。 */
@@ -145,7 +146,7 @@ public final class OrderBookEngine implements AutoCloseable {
         currentCommandScope().users.add(userId);
     }
 
-    private Set<Long> snapshotUsers() {
+    Set<Long> snapshotUsers() {
         Set<Long> snapshot = new java.util.TreeSet<>();
         standaloneCommandScope.users.forEach((long userId) -> snapshot.add(userId));
         for (MatcherCommandScope scope : shardCommandScopes) {
@@ -299,15 +300,15 @@ public final class OrderBookEngine implements AutoCloseable {
         }
         startShard(shardId, restoredSnapshot);
         if (restoredSnapshot != null) {
-            reconcileOpenOrdersShard(restoredActiveOrders, shardId, restoredCoreSequence,
+            snapshotSupport.reconcileOpenOrdersShard(restoredActiveOrders, shardId, restoredCoreSequence,
                     restoredSnapshot.snapshotId(), "matcher restore");
-            int engineHash = engineStateHash(shardId);
+            int engineHash = snapshotSupport.engineStateHash(shardId);
             restoredShardHashes[shardId] = new MatcherShardSnapshot(
                     shardId, engineHash);
         }
         if (activatedShardCount.incrementAndGet() == topology.matchingEngineCount()) {
             if (restoredSnapshot != null) {
-                int engineHash = aggregateEngineStateHash(List.of(restoredShardHashes));
+                int engineHash = OrderBookSnapshotSupport.aggregateEngineStateHash(List.of(restoredShardHashes));
                 if (engineHash != restoredSnapshot.engineStateHash()) {
                     throw new FatalMatchingDivergenceException("matcher restore", restoredCoreSequence,
                             restoredSnapshot.snapshotId(), "restored exchange-core state hash mismatch");
@@ -323,8 +324,8 @@ public final class OrderBookEngine implements AutoCloseable {
     private void activateRestoredMatcher(Iterable<CoreOrderState> activeOrders,
                                          long coreSequence, OrderBookSnapshot snapshot) {
         start(snapshot);
-        reconcileOpenOrders(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore");
-        int restoredHash = currentEngineStateHash();
+        snapshotSupport.reconcileOpenOrders(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore");
+        int restoredHash = snapshotSupport.currentEngineStateHash();
         if (restoredHash != snapshot.engineStateHash()) {
             throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
                     snapshot.snapshotId(), "restored exchange-core state hash mismatch"
@@ -333,7 +334,7 @@ public final class OrderBookEngine implements AutoCloseable {
         }
     }
 
-    private exchange.core2.core.common.MatcherResult placeNative(long userId, com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder command, exchange.core2.core.common.MatcherResult target) {
+    private exchange.core2.core.common.MatcherResult placeNative(long userId, com.surprising.aeron.service.order.ResolvedPlaceOrder command, exchange.core2.core.common.MatcherResult target) {
         int symbolId = ensureSymbol(command.instrument().instrumentIdValue());
         recordUser(userId);
         long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
@@ -380,7 +381,7 @@ public final class OrderBookEngine implements AutoCloseable {
     /** 检查分片和准入输入后同步下单，将原生结果与证据写入复用结算事件。 */
     public exchange.core2.core.common.MatcherResult placeDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
-            long userId, com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder command,
+            long userId, com.surprising.aeron.service.order.ResolvedPlaceOrder command,
             com.surprising.aeron.service.settlement.TradeSettlement target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
@@ -418,7 +419,7 @@ public final class OrderBookEngine implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult replaceDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
             long aeronTimestamp, long userId, long originalOrderId, int symbolId,
-            com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder replacement,
+            com.surprising.aeron.service.order.ResolvedPlaceOrder replacement,
             com.surprising.aeron.service.settlement.TradeSettlement target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || symbolId <= 0 || replacement == null || target == null
@@ -448,7 +449,7 @@ public final class OrderBookEngine implements AutoCloseable {
     /** 执行同一批次中的一个已准入下单项，写指定原生槽并推进本分片证据序号。 */
     public exchange.core2.core.common.MatcherResult placeDirectBatchItem(
             int shardId, int index, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
-            long userId, com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder command,
+            long userId, com.surprising.aeron.service.order.ResolvedPlaceOrder command,
             com.surprising.aeron.service.settlement.TradeSettlement target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || index < 0
                 || command == null || target == null)
@@ -777,40 +778,14 @@ public final class OrderBookEngine implements AutoCloseable {
     /** 由所属分片线程先逐单对账并取哈希，再同步持久化该分片原生快照。 */
     public MatcherShardSnapshot captureShardSnapshot(
             int shardId, long snapshotId, long coreSequence, Iterable<CoreOrderState> activeOrders) {
-        if (shardId < 0 || shardId >= topology.matchingEngineCount() || snapshotId <= 0
-                || coreSequence < 0 || activeOrders == null) {
-            throw new IllegalArgumentException("invalid matcher shard snapshot request");
-        }
-        reconcileOpenOrdersShard(activeOrders, shardId, coreSequence, snapshotId, "matcher snapshot");
-        int engineHash = engineStateHash(shardId);
-        if (!engines[shardId].storeSnapshot(snapshotId, coreSequence, coreSequence)) {
-            throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence, snapshotId,
-                    "exchange-core persist failed for shard " + shardId);
-        }
-        return new MatcherShardSnapshot(shardId, engineHash);
+        return snapshotSupport.captureShardSnapshot(shardId, snapshotId, coreSequence, activeOrders);
     }
 
     /** 要求分片结果数量完整，汇总哈希、导出已写入的模块和证据进度、物化用户集合并构造快照。 */
     public OrderBookSnapshot finishShardedSnapshot(
             long snapshotId, long coreSequence, long businessStateHash, TradingCoreState state,
             List<MatcherShardSnapshot> shardSnapshots) {
-        if (snapshotId <= 0 || coreSequence < 0 || businessStateHash == 0 || state == null
-                || shardSnapshots == null || shardSnapshots.size() != topology.matchingEngineCount()) {
-            throw new IllegalArgumentException("incomplete matcher shard snapshot set");
-        }
-        int engineHash = aggregateEngineStateHash(shardSnapshots);
-        try {
-            // 从当前快照号导出的原生模块字节，构造后删除内存存储副本。
-            List<InMemorySerializationProcessor.SerializedModule> modules =
-                    serializationProcessor.exportSnapshot(snapshotId);
-            long matcherSequence = maxMatcherSequence(modules);
-            Set<Long> userSnapshot = snapshotUsers();
-            return new OrderBookSnapshot(state.productLine(), topology, snapshotId, coreSequence, matcherSequence,
-                    matcherEvidence.snapshot(), businessStateHash, engineHash,
-                    symbols, userSnapshot, modules);
-        } finally {
-            serializationProcessor.removeSnapshot(snapshotId);
-        }
+        return snapshotSupport.finishShardedSnapshot(snapshotId, coreSequence, businessStateHash, state, shardSnapshots);
     }
 
     /** 全部分片捕获结束后释放失败快照的原生模块。 */
@@ -818,182 +793,19 @@ public final class OrderBookEngine implements AutoCloseable {
         serializationProcessor.removeSnapshot(snapshotId);
     }
 
-    /** 不自动切线程。 */
-    private void reconcileOpenOrders(
-            Iterable<CoreOrderState> activeOrders,
-            long coreSequence,
-            long snapshotId,
-            String operation) {
-        Map<Long, ReconciledOrder> expected = new HashMap<>();
-        for (CoreOrderState order : activeOrders) {
-            if (order.status() != com.surprising.aeron.model.CoreOrderStatus.OPEN) {
-                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                        "active-order index contains a terminal order");
-            }
-            Integer symbolId = symbols.get(order.instrumentId());
-            if (symbolId == null) {
-                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                        "Core open order references an unregistered matcher instrumentId");
-            }
-            if (expected.put(order.orderId(), new ReconciledOrder(symbolId, order.orderId(), order.userId(),
-                    order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
-                    order.matchingPriceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
-                    order.matchingPriceTicks())) != null) {
-                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                        "active-order index contains duplicate order ID " + order.orderId());
-            }
-        }
-        Map<Long, ReconciledOrder> actual = new HashMap<>();
-        for (SynchronousMatchingEngine matcher : engines) {
-            for (SynchronousMatchingEngine.OpenOrder order : matcher.openOrders()) {
-                ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
-                        order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
-                if (actual.put(order.orderId(), reconciled) != null) {
-                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                            "exchange-core returned duplicate open order ID " + order.orderId());
-                }
-            }
-        }
-        if (!expected.equals(actual)) {
-            throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                    "Core OPEN orders do not exactly match exchange-core open orders"
-                            + " (expected=" + expected.size() + ", actual=" + actual.size() + ')');
-        }
-    }
-
-    private void reconcileOpenOrdersShard(Iterable<CoreOrderState> activeOrders, int shardId,
-                                          long coreSequence, long snapshotId, String operation) {
-        Map<Long, ReconciledOrder> expected = new HashMap<>();
-        for (CoreOrderState order : activeOrders) {
-            Integer symbolId = symbols.get(order.instrumentId());
-            if (symbolId == null || topology.matcherShardId(symbolId) != shardId) continue;
-            if (order.status() != com.surprising.aeron.model.CoreOrderStatus.OPEN) {
-                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                        "active-order index contains a terminal order");
-            }
-            ReconciledOrder value = new ReconciledOrder(symbolId, order.orderId(), order.userId(),
-                    order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
-                    order.matchingPriceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
-                    order.matchingPriceTicks());
-            if (expected.put(order.orderId(), value) != null) {
-                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                        "active-order index contains duplicate order ID " + order.orderId());
-            }
-        }
-        Map<Long, ReconciledOrder> actual = new HashMap<>();
-        for (SynchronousMatchingEngine.OpenOrder order : engines[shardId].openOrders()) {
-            ReconciledOrder value = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
-                    order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
-            if (actual.put(order.orderId(), value) != null) {
-                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                        "exchange-core returned duplicate open order ID " + order.orderId());
-            }
-        }
-        if (!expected.equals(actual)) {
-            throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                    "Core OPEN orders do not exactly match exchange-core shard " + shardId
-                            + " (expected=" + expected.size() + ", actual=" + actual.size() + ')');
-        }
-    }
-
-    /** 在调用线程按分片号折叠哈希，不创建中间分片快照列表。 */
-    private int currentEngineStateHash() {
-        if (engines.length == 1) return engineStateHash(0);
-        int engineHash = 1;
-        for (int shardId = 0; shardId < engines.length; shardId++) {
-            engineHash = (engineHash * 31 + shardId) * 31 + engineStateHash(shardId);
-        }
-        return engineHash;
-    }
-
-    /** 按原生报告的迭代顺序折叠子模块类型、编号和数值为引擎哈希。int 溢出按 Java 哈希运算保留，不是资金数值或密码摘要。 */
-    private int engineStateHash(int shardId) {
-        var report = engines[shardId].stateHashReport();
-        int engineHash = 1;
-        for (Map.Entry<exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleKey,
-                Integer> entry : report.getHashCodes().entrySet()) {
-            engineHash = engineHash * 31 + entry.getKey().submodule.code;
-            engineHash = engineHash * 31 + entry.getKey().moduleId;
-            engineHash = engineHash * 31 + entry.getValue();
-        }
-        return engineHash;
-    }
-
-    /** 多分片要求列表下标就是分片号再顺序折叠。 */
-    private static int aggregateEngineStateHash(List<MatcherShardSnapshot> shards) {
-        if (shards.size() == 1) return shards.getFirst().engineHash();
-        int engineHash = 1;
-        for (int shardId = 0; shardId < shards.size(); shardId++) {
-            MatcherShardSnapshot shard = shards.get(shardId);
-            if (shard.shardId() != shardId) throw new IllegalArgumentException("matcher shards are not ordered");
-            engineHash = (engineHash * 31 + shardId) * 31 + shard.engineHash();
-        }
-        return engineHash;
-    }
-
     /** 校验深度 1 至 100 并规范品种字符串，未登记返回空列表。已登记则在调用线程读订单簿，转换结果排序为买卖侧再价格升序。 */
     public List<CoreBookLevelView> orderBookLevels(String requestedSymbol, int depth) {
-        if (requestedSymbol == null || requestedSymbol.isBlank() || depth < 1 || depth > 100) {
-            throw new IllegalArgumentException("invalid single-instrumentId book query");
-        }
-        String instrumentId = requestedSymbol.trim().toUpperCase(java.util.Locale.ROOT);
-        Integer symbolId = symbols.get(instrumentId);
-        if (symbolId == null) return List.of();
-        return bookLevels(instrumentId, engine(symbolId).orderBook(symbolId, depth));
+        return snapshotSupport.orderBookLevels(requestedSymbol, depth);
     }
 
     /** 在当前分片线程筛选路由表，按品种名读取本分片各盘口并转换为启动视图，深度限制 1 至 100。 */
     public OrderBookDepthSnapshot orderBookBootstrapShard(int shardId, int depth) {
-        if (shardId < 0 || shardId >= topology.matchingEngineCount() || depth < 1 || depth > 100) {
-            throw new IllegalArgumentException("invalid matcher shard bootstrap query");
-        }
-        List<Map.Entry<String, Integer>> entries = new ArrayList<>();
-        for (Map.Entry<String, Integer> entry : symbols.entrySet()) {
-            if (topology.matcherShardId(entry.getValue()) == shardId) {
-                entries.add(entry);
-            }
-        }
-        entries.sort(Map.Entry.comparingByKey());
-        ArrayList<CoreBookLevelView> levels = new ArrayList<>();
-        List<String> entrySymbols = new ArrayList<>(entries.size());
-        for (Map.Entry<String, Integer> entry : entries) {
-            entrySymbols.add(entry.getKey());
-            levels.addAll(bookLevels(entry.getKey(), engines[shardId].orderBook(entry.getValue(), depth)));
-        }
-        return new OrderBookDepthSnapshot(entrySymbols, levels);
+        return snapshotSupport.orderBookBootstrapShard(shardId, depth);
     }
 
     /** 要求结果数等于拓扑分片数，拼接品种与档位后统一排序。 */
     public OrderBookDepthSnapshot mergeBookBootstrapShards(List<OrderBookDepthSnapshot> shards) {
-        if (shards == null || shards.size() != topology.matchingEngineCount()) {
-            throw new IllegalArgumentException("incomplete matcher bootstrap shards");
-        }
-        ArrayList<String> mergedSymbols = new ArrayList<>();
-        ArrayList<CoreBookLevelView> mergedLevels = new ArrayList<>();
-        for (OrderBookDepthSnapshot shard : shards) {
-            mergedSymbols.addAll(shard.symbols());
-            mergedLevels.addAll(shard.levels());
-        }
-        mergedSymbols.sort(String::compareTo);
-        mergedLevels.sort(Comparator.comparing(CoreBookLevelView::instrumentId)
-                .thenComparing(CoreBookLevelView::side)
-                .thenComparingLong(CoreBookLevelView::priceTicks));
-        return new OrderBookDepthSnapshot(mergedSymbols, mergedLevels);
-    }
-
-    private static List<CoreBookLevelView> bookLevels(String instrumentId, L2MarketData book) {
-        List<CoreBookLevelView> levels = new ArrayList<>(Math.addExact(book.askSize, book.bidSize));
-        for (int index = 0; index < book.askSize; index++) {
-            levels.add(new CoreBookLevelView(instrumentId, CoreOrderSide.SELL, book.askPrices[index],
-                    book.askVolumes[index], book.askOrders[index]));
-        }
-        for (int index = 0; index < book.bidSize; index++) {
-            levels.add(new CoreBookLevelView(instrumentId, CoreOrderSide.BUY, book.bidPrices[index],
-                    book.bidVolumes[index], book.bidOrders[index]));
-        }
-        levels.sort(Comparator.comparing(CoreBookLevelView::side)
-                .thenComparingLong(CoreBookLevelView::priceTicks));
-        return levels;
+        return snapshotSupport.mergeBookBootstrapShards(shards);
     }
 
     /** 以空白初始状态同步创建全部引擎，不启动独立工作线程。 */
@@ -1091,7 +903,7 @@ public final class OrderBookEngine implements AutoCloseable {
     }
 
     /** 此方法不再单独检查该元素已激活或调用线程。 */
-    private SynchronousMatchingEngine engine(int symbolId) {
+    SynchronousMatchingEngine engine(int symbolId) {
         if (engines == null) throw new IllegalStateException("matcher engines are not active");
         return engines[topology.matcherShardId(symbolId)];
     }
@@ -1103,18 +915,6 @@ public final class OrderBookEngine implements AutoCloseable {
             hash *= 0x01000193;
         }
         return hash & 0x7fffffff;
-    }
-
-    /** Core 与原生活动订单对账时使用的逐字段投影。 */
-    private record ReconciledOrder(
-            int symbolId,
-            long orderId,
-            long userId,
-            OrderAction action,
-            long price,
-            long size,
-            long filled,
-            long reserveBidPrice) {
     }
 
     /** 一个分片已完成冷态快照或读取后的哈希结果，不携带模块字节。 */
@@ -1177,276 +977,4 @@ public final class OrderBookEngine implements AutoCloseable {
             }
         }
     }
-
-    private static long maxMatcherSequence(List<InMemorySerializationProcessor.SerializedModule> modules) {
-        if (modules.isEmpty()) throw new java.util.NoSuchElementException("modules is empty");
-        long max = Long.MIN_VALUE;
-        for (int i = 0; i < modules.size(); i++) {
-            long seq = modules.get(i).sequence();
-            if (seq > max) {
-                max = seq;
-            }
-        }
-        return max;
-    }
-
-    private static final class ShardSerializationProcessor implements ISerializationProcessor {
-    private final ISerializationProcessor delegate;
-    private final int shardId;
-
-    /** 要求委托存在且全局分片编号非负。 */
-    ShardSerializationProcessor(ISerializationProcessor delegate, int shardId) {
-        if (delegate == null || shardId < 0) throw new IllegalArgumentException("invalid shard serializer");
-        this.delegate = delegate;
-        this.shardId = shardId;
-    }
-
-    /** 撮合路由模块必须使用本地实例零，转换为本包装器全局分片号。 */
-    private int globalInstance(SerializedModuleType type, int localInstance) {
-        if (type == SerializedModuleType.MATCHING_ENGINE_ROUTER) {
-            if (localInstance != 0) throw new IllegalStateException("synchronous matcher local module must be zero");
-            return shardId;
-        }
-        return localInstance;
-    }
-
-    /** 先映射当前模块实例编号，再把同一快照、水位、时间和写入器交给原处理器，返回委托写入结果。 */
-    @Override
-    public boolean storeData(long snapshotId, long sequence, long timestampNs, SerializedModuleType type,
-                             int instanceId, WriteBytesMarshallable writer) {
-        return delegate.storeData(snapshotId, sequence, timestampNs, type,
-                globalInstance(type, instanceId), writer);
-    }
-
-    /** 按同一实例映射规则读取模块，业务对象解析函数原样交给委托。 */
-    @Override
-    public <T> T loadData(long snapshotId, SerializedModuleType type, int instanceId,
-                          Function<BytesIn, T> reader) {
-        return delegate.loadData(snapshotId, type, globalInstance(type, instanceId), reader);
-    }
-
-    /** 按同一实例映射规则向委托检查模块是否存在，避免检查本地零号造成跨分片混淆。 */
-    @Override
-    public boolean checkSnapshotExists(long snapshotId, SerializedModuleType type, int instanceId) {
-        return delegate.checkSnapshotExists(snapshotId, type, globalInstance(type, instanceId));
-    }
-
-    /** 把原命令、日志序号和批次结束标记原样委托，不在此复制命令或重排日志。 */
-    @Override public void writeToJournal(OrderCommand cmd, long dSeq, boolean eob) throws IOException {
-        delegate.writeToJournal(cmd, dSeq, eob);
-    }
-    /** 把原启用序号和引擎 API 交给委托，日志启用边界沿用原处理器。 */
-    @Override public void enableJournaling(long afterSeq, ExchangeApi api) {
-        delegate.enableJournaling(afterSeq, api);
-    }
-    /** 直接返回委托发现的快照点有序表，不复制或额外固定为只读。 */
-    @Override public NavigableMap<Long, SnapshotDescriptor> findAllSnapshotPoints() {
-        return delegate.findAllSnapshotPoints();
-    }
-    /** 把指定快照及序号范围交给委托分段回放，范围包含规则由原处理器决定。 */
-    @Override public void replayJournalStep(long snapshotId, long seqFrom, long seqTo, ExchangeApi api) {
-        delegate.replayJournalStep(snapshotId, seqFrom, seqTo, api);
-    }
-    /** 按初始状态配置回放委托日志，并返回其报告的回放序号。 */
-    @Override public long replayJournalFull(InitialStateConfiguration initialState, ExchangeApi api) {
-        return delegate.replayJournalFull(initialState, api);
-    }
-    /** 由委托完成全量日志回放后启用日志。 */
-    @Override public void replayJournalFullAndThenEnableJouraling(
-            InitialStateConfiguration initialState, ExchangeApi api) {
-        delegate.replayJournalFullAndThenEnableJouraling(initialState, api);
-    }
-}
-
-    static final class MatcherEvidenceLedger {
-
-    private static final int CACHE_LINE_LONGS = 16;
-    /** 以 acquire/release 访问 long 数组元素的 VarHandle，未使用 CAS 协调同分片多写者。 */
-    private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
-
-    private final LaneTopology topology;
-    private final int shardCount;
-    /** 各业务分片已经分配的序号，恢复时至少达到 sequenceFloor。 */
-    private final long[] issuedSequences;
-    private final long[] shardSequences;
-    /** 本轮运行已观察到的各实际原生分片序号，恢复构造不从历史进度填入。 */
-    private final long[] shardNativeSequences;
-
-    /** 以零下限和从控制分片到各撮合分片的全零进度创建新证据账本。 */
-    MatcherEvidenceLedger(LaneTopology topology) {
-        if (topology == null) throw new IllegalArgumentException("matcher topology is required");
-        this.topology = topology;
-        this.shardCount = topology.matchingEngineCount() + 1;
-        int paddedLength = Math.multiplyExact(shardCount, CACHE_LINE_LONGS);
-        this.shardSequences = new long[paddedLength];
-        this.shardNativeSequences = new long[paddedLength];
-        this.issuedSequences = new long[paddedLength];
-    }
-
-    /** 按拓扑创建留有间隔的序号数组，恢复每个分片已发布进度，已发号位置取给定下限与原进度较大值。输入进度可以不按编号排列，但分片必须齐全且不能重复。 */
-    MatcherEvidenceLedger(LaneTopology topology, long sequenceFloor, List<ShardProgress> progress) {
-        if (topology == null || sequenceFloor < 0 || progress == null
-                || progress.size() != topology.matchingEngineCount() + 1) {
-            throw new IllegalArgumentException("invalid matcher evidence restore");
-        }
-        this.topology = topology;
-        this.shardCount = progress.size();
-        int paddedLength = Math.multiplyExact(shardCount, CACHE_LINE_LONGS);
-        this.shardSequences = new long[paddedLength];
-        this.shardNativeSequences = new long[paddedLength];
-        this.issuedSequences = new long[paddedLength];
-        boolean[] restored = new boolean[progress.size()];
-        for (ShardProgress shard : progress) {
-            int index = index(shard.matcherShardId());
-            if (restored[index]) throw new IllegalArgumentException("duplicate matcher shard progress");
-            restored[index] = true;
-            int offset = offset(index);
-            shardSequences[offset] = shard.matcherSequence();
-            issuedSequences[offset] = Math.max(sequenceFloor, shard.matcherSequence());
-        }
-        for (boolean present : restored) {
-            if (!present) throw new IllegalArgumentException("incomplete matcher shard progress");
-        }
-    }
-
-    /** 为指定业务分片递增已发号序号并发布，精确加法溢出时报错。发号不等于结果已发布，依赖同一分片单所有者调用，不是多生产者 CAS 发号器。 */
-    long nextSequence(int matcherShardId) {
-        int offset = offset(index(matcherShardId));
-        long next = Math.incrementExact((long) LONGS.getAcquire(issuedSequences, offset));
-        LONGS.setRelease(issuedSequences, offset, next);
-        return next;
-    }
-
-    /** 按实际订单簿分片严格推进本轮原生序号，用于控制命令中已发生的原生调用。 */
-    void recordControlNative(int shardId, long nativeSequence) {
-        advanceStrictly(shardNativeSequences, index(shardId), nativeSequence,
-                "matcher shard native sequence is not strictly increasing");
-    }
-
-    /** 聚合控制撤单已经逐项登记过原生序号。 */
-    OrderMatchingResult.Control bindControl(long coreSequence, java.util.UUID commandId,
-                                   long sequence, OrderMatchingResult.Control result) {
-        if (commandId == null || result == null) throw new IllegalArgumentException("matcher evidence is required");
-        advanceStrictly(shardSequences, index(-1), sequence,
-                "matcher shard sequence is not strictly increasing");
-        return result.bindEvidenceInPlace(coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), sequence);
-    }
-
-    /** 检查结果和目标非空，正原生序号先按实际订单簿分片推进，再推进业务证据分片并向现有结算事件直接发布原生成交或撤单结果。 */
-    exchange.core2.core.common.MatcherResult publishNative(
-            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long sequence, int matcherShardId, int nativeMatcherShardId,
-            exchange.core2.core.common.MatcherResult result,
-            com.surprising.aeron.service.settlement.TradeSettlement target) {
-        if (result == null || target == null)
-            throw new IllegalArgumentException("native matcher publication is required");
-        int matcherIndex = index(matcherShardId);
-        long nativeSequence = result.sequence();
-        if (nativeSequence > 0) {
-            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
-                    "matcher shard native sequence is not strictly increasing");
-        }
-        advanceStrictly(shardSequences, matcherIndex, sequence,
-                "matcher shard sequence is not strictly increasing");
-        target.publishDirectNativeResult(result, coreSequence,
-                commandIdMsb, commandIdLsb, orderId,
-                sequence, matcherShardId);
-        return result;
-    }
-
-    /** 检查撤旧、放新结果和目标非空，以最终放新结果的原生序号推进实际分片，再推进业务证据并把两结果交给现有事件。 */
-    exchange.core2.core.common.MatcherResult publishReplacement(
-            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long sequence, int matcherShardId, int nativeMatcherShardId,
-            exchange.core2.core.common.MatcherResult cancellation,
-            exchange.core2.core.common.MatcherResult result,
-            com.surprising.aeron.service.settlement.TradeSettlement target) {
-        if (cancellation == null || result == null || target == null)
-            throw new IllegalArgumentException("native matcher replacement publication is required");
-        long nativeSequence = result.sequence();
-        if (nativeSequence > 0) {
-            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
-                    "matcher shard native sequence is not strictly increasing");
-        }
-        advanceStrictly(shardSequences, index(matcherShardId), sequence,
-                "matcher shard sequence is not strictly increasing");
-        target.publishDirectNativeReplacement(cancellation, result, coreSequence,
-                commandIdMsb, commandIdLsb, orderId,
-                sequence, matcherShardId);
-        return result;
-    }
-
-    /** 检查结果和目标非空，推进正原生序号及业务证据序号，再将结果和批次下标交给现有事件。 */
-    exchange.core2.core.common.MatcherResult publishBatchItem(
-            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long sequence, int matcherShardId, int nativeMatcherShardId,
-            exchange.core2.core.common.MatcherResult result, int index,
-            com.surprising.aeron.service.settlement.TradeSettlement target) {
-        if (result == null || target == null)
-            throw new IllegalArgumentException("native matcher batch publication is required");
-        long nativeSequence = result.sequence();
-        if (nativeSequence > 0) {
-            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
-                    "matcher shard native sequence is not strictly increasing");
-        }
-        advanceStrictly(shardSequences, index(matcherShardId), sequence,
-                "matcher shard sequence is not strictly increasing");
-        target.publishDirectNativeBatchItem(result, index, coreSequence,
-                commandIdMsb, commandIdLsb, orderId,
-                sequence, matcherShardId);
-        return result;
-    }
-
-    /** 要求拒绝码非空且目标存在，只推进业务证据分片，再向现有事件发布拒绝身份。 */
-    void publishRejection(
-            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long sequence, int matcherShardId, String resultCode,
-            com.surprising.aeron.service.settlement.TradeSettlement target) {
-        if (resultCode == null || resultCode.isBlank() || target == null)
-            throw new IllegalArgumentException("matcher rejection publication is required");
-        advanceStrictly(shardSequences, index(matcherShardId), sequence,
-                "matcher shard sequence is not strictly increasing");
-        target.publishDirectRejection(resultCode, coreSequence,
-                commandIdMsb, commandIdLsb, orderId,
-                sequence, matcherShardId);
-    }
-
-    /** 逐个以 acquire 读取已发布的业务分片进度，按负一控制分片到各撮合分片顺序返回只读列表。跨分片一致切面由调用方原快照栅栏保证，本方法不锁住全部所有者线程。 */
-    List<ShardProgress> snapshot() {
-        ArrayList<ShardProgress> progress = new ArrayList<>(shardCount);
-        for (int index = 0; index < shardCount; index++) {
-            int offset = offset(index);
-            progress.add(new ShardProgress(index - 1,
-                    (long) LONGS.getAcquire(shardSequences, offset)));
-        }
-        return List.copyOf(progress);
-    }
-
-    private int index(int matcherShardId) {
-        if (matcherShardId < -1 || matcherShardId >= topology.matchingEngineCount()) {
-            throw new IllegalArgumentException("matcher shard is outside configured topology");
-        }
-        return matcherShardId + 1;
-    }
-
-    /** 在单所有者约定下读取原值，要求新值严格更大，再以 release 发布。不是 CAS 重试，也不替调用方协调两个线程同时写同一分片。 */
-    private static void advanceStrictly(long[] values, int index, long next, String message) {
-        int offset = offset(index);
-        long previous = (long) LONGS.getAcquire(values, offset);
-        if (next <= previous) {
-            throw new IllegalStateException(message + " shard=" + (index - 1)
-                    + " previous=" + previous + " next=" + next);
-        }
-        // 每个撮合分片只有一个所有者写线程，以 release 发布即可供原快照栅栏读取。
-        // 这里不为每条撮合命令增加 CAS，也不支持两个线程同时写同一分片。
-        LONGS.setRelease(values, offset, next);
-    }
-
-    private static int offset(int index) {
-        return index * CACHE_LINE_LONGS;
-    }
-
-}
-
 }

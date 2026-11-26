@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.PlaceOrderCheckEvent;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import com.surprising.aeron.service.realtime.TradingRealtimeBoundary;
 
@@ -39,15 +40,15 @@ import com.surprising.aeron.service.matcher.OrderBookRouter;
 import com.surprising.aeron.service.order.OrderCommandQueue.IngressWindow;
 import com.surprising.aeron.service.order.OrderCommand;
 import com.surprising.aeron.service.order.OrderMatchingFlow;
-import com.surprising.aeron.service.order.OrderCommand.Direct;
+import com.surprising.aeron.service.order.DirectOrderCommand;
 import com.surprising.aeron.service.order.OrderCheckService;
 import com.surprising.aeron.service.order.OrderMatchingFlow.Progress;
 import com.surprising.aeron.service.order.OrderBatchProcessor;
-import com.surprising.aeron.service.order.OrderBatchProcessor.PendingBatch;
+import com.surprising.aeron.service.order.PendingOrderBatch;
 import com.surprising.aeron.service.order.OrderCommandQueue;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.OrderCommand.Decoded;
-import com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheck;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.DecodedOrderCommand;
+import com.surprising.aeron.service.order.ReplaceOrderCheck;
 import com.surprising.aeron.service.order.OrderCommitService;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.service.query.CoreQueryService;
@@ -105,8 +106,9 @@ public final class TradingCore implements AutoCloseable {
     final OrderBatchProcessor batches = new OrderBatchProcessor(this);
     public final CoreSnapshotLifecycle snapshots = new CoreSnapshotLifecycle(this);
     public final CoreQueryService bookQueries = new CoreQueryService(this);
-    public final OrderCommand.Direct directCommand = new OrderCommand.Direct(this);
-    private java.util.concurrent.CompletableFuture<com.surprising.aeron.service.realtime.TradingRealtimeBoundary.UserSnapshot> pendingRealtimeSnapshot;
+    public final DirectOrderCommand directCommand = new DirectOrderCommand(this);
+    private final TradingCoreRealtimeCoordinator realtimeCoordinator = new TradingCoreRealtimeCoordinator(this);
+    private final TradingCoreIngressCoordinator ingressCoordinator = new TradingCoreIngressCoordinator(this);
     final CoreRuntimeConfiguration configuration;
     final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
     final OrderCheckService orderChecks;
@@ -144,7 +146,7 @@ public final class TradingCore implements AutoCloseable {
         java.util.function.Consumer<com.surprising.aeron.service.funding.FundingSettlementService.FundingResult> replayFundingObserver;
         boolean clusterPipelineOrderCheck;
         CoreMessage decodedIngressMessage;
-        OrderCommand.Decoded decodedIngressCommand;
+        DecodedOrderCommand decodedIngressCommand;
         CommandFingerprint preparedIngressFingerprint;
         long preparedRouteUserLaneBit;
         int preparedRouteMatcherShard = -1;
@@ -366,84 +368,30 @@ public final class TradingCore implements AutoCloseable {
     /** 接入实时输出队列，创建本产品线的变更捕获器并交给运行时。这里只连接既有业务状态，不启动输出线程。 */
     public com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture attachRealtime(
             com.surprising.aeron.client.RealtimeOutbox outbox) {
-        state.realtimeCapture = new com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture(
-                outbox, productLine, identities);
-        accountBook.realtimeCapture(state.realtimeCapture);
-        return state.realtimeCapture;
+        return realtimeCoordinator.attachRealtime(outbox);
     }
 
     /** 返回已经发布的投影序号，用它标明实时快照可见的提交边界。 */
     public long realtimeExportSequence() { return commits.publication.publishedSequence(); }
     /** 判断是否还保存着一个待收集的实时账户快照请求。 */
-    public boolean realtimeSnapshotPending() { return pendingRealtimeSnapshot != null; }
+    public boolean realtimeSnapshotPending() { return realtimeCoordinator.realtimeSnapshotPending(); }
     /** 判断是否还保存着一个待收集的实时盘口请求。 */
     public boolean realtimeBookPending() { return state.realtimeBook != null; }
 
     /** 未来结果就绪后先取走等待槽，再按原请求位置、时间和导出序号发布账户快照。收集失败时记录捕获故障，并尝试发布快照不可用事件。 */
-    public int pollRealtimeSnapshot() {
-        if (pendingRealtimeSnapshot == null || !pendingRealtimeSnapshot.isDone()) return 0;
-        var future = pendingRealtimeSnapshot;
-        pendingRealtimeSnapshot = null;
-        try {
-            var snapshot = future.join();
-            state.realtimeCapture.begin(state.realtimeSnapshotPosition, state.realtimeSnapshotTimestamp, state.realtimeSnapshotId);
-            state.realtimeCapture.snapshot(state.realtimeSnapshotUser, snapshot, state.realtimeSnapshotExportSequence);
-            state.realtimeCapture.commit();
-        } catch (RuntimeException failure) {
-            state.realtimeCapture.failed();
-            state.realtimeCapture.begin(state.realtimeSnapshotPosition, state.realtimeSnapshotTimestamp, state.realtimeSnapshotId);
-            state.realtimeCapture.emit(com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE,
-                    state.realtimeSnapshotUser, "", "", new byte[0]);
-            state.realtimeCapture.commit();
-        }
-        return 1;
-    }
+    public int pollRealtimeSnapshot() { return realtimeCoordinator.pollRealtimeSnapshot(); }
 
     /** 收集已就绪的盘口读取并发布 BOOK 事件。 */
-    public int pollRealtimeBook() {
-        if (state.realtimeBook == null || !state.realtimeBook.isDone()) return 0;
-        var future = state.realtimeBook;
-        state.realtimeBook = null;
-        try {
-            var levels = future.join();
-            state.realtimeCapture.begin(state.realtimeBookPosition, state.realtimeBookTimestamp, 0);
-            state.realtimeCapture.emit(com.surprising.aeron.protocol.RealtimeFrame.Kind.BOOK, 0,
-                    state.realtimeBookSymbol, state.realtimeBookSymbol,
-                    com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOrderBookView(
-                            new com.surprising.aeron.protocol.CoreOrderBookView(state.realtimeBookPosition, levels)));
-            state.realtimeCapture.commit();
-        } catch (RuntimeException failure) {
-            state.realtimeCapture.failed();
-        }
-        return 1;
-    }
+    public int pollRealtimeBook() { return realtimeCoordinator.pollRealtimeBook(); }
 
     /** 实时功能启用且没有同类请求时，确认业务回调已完成，保存原请求元数据并发起账户快照读取。 */
     public void captureRealtimeSnapshot(long userId, long snapshotId, long position, long timestamp) {
-        if (state.realtimeCapture == null || pendingRealtimeSnapshot != null) return;
-        assertClusterCallbackComplete();
-        state.realtimeSnapshotExportSequence = realtimeExportSequence();
-        state.realtimeSnapshotUser = userId;
-        state.realtimeSnapshotId = snapshotId;
-        state.realtimeSnapshotPosition = position;
-        state.realtimeSnapshotTimestamp = timestamp;
-        try { pendingRealtimeSnapshot = accountBook.realtimeSnapshot(userId); }
-        catch (RuntimeException failure) { state.realtimeCapture.failed(); }
+        realtimeCoordinator.captureRealtimeSnapshot(userId, snapshotId, position, timestamp);
     }
 
     /** 实时功能启用且没有同类请求时，在对应 Matcher 的提交栅栏后读取最多 50 档盘口。 */
     public void captureRealtimeBook(String instrumentId, long position, long timestamp) {
-        if (state.realtimeCapture == null || state.realtimeBook != null) return;
-        assertClusterCallbackComplete();
-        state.realtimeBookSymbol = instrumentId;
-        state.realtimeBookPosition = position;
-        state.realtimeBookTimestamp = timestamp;
-        try {
-            state.realtimeBook = matcherPipeline.readAtSubmissionFence(matchingAdapter.matcherShardId(instrumentId),
-                    () -> matchingAdapter.orderBookLevels(instrumentId, 50));
-        } catch (RuntimeException failure) {
-            state.realtimeCapture.failed();
-        }
+        realtimeCoordinator.captureRealtimeBook(instrumentId, position, timestamp);
     }
 
     /** 独立调用的便捷入口：用请求提交时间作为业务时间，并计算下一个计数作为位置。 */
@@ -492,7 +440,7 @@ public final class TradingCore implements AutoCloseable {
         if (message.header().kind() != WireMessageKind.COMMAND) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
-        return applyCommandIngress(message, clusterTimestamp, clusterPosition);
+        return ingressCoordinator.applyCommandIngress(message, clusterTimestamp, clusterPosition);
     }
 
     /** 判断准备此请求是否需要 Owner 账户访问边界。 */
@@ -516,25 +464,25 @@ public final class TradingCore implements AutoCloseable {
 
     /** 必要时进入异步命令作用域，按独立窗口方式执行已准备的 Cluster 输入。 */
     public CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position,
-                                     OrderCommand.Decoded decoded) {
+                                     DecodedOrderCommand decoded) {
         return applyDecodedCommand(message, timestamp, position, decoded, true);
     }
 
     /** 为已准备输入补上空的预计算指纹参数，再进入统一执行路径。 */
     public CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
-                                     OrderCommand.Decoded decoded, boolean independent) {
+                                     DecodedOrderCommand decoded, boolean independent) {
         return applyDecodedCommand(message, timestamp, position, decoded, independent, null);
     }
 
     /** 临时接入本条输入的解码对象、指纹和窗口准入标记，调用正常交易入口。无论成功或抛错都恢复外层调用的准备状态。 */
     public CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
-                                     OrderCommand.Decoded decoded, boolean independent,
+                                     DecodedOrderCommand decoded, boolean independent,
                                      CommandFingerprint fingerprint) {
         CommandFingerprint previousFingerprint = state.preparedIngressFingerprint;
         state.preparedIngressFingerprint = fingerprint;
         boolean previousOrderCheck = state.clusterPipelineOrderCheck;
         CoreMessage previousMessage = state.decodedIngressMessage;
-        OrderCommand.Decoded previousCommand = state.decodedIngressCommand;
+        DecodedOrderCommand previousCommand = state.decodedIngressCommand;
         state.clusterPipelineOrderCheck = independent;
         state.decodedIngressMessage = message;
         state.decodedIngressCommand = decoded;
@@ -549,9 +497,9 @@ public final class TradingCore implements AutoCloseable {
     }
 
     /** 取得当前输入的撮合解码结果。复用槽尚未解码时在此延迟解码，使串行输入先经过幂等和来源检查，再落入业务拒绝处理边界。 */
-    public OrderCommand.Decoded decodeMatchingCommand(CoreMessage message) {
+    public DecodedOrderCommand decodeMatchingCommand(CoreMessage message) {
         if (message != state.decodedIngressMessage || state.decodedIngressCommand == null)
-            return OrderCommand.Decoded.decode(message);
+            return DecodedOrderCommand.decode(message);
         // 解码留在幂等和来源检查之后，并处于准入的业务拒绝处理范围内。
         if (!state.decodedIngressCommand.isDecoded()) state.decodedIngressCommand.decodeInto(message);
         return state.decodedIngressCommand;
@@ -559,207 +507,7 @@ public final class TradingCore implements AutoCloseable {
 
     /** 只做独立窗口的路由预检查：支持同一 Matcher 分片的下单、撤单及对应批量命令，排除需要全局持仓量依赖等情况。 */
     public boolean prepareClusterPipelineScope(CoreMessage message, OrderCommandQueue.IngressWindow window) {
-        if (!activated()) activate();
-        assertOwner();
-        long user = message.header().userId();
-        if (message.header().productLine() != productLine || user <= 0) {
-            return rememberPipelineRoute(window, false);
-        }
-        window.resetCandidate(user);
-        try {
-            OrderCommand.Decoded decoded = window.decoded(message);
-            switch (message.header().messageType()) {
-                case PLACE_ORDER -> {
-                    var command = decoded.placeOrder();
-                    var instrument = accountBook.instrument(command.instrumentId());
-                    if (instrument != null && instrument.usesOpenInterestForUserLimit() && !command.reduceOnly())
-                        return rememberPipelineRoute(window, false);
-                    window.route(decoded.matcherShard(matchingAdapter, command.instrumentId()),
-                            accountBook.topology().accountLaneMask(user));
-                    return rememberPipelineRoute(window, true);
-                }
-                case CANCEL_ORDER -> {
-                    long orderId = decoded.cancelOrder().orderId();
-                    var route = bizIndex.activeOrders().activeOrderRoute(orderId);
-                    if (route == null || route.userId() != user || route.instrumentId() == null
-                            || route.instrumentId().isBlank()) return rememberPipelineRoute(window, false);
-                    window.route(matchingAdapter.matcherShardId(route.instrumentId()),
-                            accountBook.topology().accountLaneMask(user));
-                    return rememberPipelineRoute(window, true);
-                }
-                case PLACE_ORDER_BATCH -> {
-                    int shard = -1;
-                    for (var order : decoded.placeOrderBatch().orders()) {
-                        var instrument = accountBook.instrument(order.instrumentId());
-                        if (instrument != null && instrument.usesOpenInterestForUserLimit() && !order.reduceOnly())
-                            return rememberPipelineRoute(window, false);
-                        int current = decoded.matcherShard(matchingAdapter, order.instrumentId());
-                        if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
-                        if (shard < 0) {
-                            shard = current;
-                            window.route(shard, accountBook.topology().accountLaneMask(user));
-                        }
-                    }
-                    return rememberPipelineRoute(window, shard >= 0);
-                }
-                case CANCEL_ORDER_BATCH -> {
-                    int shard = -1;
-                    for (var order : decoded.cancelOrderBatch().orders()) {
-                        var route = bizIndex.activeOrders().activeOrderRoute(order.orderId());
-                        if (route == null || route.userId() != user || route.instrumentId() == null
-                                || route.instrumentId().isBlank()) return rememberPipelineRoute(window, false);
-                        int current = matchingAdapter.matcherShardId(route.instrumentId());
-                        if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
-                        shard = current;
-                    }
-                    window.route(shard, accountBook.topology().accountLaneMask(user));
-                    return rememberPipelineRoute(window, true);
-                }
-                default -> { return rememberPipelineRoute(window, false); }
-            }
-        } catch (IllegalArgumentException | java.nio.BufferUnderflowException invalid) {
-            return rememberPipelineRoute(window, false);
-        }
-    }
-
-    /** 不适用时清空路由提示，避免沿用上一条输入。 */
-    private boolean rememberPipelineRoute(OrderCommandQueue.IngressWindow window, boolean eligible) {
-        state.preparedRouteUserLaneBit = eligible ? window.routeUserLaneBit() : 0;
-        state.preparedRouteMatcherShard = eligible ? window.routeMatcherShard() : -1;
-        return eligible;
-    }
-
-    private CoreResponse applyCommandIngress(CoreMessage message, long clusterTimestamp, long clusterPosition) {
-        CommandFingerprint fingerprint = message == state.decodedIngressMessage && state.preparedIngressFingerprint != null
-                ? state.preparedIngressFingerprint : fingerprints.of(message);
-        CoreResponse replayResponse = checkCommandReplay(message, fingerprint);
-        if (replayResponse != null) return replayResponse;
-
-        long lastSourceSequence = sourceSequenceIndex.lookupOrDefault(
-                message.header().source(), message.header().sourceId(), -1);
-        SourceKey sourceKey = sourceSequenceIndex.lastLookupKey();
-        if (sourceKey == null) {
-            sourceKey = new SourceKey(message.header().source(), message.header().sourceId());
-        }
-        if (isFundsIdempotencyCommand(message.header().messageType())) {
-            CoreResponse fundsReplay = fundsReplayResponse(completedOrderArchive.fundsCommandMatch(
-                    message.header().commandIdMsb(), message.header().commandIdLsb(), fingerprint));
-            if (fundsReplay != null) return fundsReplay;
-        }
-        CoreResponse sourceSequenceResponse = checkSourceSequence(message, lastSourceSequence);
-        if (sourceSequenceResponse != null) return sourceSequenceResponse;
-
-        if (isFundsIdempotencyCommand(message.header().messageType())) {
-            completedOrderArchive.reserveFundsCommandIdentity();
-        }
-
-        if (isMatchingCommand(message.header().messageType())) {
-            if (pendingMatching.size() >= pendingMatching.capacity()) {
-                throw new IllegalStateException("matcher dispatch window is exhausted after Cluster Log append");
-            }
-            if (isOrderBatchCommand(message.header().messageType())) {
-                return batches.beginOrderBatchMatching(message, clusterTimestamp, clusterPosition,
-                        sourceKey, fingerprint);
-            }
-            return orderChecks.beginMatching(message, clusterTimestamp, clusterPosition,
-                    sourceKey, fingerprint);
-        }
-        return applyDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
-    }
-
-    /** 直接控制入口：建立命令事实、回滚检查点及发布作用域，执行业务处理并映射已列明的业务异常。有异步续步时返回空，否则继续完成终态。 */
-    private CoreResponse applyDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
-                                    SourceKey sourceKey, CommandFingerprint fingerprint) {
-        ResponseStatus status;
-        CoreResultCode resultCode = CoreResultCode.NONE;
-        activateFactContext(message, fingerprint);
-        long beforeRuntimeRevision = accountBook.revision();
-        long positionIdentityCheckpoint = identities.positionCheckpoint();
-        directCommand.initialize(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
-                beforeRuntimeRevision, beforeRuntimeRevision, positionIdentityCheckpoint);
-        resultBuilder.beginCommand();
-        orderChecks.clearQueuedMatching();
-        commits.publication.begin();
-        try {
-            if (directCommands.dispatch(message, clusterTimestamp)) {
-                status = ResponseStatus.APPLIED;
-            } else {
-                switch (message.header().messageType()) {
-                    case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER,
-                            PLACE_ORDER_BATCH, CANCEL_ORDER_BATCH, AMEND_ORDER_BATCH,
-                            EXECUTE_LIQUIDATION, SETTLE_INSTRUMENT ->
-                            throw new IllegalStateException("matching command must use async continuation");
-                    default -> status = null;
-                }
-            }
-        } catch (CoreStateRejectedException exception) {
-            status = ResponseStatus.REJECTED;
-            resultCode = CoreResultCode.fromRejectionCode(exception.code());
-        } catch (ArithmeticException exception) {
-            status = ResponseStatus.REJECTED;
-            resultCode = CoreResultCode.ARITHMETIC_OVERFLOW;
-        } catch (IllegalArgumentException exception) {
-            status = ResponseStatus.REJECTED;
-            resultCode = CoreResultCode.INVALID_COMMAND;
-        }
-        if (directCommand.hasControlWork()) return null;
-        return finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint,
-                beforeRuntimeRevision, beforeRuntimeRevision, positionIdentityCheckpoint, status, resultCode);
-    }
-
-    /** 指纹冲突直接拒绝，同一在途命令只返回等待提示，避免重复准入。 */
-    private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
-        if (commandResultLog.isEmpty() && pendingMatching.isEmpty()) return null;
-        long msb = message.header().commandIdMsb();
-        long lsb = message.header().commandIdLsb();
-        if (!commandResultLog.isEmpty()) {
-            CommandResultLog.StoredResult terminalDuplicate = commandResultLog.get(msb, lsb);
-            if (terminalDuplicate != null) {
-                return commandResultLog.duplicateResponse(terminalDuplicate, fingerprint, state.appliedCommandCount);
-            }
-        }
-        if (!pendingMatching.isEmpty()) {
-            OrderCommand pendingDuplicate = pendingMatching.findByCommandId(msb, lsb);
-            if (pendingDuplicate != null) {
-                if (!pendingDuplicate.fingerprint().equals(fingerprint)) {
-                    return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                            com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                            CoreResultCode.IDEMPOTENCY_CONFLICT, state.appliedCommandCount,
-                            EMPTY_RESPONSE_DATA);
-                }
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
-                        com.surprising.aeron.protocol.ResponseStatus.OK, CoreResultCode.MATCHING_PENDING,
-                        pendingDuplicate.sequence(),
-                        EMPTY_RESPONSE_DATA);
-            }
-        }
-        return null;
-    }
-
-    private CoreResponse fundsReplayResponse(FundsCommandIndex.Match match) {
-        if (match == FundsCommandIndex.Match.ABSENT) return null;
-        if (match == FundsCommandIndex.Match.CONFLICT) {
-            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                    com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                    CoreResultCode.IDEMPOTENCY_CONFLICT, state.appliedCommandCount,
-                    EMPTY_RESPONSE_DATA);
-        }
-        return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
-                    com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    state.appliedCommandCount, EMPTY_RESPONSE_DATA);
-    }
-
-    private CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
-        if (lastSourceSequence >= 0 && message.header().sourceSequence() <= lastSourceSequence) {
-            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
-                    com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
-                    CoreResultCode.STALE_SOURCE_SEQUENCE, state.appliedCommandCount);
-        }
-        if (lastSourceSequence < 0
-                && sourceSequenceIndex.size() >= Limits.MAX_SOURCE_SEQUENCES) {
-            return rejected(CoreResultCode.SOURCE_SEQUENCE_TRACKING_FULL);
-        }
-        return null;
+        return ingressCoordinator.prepareClusterPipelineScope(message, window);
     }
 
     /** 直接控制完成入口：必要时回滚被拒绝的命令，收集关闭的触发单、订单变化和账户提交，等待资金校验及发布完成，最后进入资金长期身份保留与终态保存。 */
@@ -767,102 +515,9 @@ public final class TradingCore implements AutoCloseable {
             SourceKey sourceKey, CommandFingerprint fingerprint,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
-        long nextAppliedCommandCount = Math.incrementExact(state.appliedCommandCount);
-        if (!directCommand.finalizationPrepared()) {
-            if (status != ResponseStatus.APPLIED
-                    && (commits.publication.dirty()
-                    || accountBook.revision() != beforeRuntimeRevision
-                    || accountBook.hasUncommittedCommandChanges())) {
-                rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                        Math.incrementExact(state.appliedCommandCount));
-            }
-            if (status == null) {
-                commits.publication.clearBatchState();
-                return finishDirectCommandContext(rejected(CoreResultCode.INVALID_MESSAGE));
-            }
-            if (status == ResponseStatus.APPLIED) {
-                try {
-                    if (!triggers.collectClosingTriggerIds().isEmpty()) {
-                        commits.publication.request();
-                    }
-                } catch (ArithmeticException failure) {
-                    if (deferFinalizationRejection(CoreResultCode.ARITHMETIC_OVERFLOW)) return null;
-                    throw failure;
-                }
-                if (pendingMatching.size() + orderChecks.queuedMatchingCount()
-                        > pendingMatching.capacity()) {
-                    orderChecks.clearQueuedMatching();
-                    if (deferFinalizationRejection(CoreResultCode.MATCHING_BACKPRESSURE)) return null;
-                    rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                            Math.incrementExact(state.appliedCommandCount));
-                    return finishDirectCommandContext(rejected(CoreResultCode.MATCHING_BACKPRESSURE));
-                }
-            }
-            resultBuilder.materializeDirectChangeAccumulators();
-            if (status == ResponseStatus.APPLIED && !resultBuilder.commandChangedUserIds.isEmpty()) {
-                accountBook.releaseCompletedSequentialLaneStage();
-                directCommand.commitEvent(accountBook.dispatchLaneMutation(
-                        nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
-                        accountBook.metadataOrderUsers(resultBuilder.commandChangedOrderIds), triggers.closingTriggerIds(),
-                        clusterTimestamp, clusterPosition));
-            }
-            directCommand.markFinalizationPrepared();
-        }
-        if (directCommand.commitEvent() != null) {
-            if (!accountBook.laneCommitComplete(directCommand.commitEvent())) {
-                directCommand.result(status, resultCode);
-                return null;
-            }
-            accountBook.releaseLaneCommit(directCommand.commitEvent());
-            directCommand.clearCommitEvent();
-        }
-        if (status == ResponseStatus.APPLIED) {
-            accountBook.validateControlFunds(
-                    message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE
-                    || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_OUT
-                    || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN
-                    || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_INSURANCE_FUND);
-        }
-        directCommand.clearFinalizationPrepared();
-        commits.publication.complete();
-        return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
-                sourceKey, fingerprint, status, resultCode, nextAppliedCommandCount);
-    }
-
-    /** 成功资金命令同步保存长期身份，再推进计数、记来源、追加衍生撮合并保存近期收据，最后移交响应缓冲租约。长期保存失败可能发生在账户和发布已完成之后，不能据此声称业务已回滚。 */
-    private CoreResponse finishResponseAfterFundsRetention(CoreMessage message, long clusterTimestamp,
-            long clusterPosition, SourceKey sourceKey, CommandFingerprint fingerprint,
-            ResponseStatus status, CoreResultCode resultCode, long nextAppliedCommandCount) {
-        if (isFundsIdempotencyCommand(message.header().messageType())
-                && status == ResponseStatus.APPLIED) {
-            completedOrderArchive.retainFundsCommand(message.header().commandIdMsb(),
-                    message.header().commandIdLsb(), fingerprint);
-        }
-        recordAppliedSequence(nextAppliedCommandCount, sourceKey, message.header().sourceSequence());
-        orderChecks.appendQueuedMatching(clusterTimestamp, clusterPosition);
-        byte[] responseData = resultBuilder.commandResultData();
-        int responseOffset = resultBuilder.responseDataOffset();
-        int responseLength = resultBuilder.responseDataLength();
-        commandResultLog.storeOwnedResult(message.header().commandIdMsb(), message.header().commandIdLsb(), fingerprint, status, resultCode,
-                state.appliedCommandCount, responseData,
-                responseOffset, responseLength);
-        CoreResponse response = message.ownedResponse(status, status, resultCode, state.appliedCommandCount,
-                responseData, responseOffset, responseLength);
-        resultBuilder.transferResponseOwnership();
-        return finishDirectCommandContext(response);
-    }
-
-    private CoreResponse finishDirectCommandContext(CoreResponse response) {
-        directCommand.clear();
-        return finishFactContext(response);
-    }
-
-    private boolean deferFinalizationRejection(CoreResultCode code) {
-        if (!directCommand.active()) {
-            throw new IllegalStateException("asynchronous finalization has no command context");
-        }
-        directCommand.result(ResponseStatus.REJECTED, code);
-        return true;
+        return ingressCoordinator.finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey,
+                fingerprint, beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint,
+                status, resultCode);
     }
     /** 唯一直接控制命令续步槽，与普通撮合序号槽分开管理。 */
 
@@ -971,7 +626,7 @@ public final class TradingCore implements AutoCloseable {
         var settlement = pending.settlementEvent();
         if (settlement != null && settlement.complete()) return true;
         if (pending.commitEvent() != null && pending.commitEvent().complete()) return true;
-        OrderBatchProcessor.PendingBatch batch = pending.orderBatch();
+        PendingOrderBatch batch = pending.orderBatch();
         if (batch == null) return false;
         if (batch.itemSettlementEvent() != null && batch.itemSettlementEvent().complete()) return true;
         if (batch.settlementEvent() != null && batch.settlementEvent().complete()) return true;
@@ -1025,6 +680,11 @@ public final class TradingCore implements AutoCloseable {
             long fenceSequence) {
         if (state.activated) throw new IllegalStateException("account lanes must restore before activation");
         accountBook.restoreAccountLaneSnapshots(snapshots, fenceSequence, snapshotTradingState());
+    }
+
+    public void parkOnIdle(boolean parkOnIdle) {
+        matcherPipeline.setParkOnIdle(parkOnIdle);
+        accountBook.setParkOnIdle(parkOnIdle);
     }
 
     /** 以禁用 CPU 亲和的配置激活运行时。 */
@@ -1302,7 +962,7 @@ public final class TradingCore implements AutoCloseable {
     }
 
     /** 借用准入事件，按当前运行时业务时间解析下单规则并确定结算状态与资产，再派发账户准入。 */
-    public com.surprising.aeron.service.order.OrderCommand.PlaceOrderCheckEvent dispatchPlaceOrderCheck(
+    public com.surprising.aeron.service.order.PlaceOrderCheckEvent dispatchPlaceOrderCheck(
             long userId, PlaceOrderCommand command, UUID commandId, long coreSequence,
             long timestamp, long position) {
         var event = accountBook.acquirePlaceOrderCheck();
@@ -1326,8 +986,8 @@ public final class TradingCore implements AutoCloseable {
     }
 
     /** 取得在途命令必须具备的准入结果，缺失视为流程错误。 */
-    public OrderCommand.ReplaceOrderCheck requireMatchingOrderCheck(OrderCommand pending) {
-        OrderCommand.ReplaceOrderCheck orderCheck = pending.matchingOrderCheck();
+    public ReplaceOrderCheck requireMatchingOrderCheck(OrderCommand pending) {
+        ReplaceOrderCheck orderCheck = pending.matchingOrderCheck();
         if (orderCheck == null) throw new IllegalStateException("replace admission is missing");
         return orderCheck;
     }
@@ -1497,30 +1157,11 @@ public final class TradingCore implements AutoCloseable {
 
     /** 先保存成交计划与 taker 引用，再清在途实时引用。仅捕获 TRADE 事件，实时捕获异常只计故障，不回滚交易。 */
     public void captureRealtimeTrades(OrderCommand pending) {
-        var plan = pending.settlementPlan();
-        Order taker = pending.realtimeTakerOrder();
-        OrderCommand.ResolvedPlaceOrder resolvedTaker = pending.realtimeResolvedTakerOrder();
-        pending.realtimeTakerOrder(null);
-        pending.realtimeResolvedTakerOrder(null);
-        if (state.realtimeCapture == null || !state.realtimeCapture.active()) return;
-        try {
-            for (int index = 0; index < plan.matcherEventCount(); index++) {
-                MatcherEvent match = plan.matcherEvent(index);
-                if (match.eventType() != MatcherEventType.TRADE) continue;
-                if (resolvedTaker != null) {
-                    state.realtimeCapture.trade(pending.command().header().userId(), resolvedTaker.orderId(),
-                            resolvedTaker.symbolId(), resolvedTaker.side(), plan.coreSequence(), index,
-                            match.price(), match.size(), match.matchedOrderId(), match.matchedOrderUid());
-                } else {
-                    state.realtimeCapture.trade(taker, plan.coreSequence(), index, match.price(), match.size(),
-                            match.matchedOrderId(), match.matchedOrderUid());
-                }
-            }
-        } catch (RuntimeException failure) { state.realtimeCapture.failed(); }
+        realtimeCoordinator.captureRealtimeTrades(pending);
     }
 
     /** 统计结算计划中的 TRADE 事件条数，不以订单数或成交数量代替。 */
-    public static long tradeCount(com.surprising.aeron.service.settlement.TradeSettlement.Plan plan) {
+    public static long tradeCount(com.surprising.aeron.service.settlement.TradeSettlementPlan plan) {
         long trades = 0;
         for (int index = 0; index < plan.matcherEventCount(); index++)
             if (plan.matcherEvent(index).eventType() == MatcherEventType.TRADE) trades++;
@@ -1532,31 +1173,12 @@ public final class TradingCore implements AutoCloseable {
             long base,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> policies,
             Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> transfers) {
-        long feePolicyHash = computeFeePolicyHash(policies);
-        if (feePolicyHash != 0) base = mix(base, feePolicyHash);
-        long transferHash = computeTransferHash(transfers);
-        return transferHash == 0 ? base : mix(base, transferHash);
+        return TradingCoreHashSupport.canonicalBusinessStateHash(base, policies, transfers);
     }
 
     /** 按提供映射的值遍历顺序混入待完成划转的业务字段。 */
-    static long computeTransferHash(
-            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> transfers) {
-        if (transfers.isEmpty()) return 0;
-        long digest = ExecutionState.HASH_OFFSET_BASIS;
-        for (var command : transfers.values()) {
-            digest = mix(digest, command.transferId());
-            digest = mix(digest, command.sourceUserId());
-            digest = mix(digest, command.targetUserId());
-            digest = mix(digest, com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(command.sourceProductLine()));
-            digest = mix(digest, com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(command.targetProductLine()));
-            digest = mixText(digest, command.sourceAccountType());
-            digest = mixText(digest, command.targetAccountType());
-            digest = mixText(digest, command.asset());
-            digest = mix(digest, command.amountUnits());
-            digest = mixText(digest, command.referenceId());
-            digest = mixText(digest, command.reason());
-        }
-        return digest;
+    static long computeTransferHash(Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> transfers) {
+        return TradingCoreHashSupport.computeTransferHash(transfers);
     }
 
     /** 列举需要长期资金身份去重的余额调整、转出、转入和完成划转命令。 */
@@ -1566,115 +1188,23 @@ public final class TradingCore implements AutoCloseable {
     }
 
     /** 按提供映射的值遍历顺序混入费用政策字段。 */
-    static long computeFeePolicyHash(
-            Map<Long, com.surprising.aeron.model.CoreFeePolicyState> policies) {
-        if (policies.isEmpty()) return 0;
-        long digest = ExecutionState.HASH_OFFSET_BASIS;
-        for (var policy : policies.values()) {
-            digest = mix(digest, policy.policyId());
-            digest = mix(digest, policy.policyRevision());
-            digest = mix(digest, policy.userId());
-            digest = mixText(digest, policy.instrumentId());
-            digest = mix(digest, policy.makerFeeRatePpm());
-            digest = mix(digest, policy.takerFeeRatePpm());
-            digest = mix(digest, policy.sourcePriority());
-            digest = mix(digest, policy.active() ? 1 : 0);
-            digest = mix(digest, policy.effectiveFromEpochMillis());
-            digest = mix(digest, policy.expireAtEpochMillis());
-        }
-        return digest;
-    }
-
-    private static long mixText(long hash, String value) {
-        if (value == null || value.isEmpty()) return mix(hash, 0);
-        int length = value.length();
-        boolean isAscii = true;
-        for (int i = 0; i < length; i++) {
-            if (value.charAt(i) >= 0x80) {
-                isAscii = false;
-                break;
-            }
-        }
-        if (isAscii) {
-            long result = mix(hash, length);
-            for (int i = 0; i < length; i++) {
-                result ^= value.charAt(i);
-                result *= ExecutionState.HASH_PRIME;
-            }
-            return result;
-        }
-        int utf8Len = 0;
-        for (int i = 0; i < length; i++) {
-            char c = value.charAt(i);
-            if (c < 0x80) utf8Len++;
-            else if (c < 0x800) utf8Len += 2;
-            else if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(value.charAt(i + 1))) {
-                utf8Len += 4;
-                i++;
-            } else if (!Character.isSurrogate(c)) utf8Len += 3;
-            else utf8Len += 1;
-        }
-        long result = mix(hash, utf8Len);
-        for (int i = 0; i < length; i++) {
-            char c = value.charAt(i);
-            if (c < 0x80) {
-                result ^= c;
-                result *= ExecutionState.HASH_PRIME;
-            } else if (c < 0x800) {
-                result ^= (0xc0 | (c >>> 6));
-                result *= ExecutionState.HASH_PRIME;
-                result ^= (0x80 | (c & 0x3f));
-                result *= ExecutionState.HASH_PRIME;
-            } else if (!Character.isSurrogate(c)) {
-                result ^= (0xe0 | (c >>> 12));
-                result *= ExecutionState.HASH_PRIME;
-                result ^= (0x80 | ((c >>> 6) & 0x3f));
-                result *= ExecutionState.HASH_PRIME;
-                result ^= (0x80 | (c & 0x3f));
-                result *= ExecutionState.HASH_PRIME;
-            } else if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(value.charAt(i + 1))) {
-                int point = Character.toCodePoint(c, value.charAt(++i));
-                result ^= (0xf0 | (point >>> 18));
-                result *= ExecutionState.HASH_PRIME;
-                result ^= (0x80 | ((point >>> 12) & 0x3f));
-                result *= ExecutionState.HASH_PRIME;
-                result ^= (0x80 | ((point >>> 6) & 0x3f));
-                result *= ExecutionState.HASH_PRIME;
-                result ^= (0x80 | (point & 0x3f));
-                result *= ExecutionState.HASH_PRIME;
-            } else {
-                result ^= '?';
-                result *= ExecutionState.HASH_PRIME;
-            }
-        }
-        return result;
+    static long computeFeePolicyHash(Map<Long, com.surprising.aeron.model.CoreFeePolicyState> policies) {
+        return TradingCoreHashSupport.computeFeePolicyHash(policies);
     }
 
     /** 按从低到高的八个字节混入长整数。自然溢出属于哈希算法，与资金算术无关。 */
     public static long mix(long hash, long value) {
-        long result = hash;
-        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
-            result ^= (value >>> shift) & 0xff;
-            result *= ExecutionState.HASH_PRIME;
-        }
-        return result;
+        return TradingCoreHashSupport.mix(hash, value);
     }
 
     /** 将每个来源键及其序号的摘要异或合并，因此不依赖来源表遍历顺序。 */
     public static long sourceSequenceDigest(Map<SourceKey, Long> sequences) {
-        long digest = 0;
-        for (Map.Entry<SourceKey, Long> entry : sequences.entrySet()) {
-            digest ^= sourceSequenceDigest(entry.getKey(), entry.getValue());
-        }
-        return digest;
+        return TradingCoreHashSupport.sourceSequenceDigest(sequences);
     }
 
     /** 对来源类型、来源身份及该来源序号计算单项摘要。 */
     public static long sourceSequenceDigest(SourceKey key, long sequence) {
-        long digest = ExecutionState.HASH_OFFSET_BASIS;
-        digest = mix(digest, key.source().wireCode());
-        digest = mix(digest, key.sourceId());
-        return mix(digest, sequence);
+        return TradingCoreHashSupport.sourceSequenceDigest(key, sequence);
     }
 
     /** 使用当前已受理计数生成业务拒绝响应，不在此推进命令水位。 */
@@ -1786,80 +1316,7 @@ public final class TradingCore implements AutoCloseable {
 
     /** 按撮合命令类型准备普通下单、触发子单、撤单或改单结算事件。 */
     public com.surprising.aeron.service.settlement.TradeSettlement prepareForMatching(OrderCommand pending) {
-        if (pending.operation() == OrderCommand.Operation.REPLACE
-                || pending.operation() == OrderCommand.Operation.AMEND) {
-            return prepareReplacement(pending);
-        }
-        return switch (pending.operation()) {
-            case PLACE -> preparePlace(pending);
-            case TRIGGER -> prepareTrigger(pending);
-            case CANCEL -> prepareCancellation(pending);
-            default -> null;
-        };
-    }
-
-    /** 要求下单准入收据已挂上，用初始用户 Lane 和原提交栅栏准备结算事件。单笔先撤稍后由准入事件并入，并保留 Matcher 发布租约。 */
-    private com.surprising.aeron.service.settlement.TradeSettlement preparePlace(OrderCommand pending) {
-        var orderCheck = java.util.Objects.requireNonNull(pending.placeOrderCheck(), "place admission receipt");
-        com.surprising.aeron.service.settlement.TradeSettlement direct = accountBook.prepareDirectMatcherSettlement(
-                pending.sequence(), directInitialLaneMask(orderCheck.userId()), orderCheck,
-                pending.command().header().commandId(), matchingFlow.matcherShard(pending),
-                identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                java.util.List.of(), pending.laneResultTarget());
-        reserveMatcherPublication(pending, direct);
-        return direct;
-    }
-
-    /** 要求改单准入已完成，按原提交栅栏准备替换结算及发布租约。 */
-    private com.surprising.aeron.service.settlement.TradeSettlement prepareReplacement(OrderCommand pending) {
-        var orderCheck = requireMatchingOrderCheck(pending);
-        com.surprising.aeron.service.settlement.TradeSettlement direct = accountBook.prepareDirectReplacement(
-                pending.sequence(), pending.sequence(), directInitialLaneMask(orderCheck.userId()), orderCheck,
-                pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
-                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-        reserveMatcherPublication(pending, direct);
-        if (state.realtimeCapture != null) pending.realtimeTakerOrder(direct.admittedOrder());
-        return direct;
-    }
-
-    /** 解码触发执行字段，要求原触发单及子单收据存在，准备子单结算并登记触发完成信息，再保留发布租约及可选实时引用。 */
-    private com.surprising.aeron.service.settlement.TradeSettlement prepareTrigger(OrderCommand pending) {
-        long[] execute = pending.decodedCommand().trigger();
-        var trigger = java.util.Objects.requireNonNull(pending.sourceTrigger(),
-                "admitted trigger is missing");
-        com.surprising.aeron.service.order.Order triggerOrder = java.util.Objects.requireNonNull(pending.triggerOrderCheckOrder(),
-                "trigger admission receipt is missing");
-        com.surprising.aeron.service.settlement.TradeSettlement direct = accountBook.prepareDirectMatcherSettlement(pending.sequence(),
-                directInitialLaneMask(triggerOrder.userId()), triggerOrder, null, 1,
-                pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
-                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-        direct.triggerCompletion(trigger, execute[3]);
-        reserveMatcherPublication(pending, direct);
-        if (state.realtimeCapture != null) pending.realtimeTakerOrder(triggerOrder);
-        return direct;
-    }
-
-    /** 按用户、订单身份、原提交栅栏及结果槽准备直接撤单结算事件，并保留 Matcher 发布租约。 */
-    private com.surprising.aeron.service.settlement.TradeSettlement prepareCancellation(OrderCommand pending) {
-        com.surprising.aeron.service.settlement.TradeSettlement direct = accountBook.prepareDirectCancellation(pending.sequence(),
-                pending.command().header().userId(), pending.decodedCommand().cancelOrder().orderId(),
-                pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
-                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
-        reserveMatcherPublication(pending, direct);
-        return direct;
-    }
-
-    /** 把结算事件与计划登记到在途命令，并取得 Matcher 发布所需的生产者租约。 */
-    private void reserveMatcherPublication(OrderCommand pending, com.surprising.aeron.service.settlement.TradeSettlement direct) {
-        pending.settlement(direct, direct.plan());
-        direct.reserveMatcherPublication();
-    }
-
-    private long directInitialLaneMask(long userId) {
-        if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");
-        return accountBook.topology().accountLaneMask(userId);
+        return ingressCoordinator.prepareForMatching(pending);
     }
 
     /** 借出来源序号索引，写入仍由 Owner 的有序命令完成路径负责。 */

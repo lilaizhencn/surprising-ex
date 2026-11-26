@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.PendingOrderBatch;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -18,9 +19,9 @@ class OrderBatchSlotReuseTest {
      */
     @Test void orderCheckReceiptBelongsToItsItemAndSurvivesOtherBatchesAndReuse() {
         // 第一批上下文或其首项对象，具体类型见声明
-        var first = new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool(1, 4096));
+        var first = new PendingOrderBatch(1, new ResponseSlotPool(1, 4096));
         // 第二批独立上下文
-        var second = new OrderBatchProcessor.PendingBatch(1, new ResponseSlotPool(1, 4096));
+        var second = new PendingOrderBatch(1, new ResponseSlotPool(1, 4096));
         first.addItem(11, 0, 0, new Object());
         second.addItem(12, 0, 0, new Object());
         // 用于捕获的活跃订单，不能被副本复用改写
@@ -77,7 +78,7 @@ class OrderBatchSlotReuseTest {
         // 测试显式创建的有限响应分配器
         var 槽池 = new ResponseSlotPool(1, 4096);
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchProcessor.PendingBatch(1, 槽池);
+        var batch = new PendingOrderBatch(1, 槽池);
         batch.addItem(1, 0, 0, new Object());
         // 当前设置状态或准备结果的批内项
         var item = batch.items.getFirst();
@@ -105,7 +106,7 @@ class OrderBatchSlotReuseTest {
      * 显式传空响应分配器必须失败，并说明缺少 response slot pool。
      */
     @Test void batchRequiresAnExplicitResponseSlotPool() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new OrderBatchProcessor.PendingBatch(1, null))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new PendingOrderBatch(1, null))
                 .isInstanceOf(NullPointerException.class).hasMessageContaining("response slot pool");
     }
 
@@ -116,7 +117,7 @@ class OrderBatchSlotReuseTest {
         // 测试显式创建的有限响应分配器
         var 槽池 = new ResponseSlotPool(1, 4096);
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchProcessor.PendingBatch(2, 槽池);
+        var batch = new PendingOrderBatch(2, 槽池);
         batch.addItem(1, 0, 0, new Object());
         batch.addItem(2, 0, 0, new Object());
         for (var /* 当前设置状态或准备结果的批内项 */ item : batch.items) {
@@ -159,7 +160,7 @@ class OrderBatchSlotReuseTest {
      */
     @Test void reuseClearsPriorInputsAndLaneResultsAcrossDifferentBatchSizes() {
         // 当前用于复用或编码检查的批次
-        var batch = new OrderBatchProcessor.PendingBatch(20, new ResponseSlotPool(1, 4096));
+        var batch = new PendingOrderBatch(20, new ResponseSlotPool(1, 4096));
         // 批内多个项共用的输入标识对象
         var command = new Object();
         batch.addItem(1, 0, 0, command);

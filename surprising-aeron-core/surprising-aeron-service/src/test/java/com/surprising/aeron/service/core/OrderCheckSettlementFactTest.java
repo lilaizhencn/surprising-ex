@@ -20,7 +20,7 @@ import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPrice;
 import com.surprising.aeron.service.order.OrderCheckService;
-import com.surprising.aeron.service.order.OrderCommand.PlaceOrderCheckEvent;
+import com.surprising.aeron.service.order.PlaceOrderCheckEvent;
 import com.surprising.aeron.service.snapshot.state.SnapshotLoader;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.SystemFunds;
@@ -91,7 +91,7 @@ class OrderCheckSettlementFactTest {
                 try {
                     accountBook.dispatchPlaceOrderCheck(2, 7, event, new UUID(1, 2), captured, asset, ids, 1_001, 2);
                     // 通过反射读取准入事件所保留结算状态的字段
-                    var field = OrderCommand.PlaceOrderCheckEvent.class.getDeclaredField("settlementStatus");
+                    var field = PlaceOrderCheckEvent.class.getDeclaredField("settlementStatus");
                     field.setAccessible(true);
                     assertThat(field.get(event)).isSameAs(captured);
                     assertThat(event.complete()).isFalse();

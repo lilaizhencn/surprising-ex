@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.settlement.TradeSettlementChanges;
 import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.model.CoreTriggerOrderState;
@@ -220,7 +221,7 @@ public final class AccountTransactionRollback {
     }
 
     public void captureBalanceBefore(long userId, int assetId) {
-        TradeSettlement.Changes changes = state.currentMatcherSettlementChangesScope();
+        TradeSettlementChanges changes = state.currentMatcherSettlementChangesScope();
         BalancePatches captured = changes == null
                 ? patchBalancesBeforeByLane[state.topology().accountLaneId(userId)]
                 : changes.balancePatch(state.topology().accountLaneId(userId));
@@ -244,14 +245,14 @@ public final class AccountTransactionRollback {
     }
 
     public void captureBalanceBefore(AccountPartition lane, long userId, int assetId) {
-        TradeSettlement.Changes changes = lane.matcherSettlementChanges;
+        TradeSettlementChanges changes = lane.matcherSettlementChanges;
         BalancePatches captured = changes == null ? patchBalancesBeforeByLane[lane.laneId()]
                 : changes.balancePatch(lane.laneId());
         if (!captured.contains(userId, assetId)) captureBalanceBefore(lane, captured, userId, assetId);
     }
 
     public void captureBalanceAfter(AccountPartition lane, long userId, int assetId) {
-        TradeSettlement.Changes changes = lane.matcherSettlementChanges;
+        TradeSettlementChanges changes = lane.matcherSettlementChanges;
         BalancePatches captured = changes == null
                 ? patchBalancesBeforeByLane[lane.laneId()]
                 : changes.balancePatch(lane.laneId());

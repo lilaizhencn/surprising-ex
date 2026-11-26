@@ -42,7 +42,7 @@ import com.surprising.aeron.service.retention.CompletedOrderArchive;
 import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.funding.FundingSettlementService;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.OrderCheckService;
 import com.surprising.aeron.service.risk.RiskMarginCalculator;
 import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchFixture;
@@ -186,7 +186,7 @@ public final class RuntimeTestStateTransitions {
         long decisionTimestamp = mark == null ? 1 : mark.generatedAtEpochMillis();
         UUID commandId = UUID.randomUUID();
         return mutate(before, (runtime, identities) -> {
-            OrderCommand.ResolvedPlaceOrder resolved = OrderCheckService.resolve(
+            ResolvedPlaceOrder resolved = OrderCheckService.resolve(
                     runtime, identities, userId, command, decisionTimestamp);
             long required = OrderCheckService.requiredReservation(runtime, identities, userId,
                     resolved, 0);
@@ -202,7 +202,7 @@ public final class RuntimeTestStateTransitions {
      * @param userId 当前测试命令或风险查询使用的用户编号
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      */
-    public TradingCoreState placeOrder(TradingCoreState before, long userId, OrderCommand.ResolvedPlaceOrder command) {
+    public TradingCoreState placeOrder(TradingCoreState before, long userId, ResolvedPlaceOrder command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> {
             // 生产账户准入根据本单和原运行态挂单算出的应预留金额。
             long required = OrderCheckService.requiredReservation(runtime, identities, userId,

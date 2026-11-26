@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.treasury;
 
+import com.surprising.aeron.service.settlement.TradeSettlementPosting;
 import com.surprising.aeron.service.settlement.TradeSettlement;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -17,8 +18,8 @@ public final class RuntimeFundsTestSupport {
             long[] ids = (long[]) value(funds, "ownerIds");
             byte[] ledgers = (byte[]) value(funds, "subledgers");
             long[] amounts = (long[]) value(funds, "units");
-            var ownerKinds = TradeSettlement.Posting.OwnerKind.values();
-            var subledgers = TradeSettlement.Posting.Subledger.values();
+            var ownerKinds = TradeSettlementPosting.OwnerKind.values();
+            var subledgers = TradeSettlementPosting.Subledger.values();
             var result = new ArrayList<Posting>(size);
             for (int index = 0; index < size; index++) {
                 result.add(new Posting(assets[index], ownerKinds[owners[index]], ids[index],
@@ -37,6 +38,6 @@ public final class RuntimeFundsTestSupport {
         return field.get(funds);
     }
 
-    public record Posting(int assetId, TradeSettlement.Posting.OwnerKind ownerKind, long ownerId,
-                          TradeSettlement.Posting.Subledger subledger, long units) { }
+    public record Posting(int assetId, TradeSettlementPosting.OwnerKind ownerKind, long ownerId,
+                          TradeSettlementPosting.Subledger subledger, long units) { }
 }

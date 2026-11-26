@@ -4,8 +4,15 @@ import com.surprising.aeron.service.realtime.TradingRealtimeBoundary;
 
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.protocol.export.CommittedBalanceFlow;
+import com.surprising.aeron.protocol.export.CommittedCommandResult;
+import com.surprising.aeron.protocol.export.CommittedCommandResult.CancelBatchItem;
+import com.surprising.aeron.protocol.export.CommittedDeliveryPage;
+import com.surprising.aeron.protocol.export.CommittedDeliveryPage.DeliveryCashFlow;
+import com.surprising.aeron.protocol.export.CommittedFundingPage;
+import com.surprising.aeron.protocol.export.CommittedTradingActivity;
+import com.surprising.aeron.protocol.export.LiquidationChange;
 import com.surprising.aeron.service.core.TradingCore;
-import com.surprising.aeron.service.realtime.TradingRealtimeBoundary.StateCapture.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -52,6 +59,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                 snapshot == null
                         ? new TradingCore(product, config)
                         : TradingCore.fromSnapshot(product, snapshot, config);
+        state.parkOnIdle(true);
         state.assertClusterCallbackComplete();
         capture = state.attachRealtime(outbox);
         capture.orderProjectionOnly(true);
@@ -309,19 +317,14 @@ public final class CommittedTradeReplay implements AutoCloseable {
     /** 本次余额或转账命令要比较的用户、资产与可空转账元数据，由辅助解析构造，不另存账户状态。 */
     private record BalanceFlowTarget(long userId, String asset, TransferFundsCommand transfer) {}
 
-    /** 本次已提交尝试的现金净差额及原始事后总额，使用十进制整数字符串。 */
-    public record CommittedBalanceFlow(ProductLine product, long userId, UUID commandId, String asset,
-                                       String amountUnits, String balanceAfterUnits, long clusterPosition, long occurredAt,
-                                       TransferFundsCommand transfer) {}
-
     /** 显式冷查询本回放副本的组合财务状态，先收集待完成转账双方用户供快照判断。 */
-    public CommittedPortfolioSnapshot portfolioSnapshot(long asOf, long maximumMarkAgeMillis) {
+    public com.surprising.aeron.protocol.export.CommittedPortfolioSnapshot portfolioSnapshot(long asOf, long maximumMarkAgeMillis) {
         var pendingUsers = new HashSet<Long>();
         state.pendingTransfers().values().forEach(transfer -> {
             pendingUsers.add(transfer.sourceUserId());
             pendingUsers.add(transfer.targetUserId());
         });
-        return CommittedPortfolioSnapshot.capture(state.tradingState(), state.currentClusterTimestamp(),
+        return CommittedPortfolioSnapshotCapture.capture(state.tradingState(), state.currentClusterTimestamp(),
                 asOf, maximumMarkAgeMillis, pendingUsers);
     }
 
@@ -471,37 +474,15 @@ public final class CommittedTradeReplay implements AutoCloseable {
     /** 本页交割执行前保存的用户、结算资产与总额三个标量，供同页完成后计算差额。 */
     private record BeforeDeliveryBalance(long userId, String asset, long totalUnits) {}
 
-    /** 独立回放中当前有界交割页观察到的现金变化，列表复制后对外提供，不是在线账户状态副本。 */
-    public record CommittedDeliveryPage(ProductLine product, long occurredAt,
-                                         SettleInstrumentCommand command, List<DeliveryCashFlow> cashFlows) {
-        public CommittedDeliveryPage {
-            cashFlows = List.copyOf(cashFlows);
-            if (product == null || !product.isDeliveryProduct() || occurredAt <= 0
-                    || command == null || cashFlows.isEmpty() || cashFlows.size() > command.maxUsers())
-                throw new IllegalArgumentException("invalid committed delivery cash page");
-            var users = new HashSet<Long>();
-            for (var flow : cashFlows) if (!users.add(flow.userId()))
-                throw new IllegalArgumentException("duplicate delivery cash user");
-        }
-    }
-
-    /** 一个交割用户在本页实际发生的非零结算现金差额及结算后总额。 */
-    public record DeliveryCashFlow(long userId, String asset, long amountUnits, long balanceAfterUnits) {
-        public DeliveryCashFlow {
-            if (userId <= 0 || asset == null || asset.isBlank() || amountUnits == 0 || balanceAfterUnits < 0)
-                throw new IllegalArgumentException("invalid delivery cash flow");
-        }
-    }
-
     /** 读取回放副本当前实时导出序号。 */
     public long exportSequence() {
         return state.realtimeExportSequence();
     }
 
     /** 要求副本回调工作已结束，再生成当前交易活动摘要。 */
-    public com.surprising.aeron.service.query.CommittedTradingActivity currentTradingActivity(long now) {
+    public CommittedTradingActivity currentTradingActivity(long now) {
         state.assertClusterCallbackComplete();
-        return com.surprising.aeron.service.query.CommittedTradingActivity.capture(state.accountBook(), state.identities(), now);
+        return com.surprising.aeron.service.query.CommittedTradingActivityCapture.capture(state.accountBook(), state.identities(), now);
     }
 
     /** 要求本副本回调工作已结束，再交真实快照入口编码恢复状态。 */
@@ -519,55 +500,5 @@ public final class CommittedTradeReplay implements AutoCloseable {
     @Override
     public void close() {
         state.close();
-    }
-
-    /** 当前已提交资金费命令对应的进度和支付事实，列表属于本页结果。 */
-    public record CommittedFundingPage(ProductLine product, long clusterPosition, long occurredAt,
-                                       ApplyFundingCommand command, CoreFundingProgressView progress,
-                                       String resultCode, List<CoreFundingPaymentView> payments) {
-        public CommittedFundingPage {
-            if (product == null || !product.isFundingProduct() || clusterPosition <= 0 || occurredAt <= 0
-                    || command == null || progress == null || progress.settlementId() != command.settlementId()
-                    || resultCode == null || payments == null) throw new IllegalArgumentException("invalid committed funding page");
-            payments = List.copyOf(payments);
-            for (var payment : payments) {
-                if (payment.settlementId() != command.settlementId()
-                        || !payment.instrumentId().equals(command.instrumentId())
-                        || payment.fundingRatePpm() != command.fundingRatePpm())
-                    throw new IllegalArgumentException("funding payment does not belong to committed command");
-            }
-        }
-    }
-
-    /** 一次已提交命令尝试的最终导出收据，含可空下单身份及有界批撤逐项结果。 */
-    public record CommittedCommandResult(ProductLine product, long userId, UUID commandId,
-                                         CoreMessageType commandType, String clientOrderId, String instrumentId,
-                                         ResponseStatus status, CoreResultCode code, long appliedCommandCount,
-                                         long clusterPosition, long occurredAt, List<CancelBatchItem> cancelResults) {
-        /** 命令必须为 COMMAND，收据只能是已应用或拒绝，不能仍为 MATCHING_PENDING，身份及日志元数据必须有效。 */
-        public CommittedCommandResult {
-            cancelResults = List.copyOf(cancelResults);
-            if (cancelResults.size() > 50 || (!cancelResults.isEmpty() && commandType != CoreMessageType.CANCEL_ORDER_BATCH))
-                throw new IllegalArgumentException("invalid committed cancellation items");
-            for (int i = 0; i < cancelResults.size(); i++)
-                if (cancelResults.get(i).index() != i) throw new IllegalArgumentException("noncontiguous cancellation items");
-            if (product == null || userId <= 0 || commandId == null || commandType == null
-                    || commandType.kind() != WireMessageKind.COMMAND
-                    || (status != ResponseStatus.APPLIED && status != ResponseStatus.REJECTED) || code == null
-                    || code == CoreResultCode.MATCHING_PENDING || appliedCommandCount < 0
-                    || clusterPosition <= 0 || occurredAt <= 0)
-                throw new IllegalArgumentException("invalid committed command result");
-        }
-    }
-
-    /** 单个批撤请求的确定性结果，只有请求下标、订单身份、成功标记与结果码，不复制完整订单。 */
-    public record CancelBatchItem(int index, long orderId, boolean success, String code) {
-        /** 成功当且仅当码为 NONE，不允许保留 MATCHING_PENDING。 */
-        public CancelBatchItem {
-            if (index < 0 || orderId <= 0 || code == null || code.isBlank()
-                    || CoreResultCode.valueOf(code) == CoreResultCode.MATCHING_PENDING
-                    || success != (CoreResultCode.valueOf(code) == CoreResultCode.NONE))
-                throw new IllegalArgumentException("invalid cancellation result item");
-        }
     }
 }

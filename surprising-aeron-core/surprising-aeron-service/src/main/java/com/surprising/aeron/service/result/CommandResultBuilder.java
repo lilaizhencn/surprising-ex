@@ -18,7 +18,7 @@ import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.aeron.service.matcher.OrderBookEngine.CancellationOrder;
 import com.surprising.aeron.service.matcher.OrderMatchingResult;
 import com.surprising.aeron.service.order.OrderCommand;
-import com.surprising.aeron.service.order.OrderCommand.ReplaceOrderCheck;
+import com.surprising.aeron.service.order.ReplaceOrderCheck;
 import com.surprising.aeron.service.order.Order;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import com.surprising.aeron.support.collection.PrimitiveLongView;
@@ -212,7 +212,7 @@ public final class CommandResultBuilder {
                 return;
             }
             case REPLACE, AMEND -> {
-                OrderCommand.ReplaceOrderCheck orderCheck = owner.requireMatchingOrderCheck(pending);
+                ReplaceOrderCheck orderCheck = owner.requireMatchingOrderCheck(pending);
                 materializeResponseOrders(pending, orderCheck.originalOrderId(), orderCheck.command().orderId());
                 return;
             }

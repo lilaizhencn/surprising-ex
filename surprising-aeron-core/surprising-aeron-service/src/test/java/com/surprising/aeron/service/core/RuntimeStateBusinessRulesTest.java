@@ -30,7 +30,7 @@ import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.service.account.UserAccountSnapshot;
 import com.surprising.aeron.service.core.identity.IdIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.SnapshotWriter;
@@ -219,10 +219,10 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState state = funded(ProductLine.SPOT, "USDT", 1_000);
         state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("BTC", 10));
         // 显式固定挂单返佣的现货卖方准入结果
-        OrderCommand.ResolvedPlaceOrder makerSell = feeOrder(state, 2, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET,
+        ResolvedPlaceOrder makerSell = feeOrder(state, 2, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET,
                 "BTC", -50_000, 100_000);
         // 显式固定吃单收费的现货买方准入结果
-        OrderCommand.ResolvedPlaceOrder takerBuy = feeOrder(state, 1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET,
+        ResolvedPlaceOrder takerBuy = feeOrder(state, 1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET,
                 "USDT", 0, 100_000);
         state = reducer.placeOrder(state, 202, makerSell);
         state = reducer.placeOrder(state, 101, takerBuy);
@@ -837,7 +837,7 @@ class RuntimeStateBusinessRulesTest {
      * @param makerFeeRatePpm 需要固定在本订单准入结果中的挂单费率，单位为百万分之一
      * @param takerFeeRatePpm 需要固定在本订单准入结果中的吃单费率，单位为百万分之一
      */
-    private static OrderCommand.ResolvedPlaceOrder feeOrder(
+    private static ResolvedPlaceOrder feeOrder(
             TradingCoreState state,
             long orderId,
             CoreOrderSide side,
@@ -862,12 +862,12 @@ class RuntimeStateBusinessRulesTest {
      * @param makerFeeRatePpm 需要固定在本订单准入结果中的挂单费率，单位为百万分之一
      * @param takerFeeRatePpm 需要固定在本订单准入结果中的吃单费率，单位为百万分之一
      */
-    private static OrderCommand.ResolvedPlaceOrder resolved(
+    private static ResolvedPlaceOrder resolved(
             TradingCoreState state, PlaceOrderCommand intent, ReservationKind kind, String asset,
             long makerFeeRatePpm, long takerFeeRatePpm) {
         // 意图所属的已有标的，供显式准入结果使用
         CoreInstrument instrument = state.instruments().get(intent.instrumentId());
-        return new OrderCommand.ResolvedPlaceOrder(intent, instrument, 0, intent.limitPriceTicks(), intent.limitPriceTicks(),
+        return new ResolvedPlaceOrder(intent, instrument, 0, intent.limitPriceTicks(), intent.limitPriceTicks(),
                 intent.limitPriceTicks(), 0, 0, kind, asset, makerFeeRatePpm, takerFeeRatePpm);
     }
 

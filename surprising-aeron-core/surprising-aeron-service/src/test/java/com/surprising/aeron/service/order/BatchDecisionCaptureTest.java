@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.PendingOrderBatch;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingCore;
 import com.surprising.product.api.ProductLine;
@@ -32,7 +33,7 @@ class BatchDecisionCaptureTest {
                 mark(core, symbol, 100, 1);
             }
             // 独立的两项容量批次，仅用于检查配置捕获，未派发
-            var batch = new OrderBatchProcessor.PendingBatch(2, core.responseSlotPool());
+            var batch = new PendingOrderBatch(2, core.responseSlotPool());
             batch.clusterTimestamp = TIME;
             // 品种一首次捕获的判断对象，后续价格更新不能改它
             var first = core.batches().prepareBatchDecision(batch, "1");

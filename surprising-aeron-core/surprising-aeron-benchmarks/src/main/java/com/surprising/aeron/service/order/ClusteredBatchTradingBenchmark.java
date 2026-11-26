@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.DirectOrderCommand;
 import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport;
@@ -694,7 +695,7 @@ public class ClusteredBatchTradingBenchmark {
                     throw new AssertionError("funds preflight did not reach Account Lane work");
                 Thread.onSpinWait();
             }
-            var controlWork = OrderCommand.Direct.class.getDeclaredField("controlWork");
+            var controlWork = DirectOrderCommand.class.getDeclaredField("controlWork");
             controlWork.setAccessible(true);
             var business = (java.util.function.BooleanSupplier) controlWork.get(owner.directCommand);
             controlWork.set(owner.directCommand, (java.util.function.BooleanSupplier) () -> {

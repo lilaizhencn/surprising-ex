@@ -4,7 +4,7 @@ import com.surprising.aeron.service.order.*;
 
 import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 
-import com.surprising.aeron.service.order.OrderCommand.ResolvedPlaceOrder;
+import com.surprising.aeron.service.order.ResolvedPlaceOrder;
 
 import static com.surprising.aeron.service.core.TradingCoreRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.model.CoreOrderState;
@@ -576,7 +576,7 @@ class SectionedCoreSnapshotCodecTest {
     /**
      * 创建与合成 Core 挂单相同的一号品种、一号订单、价格一百、数量二的 GTC 买单撮合输入。
      */
-    private static OrderCommand.ResolvedPlaceOrder bid() {
+    private static ResolvedPlaceOrder bid() {
         return DirectMatcherTestInputs.order(
                 ProductLine.SPOT, 1, "1", CoreOrderSide.BUY, com.surprising.aeron.protocol.CoreOrderType.LIMIT,
                 com.surprising.aeron.protocol.CoreTimeInForce.GTC, 100, 2);

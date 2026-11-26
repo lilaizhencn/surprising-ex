@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.service.settlement.TradeSettlementChanges;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.account.AccountLaneTestAccess;
@@ -26,7 +27,7 @@ class SettlementChangesReuseTest {
             // 本用例持有的账户 Lane，或池轮转用例当前 Lane 数组下标。
             var lane = accountBook.accountLane(laneId);
             // 本次创建或借出的结算变化缓冲。
-            var changes = new TradeSettlement.Changes(accountBook.topology().accountLaneCount());
+            var changes = new TradeSettlementChanges(accountBook.topology().accountLaneCount());
             changes.ensureOrderCapacity(2, 1L << laneId);
             // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
             var delta = changes.laneDeltas[laneId];

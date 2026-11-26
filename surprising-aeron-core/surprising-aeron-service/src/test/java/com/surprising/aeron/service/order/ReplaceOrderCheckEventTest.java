@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.order.ReplaceOrderCheckEvent;
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreOrderState;
@@ -151,7 +152,7 @@ class ReplaceOrderCheckEventTest {
      * @param runtime 持有当前真实账户 worker 的测试运行时
      * @param event 等待 Lane 发布完成的改单准入事件
      */
-    private static void await(AccountBook accountBook, OrderCommand.ReplaceOrderCheckEvent event) {
+    private static void await(AccountBook accountBook, ReplaceOrderCheckEvent event) {
         // 等待账户准入回执的三秒单调时钟上限，不改变业务时间。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!event.complete()) {
