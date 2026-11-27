@@ -2,7 +2,7 @@ package com.surprising.candlestick.provider.repository;
 
 import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandlePeriod;
-import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
+import com.surprising.candlestick.provider.model.CandleSnapshot;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.util.List;

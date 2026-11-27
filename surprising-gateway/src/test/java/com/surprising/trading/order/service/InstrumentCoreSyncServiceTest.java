@@ -4,7 +4,6 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.maintenance.service.MaintenanceAeronGateway;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.time.Instant;
 import java.util.List;
@@ -23,7 +22,7 @@ class InstrumentCoreSyncServiceTest {
         var cache = new InstrumentSnapshotCache();
         var properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(line);
-        var gateway = mock(MaintenanceAeronGateway.class);
+        var gateway = mock(OrderAeronGateway.class);
         Map<String, RegisterInstrumentCommand> registeredCommands = new ConcurrentHashMap<>();
         when(gateway.commandOutcome(any(), any(), anyLong(), any())).thenAnswer(call -> {
             CoreMessageType type = call.getArgument(0);
@@ -56,7 +55,7 @@ class InstrumentCoreSyncServiceTest {
         var cache = new InstrumentSnapshotCache();
         var properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(line);
-        var gateway = mock(MaintenanceAeronGateway.class);
+        var gateway = mock(OrderAeronGateway.class);
         var sequence = new AtomicLong();
         Map<String, RegisterInstrumentCommand> registeredCommands = new ConcurrentHashMap<>();
         when(gateway.commandOutcome(any(), any(), anyLong(), any())).thenAnswer(call -> {

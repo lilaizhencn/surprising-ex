@@ -5,15 +5,22 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.trading.order.service.OrderAeronGateway;
 import java.util.List;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
 public class MaintenanceAeronGateway {
     private final AeronClientPool clients;
     private final OrderAeronGateway views;
-    public MaintenanceAeronGateway(AeronClientPool clients) {
+
+    @Autowired
+    public MaintenanceAeronGateway(AeronClientPool clients, OrderAeronGateway views) {
         this.clients = Objects.requireNonNull(clients, "clients");
-        this.views = new OrderAeronGateway(this.clients);
+        this.views = Objects.requireNonNull(views, "views");
+    }
+
+    public MaintenanceAeronGateway(AeronClientPool clients) {
+        this(clients, new OrderAeronGateway(Objects.requireNonNull(clients, "clients")));
     }
     public CoreMaintenanceCodec.Page maintenance(String instrumentId,long afterUserId,int limit) { return views.maintenance(instrumentId,afterUserId,limit); }
     public CoreUserStateView userState(long userId) { return views.userState(userId); }

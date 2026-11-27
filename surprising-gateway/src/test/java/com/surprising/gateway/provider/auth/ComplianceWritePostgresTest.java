@@ -106,7 +106,7 @@ class ComplianceWritePostgresTest {
         jdbc.update("UPDATE gateway_user_kyc_profiles SET face_verification_status=?, reviewed_by_user_id=NULL, reviewed_at=?, rejection_reason='before' WHERE user_id=42",
                 priorFace, Timestamp.from(Instant.now().minusSeconds(1)));
         when(providers.verifyCallback(eq("SUMSUB"), any(), any())).thenReturn(Optional.of(
-                new KycProvider.KycProviderResult("session-42", "42", "event-1", status, " rejected ", java.time.Instant.now(), null, null)));
+                new KycProviderResult("session-42", "42", "event-1", status, " rejected ", java.time.Instant.now(), null, null)));
         var updated = service.applyProviderCallback("SUMSUB", Map.of(), new byte[0]);
         String expectedFace = !priorFace.equals("NOT_REQUIRED") && status.equals("VERIFIED") ? "VERIFIED"
                 : !priorFace.equals("NOT_REQUIRED") && status.equals("REJECTED") ? "FAILED" : priorFace;

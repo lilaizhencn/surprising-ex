@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth.controller;
 
+import com.surprising.gateway.provider.auth.model.KycProviderSession;
+
 import static com.surprising.gateway.provider.utils.KycDocumentFormats.*;
 
 import com.surprising.gateway.provider.auth.service.AuthService;
@@ -108,7 +110,7 @@ public class UserComplianceController {
     }
 
     @PostMapping("/kyc/session/refresh")
-    public KycProvider.KycProviderSession refreshKycSession(@RequestHeader("Authorization") String authorization) {
+    public KycProviderSession refreshKycSession(@RequestHeader("Authorization") String authorization) {
         try { return complianceService.refreshUserKycSession(authorization); }
         catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex); }
         catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex); }

@@ -7,7 +7,6 @@ import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.maintenance.service.MaintenanceAeronGateway;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.util.Objects;
 import java.util.UUID;
@@ -18,7 +17,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class InstrumentCoreSyncService {
     private final InstrumentSnapshotCache cache;
-    private final MaintenanceAeronGateway gateway;
+    private final OrderAeronGateway gateway;
     private final ProductLine line;
     private final TradingOrderProperties properties;
     private final ConcurrentHashMap<String, Attempt> attempts = new ConcurrentHashMap<>();
@@ -27,7 +26,7 @@ public class InstrumentCoreSyncService {
     public record SyncState(String productLine, String instrumentId, String state, String error, long appliedChangeId) { }
 
     public InstrumentCoreSyncService(InstrumentSnapshotCache cache,
-            MaintenanceAeronGateway gateway, TradingOrderProperties properties) {
+            OrderAeronGateway gateway, TradingOrderProperties properties) {
         this.cache=cache; this.gateway=gateway; this.line=properties.getProductLine(); this.properties=properties;
     }
 

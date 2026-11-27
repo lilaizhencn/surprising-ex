@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.auth.model.KycProviderResult;
+
 
 import com.surprising.gateway.provider.auth.model.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
@@ -87,7 +89,7 @@ class KycNotificationTransactionPostgresTest {
         var providers = mock(KycProviderRegistry.class);
         when(providers.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));
         when(providers.verifyCallback(eq("SUMSUB"), any(), any()))
-                .thenReturn(Optional.of(new KycProvider.KycProviderResult("session-42", "42", "event-1", "VERIFIED", null, java.time.Instant.now(), null, null)));
+                .thenReturn(Optional.of(new KycProviderResult("session-42", "42", "event-1", "VERIFIED", null, java.time.Instant.now(), null, null)));
         var target = new ComplianceService(mock(), profiles, new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc), mock(), mock(), mock(AuthService.class),
                 approvals, mock(KycDocumentService.class), mock(AdminAuditRepository.class), users,
                 notifications, providers, mock());

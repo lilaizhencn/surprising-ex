@@ -355,10 +355,10 @@ class CandlestickRollupTopologyTest {
                                 TradeSide.BUY, null, null),
                         new TradeEvent("1", "t2", 2, tradeTime.plusSeconds(1), BigDecimal.TEN,
                                 BigDecimal.ONE, TradeSide.BUY, null, null));
-        var durable = new java.util.concurrent.atomic.AtomicReference<com.surprising.candlestick.provider.aggregation.CandleSnapshot>();
+        var durable = new java.util.concurrent.atomic.AtomicReference<com.surprising.candlestick.provider.model.CandleSnapshot>();
         var failFirstRevision = new java.util.concurrent.atomic.AtomicBoolean(true);
         org.mockito.Mockito.doAnswer(call -> {
-            var next = call.<List<com.surprising.candlestick.provider.aggregation.CandleSnapshot>>getArgument(0).getFirst();
+            var next = call.<List<com.surprising.candlestick.provider.model.CandleSnapshot>>getArgument(0).getFirst();
             if (next.getTradeCount() == 2 && failFirstRevision.getAndSet(false)) throw new IllegalStateException("revision write unavailable");
             durable.set(next); return null;
         })

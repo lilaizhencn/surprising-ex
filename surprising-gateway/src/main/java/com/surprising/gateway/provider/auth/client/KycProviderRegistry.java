@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth.client;
 
+import com.surprising.gateway.provider.auth.model.KycProviderSession;
+import com.surprising.gateway.provider.auth.model.KycProviderResult;
+
 import com.surprising.gateway.provider.auth.model.KycDocument;
 import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.model.KycProfile;
@@ -24,7 +27,7 @@ public class KycProviderRegistry {
                 provider -> normalize(provider.code()), Function.identity()));
     }
 
-    public KycProvider.KycProviderSession start(long userId, KycSubmissionRequest request,
+    public KycProviderSession start(long userId, KycSubmissionRequest request,
                                                  List<KycDocument> documents) {
         if (!verificationOptions().contains(new KycVerificationOption(request.applicantType(), request.kycLevel()))) {
             throw new IllegalArgumentException("the requested KYC applicant type and level are not supported by the configured provider");
@@ -36,7 +39,7 @@ public class KycProviderRegistry {
         return provider.start(userId, request, documents);
     }
 
-    public Optional<KycProvider.KycProviderResult> verifyCallback(String providerCode, Map<String, String> headers, byte[] body) {
+    public Optional<KycProviderResult> verifyCallback(String providerCode, Map<String, String> headers, byte[] body) {
         KycProvider provider = providers.get(normalize(providerCode));
         if (provider == null) throw new IllegalArgumentException("KYC provider is not configured: " + providerCode);
         return provider.verifyCallback(headers, body);
@@ -62,23 +65,23 @@ public class KycProviderRegistry {
                 }).toList();
     }
 
-    public KycProvider.KycProviderSession refreshSession(KycProfile profile, String redirectUrl) {
+    public KycProviderSession refreshSession(KycProfile profile, String redirectUrl) {
         if (simulationEnabled()) throw new IllegalStateException("KYC simulation does not issue provider tokens");
         KycProvider provider = providers.get(normalize(profile.provider()));
         if (provider == null) throw new IllegalArgumentException("KYC provider is not configured: " + profile.provider());
         return provider.refreshSession(profile, redirectUrl);
     }
 
-    public void requireCallbackLevel(KycProfile profile, KycProvider.KycProviderResult result) {
+    public void requireCallbackLevel(KycProfile profile, KycProviderResult result) {
         if ("SUMSUB".equals(profile.provider()) && !simulationEnabled()
                 && !properties.getKyc().getSumsub().levelName(profile.applicantType(), profile.kycLevel()).equals(result.levelName())) {
             throw new IllegalArgumentException("KYC callback does not match the requested verification level");
         }
     }
 
-    public KycProvider.KycProviderSession simulationSession(long userId) {
+    public KycProviderSession simulationSession(long userId) {
         if (!simulationEnabled()) throw new IllegalStateException("KYC simulation is disabled");
-        return new KycProvider.KycProviderSession(selectedProvider(), "SIM-" + selectedProvider() + "-" + userId,
+        return new KycProviderSession(selectedProvider(), "SIM-" + selectedProvider() + "-" + userId,
                 null, null, "PENDING", true);
     }
 

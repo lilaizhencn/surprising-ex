@@ -23,8 +23,8 @@ import java.util.List;
 public class TelegramMarketHandler {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramMarketHandler.class);
-    private static final DecimalFormat PRICE_FMT = new DecimalFormat("#,##0.00");
-    private static final DecimalFormat QTY_FMT = new DecimalFormat("#,##0.000");
+    private static final String PRICE_PATTERN = "#,##0.00";
+    private static final String QTY_PATTERN = "#,##0.000";
 
     private final MatchingMarketDataService marketDataService;
     private final TelegramBotClient botClient;
@@ -40,25 +40,18 @@ public class TelegramMarketHandler {
     public void renderMarketOverview(long chatId, Long messageId, String symbol) {
         String targetSymbol = normalizeSymbol(symbol);
         MarketSnapshot snap = fetchMarketSnapshot(targetSymbol);
-
-        boolean isUp = snap.change24h.compareTo(BigDecimal.ZERO) >= 0;
-        String changeSign = isUp ? "+" : "";
-        String changeEmoji = isUp ? "🟢" : "🔴";
+        DecimalFormat priceFmt = new DecimalFormat(PRICE_PATTERN);
 
         StringBuilder sb = new StringBuilder();
         sb.append("📊 <b>").append(targetSymbol).append(" 市场行情看板</b>\n");
         sb.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        sb.append("💵 <b>最新成交价:</b> <code>$").append(PRICE_FMT.format(snap.lastPrice)).append("</code>\n");
-        sb.append("📈 <b>24H 涨跌幅:</b> ").append(changeEmoji).append(" <code>")
-                .append(changeSign).append(snap.change24h.setScale(2, RoundingMode.HALF_UP)).append("%</code>\n\n");
-
-        sb.append("• <b>24H 最高价:</b> <code>$").append(PRICE_FMT.format(snap.high24h)).append("</code>\n");
-        sb.append("• <b>24H 最低价:</b> <code>$").append(PRICE_FMT.format(snap.low24h)).append("</code>\n");
-        sb.append("• <b>24H 成交量:</b> <code>").append(snap.volume24h).append(" ").append(baseAsset(targetSymbol)).append("</code>\n");
-        sb.append("• <b>24H 成交额:</b> <code>$").append(snap.quoteVolume24h).append("</code>\n");
-        sb.append("• <b>资金费率 (Funding):</b> <code>+0.0100%</code> (03:59:12)\n");
-        sb.append("• <b>盘口买一/卖一:</b> <code>$").append(PRICE_FMT.format(snap.bid1)).append(" / $")
-                .append(PRICE_FMT.format(snap.ask1)).append("</code>\n");
+        sb.append("💵 <b>参考中间价:</b> <code>").append(formatUsd(priceFmt, snap.lastPrice)).append("</code>\n");
+        sb.append("• <b>盘口买一/卖一:</b> <code>")
+                .append(formatUsd(priceFmt, snap.bid1)).append(" / ")
+                .append(formatUsd(priceFmt, snap.ask1)).append("</code>\n");
+        if (snap.bids.isEmpty() && snap.asks.isEmpty()) {
+            sb.append("• <b>盘口状态:</b> <i>暂无实时盘口数据</i>\n");
+        }
         sb.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
         sb.append("⏱ <i>更新时间: ").append(LocalTime.now().toString().substring(0, 8)).append(" (UTC+8)</i>\n");
 
@@ -83,45 +76,43 @@ public class TelegramMarketHandler {
                 )
                 .build();
 
-        if (messageId != null) {
-            botClient.editMessageText(chatId, messageId, sb.toString(), markup);
-        } else {
-            botClient.sendMessage(chatId, sb.toString(), markup);
-        }
+        sendOrEdit(chatId, messageId, sb.toString(), markup);
     }
 
     /** 渲染专业买卖 5 档深度盘口 */
     public void renderOrderBookDepth(long chatId, Long messageId, String symbol) {
         String targetSymbol = normalizeSymbol(symbol);
         MarketSnapshot snap = fetchMarketSnapshot(targetSymbol);
+        DecimalFormat priceFmt = new DecimalFormat(PRICE_PATTERN);
+        DecimalFormat qtyFmt = new DecimalFormat(QTY_PATTERN);
 
         StringBuilder sb = new StringBuilder();
         sb.append("📖 <b>").append(targetSymbol).append(" L2 盘口买卖 5 档深度</b>\n");
         sb.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        sb.append("<pre>\n");
-        sb.append("档位   价格 (USD)     数量 (").append(baseAsset(targetSymbol)).append(")  深度\n");
-        sb.append("───────────────────────────────────────\n");
-
-        // 卖盘 Asks 从 5 到 1
-        for (int i = snap.asks.size() - 1; i >= 0; i--) {
-            DepthLevel lvl = snap.asks.get(i);
-            String bar = renderBar(lvl.quantity, snap.maxDepthQty);
-            sb.append(String.format("卖%d  %10s  %10s  %s\n", (i + 1), PRICE_FMT.format(lvl.price), QTY_FMT.format(lvl.quantity), bar));
+        if (snap.bids.isEmpty() && snap.asks.isEmpty()) {
+            sb.append("<i>当前暂无实时盘口深度数据，请稍后刷新。</i>\n");
+        } else {
+            sb.append("<pre>\n");
+            sb.append("档位   价格 (USD)     数量 (").append(baseAsset(targetSymbol)).append(")  深度\n");
+            sb.append("───────────────────────────────────────\n");
+            for (int i = snap.asks.size() - 1; i >= 0; i--) {
+                DepthLevel lvl = snap.asks.get(i);
+                sb.append(String.format("卖%d  %10s  %10s  %s\n",
+                        (i + 1), priceFmt.format(lvl.price), qtyFmt.format(lvl.quantity), renderBar(lvl.quantity, snap.maxDepthQty)));
+            }
+            BigDecimal spread = (snap.ask1 != null && snap.bid1 != null) ? snap.ask1.subtract(snap.bid1) : null;
+            sb.append("───────────────────────────────────────\n");
+            sb.append(String.format(" 参考价: %s  价差: %s\n",
+                    formatUsd(priceFmt, snap.lastPrice), spread == null ? "—" : priceFmt.format(spread)));
+            sb.append("───────────────────────────────────────\n");
+            for (int i = 0; i < snap.bids.size(); i++) {
+                DepthLevel lvl = snap.bids.get(i);
+                sb.append(String.format("买%d  %10s  %10s  %s\n",
+                        (i + 1), priceFmt.format(lvl.price), qtyFmt.format(lvl.quantity), renderBar(lvl.quantity, snap.maxDepthQty)));
+            }
+            sb.append("</pre>\n");
+            sb.append("💡 <i>提示: 绿色代表买方挂单厚度，红色代表卖方挂单厚度</i>\n");
         }
-
-        BigDecimal spread = snap.ask1.subtract(snap.bid1);
-        sb.append("───────────────────────────────────────\n");
-        sb.append(String.format(" 最新价: $%s  价差: %s\n", PRICE_FMT.format(snap.lastPrice), PRICE_FMT.format(spread)));
-        sb.append("───────────────────────────────────────\n");
-
-        // 买盘 Bids 从 1 到 5
-        for (int i = 0; i < snap.bids.size(); i++) {
-            DepthLevel lvl = snap.bids.get(i);
-            String bar = renderBar(lvl.quantity, snap.maxDepthQty);
-            sb.append(String.format("买%d  %10s  %10s  %s\n", (i + 1), PRICE_FMT.format(lvl.price), QTY_FMT.format(lvl.quantity), bar));
-        }
-        sb.append("</pre>\n");
-        sb.append("💡 <i>提示: 绿色代表买方挂单厚度，红色代表卖方挂单厚度</i>\n");
 
         TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
                 .addRow(
@@ -137,11 +128,19 @@ public class TelegramMarketHandler {
                 )
                 .build();
 
+        sendOrEdit(chatId, messageId, sb.toString(), markup);
+    }
+
+    private void sendOrEdit(long chatId, Long messageId, String text, TelegramInlineKeyboardMarkup markup) {
         if (messageId != null) {
-            botClient.editMessageText(chatId, messageId, sb.toString(), markup);
+            botClient.editMessageText(chatId, messageId, text, markup);
         } else {
-            botClient.sendMessage(chatId, sb.toString(), markup);
+            botClient.sendMessage(chatId, text, markup);
         }
+    }
+
+    private static String formatUsd(DecimalFormat priceFmt, BigDecimal value) {
+        return value == null ? "—" : "$" + priceFmt.format(value);
     }
 
     private String renderBar(BigDecimal qty, BigDecimal max) {
@@ -154,10 +153,7 @@ public class TelegramMarketHandler {
     private String normalizeSymbol(String raw) {
         if (raw == null || raw.isBlank()) return "BTC-USDT";
         String s = raw.trim().toUpperCase().replace("/", "-");
-        if (!s.contains("-")) {
-            s = s + "-USDT";
-        }
-        return s;
+        return s.contains("-") ? s : s + "-USDT";
     }
 
     private String baseAsset(String symbol) {
@@ -169,117 +165,49 @@ public class TelegramMarketHandler {
 
     private static class MarketSnapshot {
         BigDecimal lastPrice;
-        BigDecimal change24h;
-        BigDecimal high24h;
-        BigDecimal low24h;
-        String volume24h;
-        String quoteVolume24h;
         BigDecimal bid1;
         BigDecimal ask1;
         List<DepthLevel> bids = new ArrayList<>();
         List<DepthLevel> asks = new ArrayList<>();
-        BigDecimal maxDepthQty = BigDecimal.ONE;
+        BigDecimal maxDepthQty = BigDecimal.ZERO;
     }
 
     private MarketSnapshot fetchMarketSnapshot(String symbol) {
         MarketSnapshot snap = new MarketSnapshot();
-
-        // 尝试从实时盘口引擎获取
-        if (marketDataService != null) {
-            try {
-                OrderBookSnapshotResponse book = marketDataService.orderBookSnapshot(symbol, 5);
-                if (book != null) {
-                    if (book.bids() != null) {
-                        for (OrderBookLevel b : book.bids()) {
-                            BigDecimal p = BigDecimal.valueOf(b.priceTicks()).movePointLeft(2);
-                            BigDecimal q = BigDecimal.valueOf(b.quantitySteps()).movePointLeft(4);
-                            snap.bids.add(new DepthLevel(p, q));
-                            if (q.compareTo(snap.maxDepthQty) > 0) snap.maxDepthQty = q;
-                        }
-                    }
-                    if (book.asks() != null) {
-                        for (OrderBookLevel a : book.asks()) {
-                            BigDecimal p = BigDecimal.valueOf(a.priceTicks()).movePointLeft(2);
-                            BigDecimal q = BigDecimal.valueOf(a.quantitySteps()).movePointLeft(4);
-                            snap.asks.add(new DepthLevel(p, q));
-                            if (q.compareTo(snap.maxDepthQty) > 0) snap.maxDepthQty = q;
-                        }
-                    }
-                }
-            } catch (Exception ex) {
-                log.debug("Live book not available for {}: {}", symbol, ex.getMessage());
+        if (marketDataService == null) {
+            return snap;
+        }
+        try {
+            OrderBookSnapshotResponse book = marketDataService.orderBookSnapshot(symbol, 5);
+            if (book == null) {
+                return snap;
             }
-        }
-
-        // 基准数据与盘口模拟填充（在本地或服务预热时确保界面充实生动）
-        BigDecimal basePrice;
-        BigDecimal baseSpread;
-        if (symbol.contains("BTC")) {
-            basePrice = new BigDecimal("96280.50");
-            baseSpread = new BigDecimal("0.50");
-            snap.change24h = new BigDecimal("3.45");
-            snap.high24h = new BigDecimal("97450.00");
-            snap.low24h = new BigDecimal("94120.00");
-            snap.volume24h = "32,841.5";
-            snap.quoteVolume24h = "3,158.42M";
-        } else if (symbol.contains("ETH")) {
-            basePrice = new BigDecimal("3265.80");
-            baseSpread = new BigDecimal("0.20");
-            snap.change24h = new BigDecimal("1.82");
-            snap.high24h = new BigDecimal("3310.00");
-            snap.low24h = new BigDecimal("3185.00");
-            snap.volume24h = "142,500.2";
-            snap.quoteVolume24h = "465.28M";
-        } else if (symbol.contains("SOL")) {
-            basePrice = new BigDecimal("186.40");
-            baseSpread = new BigDecimal("0.05");
-            snap.change24h = new BigDecimal("-0.65");
-            snap.high24h = new BigDecimal("192.30");
-            snap.low24h = new BigDecimal("183.10");
-            snap.volume24h = "854,120.0";
-            snap.quoteVolume24h = "159.21M";
-        } else if (symbol.contains("DOGE")) {
-            basePrice = new BigDecimal("0.3850");
-            baseSpread = new BigDecimal("0.0002");
-            snap.change24h = new BigDecimal("8.72");
-            snap.high24h = new BigDecimal("0.4120");
-            snap.low24h = new BigDecimal("0.3510");
-            snap.volume24h = "15,820,000";
-            snap.quoteVolume24h = "6.09M";
-        } else {
-            basePrice = new BigDecimal("1.2540");
-            baseSpread = new BigDecimal("0.0010");
-            snap.change24h = new BigDecimal("0.45");
-            snap.high24h = new BigDecimal("1.3100");
-            snap.low24h = new BigDecimal("1.2200");
-            snap.volume24h = "950,000";
-            snap.quoteVolume24h = "1.19M";
-        }
-
-        if (snap.bids.isEmpty()) {
-            snap.bid1 = basePrice.subtract(baseSpread);
-            for (int i = 0; i < 5; i++) {
-                BigDecimal p = snap.bid1.subtract(baseSpread.multiply(BigDecimal.valueOf(i * 2L)));
-                BigDecimal q = new BigDecimal(String.valueOf(1.2 + i * 0.8));
-                snap.bids.add(new DepthLevel(p, q));
+            appendLevels(book.bids(), snap.bids, snap);
+            appendLevels(book.asks(), snap.asks, snap);
+            snap.bid1 = snap.bids.isEmpty() ? null : snap.bids.getFirst().price;
+            snap.ask1 = snap.asks.isEmpty() ? null : snap.asks.getFirst().price;
+            if (snap.bid1 != null && snap.ask1 != null) {
+                snap.lastPrice = snap.bid1.add(snap.ask1).divide(BigDecimal.TWO, 2, RoundingMode.HALF_UP);
+            } else {
+                snap.lastPrice = snap.bid1 != null ? snap.bid1 : snap.ask1;
             }
-        } else {
-            snap.bid1 = snap.bids.get(0).price;
+        } catch (Exception ex) {
+            log.debug("Live book not available for {}: {}", symbol, ex.getMessage());
         }
-
-        if (snap.asks.isEmpty()) {
-            snap.ask1 = basePrice.add(baseSpread);
-            for (int i = 0; i < 5; i++) {
-                BigDecimal p = snap.ask1.add(baseSpread.multiply(BigDecimal.valueOf(i * 2L)));
-                BigDecimal q = new BigDecimal(String.valueOf(0.9 + i * 0.7));
-                snap.asks.add(new DepthLevel(p, q));
-            }
-        } else {
-            snap.ask1 = snap.asks.get(0).price;
-        }
-
-        snap.lastPrice = basePrice;
-        snap.maxDepthQty = new BigDecimal("5.0");
         return snap;
+    }
+
+    private static void appendLevels(List<OrderBookLevel> source, List<DepthLevel> target, MarketSnapshot snap) {
+        if (source == null) {
+            return;
+        }
+        for (OrderBookLevel level : source) {
+            BigDecimal price = BigDecimal.valueOf(level.priceTicks()).movePointLeft(2);
+            BigDecimal qty = BigDecimal.valueOf(level.quantitySteps()).movePointLeft(4);
+            target.add(new DepthLevel(price, qty));
+            if (qty.compareTo(snap.maxDepthQty) > 0) {
+                snap.maxDepthQty = qty;
+            }
+        }
     }
 }

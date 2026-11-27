@@ -302,133 +302,138 @@ public final class RealtimeWebSocketDispatcher
             registry.publishUserSnapshot(
                     f.productLine(),
                     f.userId(),
-                    UserReadView.from(
-                            new ValkeyReadViewStore.ReadView("UNAVAILABLE", "", 0, List.of())));
+                    UserReadView.from(new ValkeyReadViewStore.ReadView("UNAVAILABLE", "", 0, List.of())));
             return;
         }
         if (f.snapshotId() != 0) {
-            var complete = snapshots.accept(f, System.currentTimeMillis());
-            if (!complete.isEmpty()) {
-                var view =
-                        UserReadView.from(
-                                new ValkeyReadViewStore.ReadView(
-                                        "READY",
-                                        RealtimeVersion.fence(f.sequence()),
-                                        System.currentTimeMillis(),
-                                        complete.subList(1, complete.size() - 1),
-                                        RealtimeVersion.of(
-                                                ValkeyReadViewStore.exportSequence(
-                                                        complete.getLast()),
-                                                0)));
-                registry.publishUserSnapshot(f.productLine(), f.userId(), view);
-            }
+            handleSnapshotFrame(f);
             return;
         }
-        WsChannel channel =
-                switch (f.kind()) {
-                    case EXECUTION -> WsChannel.EXECUTION_REPORTS;
-                    case RISK -> WsChannel.POSITION_RISK;
-                    case ORDER -> WsChannel.ORDERS;
-                    case TRIGGER -> WsChannel.TRIGGER_ORDERS;
-                    case POSITION -> WsChannel.POSITIONS;
-                    case USER, BALANCE, METADATA, RESERVATION, LEVERAGE -> WsChannel.ACCOUNT_STATE;
-                    case TRADE -> WsChannel.TRADES;
-                    case BOOK -> WsChannel.DEPTH;
-                    case INDEX -> WsChannel.INDEX_PRICE;
-                    case MARK -> WsChannel.MARK_PRICE;
-                    case FUNDING -> WsChannel.FUNDING_RATE;
-                    case CANDLE -> WsChannel.CANDLES;
-                    default -> null;
-                };
+        WsChannel channel = channelFor(f.kind());
         if (channel == null) return;
         String instrumentId = f.instrumentId().isBlank() ? SubscriptionTopic.WILDCARD : f.instrumentId();
-        var topic =
-                new SubscriptionTopic(
-                        channel,
-                        instrumentId,
-                        channel == WsChannel.CANDLES ? f.entityId() : null,
-                        f.userId() > 0 ? f.userId() : null,
-                        f.productLine());
+        var topic = new SubscriptionTopic(
+                channel,
+                instrumentId,
+                channel == WsChannel.CANDLES ? f.entityId() : null,
+                f.userId() > 0 ? f.userId() : null,
+                f.productLine());
         if (f.kind() == RealtimeFrame.Kind.BOOK) {
-            boolean hasDepth = registry.hasDepthSubscribers(f.productLine(), instrumentId);
-            var tickerTopic = new SubscriptionTopic(
-                    WsChannel.BOOK_TICKER, instrumentId, null, null, f.productLine());
-            boolean hasTicker = registry.hasSubscribers(tickerTopic);
-            if (!hasDepth && !hasTicker) return;
-            CoreOrderBookView book = CoreStateQueryCodec.decodeOrderBookView(f.payload());
-            String version = RealtimeVersion.of(f.sequence(), f.ordinal());
-            Instant eventTime = Instant.ofEpochMilli(f.timestamp());
-            BookKey key = new BookKey(f.productLine(), instrumentId);
-            if (hasDepth) {
-                publishOrCoalesceDepth(key, topic, book, version, f.entityId(), eventTime);
-            }
-            if (hasTicker) {
-                publishTickerIfChanged(key, tickerTopic, book, version, f.entityId(), eventTime);
-            }
+            handleBookFrame(f, topic, instrumentId);
             return;
         }
         if (f.kind() == RealtimeFrame.Kind.RISK) {
-            var accountRiskTopic = new SubscriptionTopic(
-                    WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, null, f.userId(), f.productLine());
-            boolean hasPositionRisk = registry.hasSubscribers(topic);
-            boolean hasAccountRisk = registry.hasSubscribers(accountRiskTopic);
-            if (!hasPositionRisk && !hasAccountRisk) return;
-            Object value = UserReadView.PositionRisk.decode(f);
-            var event = new VersionedEvent(RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), value);
-            Instant eventTime = Instant.ofEpochMilli(f.timestamp());
-            if (hasPositionRisk) registry.publish(topic, event, eventTime);
-            if (hasAccountRisk) registry.publish(accountRiskTopic, event, eventTime);
+            handleRiskFrame(f, topic);
             return;
         }
         if (f.kind() == RealtimeFrame.Kind.CANDLE && "1m".equals(f.entityId()) && marketSummaryService != null) {
-            try {
-                var node = mapper.readTree(f.payload());
-                int instId = Integer.parseInt(f.instrumentId());
-                long openMs = Instant.parse(node.path("openTime").asText()).toEpochMilli();
-                marketSummaryService.onMinuteCandle(
-                        f.productLine(), instId, openMs,
-                        node.path("openPrice").decimalValue(),
-                        node.path("highPrice").decimalValue(),
-                        node.path("lowPrice").decimalValue(),
-                        node.path("closePrice").decimalValue(),
-                        node.path("baseVolume").decimalValue(),
-                        node.path("quoteVolume").decimalValue());
-            } catch (Exception ignored) {
-                // Best-effort 24h ring buffer update; must never block WS fanout.
-            }
+            observeMinuteCandle(f);
         }
         if (!registry.hasSubscribers(topic)) return;
-        Object value =
-                switch (f.kind()) {
-                    case EXECUTION -> {
-                        var b =
-                                java.nio.ByteBuffer.wrap(f.payload())
-                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN);
-                        yield Map.of(
-                                "orderId",
-                                Long.toString(b.getLong()),
-                                "priceTicks",
-                                b.getLong(),
-                                "quantitySteps",
-                                b.getLong(),
-                                "side",
-                                ORDER_SIDES[b.get()].name(),
-                                "maker",
-                                b.get() == 1);
-                    }
-                    case ORDER -> CoreStateQueryCodec.decodeOrderState(f.payload());
-                    case TRIGGER -> CoreTriggerOrderCodec.decodeList(f.payload());
-                    case USER, BALANCE, METADATA, RESERVATION, LEVERAGE, POSITION ->
-                            CoreStateQueryCodec.decodeUserState(f.payload());
-                    case TRADE -> publicTrade(f);
-                    default -> new tools.jackson.databind.util.RawValue(
-                            new String(f.payload(), java.nio.charset.StandardCharsets.UTF_8));
-                };
         registry.publish(
                 topic,
-                new VersionedEvent(
-                        RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), value),
+                new VersionedEvent(RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), decodeFramePayload(f)),
                 Instant.ofEpochMilli(f.timestamp()));
+    }
+
+    private void handleSnapshotFrame(RealtimeFrame f) {
+        var complete = snapshots.accept(f, System.currentTimeMillis());
+        if (complete.isEmpty()) return;
+        var view = UserReadView.from(new ValkeyReadViewStore.ReadView(
+                "READY",
+                RealtimeVersion.fence(f.sequence()),
+                System.currentTimeMillis(),
+                complete.subList(1, complete.size() - 1),
+                RealtimeVersion.of(ValkeyReadViewStore.exportSequence(complete.getLast()), 0)));
+        registry.publishUserSnapshot(f.productLine(), f.userId(), view);
+    }
+
+    private static WsChannel channelFor(RealtimeFrame.Kind kind) {
+        return switch (kind) {
+            case EXECUTION -> WsChannel.EXECUTION_REPORTS;
+            case RISK -> WsChannel.POSITION_RISK;
+            case ORDER -> WsChannel.ORDERS;
+            case TRIGGER -> WsChannel.TRIGGER_ORDERS;
+            case POSITION -> WsChannel.POSITIONS;
+            case USER, BALANCE, METADATA, RESERVATION, LEVERAGE -> WsChannel.ACCOUNT_STATE;
+            case TRADE -> WsChannel.TRADES;
+            case BOOK -> WsChannel.DEPTH;
+            case INDEX -> WsChannel.INDEX_PRICE;
+            case MARK -> WsChannel.MARK_PRICE;
+            case FUNDING -> WsChannel.FUNDING_RATE;
+            case CANDLE -> WsChannel.CANDLES;
+            default -> null;
+        };
+    }
+
+    private void handleBookFrame(RealtimeFrame f, SubscriptionTopic topic, String instrumentId) {
+        boolean hasDepth = registry.hasDepthSubscribers(f.productLine(), instrumentId);
+        var tickerTopic = new SubscriptionTopic(
+                WsChannel.BOOK_TICKER, instrumentId, null, null, f.productLine());
+        boolean hasTicker = registry.hasSubscribers(tickerTopic);
+        if (!hasDepth && !hasTicker) return;
+        CoreOrderBookView book = CoreStateQueryCodec.decodeOrderBookView(f.payload());
+        String version = RealtimeVersion.of(f.sequence(), f.ordinal());
+        Instant eventTime = Instant.ofEpochMilli(f.timestamp());
+        BookKey key = new BookKey(f.productLine(), instrumentId);
+        if (hasDepth) {
+            publishOrCoalesceDepth(key, topic, book, version, f.entityId(), eventTime);
+        }
+        if (hasTicker) {
+            publishTickerIfChanged(key, tickerTopic, book, version, f.entityId(), eventTime);
+        }
+    }
+
+    private void handleRiskFrame(RealtimeFrame f, SubscriptionTopic topic) {
+        var accountRiskTopic = new SubscriptionTopic(
+                WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, null, f.userId(), f.productLine());
+        boolean hasPositionRisk = registry.hasSubscribers(topic);
+        boolean hasAccountRisk = registry.hasSubscribers(accountRiskTopic);
+        if (!hasPositionRisk && !hasAccountRisk) return;
+        Object value = UserReadView.PositionRisk.decode(f);
+        var event = new VersionedEvent(RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), value);
+        Instant eventTime = Instant.ofEpochMilli(f.timestamp());
+        if (hasPositionRisk) registry.publish(topic, event, eventTime);
+        if (hasAccountRisk) registry.publish(accountRiskTopic, event, eventTime);
+    }
+
+    private void observeMinuteCandle(RealtimeFrame f) {
+        try {
+            var node = mapper.readTree(f.payload());
+            int instId = Integer.parseInt(f.instrumentId());
+            long openMs = Instant.parse(node.path("openTime").asText()).toEpochMilli();
+            marketSummaryService.onMinuteCandle(
+                    f.productLine(), instId, openMs,
+                    node.path("openPrice").decimalValue(),
+                    node.path("highPrice").decimalValue(),
+                    node.path("lowPrice").decimalValue(),
+                    node.path("closePrice").decimalValue(),
+                    node.path("baseVolume").decimalValue(),
+                    node.path("quoteVolume").decimalValue());
+        } catch (Exception ignored) {
+            // Best-effort 24h ring buffer update; must never block WS fanout.
+        }
+    }
+
+    private static Object decodeFramePayload(RealtimeFrame f) {
+        return switch (f.kind()) {
+            case EXECUTION -> {
+                var b = java.nio.ByteBuffer.wrap(f.payload()).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                yield Map.of(
+                        "orderId", Long.toString(b.getLong()),
+                        "priceTicks", b.getLong(),
+                        "quantitySteps", b.getLong(),
+                        "side", ORDER_SIDES[b.get()].name(),
+                        "maker", b.get() == 1);
+            }
+            case ORDER -> CoreStateQueryCodec.decodeOrderState(f.payload());
+            case TRIGGER -> CoreTriggerOrderCodec.decodeList(f.payload());
+            case USER, BALANCE, METADATA, RESERVATION, LEVERAGE, POSITION ->
+                    CoreStateQueryCodec.decodeUserState(f.payload());
+            case TRADE -> publicTrade(f);
+            default -> new tools.jackson.databind.util.RawValue(
+                    new String(f.payload(), java.nio.charset.StandardCharsets.UTF_8));
+        };
     }
 
     private void publishOrCoalesceDepth(BookKey key, SubscriptionTopic topic, CoreOrderBookView book,

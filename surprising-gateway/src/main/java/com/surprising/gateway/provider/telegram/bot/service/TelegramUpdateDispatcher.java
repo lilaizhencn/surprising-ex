@@ -103,97 +103,89 @@ public class TelegramUpdateDispatcher {
         rememberChat(tgUser, chatId);
 
         log.info("Telegram callback data: {} from userId={}", data, tgUser.id());
+        if (dispatchExactCallback(data, chatId, messageId, tgUser)) {
+            return;
+        }
+        dispatchPrefixCallback(data, chatId, messageId, tgUser);
+    }
 
-        if ("menu:main".equals(data)) {
-            authHandler.renderMainMenu(chatId, messageId, tgUser);
-        } else if ("menu:assets".equals(data)) {
-            assetHandler.renderAssets(chatId, messageId, tgUser);
-        } else if ("menu:market".equals(data)) {
-            marketHandler.renderMarketOverview(chatId, messageId, "BTC-USDT");
-        } else if ("menu:positions".equals(data)) {
-            positionHandler.renderPositions(chatId, messageId, tgUser);
-        } else if ("menu:orders".equals(data)) {
-            orderHandler.renderOpenOrders(chatId, messageId, tgUser);
-        } else if ("menu:trade".equals(data)) {
-            tradeHandler.renderTradeCenter(chatId, messageId, tgUser);
-        } else if ("menu:deposit".equals(data)) {
-            depositHandler.renderChainSelection(chatId, messageId, tgUser);
-        } else if ("menu:withdraw".equals(data)) {
-            withdrawHandler.renderChainSelection(chatId, messageId, tgUser);
-        } else if ("menu:transfer".equals(data)) {
-            transferHandler.renderDirectionSelection(chatId, messageId, tgUser);
-        } else if ("kol:dashboard".equals(data)) {
-            affiliateHandler.renderKolDashboard(chatId, messageId, tgUser);
-        } else if ("kol:poster".equals(data)) {
-            affiliateHandler.renderReferralPoster(chatId, tgUser);
-        } else if ("kol:members".equals(data)) {
-            affiliateHandler.renderTeamMembers(chatId, messageId, tgUser);
-        } else if ("kol:hierarchy".equals(data)) {
-            affiliateHandler.renderHierarchy(chatId, messageId, tgUser);
-        } else if ("kol:create_code".equals(data)) {
-            affiliateHandler.renderCreateCustomInvitation(chatId, messageId, tgUser);
-        } else if (data.startsWith("kol:do_create_code:")) {
-            String[] parts = data.split(":");
-            affiliateHandler.executeCreateCustomInvitation(chatId, messageId, tgUser, Integer.parseInt(parts[2]));
-        } else if (data.startsWith("kol:member:")) {
-            String[] parts = data.split(":");
-            affiliateHandler.renderMemberDetail(chatId, messageId, tgUser, Long.parseLong(parts[2]));
-        } else if (data.startsWith("kol:do_share:")) {
-            String[] parts = data.split(":");
-            affiliateHandler.executeSetShare(chatId, messageId, tgUser, Long.parseLong(parts[2]), Integer.parseInt(parts[3]));
-        } else if (data.startsWith("kol:custom_share:")) {
-            String[] parts = data.split(":");
-            affiliateHandler.startCustomShareInput(chatId, messageId, tgUser, Long.parseLong(parts[2]));
-        } else if ("menu:settings".equals(data)) {
-            settingsHandler.renderSettings(chatId, messageId, tgUser);
+    private boolean dispatchExactCallback(String data, long chatId, long messageId, TelegramUser tgUser) {
+        switch (data) {
+            case "menu:main" -> authHandler.renderMainMenu(chatId, messageId, tgUser);
+            case "menu:assets" -> assetHandler.renderAssets(chatId, messageId, tgUser);
+            case "menu:market" -> marketHandler.renderMarketOverview(chatId, messageId, "BTC-USDT");
+            case "menu:positions" -> positionHandler.renderPositions(chatId, messageId, tgUser);
+            case "menu:orders" -> orderHandler.renderOpenOrders(chatId, messageId, tgUser);
+            case "menu:trade" -> tradeHandler.renderTradeCenter(chatId, messageId, tgUser);
+            case "menu:deposit" -> depositHandler.renderChainSelection(chatId, messageId, tgUser);
+            case "menu:withdraw" -> withdrawHandler.renderChainSelection(chatId, messageId, tgUser);
+            case "menu:transfer" -> transferHandler.renderDirectionSelection(chatId, messageId, tgUser);
+            case "menu:settings" -> settingsHandler.renderSettings(chatId, messageId, tgUser);
+            case "kol:dashboard" -> affiliateHandler.renderKolDashboard(chatId, messageId, tgUser);
+            case "kol:poster" -> affiliateHandler.renderReferralPoster(chatId, tgUser);
+            case "kol:members" -> affiliateHandler.renderTeamMembers(chatId, messageId, tgUser);
+            case "kol:hierarchy" -> affiliateHandler.renderHierarchy(chatId, messageId, tgUser);
+            case "kol:create_code" -> affiliateHandler.renderCreateCustomInvitation(chatId, messageId, tgUser);
+            case "orders:cancel_all" -> orderHandler.executeCancelAll(chatId, messageId, tgUser);
+            case "trade:confirm_execute" ->
+                    sessionService.getState(tgUser.id()).ifPresent(state -> tradeHandler.executeTrade(chatId, messageId, tgUser, state));
+            case "withdraw:confirm_execute" ->
+                    sessionService.getState(tgUser.id()).ifPresent(state -> withdrawHandler.executeWithdrawal(chatId, messageId, tgUser, state));
+            case "settings:begin_pin" -> settingsHandler.startPinSetupStep(chatId, messageId, tgUser);
+            case "settings:lang:menu" -> settingsHandler.renderLanguageSettings(chatId, messageId, tgUser);
+            default -> {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void dispatchPrefixCallback(String data, long chatId, long messageId, TelegramUser tgUser) {
+        if (data.startsWith("kol:")) {
+            dispatchKolCallback(data, chatId, messageId, tgUser);
+        } else if (data.startsWith("market:depth:")) {
+            marketHandler.renderOrderBookDepth(chatId, messageId, data.substring("market:depth:".length()));
+        } else if (data.startsWith("market:view:")) {
+            marketHandler.renderMarketOverview(chatId, messageId, data.substring("market:view:".length()));
         } else if (data.startsWith("orders:cancel:")) {
             String[] parts = data.split(":");
             orderHandler.executeCancelOrder(chatId, messageId, tgUser, Long.parseLong(parts[2]), parts[3]);
-        } else if ("orders:cancel_all".equals(data)) {
-            orderHandler.executeCancelAll(chatId, messageId, tgUser);
-        } else if (data.startsWith("market:depth:")) {
-            String symbol = data.substring("market:depth:".length());
-            marketHandler.renderOrderBookDepth(chatId, messageId, symbol);
-        } else if (data.startsWith("market:view:")) {
-            String symbol = data.substring("market:view:".length());
-            marketHandler.renderMarketOverview(chatId, messageId, symbol);
         } else if (data.startsWith("trade:symbol:")) {
-            String symbol = data.substring("trade:symbol:".length());
-            tradeHandler.startFastTradeQtyStep(chatId, messageId, tgUser, symbol, "BUY");
+            tradeHandler.startFastTradeQtyStep(chatId, messageId, tgUser, data.substring("trade:symbol:".length()), "BUY");
         } else if (data.startsWith("trade:fast:")) {
             String[] parts = data.split(":");
             tradeHandler.startFastTradeQtyStep(chatId, messageId, tgUser, parts[2], parts[3]);
-        } else if ("trade:confirm_execute".equals(data)) {
-            sessionService.getState(tgUser.id()).ifPresent(state -> tradeHandler.executeTrade(chatId, messageId, tgUser, state));
         } else if (data.startsWith("pos:confirm_close:")) {
             String[] parts = data.split(":");
-            String pct = parts.length > 4 ? parts[4] : "100";
-            positionHandler.renderConfirmClose(chatId, messageId, tgUser, parts[2], parts[3], pct);
+            positionHandler.renderConfirmClose(chatId, messageId, tgUser, parts[2], parts[3], parts.length > 4 ? parts[4] : "100");
         } else if (data.startsWith("pos:do_close:")) {
             String[] parts = data.split(":");
-            String pct = parts.length > 4 ? parts[4] : "100";
-            positionHandler.executeClosePosition(chatId, messageId, tgUser, parts[2], parts[3], pct);
+            positionHandler.executeClosePosition(chatId, messageId, tgUser, parts[2], parts[3], parts.length > 4 ? parts[4] : "100");
         } else if (data.startsWith("deposit:get:")) {
-            String chain = data.substring("deposit:get:".length());
-            depositHandler.handleGetAddress(chatId, messageId, tgUser, chain);
+            depositHandler.handleGetAddress(chatId, messageId, tgUser, data.substring("deposit:get:".length()));
         } else if (data.startsWith("withdraw:step1:")) {
             String[] parts = data.split(":");
             withdrawHandler.startWithdrawAddressStep(chatId, messageId, tgUser, parts[2], parts[3]);
-        } else if ("withdraw:confirm_execute".equals(data)) {
-            sessionService.getState(tgUser.id()).ifPresent(state -> withdrawHandler.executeWithdrawal(chatId, messageId, tgUser, state));
         } else if (data.startsWith("transfer:dir:")) {
             String[] parts = data.split(":");
             transferHandler.startTransferAmountStep(chatId, messageId, tgUser, parts[2], parts[3], parts[4]);
         } else if (data.startsWith("settings:mode:")) {
-            String mode = data.substring("settings:mode:".length());
-            settingsHandler.handleModeChange(chatId, messageId, tgUser, mode);
-        } else if ("settings:begin_pin".equals(data)) {
-            settingsHandler.startPinSetupStep(chatId, messageId, tgUser);
-        } else if ("settings:lang:menu".equals(data)) {
-            settingsHandler.renderLanguageSettings(chatId, messageId, tgUser);
+            settingsHandler.handleModeChange(chatId, messageId, tgUser, data.substring("settings:mode:".length()));
         } else if (data.startsWith("settings:lang:set:")) {
-            String lang = data.substring("settings:lang:set:".length());
-            settingsHandler.handleLanguageChange(chatId, messageId, tgUser, lang);
+            settingsHandler.handleLanguageChange(chatId, messageId, tgUser, data.substring("settings:lang:set:".length()));
+        }
+    }
+
+    private void dispatchKolCallback(String data, long chatId, long messageId, TelegramUser tgUser) {
+        String[] parts = data.split(":");
+        if (data.startsWith("kol:do_create_code:")) {
+            affiliateHandler.executeCreateCustomInvitation(chatId, messageId, tgUser, Integer.parseInt(parts[2]));
+        } else if (data.startsWith("kol:member:")) {
+            affiliateHandler.renderMemberDetail(chatId, messageId, tgUser, Long.parseLong(parts[2]));
+        } else if (data.startsWith("kol:do_share:")) {
+            affiliateHandler.executeSetShare(chatId, messageId, tgUser, Long.parseLong(parts[2]), Integer.parseInt(parts[3]));
+        } else if (data.startsWith("kol:custom_share:")) {
+            affiliateHandler.startCustomShareInput(chatId, messageId, tgUser, Long.parseLong(parts[2]));
         }
     }
 
@@ -207,99 +199,83 @@ public class TelegramUpdateDispatcher {
 
         if (text.startsWith("/start")) authHandler.registerUser(tgUser);
         else authHandler.resolveUserId(tgUser);
-        rememberChat(tgUser,chatId);
+        rememberChat(tgUser, chatId);
 
-        // 1. 先检查是否处于多步会话状态机中
+        if (handleSessionInput(chatId, tgUser, text)) {
+            return;
+        }
+        dispatchTextCommand(chatId, tgUser, text);
+    }
+
+    private boolean handleSessionInput(long chatId, TelegramUser tgUser, String text) {
         Optional<TelegramSessionState> optState = sessionService.getState(tgUser.id());
-        if (optState.isPresent()) {
-            TelegramSessionState state = optState.get();
-            switch (state.getStep()) {
-                case WITHDRAW_AWAITING_ADDRESS -> {
-                    withdrawHandler.handleAddressInput(chatId, tgUser, text, state);
-                    return;
-                }
-                case WITHDRAW_AWAITING_AMOUNT -> {
-                    withdrawHandler.handleAmountInput(chatId, tgUser, text, state);
-                    return;
-                }
-                case WITHDRAW_AWAITING_CREDENTIAL -> {
-                    withdrawHandler.handleCredentialInput(chatId, tgUser, text, state);
-                    return;
-                }
-                case TRADE_AWAITING_QUANTITY -> {
-                    tradeHandler.handleQuantityInput(chatId, tgUser, text, state);
-                    return;
-                }
-                case TRADE_AWAITING_CREDENTIAL -> {
-                    tradeHandler.handleCredentialInput(chatId, tgUser, text, state);
-                    return;
-                }
-                case TRANSFER_AWAITING_AMOUNT -> {
-                    transferHandler.handleAmountInput(chatId, tgUser, text, state);
-                    return;
-                }
-                case SETTINGS_AWAITING_NEW_PIN -> {
-                    settingsHandler.handlePinInput(chatId, tgUser, text);
-                    return;
-                }
-                case KOL_AWAITING_CUSTOM_SHARE -> {
-                    affiliateHandler.handleCustomShareInput(chatId, tgUser, text, state);
-                    return;
-                }
-                default -> {}
+        if (optState.isEmpty()) {
+            return false;
+        }
+        TelegramSessionState state = optState.get();
+        switch (state.getStep()) {
+            case WITHDRAW_AWAITING_ADDRESS -> withdrawHandler.handleAddressInput(chatId, tgUser, text, state);
+            case WITHDRAW_AWAITING_AMOUNT -> withdrawHandler.handleAmountInput(chatId, tgUser, text, state);
+            case WITHDRAW_AWAITING_CREDENTIAL -> withdrawHandler.handleCredentialInput(chatId, tgUser, text, state);
+            case TRADE_AWAITING_QUANTITY -> tradeHandler.handleQuantityInput(chatId, tgUser, text, state);
+            case TRADE_AWAITING_CREDENTIAL -> tradeHandler.handleCredentialInput(chatId, tgUser, text, state);
+            case TRANSFER_AWAITING_AMOUNT -> transferHandler.handleAmountInput(chatId, tgUser, text, state);
+            case SETTINGS_AWAITING_NEW_PIN -> settingsHandler.handlePinInput(chatId, tgUser, text);
+            case KOL_AWAITING_CUSTOM_SHARE -> affiliateHandler.handleCustomShareInput(chatId, tgUser, text, state);
+            default -> {
+                return false;
             }
         }
+        return true;
+    }
 
-        // 2. 匹配固定指令与多语言键盘快捷语（中、英、俄）
+    private void dispatchTextCommand(long chatId, TelegramUser tgUser, String text) {
         if (text.startsWith("/start aff_")) {
-            String inviteCode = text.substring("/start aff_".length()).trim();
-            affiliateHandler.handleDeepLinkInvitation(chatId, tgUser, inviteCode);
-        } else if (text.startsWith("/start") || text.startsWith("/menu") || "主菜单".equals(text)
-                || "Menu".equalsIgnoreCase(text) || "Main Menu".equalsIgnoreCase(text) || "Главное меню".equalsIgnoreCase(text)) {
+            affiliateHandler.handleDeepLinkInvitation(chatId, tgUser, text.substring("/start aff_".length()).trim());
+        } else if (text.startsWith("/start") || text.startsWith("/menu") || matchesAny(text, "主菜单", "Menu", "Main Menu", "Главное меню")) {
             authHandler.sendWelcomeAndMainMenu(chatId, tgUser);
-        } else if (text.startsWith("/assets") || "💰 账户资产".equals(text) || "💰 Assets".equalsIgnoreCase(text)
-                || "💰 Активы".equalsIgnoreCase(text) || "资产".equals(text) || "Assets".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/assets") || matchesAny(text, "💰 账户资产", "💰 Assets", "💰 Активы", "资产", "Assets")) {
             assetHandler.renderAssets(chatId, null, tgUser);
         } else if (text.startsWith("/depth")) {
-            String[] parts = text.split("\\s+");
-            String symbol = parts.length > 1 ? parts[1] : "BTC-USDT";
-            marketHandler.renderOrderBookDepth(chatId, null, symbol);
-        } else if (text.startsWith("/price") || text.startsWith("/market") || "📊 实时行情".equals(text)
-                || "📊 Market".equalsIgnoreCase(text) || "📊 Рынок".equalsIgnoreCase(text) || "行情".equals(text) || "Market".equalsIgnoreCase(text)) {
-            String[] parts = text.split("\\s+");
-            String symbol = parts.length > 1 ? parts[1] : "BTC-USDT";
-            marketHandler.renderMarketOverview(chatId, null, symbol);
-        } else if (text.equalsIgnoreCase("btc") || text.equalsIgnoreCase("eth") || text.equalsIgnoreCase("sol")
-                || text.equalsIgnoreCase("doge") || text.equalsIgnoreCase("xrp")) {
+            marketHandler.renderOrderBookDepth(chatId, null, extractSecondToken(text, "BTC-USDT"));
+        } else if (text.startsWith("/price") || text.startsWith("/market")
+                || matchesAny(text, "📊 实时行情", "📊 Market", "📊 Рынок", "行情", "Market")) {
+            marketHandler.renderMarketOverview(chatId, null, extractSecondToken(text, "BTC-USDT"));
+        } else if (matchesAny(text, "btc", "eth", "sol", "doge", "xrp")) {
             marketHandler.renderMarketOverview(chatId, null, text.toUpperCase() + "-USDT");
-        } else if (text.startsWith("/positions") || "📈 合约持仓".equals(text) || "📈 Positions".equalsIgnoreCase(text)
-                || "📈 Позиции".equalsIgnoreCase(text) || "持仓".equals(text) || "Positions".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/positions") || matchesAny(text, "📈 合约持仓", "📈 Positions", "📈 Позиции", "持仓", "Positions")) {
             positionHandler.renderPositions(chatId, null, tgUser);
-        } else if (text.startsWith("/orders") || "📋 当前挂单".equals(text) || "📋 Open Orders".equalsIgnoreCase(text)
-                || "📋 Ордера".equalsIgnoreCase(text) || "挂单".equals(text) || "Orders".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/orders") || matchesAny(text, "📋 当前挂单", "📋 Open Orders", "📋 Ордера", "挂单", "Orders")) {
             orderHandler.renderOpenOrders(chatId, null, tgUser);
-        } else if (text.startsWith("/trade") || "⚡ 快捷交易".equals(text) || "⚡ Fast Trade".equalsIgnoreCase(text)
-                || "⚡ Быстрая торговля".equalsIgnoreCase(text) || "交易".equals(text) || "Trade".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/trade") || matchesAny(text, "⚡ 快捷交易", "⚡ Fast Trade", "⚡ Быстрая торговля", "交易", "Trade")) {
             tradeHandler.renderTradeCenter(chatId, null, tgUser);
-        } else if (text.startsWith("/deposit") || "💳 充值".equals(text) || "💳 Deposit".equalsIgnoreCase(text)
-                || "💳 Депозит".equalsIgnoreCase(text) || "充币".equals(text) || "Deposit".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/deposit") || matchesAny(text, "💳 充值", "💳 Deposit", "💳 Депозит", "充币", "Deposit")) {
             depositHandler.renderChainSelection(chatId, null, tgUser);
-        } else if (text.startsWith("/withdraw") || "💸 提币".equals(text) || "💸 Withdraw".equalsIgnoreCase(text)
-                || "💸 Вывод".equalsIgnoreCase(text) || "提现".equals(text) || "Withdraw".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/withdraw") || matchesAny(text, "💸 提币", "💸 Withdraw", "💸 Вывод", "提现", "Withdraw")) {
             withdrawHandler.renderChainSelection(chatId, null, tgUser);
-        } else if (text.startsWith("/transfer") || "🔄 划转".equals(text) || "🔄 Transfer".equalsIgnoreCase(text)
-                || "🔄 Перевод".equalsIgnoreCase(text) || "资金划转".equals(text) || "Transfer".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/transfer") || matchesAny(text, "🔄 划转", "🔄 Transfer", "🔄 Перевод", "资金划转", "Transfer")) {
             transferHandler.renderDirectionSelection(chatId, null, tgUser);
-        } else if (text.startsWith("/kol") || text.startsWith("/affiliate") || "🤝 邀请返佣".equals(text)
-                || "🤝 Referral (KOL)".equalsIgnoreCase(text) || "🤝 Рефералы (KOL)".equalsIgnoreCase(text)
-                || "邀请".equals(text) || "Referral".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/kol") || text.startsWith("/affiliate")
+                || matchesAny(text, "🤝 邀请返佣", "🤝 Referral (KOL)", "🤝 Рефералы (KOL)", "邀请", "Referral")) {
             affiliateHandler.renderKolDashboard(chatId, null, tgUser);
-        } else if (text.startsWith("/settings") || "⚙️ 设置".equals(text) || "⚙️ Settings".equalsIgnoreCase(text)
-                || "⚙️ Настройки".equalsIgnoreCase(text) || "安全设置".equals(text) || "Settings".equalsIgnoreCase(text)) {
+        } else if (text.startsWith("/settings") || matchesAny(text, "⚙️ 设置", "⚙️ Settings", "⚙️ Настройки", "安全设置", "Settings")) {
             settingsHandler.renderSettings(chatId, null, tgUser);
         } else {
-            // 未知输入时引导用户回主菜单
             authHandler.sendWelcomeAndMainMenu(chatId, tgUser);
         }
+    }
+
+    private static boolean matchesAny(String text, String... aliases) {
+        for (String alias : aliases) {
+            if (alias.equalsIgnoreCase(text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String extractSecondToken(String text, String fallback) {
+        String[] parts = text.split("\\s+");
+        return parts.length > 1 ? parts[1] : fallback;
     }
 }

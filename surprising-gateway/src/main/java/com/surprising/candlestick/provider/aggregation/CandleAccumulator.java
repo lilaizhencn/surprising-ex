@@ -1,5 +1,7 @@
 package com.surprising.candlestick.provider.aggregation;
 
+import com.surprising.candlestick.provider.model.CandleSnapshot;
+
 import com.surprising.candlestick.api.model.CandlePeriod;
 import com.surprising.candlestick.api.model.CandleStatus;
 import java.math.BigDecimal;

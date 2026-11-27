@@ -89,9 +89,9 @@ class CandleQueryPostgresTest {
         });
     }
 
-    private com.surprising.candlestick.provider.aggregation.CandleSnapshot minute(
+    private com.surprising.candlestick.provider.model.CandleSnapshot minute(
             Instant open, long sequence, String close, String volume) {
-        return new com.surprising.candlestick.provider.aggregation.CandleSnapshot("2147483598", "1m", open,
+        return new com.surprising.candlestick.provider.model.CandleSnapshot("2147483598", "1m", open,
                 open.plusSeconds(60), new java.math.BigDecimal("100"), new java.math.BigDecimal(close),
                 new java.math.BigDecimal("100"), new java.math.BigDecimal(close), new java.math.BigDecimal(volume),
                 new java.math.BigDecimal(volume).multiply(new java.math.BigDecimal(close)), sequence, "first", "last" + sequence,

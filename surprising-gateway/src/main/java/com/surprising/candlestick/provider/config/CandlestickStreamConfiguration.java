@@ -11,7 +11,7 @@ import com.surprising.candlestick.provider.aggregation.CandleAggregationProcesso
 import com.surprising.candlestick.provider.aggregation.CandleRollupAccumulator;
 import com.surprising.candlestick.provider.aggregation.CandleRollupProcessor;
 import com.surprising.candlestick.provider.repository.PostgresCandleSink;
-import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
+import com.surprising.candlestick.provider.model.CandleSnapshot;
 import com.surprising.candlestick.provider.aggregation.CandleStores;
 import com.surprising.candlestick.provider.service.CandleHotCache;
 import com.surprising.candlestick.provider.service.PublicTradeEventMapper;

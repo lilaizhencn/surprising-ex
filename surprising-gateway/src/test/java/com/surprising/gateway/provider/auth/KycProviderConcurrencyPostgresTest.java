@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.KycProviderSession;
+import com.surprising.gateway.provider.auth.model.KycProviderResult;
+
 
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.client.KycProvider;
@@ -77,12 +80,12 @@ class KycProviderConcurrencyPostgresTest {
             }
         };
         providers=mock(KycProviderRegistry.class);
-        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(new KycProvider.KycProviderResult("session-old","42","event-1","VERIFIED",null, java.time.Instant.now(), null, null)));
+        when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(new KycProviderResult("session-old","42","event-1","VERIFIED",null, java.time.Instant.now(), null, null)));
         when(providers.simulationEnabled()).thenReturn(true);when(providers.verificationValidity()).thenReturn(java.time.Duration.ofDays(365));when(providers.selectedProvider()).thenReturn("SUMSUB");
         var auth=mock(AuthService.class);when(auth.authenticateBearer("auth")).thenReturn(new JwtPrincipal(42,"user","NORMAL",List.of(),Instant.now().plusSeconds(600)));
         var countries=mock(com.surprising.gateway.provider.auth.repository.CountryRepository.class);
         when(countries.supported("SG")).thenReturn(true);
-        when(providers.start(eq(42L),any(),anyList())).thenReturn(new KycProvider.KycProviderSession("SUMSUB","session-new", "token",null,"PENDING",false));
+        when(providers.start(eq(42L),any(),anyList())).thenReturn(new KycProviderSession("SUMSUB","session-new", "token",null,"PENDING",false));
         var documents=mock(KycDocumentService.class);
         when(documents.references(anyList(),any(),any(),any())).thenReturn("[]");
         var target=new ComplianceService(mock(),profiles,events,mock(),mock(),auth,mock(),documents,mock(),mock(),mock(),providers,countries);
@@ -136,13 +139,13 @@ class KycProviderConcurrencyPostgresTest {
     @Test void newerPendingAndOlderFinalCallbacksCannotReplaceTheLatestVerifiedDecision() {
         Instant time=Instant.now();
         when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
-                new KycProvider.KycProviderResult("session-old","42","approved","VERIFIED",null,time,null, null)));
+                new KycProviderResult("session-old","42","approved","VERIFIED",null,time,null, null)));
         assertThat(callback().status()).isEqualTo("VERIFIED");
         when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
-                new KycProvider.KycProviderResult("session-old","42","late-pending","PENDING",null,time.plusSeconds(1),null, null)));
+                new KycProviderResult("session-old","42","late-pending","PENDING",null,time.plusSeconds(1),null, null)));
         assertThat(callback().status()).isEqualTo("VERIFIED");
         when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
-                new KycProvider.KycProviderResult("session-old","42","old-rejection","REJECTED","old",time.minusSeconds(1),null, null)));
+                new KycProviderResult("session-old","42","old-rejection","REJECTED","old",time.minusSeconds(1),null, null)));
         assertThat(callback().status()).isEqualTo("VERIFIED");
         assertThat(profiles.find(42).faceVerificationStatus()).isEqualTo("VERIFIED");
     }
@@ -180,7 +183,7 @@ class KycProviderConcurrencyPostgresTest {
         for(Instant expiry:List.of(now.plusSeconds(90),now.minusSeconds(1))) {
             profiles.submit(42,request("session-old"),"[]",now);
             when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
-                    new KycProvider.KycProviderResult("session-old","42",expiry.toString(),"VERIFIED",null,now,null,expiry)));
+                    new KycProviderResult("session-old","42",expiry.toString(),"VERIFIED",null,now,null,expiry)));
             var result=callback();
             assertThat(result.status()).isEqualTo(expiry.isAfter(now)?"VERIFIED":"EXPIRED");
             assertThat(result.expiresAt()).isEqualTo(expiry);
@@ -192,10 +195,10 @@ class KycProviderConcurrencyPostgresTest {
         profiles.upsert(42,42,new com.surprising.gateway.provider.auth.model.KycUpdateRequest(
                 "STANDARD","VERIFIED","SG","PASSPORT","SUMSUB","session-old",null,now.plusSeconds(600)),now);
         when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
-                new KycProvider.KycProviderResult("session-old","42","old-final","REJECTED","old",now.minusSeconds(1),null,null)));
+                new KycProviderResult("session-old","42","old-final","REJECTED","old",now.minusSeconds(1),null,null)));
         assertThat(callback().status()).isEqualTo("VERIFIED");
         when(providers.verifyCallback(eq("SUMSUB"),any(),any())).thenReturn(Optional.of(
-                new KycProvider.KycProviderResult("session-old","42","new-final","REJECTED","new risk decision",now.plusSeconds(1),null,null)));
+                new KycProviderResult("session-old","42","new-final","REJECTED","new risk decision",now.plusSeconds(1),null,null)));
         assertThat(callback().status()).isEqualTo("REJECTED");
         assertThat(profiles.find(42).faceVerificationStatus()).isEqualTo("FAILED");
     }

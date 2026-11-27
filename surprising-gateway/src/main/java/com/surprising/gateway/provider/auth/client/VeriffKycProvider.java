@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth.client;
 
+import com.surprising.gateway.provider.auth.model.KycProviderSession;
+import com.surprising.gateway.provider.auth.model.KycProviderResult;
+
 import com.surprising.gateway.provider.auth.model.KycDocument;
 import com.surprising.gateway.provider.auth.model.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.model.KycProfile;

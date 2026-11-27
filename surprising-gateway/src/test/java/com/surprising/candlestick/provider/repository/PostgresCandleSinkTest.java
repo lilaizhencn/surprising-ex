@@ -5,7 +5,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.surprising.candlestick.api.model.CandleStatus;
-import com.surprising.candlestick.provider.aggregation.CandleSnapshot;
+import com.surprising.candlestick.provider.model.CandleSnapshot;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;

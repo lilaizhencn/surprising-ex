@@ -1,5 +1,7 @@
 package com.surprising.candlestick.provider.aggregation;
 
+import com.surprising.candlestick.provider.model.CandleSnapshot;
+
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.candlestick.api.model.CandlePeriod;
 import com.surprising.candlestick.api.model.CandleStatus;

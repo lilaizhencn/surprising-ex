@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.KycProviderSession;
+
 
 import com.surprising.gateway.provider.auth.model.KycProfile;
 import com.surprising.gateway.provider.auth.client.KycProvider;

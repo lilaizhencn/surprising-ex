@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth.service;
 
+import com.surprising.gateway.provider.auth.model.KycProviderSession;
+import com.surprising.gateway.provider.auth.model.KycProviderResult;
+
 
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
@@ -179,7 +182,7 @@ public class ComplianceService {
         return new KycProviderInfo(kycProviders.selectedProvider(), kycProviders.simulationEnabled(), kycProviders.verificationOptions());
     }
 
-    public KycProvider.KycProviderSession refreshUserKycSession(String authorization) {
+    public KycProviderSession refreshUserKycSession(String authorization) {
         long userId = authService.authenticateBearer(authorization).userId();
         KycProfile profile = kycRepository.find(userId);
         if (profile == null || !"PENDING".equals(profile.status())
@@ -259,7 +262,7 @@ public class ComplianceService {
         // External SDK sessions collect and validate evidence in the provider flow.
         List<KycDocument> documents = hasDocuments ? kycDocumentService.requireSubmissionDocuments(userId, request.documentIds(), request.documentType(),
                 request.applicantType(), request.kycLevel(), request.faceVerificationStatus()) : List.of();
-        KycProvider.KycProviderSession session = kycProviders.start(userId, request, documents);
+        KycProviderSession session = kycProviders.start(userId, request, documents);
         KycSubmissionRequest providerRequest = new KycSubmissionRequest(
                 request.applicantType(), request.kycLevel(), request.country(), request.documentType(),
                 ComplianceValidation.provider(session.provider()),
@@ -280,7 +283,7 @@ public class ComplianceService {
 
     @Transactional
     public KycProfile applyProviderCallback(String provider, Map<String, String> headers, byte[] body) {
-        KycProvider.KycProviderResult result = kycProviders.verifyCallback(provider, headers, body)
+        KycProviderResult result = kycProviders.verifyCallback(provider, headers, body)
                 .orElseThrow(() -> new IllegalArgumentException("KYC callback could not be verified"));
         Long userId;
         try { userId = Long.valueOf(result.externalUserId().replaceFirst(":BUSINESS$", "")); }

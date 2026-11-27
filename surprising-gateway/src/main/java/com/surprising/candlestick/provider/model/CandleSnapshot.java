@@ -1,4 +1,4 @@
-package com.surprising.candlestick.provider.aggregation;
+package com.surprising.candlestick.provider.model;
 
 import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
