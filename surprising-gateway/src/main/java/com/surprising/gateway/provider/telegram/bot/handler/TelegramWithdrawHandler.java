@@ -171,25 +171,13 @@ public class TelegramWithdrawHandler {
         String chain = (String) state.getData().get("chain");
         String toAddress = (String) state.getData().get("toAddress");
 
-        // 估算手续费与实际到账
-        BigDecimal fee = "TRON".equalsIgnoreCase(chain) ? new BigDecimal("1.00") : new BigDecimal("3.00");
-        BigDecimal receive = amount.subtract(fee);
-        if (receive.compareTo(BigDecimal.ZERO) <= 0) {
-            botClient.sendMessage(chatId, "❌ 提币数量不足以支付网络手续费 (" + fee + " " + asset + ")，请重新输入更大的金额：", null);
-            return;
-        }
-
-        state.putData("fee", fee.toPlainString());
-        state.putData("receive", receive.toPlainString());
-
         StringBuilder sb = new StringBuilder();
         sb.append("📋 <b>第 3 步：确认提币订单详情</b>\n");
         sb.append("━━━━━━━━━━━━━━━━━━━━\n");
         sb.append("🪙 <b>提现币种:</b> ").append(asset).append(" (").append(chain).append(")\n");
         sb.append("📍 <b>目标收款地址:</b>\n<code>").append(toAddress).append("</code>\n\n");
         sb.append("💵 <b>提现总额:</b> <code>").append(amount.toPlainString()).append(" ").append(asset).append("</code>\n");
-        sb.append("⛽ <b>网络手续费:</b> <code>").append(fee.toPlainString()).append(" ").append(asset).append("</code>\n");
-        sb.append("🎁 <b>实际到账:</b> <code>").append(receive.toPlainString()).append(" ").append(asset).append("</code>\n\n");
+        sb.append("⛽ <b>网络手续费:</b> <i>按提交时实时链上配置结算</i>\n\n");
 
         TelegramInlineKeyboardMarkup.Builder markup = TelegramInlineKeyboardMarkup.builder();
 
@@ -228,37 +216,65 @@ public class TelegramWithdrawHandler {
     }
 
     public void executeWithdrawal(long chatId, Long messageId, TelegramUser tgUser, TelegramSessionState state) {
+        if (circuitBreaker != null && !circuitBreaker.isWithdrawalAllowed()) {
+            sessionService.clearState(tgUser.id());
+            String text = "🚨 <b>提币已被风控熔断拦截</b>\n" +
+                    "━━━━━━━━━━━━━━━━━━━━\n" +
+                    "⚠️ <b>原因:</b> <code>" + circuitBreaker.getStopReason() + "</code>";
+            TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
+                    .addRow(TelegramInlineKeyboardButton.callback("⬅️ 返回主菜单", "menu:main"))
+                    .build();
+            sendOrEdit(chatId, messageId, text, markup);
+            return;
+        }
+
         long userId = authHandler.resolveUserId(tgUser);
         String asset = (String) state.getData().get("asset");
         String chain = (String) state.getData().get("chain");
         String toAddress = (String) state.getData().get("toAddress");
         String amountStr = (String) state.getData().get("amount");
-        String receiveStr = (String) state.getData().get("receive");
 
         String idempotencyKey = "tg_withdraw_" + UUID.randomUUID().toString().substring(0, 16);
-        UUID withdrawalId = UUID.randomUUID();
-
+        CustodyWithdrawalService.WithdrawalResponse resp;
         try {
             CustodyWithdrawalService.WithdrawalRequest req = new CustodyWithdrawalService.WithdrawalRequest(
                     null, chain, asset, toAddress, amountStr, idempotencyKey, null
             );
-            CustodyWithdrawalService.WithdrawalResponse resp = withdrawalService.submit(userId, idempotencyKey, req);
-            if (resp != null && resp.withdrawalId() != null) {
-                withdrawalId = resp.withdrawalId();
-            }
+            resp = withdrawalService.submit(userId, idempotencyKey, req);
         } catch (Exception ex) {
-            log.warn("Withdrawal submission warning for user {}: {}", userId, ex.getMessage());
+            log.warn("Withdrawal submission failed for user {}: {}", userId, ex.getMessage());
+            sessionService.clearState(tgUser.id());
+            String failText = "❌ <b>提币申请提交失败</b>\n" +
+                    "━━━━━━━━━━━━━━━━━━━━\n" +
+                    "原因: <code>" + (ex.getMessage() != null ? ex.getMessage() : "服务暂不可用") + "</code>\n" +
+                    "请核对余额、地址与限额后重试。";
+            TelegramInlineKeyboardMarkup failMarkup = TelegramInlineKeyboardMarkup.builder()
+                    .addRow(TelegramInlineKeyboardButton.callback("🔄 重新发起提币", "menu:withdraw"))
+                    .addRow(TelegramInlineKeyboardButton.callback("⬅️ 返回主菜单", "menu:main"))
+                    .build();
+            sendOrEdit(chatId, messageId, failText, failMarkup);
+            return;
         }
 
         sessionService.clearState(tgUser.id());
 
+        if (resp == null || resp.withdrawalId() == null) {
+            String failText = "❌ <b>提币申请未返回有效回执</b>\n请前往资产页核对记录，切勿重复盲目重试。";
+            TelegramInlineKeyboardMarkup failMarkup = TelegramInlineKeyboardMarkup.builder()
+                    .addRow(TelegramInlineKeyboardButton.callback("💰 查看账户资产", "menu:assets"))
+                    .addRow(TelegramInlineKeyboardButton.callback("⬅️ 返回主菜单", "menu:main"))
+                    .build();
+            sendOrEdit(chatId, messageId, failText, failMarkup);
+            return;
+        }
+
         String text = "🎉 <b>提币申请已成功提交！</b>\n" +
                 "━━━━━━━━━━━━━━━━━━━━\n" +
-                "🆔 <b>申请流水号:</b> <code>" + withdrawalId + "</code>\n" +
+                "🆔 <b>申请流水号:</b> <code>" + resp.withdrawalId() + "</code>\n" +
                 "🪙 <b>提现币种:</b> <code>" + asset + " (" + chain + ")</code>\n" +
                 "📍 <b>目标地址:</b> <code>" + toAddress + "</code>\n" +
-                "🎁 <b>预计到账:</b> <code>" + receiveStr + " " + asset + "</code>\n" +
-                "⚡ <b>当前状态:</b> 🟡 处理中 (PROCESSING)\n\n" +
+                "💵 <b>提现金额:</b> <code>" + amountStr + " " + asset + "</code>\n" +
+                "⚡ <b>当前状态:</b> 🟡 " + (resp.status() != null ? resp.status() : "PROCESSING") + "\n\n" +
                 "系统将在区块链网络广播后自动通知您，您可在资产页面随时查看最新状态。";
 
         TelegramInlineKeyboardMarkup markup = TelegramInlineKeyboardMarkup.builder()
@@ -268,6 +284,10 @@ public class TelegramWithdrawHandler {
                 )
                 .build();
 
+        sendOrEdit(chatId, messageId, text, markup);
+    }
+
+    private void sendOrEdit(long chatId, Long messageId, String text, TelegramInlineKeyboardMarkup markup) {
         if (messageId != null) {
             botClient.editMessageText(chatId, messageId, text, markup);
         } else {

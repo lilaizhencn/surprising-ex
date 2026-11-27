@@ -211,14 +211,18 @@ public class TelegramTradeHandler {
         String errorMsg = null;
 
         for (ProductLine line : List.of(ProductLine.LINEAR_PERPETUAL, ProductLine.SPOT)) {
+            if (!products.enabled().contains(line)) {
+                continue;
+            }
             try {
-                if (products.enabled().contains(line)) {
-                    OrderService orderService = products.service(line, OrderService.class);
-                    var future = orderService.placeCommandAsync(req);
-                    if (future != null) {
-                        placed = true;
-                        break;
-                    }
+                OrderService orderService = products.service(line, OrderService.class);
+                OrderResponse res = orderService.place(req);
+                if (res != null && res.status() != OrderStatus.REJECTED) {
+                    placed = true;
+                    break;
+                }
+                if (res != null && res.rejectReason() != null) {
+                    errorMsg = res.rejectReason();
                 }
             } catch (Exception ex) {
                 errorMsg = ex.getMessage();

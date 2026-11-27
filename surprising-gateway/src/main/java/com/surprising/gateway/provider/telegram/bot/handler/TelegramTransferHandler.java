@@ -119,8 +119,8 @@ public class TelegramTransferHandler {
         String to = (String) state.getData().get("to");
         String asset = (String) state.getData().get("asset");
 
-        AccountType fromType = AccountType.valueOf(from);
-        AccountType toType = AccountType.valueOf(to);
+        AccountType fromType = parseAccountType(from);
+        AccountType toType = parseAccountType(to);
 
         long amountUnits = amount.movePointRight(8).longValue();
         String idempotencyKey = "tg_tf_" + UUID.randomUUID().toString().substring(0, 16);
@@ -175,10 +175,26 @@ public class TelegramTransferHandler {
         }
     }
 
+    static AccountType parseAccountType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("account type is required");
+        }
+        String normalized = raw.trim().toUpperCase(java.util.Locale.ROOT);
+        for (AccountType type : AccountType.values()) {
+            if (type.name().equals(normalized)) {
+                return type;
+            }
+            if (type.productLine().map(Enum::name).filter(normalized::equals).isPresent()) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unsupported account type: " + raw);
+    }
+
     private String accountName(String typeStr) {
         if ("SPOT".equalsIgnoreCase(typeStr)) return "现货账户";
-        if ("LINEAR_PERPETUAL".equalsIgnoreCase(typeStr)) return "U本位合约账户";
-        if ("INVERSE_PERPETUAL".equalsIgnoreCase(typeStr)) return "币本位合约账户";
+        if ("LINEAR_PERPETUAL".equalsIgnoreCase(typeStr) || "USDT_PERPETUAL".equalsIgnoreCase(typeStr)) return "U本位合约账户";
+        if ("INVERSE_PERPETUAL".equalsIgnoreCase(typeStr) || "COIN_PERPETUAL".equalsIgnoreCase(typeStr)) return "币本位合约账户";
         return typeStr;
     }
 }

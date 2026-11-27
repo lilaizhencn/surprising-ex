@@ -91,13 +91,20 @@ public class TelegramDepositHandler {
         }
 
         if (address == null || address.isBlank()) {
-            if ("TRON".equals(normalizedChain)) {
-                address = "TYDzsxdczEfD17Q6yoRPAxmGgkPxT" + String.format("%06d", userId % 100000);
-            } else if ("ETHEREUM".equals(normalizedChain)) {
-                address = "0x71C...a8F" + String.format("%04d", userId % 10000);
+            String errorText = "❌ <b>充值地址暂不可用</b>\n" +
+                    "━━━━━━━━━━━━━━━━━━━━\n" +
+                    "网络: <b>" + normalizedChain + "</b>\n" +
+                    "托管钱包地址服务当前不可用，请稍后重试。";
+            TelegramInlineKeyboardMarkup errorMarkup = TelegramInlineKeyboardMarkup.builder()
+                    .addRow(TelegramInlineKeyboardButton.callback(t("deposit.btn.change_network", locale), "menu:deposit"))
+                    .addRow(TelegramInlineKeyboardButton.callback(t("menu.btn.back", locale), "menu:main"))
+                    .build();
+            if (messageId != null) {
+                botClient.editMessageText(chatId, messageId, errorText, errorMarkup);
             } else {
-                address = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh";
+                botClient.sendMessage(chatId, errorText, errorMarkup);
             }
+            return;
         }
 
         String caption = t("deposit.your_address", locale) + "\n" +
