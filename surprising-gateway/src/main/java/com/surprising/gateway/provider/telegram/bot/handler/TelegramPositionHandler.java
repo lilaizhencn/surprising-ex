@@ -28,8 +28,8 @@ import java.util.*;
 public class TelegramPositionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramPositionHandler.class);
-    private static final DecimalFormat PRICE_FMT = new DecimalFormat("#,##0.00");
-    private static final DecimalFormat QTY_FMT = new DecimalFormat("#,##0.0000");
+    private static final String PRICE_PATTERN = "#,##0.00";
+    private static final String QTY_PATTERN = "#,##0.0000";
 
     private final GatewayProductServices products;
     private final TelegramAuthHandler authHandler;
@@ -48,21 +48,10 @@ public class TelegramPositionHandler {
         List<PositionResponse> activePositions = new ArrayList<>();
 
         for (ProductLine line : List.of(ProductLine.LINEAR_PERPETUAL, ProductLine.INVERSE_PERPETUAL)) {
-            try {
-                if (products.enabled().contains(line)) {
-                    AccountService service = products.service(line, AccountService.class);
-                    PositionQueryResponse res = service.positions(userId);
-                    if (res != null && res.positions() != null) {
-                        for (PositionResponse p : res.positions()) {
-                            if (p.signedQuantitySteps() != 0) {
-                                activePositions.add(p);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception ex) {
-                log.warn("Failed to query positions for userId={} line={}: {}", userId, line, ex.getMessage());
+            if (!products.enabled().contains(line)) {
+                continue;
             }
+            activePositions.addAll(loadActivePositions(userId, line));
         }
 
         StringBuilder sb = new StringBuilder();
@@ -113,15 +102,17 @@ public class TelegramPositionHandler {
 
                 BigDecimal margin = positionValue.divide(new BigDecimal("20"), 2, RoundingMode.HALF_UP);
 
+                DecimalFormat priceFmt = new DecimalFormat(PRICE_PATTERN);
+                DecimalFormat qtyFmt = new DecimalFormat(QTY_PATTERN);
                 sb.append("<b>#").append(index++).append(" ").append(p.instrumentId()).append("</b> (").append(sideTag).append(")\n");
                 sb.append("• 模式: <code>").append(p.marginMode()).append(" 20x</code>\n");
-                sb.append("• 持仓数量: <code>").append(QTY_FMT.format(qty)).append(" (约 $").append(PRICE_FMT.format(positionValue)).append(")</code>\n");
-                sb.append("• 开仓均价: <code>$").append(PRICE_FMT.format(entryPrice)).append("</code>\n");
-                sb.append("• 标记价格: <code>$").append(PRICE_FMT.format(markPrice)).append("</code>\n");
+                sb.append("• 持仓数量: <code>").append(qtyFmt.format(qty)).append(" (约 $").append(priceFmt.format(positionValue)).append(")</code>\n");
+                sb.append("• 开仓均价: <code>$").append(priceFmt.format(entryPrice)).append("</code>\n");
+                sb.append("• 标记价格: <code>$").append(priceFmt.format(markPrice)).append("</code>\n");
                 sb.append("• 未实现盈亏: ").append(pnlEmoji).append(" <code>").append(pnlSign).append("$")
-                        .append(PRICE_FMT.format(pnl)).append(" (").append(pnlSign).append(roe.setScale(2, RoundingMode.HALF_UP)).append("%)</code>\n");
-                sb.append("• 预估强平价: <code>$").append(PRICE_FMT.format(liqPrice)).append("</code>\n");
-                sb.append("• 占用保证金: <code>").append(PRICE_FMT.format(margin)).append(" USDT</code>\n");
+                        .append(priceFmt.format(pnl)).append(" (").append(pnlSign).append(roe.setScale(2, RoundingMode.HALF_UP)).append("%)</code>\n");
+                sb.append("• 预估强平价: <code>$").append(priceFmt.format(liqPrice)).append("</code>\n");
+                sb.append("• 占用保证金: <code>").append(priceFmt.format(margin)).append(" USDT</code>\n");
                 sb.append("────────────────────────────\n");
 
                 markupBuilder.addRow(
@@ -216,6 +207,20 @@ public class TelegramPositionHandler {
                     .addRow(TelegramInlineKeyboardButton.callback("⬅️ 返回主菜单", "menu:main"))
                     .build();
             botClient.editMessageText(chatId, messageId, text, markup);
+        }
+    }
+
+    private List<PositionResponse> loadActivePositions(long userId, ProductLine line) {
+        try {
+            AccountService service = products.service(line, AccountService.class);
+            PositionQueryResponse res = service.positions(userId);
+            if (res == null || res.positions() == null) {
+                return List.of();
+            }
+            return res.positions().stream().filter(p -> p.signedQuantitySteps() != 0).toList();
+        } catch (Exception ex) {
+            log.warn("Failed to query positions for userId={} line={}: {}", userId, line, ex.getMessage());
+            return List.of();
         }
     }
 }

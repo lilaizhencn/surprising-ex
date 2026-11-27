@@ -2,7 +2,7 @@ package com.surprising.trading.order.repository;
 
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.order.service.StableOrderIdentity;
+import com.surprising.trading.order.model.StableOrderIdentity;
 import java.util.UUID;
 import java.util.List;
 import org.junit.jupiter.api.*;

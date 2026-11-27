@@ -1,7 +1,7 @@
 package com.surprising.liquidation.provider.service;
 
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.*;
-import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LiquidationAeronGatewayTest {
     @Test
     void repeatedRiskCursorGetsFreshSchedulingIdWhilePureActionsRemainIdempotent() {
-        var client=mock(DerivativesAeronClient.class);
+        var client=mock(AeronClientPool.class);
         var properties=new LiquidationProperties();
         properties.setProductLine(ProductLine.LINEAR_PERPETUAL);
         var result=new CoreLiquidationBatchResultView(0,0,0,0,0,1);

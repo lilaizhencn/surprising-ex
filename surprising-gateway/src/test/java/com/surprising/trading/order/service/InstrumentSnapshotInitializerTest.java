@@ -7,7 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentSnapshotResponse;
-import com.surprising.instrument.provider.service.GatewayInstrumentSnapshotBridge;
+import com.surprising.instrument.provider.service.InstrumentSnapshotSync;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -26,7 +26,7 @@ class InstrumentSnapshotInitializerTest {
                     other, 0, List.of(), Map.of("USDT", 100_000_000L)));
         }
 
-        new GatewayInstrumentSnapshotBridge(service, cache).initialize();
+        new InstrumentSnapshotSync(service, cache).initialize();
 
         assertThat(cache.initialized(line)).isTrue();
         assertThat(cache.current(line)).isEmpty();
@@ -45,7 +45,7 @@ class InstrumentSnapshotInitializerTest {
         var mismatched = line == ProductLine.SPOT ? ProductLine.OPTION : ProductLine.SPOT;
         when(service.snapshot(line)).thenReturn(new InstrumentSnapshotResponse(mismatched, 0, List.of()));
 
-        assertThatThrownBy(() -> new GatewayInstrumentSnapshotBridge(service, cache).initialize())
+        assertThatThrownBy(() -> new InstrumentSnapshotSync(service, cache).initialize())
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("产品线不匹配");
         assertThat(cache.initialized(line)).isFalse();
     }

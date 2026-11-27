@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-class RealtimeWebSocketBridgeLifecycleTest {
+class RealtimeWebSocketDispatcherLifecycleTest {
     private static Set<Long> receivers() {
         return Thread.getAllStackTraces().keySet().stream()
                 .filter(thread -> thread.isAlive() && thread.getName().equals("realtime-aeron-receiver"))
@@ -40,7 +40,7 @@ class RealtimeWebSocketBridgeLifecycleTest {
         var before = receivers();
         try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
                 .dirDeleteOnStart(true).dirDeleteOnShutdown(true))) {
-            assertThatThrownBy(() -> new RealtimeWebSocketBridge(registry, redis, environment, new ObjectMapper()))
+            assertThatThrownBy(() -> new RealtimeWebSocketDispatcher(registry, redis, environment, new ObjectMapper()))
                     .isSameAs(unavailable).hasMessage("Valkey unavailable");
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
             while (!before.containsAll(receivers()) && System.nanoTime() < deadline) Thread.sleep(10);
@@ -59,7 +59,7 @@ class RealtimeWebSocketBridgeLifecycleTest {
         var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
         try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
                 .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
-             var bridge = new RealtimeWebSocketBridge(registry, redis, environment, new ObjectMapper())) {
+             var bridge = new RealtimeWebSocketDispatcher(registry, redis, environment, new ObjectMapper())) {
             assertThat(bridge.hasPinnedMarkRouteForTest(ProductLine.SPOT)).isTrue();
             assertThat(bridge.hasPinnedMarkRouteForTest(ProductLine.LINEAR_PERPETUAL)).isTrue();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
@@ -101,7 +101,7 @@ class RealtimeWebSocketBridgeLifecycleTest {
         var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
         try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
                 .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
-             var bridge = new RealtimeWebSocketBridge(registry, redis, environment, new ObjectMapper())) {
+             var bridge = new RealtimeWebSocketDispatcher(registry, redis, environment, new ObjectMapper())) {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
             while (!bridge.ready() && System.nanoTime() < deadline) Thread.sleep(10);
             assertThat(bridge.ready()).isTrue();

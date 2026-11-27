@@ -133,7 +133,7 @@ final class DepthSubscriptionFanout {
                             encoded = EncodedDepth.EMPTY;
                         } else {
                             String message = objectMapper.writeValueAsString(WsServerMessage.event(topic,
-                                    new RealtimeWebSocketBridge.VersionedEvent(version, entityId, update), eventTime));
+                                    new RealtimeWebSocketDispatcher.VersionedEvent(version, entityId, update), eventTime));
                             ByteBuf frame = connection.supportsZeroCopyFrames()
                                     ? ByteBufUtil.writeUtf8(ByteBufAllocator.DEFAULT, message)
                                     : null;

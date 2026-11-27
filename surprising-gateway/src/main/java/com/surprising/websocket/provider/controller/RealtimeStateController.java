@@ -1,7 +1,7 @@
 package com.surprising.websocket.provider.controller;
 
 import com.surprising.gateway.provider.auth.model.OperatingUser;
-import com.surprising.websocket.provider.service.RealtimeWebSocketBridge;
+import com.surprising.websocket.provider.service.RealtimeWebSocketDispatcher;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.UserReadView;
@@ -13,9 +13,9 @@ import org.springframework.web.bind.annotation.*;
 @ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true", matchIfMissing = true)
 @RequestMapping("/api/v1/realtime")
 public final class RealtimeStateController {
-    private final RealtimeWebSocketBridge bridge;
+    private final RealtimeWebSocketDispatcher bridge;
 
-    public RealtimeStateController(RealtimeWebSocketBridge bridge) {
+    public RealtimeStateController(RealtimeWebSocketDispatcher bridge) {
         this.bridge = bridge;
     }
 

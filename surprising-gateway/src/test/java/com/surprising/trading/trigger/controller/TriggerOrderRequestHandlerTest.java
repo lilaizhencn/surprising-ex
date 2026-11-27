@@ -32,7 +32,7 @@ class TriggerOrderRequestHandlerTest {
             var requests = new TradingTriggerController(results, service);
             var placement = service.submissionCommandId(1001, " original-single ");
             org.assertj.core.api.Assertions.assertThat(placement).isEqualTo(
-                    com.surprising.trading.order.service.StableOrderIdentity.triggerCommandId(product, 1001, "original-single"));
+                    com.surprising.trading.order.model.StableOrderIdentity.triggerCommandId(product, 1001, "original-single"));
             var cancellation = TriggerOrderAeronGateway.cancellationCommandId(1001, Long.MAX_VALUE);
             org.assertj.core.api.Assertions.assertThat(cancellation).isEqualTo(java.util.UUID.nameUUIDFromBytes(
                     ("TRIGGER_CANCEL:1001:" + Long.MAX_VALUE).getBytes(java.nio.charset.StandardCharsets.UTF_8)));

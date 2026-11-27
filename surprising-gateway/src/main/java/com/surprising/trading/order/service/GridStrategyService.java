@@ -6,6 +6,7 @@ import com.surprising.trading.order.model.GridStrategyModels.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,13 +16,18 @@ import org.springframework.stereotype.Service;
 @Service
 public class GridStrategyService {
     private static final Logger log = LoggerFactory.getLogger(GridStrategyService.class);
+    private static final String STATUS_ACTIVE = "ACTIVE";
+    private static final String STATUS_RUNNING = "RUNNING";
+    private static final String STATUS_PLACED = "PLACED";
+    private static final String STATUS_FILLED = "FILLED";
 
     private final OrderService orderService;
     private final AtomicLong strategyIdGenerator = new AtomicLong(System.currentTimeMillis() % 10000000);
+    private final AtomicLong orderSequence = new AtomicLong(0);
     private final Map<Long, GridStrategyRecord> strategies = new ConcurrentHashMap<>();
     private final Map<Long, List<GridLevel>> strategyLevels = new ConcurrentHashMap<>();
     private final Map<String, String> levelClientOrderIds = new ConcurrentHashMap<>();
-    private final java.util.concurrent.atomic.AtomicBoolean reconciling = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final AtomicBoolean reconciling = new AtomicBoolean(false);
 
     public GridStrategyService(OrderService orderService) {
         this.orderService = orderService;
@@ -196,7 +202,7 @@ public class GridStrategyService {
         }
         try {
             for (GridStrategyRecord record : strategies.values()) {
-                if (!"ACTIVE".equalsIgnoreCase(record.status()) && !"RUNNING".equalsIgnoreCase(record.status())) {
+                if (!STATUS_ACTIVE.equalsIgnoreCase(record.status()) && !STATUS_RUNNING.equalsIgnoreCase(record.status())) {
                     continue;
                 }
                 try {
@@ -223,25 +229,16 @@ public class GridStrategyService {
         // Pass 1: 同步各档位挂单最新终态，避免相邻档位因遍历顺序错过补单时机
         for (int i = 0; i < levels.size(); i++) {
             GridLevel level = levels.get(i);
-            if (!"PLACED".equalsIgnoreCase(level.status())) {
+            if (!STATUS_PLACED.equalsIgnoreCase(level.status())) {
                 continue;
             }
-            String clientOrderId = levelClientOrderIds.get(levelKey(strategyId, i));
-            if (clientOrderId == null) {
-                continue;
-            }
-            OrderResponse order;
-            try {
-                order = orderService.getByClientOrderId(record.userId(), clientOrderId, null);
-            } catch (Exception ex) {
-                continue;
-            }
+            OrderResponse order = queryLevelOrder(record.userId(), strategyId, i);
             if (order == null) {
                 continue;
             }
             if (order.status() == OrderStatus.FILLED) {
                 levels.set(i, new GridLevel(level.levelIndex(), level.priceTicks(), level.side(),
-                        level.quantitySteps(), level.orderId(), "FILLED"));
+                        level.quantitySteps(), level.orderId(), STATUS_FILLED));
                 matchedDelta++;
                 newlyFilled.add(i);
                 if (OrderSide.SELL.name().equalsIgnoreCase(level.side()) && i > 0) {
@@ -255,34 +252,7 @@ public class GridStrategyService {
         }
         // Pass 2: 为本轮新成交的档位在相邻格补挂反向单
         for (int i : newlyFilled) {
-            GridLevel level = levels.get(i);
-            boolean filledBuy = OrderSide.BUY.name().equalsIgnoreCase(level.side());
-            int counterIdx = filledBuy ? i + 1 : i - 1;
-            if (counterIdx >= 0 && counterIdx < levels.size()) {
-                GridLevel target = levels.get(counterIdx);
-                if (!"PLACED".equalsIgnoreCase(target.status())) {
-                    OrderSide counterSide = filledBuy ? OrderSide.SELL : OrderSide.BUY;
-                    String nextClientId = "grid-" + strategyId + "-" + counterIdx + "-" + System.nanoTime() % 1000000;
-                    levelClientOrderIds.put(levelKey(strategyId, counterIdx), nextClientId);
-                    try {
-                        OrderResponse placed = orderService.place(new PlaceOrderRequest(
-                                record.userId(), nextClientId, record.instrumentId(),
-                                counterSide, OrderType.LIMIT, TimeInForce.GTC,
-                                target.priceTicks(), target.quantitySteps(),
-                                MarginMode.CROSS, PositionSide.NET, false, true
-                        ));
-                        if (placed != null && placed.orderId() > 0) {
-                            levels.set(counterIdx, new GridLevel(
-                                    target.levelIndex(), target.priceTicks(), counterSide.name(),
-                                    target.quantitySteps(), placed.orderId(), "PLACED"
-                            ));
-                        }
-                    } catch (Exception ex) {
-                        log.warn("Failed to place counter grid order strategyId={} level={}: {}",
-                                strategyId, counterIdx, ex.getMessage());
-                    }
-                }
-            }
+            placeCounterGridOrder(record, levels, i);
         }
         if (matchedDelta > 0 || profitDelta > 0) {
             strategies.put(strategyId, new GridStrategyRecord(
@@ -292,6 +262,51 @@ public class GridStrategyService {
                     record.status(), record.totalProfitUnits() + profitDelta,
                     record.matchedTradeCount() + matchedDelta, record.createdAt()
             ));
+        }
+    }
+
+    private OrderResponse queryLevelOrder(long userId, long strategyId, int levelIndex) {
+        String clientOrderId = levelClientOrderIds.get(levelKey(strategyId, levelIndex));
+        if (clientOrderId == null) {
+            return null;
+        }
+        try {
+            return orderService.getByClientOrderId(userId, clientOrderId, null);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private void placeCounterGridOrder(GridStrategyRecord record, List<GridLevel> levels, int filledIndex) {
+        GridLevel level = levels.get(filledIndex);
+        boolean filledBuy = OrderSide.BUY.name().equalsIgnoreCase(level.side());
+        int counterIdx = filledBuy ? filledIndex + 1 : filledIndex - 1;
+        if (counterIdx < 0 || counterIdx >= levels.size()) {
+            return;
+        }
+        GridLevel target = levels.get(counterIdx);
+        if (STATUS_PLACED.equalsIgnoreCase(target.status())) {
+            return;
+        }
+        OrderSide counterSide = filledBuy ? OrderSide.SELL : OrderSide.BUY;
+        String nextClientId = "grid-" + record.strategyId() + "-" + counterIdx + "-" + orderSequence.incrementAndGet();
+        levelClientOrderIds.put(levelKey(record.strategyId(), counterIdx), nextClientId);
+        try {
+            OrderResponse placed = orderService.place(new PlaceOrderRequest(
+                    record.userId(), nextClientId, record.instrumentId(),
+                    counterSide, OrderType.LIMIT, TimeInForce.GTC,
+                    target.priceTicks(), target.quantitySteps(),
+                    MarginMode.CROSS, PositionSide.NET, false, true
+            ));
+            if (placed != null && placed.orderId() > 0) {
+                levels.set(counterIdx, new GridLevel(
+                        target.levelIndex(), target.priceTicks(), counterSide.name(),
+                        target.quantitySteps(), placed.orderId(), STATUS_PLACED
+                ));
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to place counter grid order strategyId={} level={}: {}",
+                    record.strategyId(), counterIdx, ex.getMessage());
         }
     }
 

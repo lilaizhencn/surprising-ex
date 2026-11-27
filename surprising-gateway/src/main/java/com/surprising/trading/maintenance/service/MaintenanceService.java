@@ -7,7 +7,7 @@ import com.surprising.trading.maintenance.repository.MaintenanceRepository;
 import com.surprising.trading.maintenance.repository.MaintenanceActionRepository;
 import com.surprising.trading.api.model.*;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.service.StableOrderIdentity;
+import com.surprising.trading.order.model.StableOrderIdentity;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;

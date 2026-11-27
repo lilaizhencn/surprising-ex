@@ -115,7 +115,7 @@ class ProductBusinessConfigurationTest {
             ConfigurationPropertySources.attach(spot.getEnvironment());
             spot.register(com.surprising.gateway.config.DerivativesBusinessConfiguration.class);
             spot.refresh();
-            assertThat(spot.getBeansOfType(com.surprising.derivatives.lifecycle.DerivativesAeronClient.class)).isEmpty();
+            assertThat(spot.getBeansOfType(com.surprising.risk.provider.service.RiskAeronGateway.class)).isEmpty();
         }
     }
 

@@ -1,6 +1,6 @@
 package com.surprising.liquidation.provider.service;
 
-import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.ContinueRiskScanCommand;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultCodec;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultView;
@@ -22,9 +22,9 @@ import org.springframework.stereotype.Service;
 public class LiquidationAeronGateway {
 
     private final LiquidationProperties properties;
-    private final DerivativesAeronClient clients;
+    private final AeronClientPool clients;
 
-    public LiquidationAeronGateway(LiquidationProperties properties, DerivativesAeronClient clients) {
+    public LiquidationAeronGateway(LiquidationProperties properties, AeronClientPool clients) {
         this.properties = properties;
         this.clients = clients;
     }

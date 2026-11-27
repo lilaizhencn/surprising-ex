@@ -1,7 +1,8 @@
 package com.surprising.derivatives.lifecycle;
 
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.instrument.provider.config.InstrumentSnapshotConfiguration;
-import com.surprising.instrument.provider.service.GatewayInstrumentSnapshotBridge;
+import com.surprising.instrument.provider.service.InstrumentSnapshotSync;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.derivatives.lifecycle.task.DerivativesLifecycleMaintenanceTask;
 import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
@@ -31,7 +32,7 @@ class LifecycleApplicationContextTest {
     void mergedApplicationLoadsForEachDerivative(ProductLine line) {
         new WebApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(TestLifecycleAppConfig.class, SurprisingDerivativesLifecycleApplication.class,
-                        InstrumentSnapshotConfiguration.class, GatewayInstrumentSnapshotBridge.class)
+                        InstrumentSnapshotConfiguration.class, InstrumentSnapshotSync.class)
                 .withPropertyValues("spring.config.name=application",
                         "management.endpoint.health.group.readiness.include=readinessState",
                         "surprising.risk.product-line=" + line,
@@ -46,8 +47,8 @@ class LifecycleApplicationContextTest {
                         "surprising.insurance.coverage.enabled=false",
                         "surprising.adl.scanner.enabled=false",
                         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration")
-                .withBean(DerivativesAeronClient.class.getName(), DerivativesAeronClient.class,
-                        () -> mock(DerivativesAeronClient.class))
+                .withBean(AeronClientPool.class.getName(), AeronClientPool.class,
+                        () -> mock(AeronClientPool.class))
                 .withBean(InstrumentService.class.getName(), InstrumentService.class, () -> {
                     var instruments = mock(InstrumentService.class);
                     for (ProductLine p : ProductLine.values()) {
@@ -82,8 +83,8 @@ class LifecycleApplicationContextTest {
                 })
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed().hasSingleBean(InstrumentSnapshotCache.class)
-                            .hasSingleBean(DerivativesAeronClient.class)
-                            .hasSingleBean(GatewayInstrumentSnapshotBridge.class)
+                            .hasSingleBean(AeronClientPool.class)
+                            .hasSingleBean(InstrumentSnapshotSync.class)
                             .doesNotHaveBean("adlInstrumentSnapshotConsumer")
                             .doesNotHaveBean("adlInstrumentSnapshotConsumerFactory");
                     var shared = ctx.getBean(InstrumentSnapshotCache.class);

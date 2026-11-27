@@ -5,6 +5,7 @@ import com.surprising.gateway.provider.auth.model.CurrentUser;
 import com.surprising.gateway.provider.auth.model.OperatingUser;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.function.Supplier;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpHeaders;
@@ -20,17 +21,14 @@ import org.springframework.web.server.ResponseStatusException;
  * 解析控制器方法上的 {@link CurrentUser} 或 {@link OperatingUser} 参数，优先直接读取过滤器已认证的上下文。
  */
 public final class CurrentUserArgumentResolver implements HandlerMethodArgumentResolver {
-    private final ObjectProvider<AuthService> authServiceProvider;
-    private final AuthService directAuthService;
+    private final Supplier<AuthService> authServiceSupplier;
 
     public CurrentUserArgumentResolver(ObjectProvider<AuthService> authServiceProvider) {
-        this.authServiceProvider = authServiceProvider;
-        this.directAuthService = null;
+        this.authServiceSupplier = authServiceProvider == null ? () -> null : authServiceProvider::getIfAvailable;
     }
 
     public CurrentUserArgumentResolver(AuthService authService) {
-        this.authServiceProvider = null;
-        this.directAuthService = authService;
+        this.authServiceSupplier = () -> authService;
     }
 
     @Override
@@ -64,9 +62,7 @@ public final class CurrentUserArgumentResolver implements HandlerMethodArgumentR
         if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof JwtPrincipal principal) {
             return principal;
         }
-        AuthService authService = directAuthService != null
-                ? directAuthService
-                : (authServiceProvider == null ? null : authServiceProvider.getIfAvailable());
+        AuthService authService = authServiceSupplier.get();
         if (authService == null || request == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "unauthenticated");
         }

@@ -9,7 +9,7 @@ import com.surprising.gateway.c2c.task.C2cSettlementTask;
 import com.surprising.trading.order.service.InstrumentCoreSyncService;
 import com.surprising.trading.order.task.InstrumentCoreSyncTask;
 import com.surprising.websocket.provider.service.OpenInterestPublisher;
-import com.surprising.websocket.provider.service.RealtimeWebSocketBridge;
+import com.surprising.websocket.provider.service.RealtimeWebSocketDispatcher;
 import com.surprising.websocket.provider.task.OpenInterestPublishTask;
 import com.surprising.websocket.provider.task.RealtimeWebSocketLeaseTask;
 import java.util.Map;
@@ -34,7 +34,7 @@ class ScheduledBusinessTasksContextTest {
         var settlement = mock(C2cSettlementService.class);
         var instruments = mock(InstrumentCoreSyncService.class);
         var openInterest = mock(OpenInterestPublisher.class);
-        var bridge = mock(RealtimeWebSocketBridge.class);
+        var bridge = mock(RealtimeWebSocketDispatcher.class);
         var instrumentTick = new CountDownLatch(1);
         var interestTick = new CountDownLatch(1);
         var settlementTick = new CountDownLatch(1);
@@ -52,7 +52,7 @@ class ScheduledBusinessTasksContextTest {
             context.registerBean(C2cSettlementService.class, () -> settlement);
             context.registerBean(InstrumentCoreSyncService.class, () -> instruments);
             context.registerBean(OpenInterestPublisher.class, () -> openInterest);
-            context.registerBean(RealtimeWebSocketBridge.class, () -> bridge);
+            context.registerBean(RealtimeWebSocketDispatcher.class, () -> bridge);
             context.registerBean("taskScheduler", ThreadPoolTaskScheduler.class, () -> {
                 var scheduler = new ThreadPoolTaskScheduler();
                 scheduler.setPoolSize(1);

@@ -1,6 +1,6 @@
 package com.surprising.risk.provider.service;
 
-import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.client.ResultUnknownException;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -24,10 +24,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class RiskAeronGateway {
 
-    private final DerivativesAeronClient clients;
+    private final AeronClientPool clients;
 
     @Autowired
-    public RiskAeronGateway(DerivativesAeronClient clients) {
+    public RiskAeronGateway(AeronClientPool clients) {
         this.clients = clients;
     }
 

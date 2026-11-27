@@ -1,6 +1,6 @@
 package com.surprising.websocket.provider.handler;
 
-import com.surprising.websocket.provider.service.RealtimeWebSocketBridge;
+import com.surprising.websocket.provider.service.RealtimeWebSocketDispatcher;
 import com.surprising.websocket.provider.service.WebSocketAuthenticator;
 import com.surprising.websocket.provider.service.SubscriptionRegistry;
 import com.surprising.websocket.provider.session.ClientConnection;
@@ -22,9 +22,9 @@ public class ClientWebSocketHandler {
     private com.surprising.gateway.c2c.websocket.C2cChatRealtime c2c;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     void c2c(com.surprising.gateway.c2c.websocket.C2cChatRealtime chat) {this.c2c=chat;}
-    private RealtimeWebSocketBridge realtime;
+    private RealtimeWebSocketDispatcher realtime;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
-    void realtime(RealtimeWebSocketBridge bridge) {this.realtime=bridge;}
+    void realtime(RealtimeWebSocketDispatcher bridge) {this.realtime=bridge;}
     private final ObjectMapper objectMapper;
     private final SubscriptionRegistry registry;
     private final WebSocketProperties properties;

@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.trading.order.model.StableOrderIdentity;
+
 import static com.surprising.trading.order.service.OrderCoreMapper.*;
 
 import com.surprising.aeron.client.CoreCommandOutcome;

@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.trading.order.model.StableOrderIdentity;
+
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AlgoOrderBatchItemResponse;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;

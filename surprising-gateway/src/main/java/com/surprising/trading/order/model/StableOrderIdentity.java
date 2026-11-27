@@ -1,4 +1,4 @@
-package com.surprising.trading.order.service;
+package com.surprising.trading.order.model;
 
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.gateway.provider.support.Sha256Digests;

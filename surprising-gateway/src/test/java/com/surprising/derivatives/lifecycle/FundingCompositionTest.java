@@ -1,5 +1,6 @@
 package com.surprising.derivatives.lifecycle;
 
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.derivatives.lifecycle.config.FundingConfiguration;
 import com.surprising.derivatives.lifecycle.config.LifecycleSchedulingConfiguration;
 
@@ -33,7 +34,7 @@ class FundingCompositionTest {
                 .withPropertyValues("surprising.risk.product-line=" + line,
                         "surprising.funding.kafka.product-line=" + line)
                 .withBean(RiskProperties.class, () -> risk)
-                .withBean(DerivativesAeronClient.class, () -> mock(DerivativesAeronClient.class))
+                .withBean(AeronClientPool.class, () -> mock(AeronClientPool.class))
                 .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
                 .withBean(LifecycleBusinessSettingsService.class.getName(), LifecycleBusinessSettingsService.class, () -> {
                     var settings = mock(LifecycleBusinessSettingsService.class);
@@ -52,7 +53,7 @@ class FundingCompositionTest {
     void onlyPerpetualProductsLoadFunding(ProductLine line) {
         context(line).run(ctx -> {
             assertThat(ctx).hasNotFailed().hasSingleBean(InstrumentSnapshotCache.class)
-                    .hasSingleBean(DerivativesAeronClient.class);
+                    .hasSingleBean(AeronClientPool.class);
             if (line.isFundingProduct()) {
                 assertThat(ctx).hasSingleBean(FundingService.class).hasSingleBean(FundingProperties.class)
                         .hasSingleBean(FundingMaintenanceTask.class).hasBean("fundingScheduler");

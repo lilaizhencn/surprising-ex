@@ -12,13 +12,13 @@ import org.springframework.stereotype.Service;
 /**
  * 启动时直接从本地 InstrumentService 加载全产品线合约快照，并监听进程内变更事件刷新共享缓存。
  */
-@Service("gatewayInstrumentSnapshotBridge")
-public class GatewayInstrumentSnapshotBridge {
+@Service
+public class InstrumentSnapshotSync {
 
     private final InstrumentService instrumentService;
     private final InstrumentSnapshotCache snapshotCache;
 
-    public GatewayInstrumentSnapshotBridge(InstrumentService instrumentService,
+    public InstrumentSnapshotSync(InstrumentService instrumentService,
                                            InstrumentSnapshotCache snapshotCache) {
         this.instrumentService = instrumentService;
         this.snapshotCache = snapshotCache;

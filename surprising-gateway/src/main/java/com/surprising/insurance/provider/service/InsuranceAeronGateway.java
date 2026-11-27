@@ -1,6 +1,6 @@
 package com.surprising.insurance.provider.service;
 
-import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -16,10 +16,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class InsuranceAeronGateway {
 
-    private final DerivativesAeronClient clients;
+    private final AeronClientPool clients;
     private final ProductLine productLine;
 
-    public InsuranceAeronGateway(InsuranceProperties properties, DerivativesAeronClient clients) {
+    public InsuranceAeronGateway(InsuranceProperties properties, AeronClientPool clients) {
         productLine = properties.getProductLine();
         this.clients = clients;
     }

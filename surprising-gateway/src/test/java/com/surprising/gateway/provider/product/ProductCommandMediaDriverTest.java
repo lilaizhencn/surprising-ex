@@ -3,7 +3,6 @@ package com.surprising.gateway.provider.product;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.service.AccountAeronGateway;
 import com.surprising.adl.provider.config.AdlProperties;
-import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
 import com.surprising.gateway.provider.config.GatewayProductsHealth;
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.liquidation.provider.config.LiquidationProperties;
@@ -71,7 +70,7 @@ class ProductCommandMediaDriverTest {
                     child.registerBean(MarkPriceProperties.class, () -> markPrice);
                     child.register(AccountAeronGateway.class, OrderAeronGateway.class,
                             TriggerOrderAeronGateway.class, MaintenanceAeronGateway.class,
-                            DerivativesAeronClient.class, MarkPriceCorePublisher.class);
+                            MarkPriceCorePublisher.class);
                     child.refresh();
 
                     var pools = new java.util.HashSet<>();
@@ -86,14 +85,8 @@ class ProductCommandMediaDriverTest {
                         assertThat(((AtomicReference<?>) ReflectionTestUtils.getField(pool, "mediaDriver")).get())
                                 .isSameAs(driver);
                     }
-                    Object derivativesPool = ReflectionTestUtils.getField(child.getBean(DerivativesAeronClient.class), "pool");
-                    pools.add(derivativesPool);
-                    sources.add(ReflectionTestUtils.getField(derivativesPool, "sourceIdentity"));
-                    assertThat(ReflectionTestUtils.getField(derivativesPool, "productLine")).isEqualTo(product);
-                    assertThat(((AtomicReference<?>) ReflectionTestUtils.getField(derivativesPool, "mediaDriver")).get())
-                            .isSameAs(driver);
-                    assertThat(pools).hasSize(6);
-                    assertThat(sources).hasSize(6);
+                    assertThat(pools).hasSize(5);
+                    assertThat(sources).hasSize(5);
                 }
                 // Closing a product child context must not shut down the shared Gateway MediaDriver.
                 assertThat(Path.of(directory)).exists();

@@ -1,7 +1,7 @@
 package com.surprising.insurance.provider.service;
 
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.*;
-import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -18,7 +18,7 @@ class InsuranceAeronGatewayTest {
     void usesSharedClientForCommandsAndSystemFunds(ProductLine product) {
         var properties = new InsuranceProperties();
         properties.setProductLine(product);
-        var client = mock(DerivativesAeronClient.class);
+        var client = mock(AeronClientPool.class);
         var gateway = new InsuranceAeronGateway(properties, client);
         var id = UUID.randomUUID();
         var payload = new byte[]{1};
@@ -43,7 +43,7 @@ class InsuranceAeronGatewayTest {
 
     @Test
     void propagatesRejectedOrUnknownCommandsWithoutRetry() {
-        var client = mock(DerivativesAeronClient.class);
+        var client = mock(AeronClientPool.class);
         var gateway = new InsuranceAeronGateway(new InsuranceProperties(), client);
         var id = UUID.randomUUID();
         var payload = new byte[]{1};

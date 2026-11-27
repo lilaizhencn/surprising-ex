@@ -77,12 +77,12 @@ public class GatewayDirectAccessFilter extends OncePerRequestFilter {
     private final GatewayProductSelection productSelection;
 
     public GatewayDirectAccessFilter(GatewayProperties properties,
-                                     ObjectProvider<AuthService> authService,
+                                     AuthService authService,
                                      ObjectProvider<GatewayApiKeyService> apiKeys,
                                      ObjectProvider<AdminApprovalService> adminOperations,
                                      ObjectProvider<GatewayProductSelection> productSelection) {
         this.properties = properties;
-        this.authService = authService.getIfAvailable();
+        this.authService = authService;
         this.apiKeys = apiKeys.getIfAvailable();
         this.apiKeyRequests = new ApiKeyRequestBinding(properties);
         this.adminOperations = adminOperations.getIfAvailable();

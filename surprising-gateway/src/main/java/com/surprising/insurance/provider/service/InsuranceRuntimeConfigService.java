@@ -1,7 +1,8 @@
 package com.surprising.insurance.provider.service;
 
-import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
 import com.surprising.derivatives.lifecycle.model.LifecycleBusinessSettings;
+import com.surprising.derivatives.lifecycle.model.LifecycleSettingsSnapshot;
+import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
@@ -12,14 +13,16 @@ public class InsuranceRuntimeConfigService {
     public Map<String, Object> current() {
         var saved = settings.current();
         var value = saved.settings().insurance();
-        return Map.of("scope", "DATABASE", "version", saved.version(), "updatedBy", saved.updatedBy(), "reason", saved.reason(),
-                "coverage", Map.of("enabled", value.enabled(), "scanDelayMs", value.scanDelayMs(), "batchSize", value.batchSize()));
+        return saved.responseEnvelope(Map.of("coverage", Map.of(
+                "enabled", value.enabled(), "scanDelayMs", value.scanDelayMs(), "batchSize", value.batchSize())));
     }
     public Map<String, Object> update(String admin, long expectedVersion, Boolean enabled, Long scanDelayMs, Integer batchSize, String reason) {
         var all = settings.current().settings();
         var old = all.insurance();
-        var next = new LifecycleBusinessSettings.Insurance(enabled == null ? old.enabled() : enabled,
-                scanDelayMs == null ? old.scanDelayMs() : scanDelayMs, batchSize == null ? old.batchSize() : batchSize);
+        var next = new LifecycleBusinessSettings.Insurance(
+                LifecycleSettingsSnapshot.coalesce(enabled, old.enabled()),
+                LifecycleSettingsSnapshot.coalesce(scanDelayMs, old.scanDelayMs()),
+                LifecycleSettingsSnapshot.coalesce(batchSize, old.batchSize()));
         settings.save(new LifecycleBusinessSettings(all.funding(), all.liquidation(), next, all.adl()), expectedVersion, admin, reason);
         return current();
     }

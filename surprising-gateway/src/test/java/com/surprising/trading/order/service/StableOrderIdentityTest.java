@@ -18,6 +18,7 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.trading.order.model.StableOrderIdentity;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;

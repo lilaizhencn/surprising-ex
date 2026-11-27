@@ -1,6 +1,6 @@
 package com.surprising.funding.provider.service;
 
-import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -11,9 +11,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class FundingAeronGateway {
 
-    private final DerivativesAeronClient clients;
+    private final AeronClientPool clients;
 
-    public FundingAeronGateway(DerivativesAeronClient clients) {
+    public FundingAeronGateway(AeronClientPool clients) {
         this.clients = clients;
     }
 

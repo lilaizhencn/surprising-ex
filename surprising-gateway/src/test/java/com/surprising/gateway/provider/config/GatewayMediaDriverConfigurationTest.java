@@ -89,17 +89,19 @@ class GatewayMediaDriverConfigurationTest {
             channel = "aeron:udp?endpoint=127.0.0.1:" + socket.getLocalPort();
         }
         context(directory)
-                .withUserConfiguration(com.surprising.websocket.provider.service.RealtimeWebSocketBridge.class)
+                .withUserConfiguration(com.surprising.websocket.provider.service.RealtimeWebSocketDispatcher.class)
                 .withPropertyValues("surprising.realtime.ws.channel=" + channel)
                 .withBean(com.surprising.websocket.provider.service.SubscriptionRegistry.class, () -> registry)
                 .withBean(org.springframework.data.redis.core.StringRedisTemplate.class,
                         () -> org.mockito.Mockito.mock(org.springframework.data.redis.core.StringRedisTemplate.class,
                                 org.mockito.Mockito.RETURNS_DEEP_STUBS))
                 .withBean(tools.jackson.databind.ObjectMapper.class, tools.jackson.databind.ObjectMapper::new)
+                .withBean(com.surprising.websocket.provider.config.WebSocketProperties.class,
+                        com.surprising.websocket.provider.config.WebSocketProperties::new)
                 .withBean(io.micrometer.core.instrument.MeterRegistry.class,
                         io.micrometer.core.instrument.simple.SimpleMeterRegistry::new)
                 .run(context -> assertThat(context).hasNotFailed()
-                        .hasSingleBean(com.surprising.websocket.provider.service.RealtimeWebSocketBridge.class));
+                        .hasSingleBean(com.surprising.websocket.provider.service.RealtimeWebSocketDispatcher.class));
         assertThat(bridgeClosed).isTrue();
         assertThat(io.aeron.CommonContext.isDriverActive(Path.of(directory).toFile(), 1000, message -> {})).isFalse();
     }

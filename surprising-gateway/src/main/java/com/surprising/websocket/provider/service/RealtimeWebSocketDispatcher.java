@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 @org.springframework.context.annotation.DependsOn("appMediaDriver")
 @ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true", matchIfMissing = true)
-public final class RealtimeWebSocketBridge
+public final class RealtimeWebSocketDispatcher
         implements SubscriptionRegistry.RouteLifecycle, AutoCloseable {
     private final String node = UUID.randomUUID().toString();
     private final String endpoint;
@@ -51,10 +51,10 @@ public final class RealtimeWebSocketBridge
     private long nextHeartbeatNanos;
     private final java.util.concurrent.atomic.AtomicLong nextCleanupLog = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicBoolean continuityLost = new java.util.concurrent.atomic.AtomicBoolean();
-    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(RealtimeWebSocketBridge.class);
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(RealtimeWebSocketDispatcher.class);
     private static final CoreOrderSide[] ORDER_SIDES = CoreOrderSide.values();
 
-    public RealtimeWebSocketBridge(
+    public RealtimeWebSocketDispatcher(
             SubscriptionRegistry registry,
             StringRedisTemplate redis,
             Environment env,
@@ -63,7 +63,7 @@ public final class RealtimeWebSocketBridge
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public RealtimeWebSocketBridge(
+    public RealtimeWebSocketDispatcher(
             SubscriptionRegistry registry,
             StringRedisTemplate redis,
             Environment env,
@@ -275,11 +275,11 @@ public final class RealtimeWebSocketBridge
         io.micrometer.core.instrument.Gauge.builder("surprising.websocket.realtime.ready", this,
                 bridge -> bridge.ready() ? 1 : 0).register(meters);
         io.micrometer.core.instrument.Gauge.builder("surprising.websocket.realtime.failures", this,
-                RealtimeWebSocketBridge::decodeFailures).tag("stage", "decode").register(meters);
+                RealtimeWebSocketDispatcher::decodeFailures).tag("stage", "decode").register(meters);
         io.micrometer.core.instrument.Gauge.builder("surprising.websocket.realtime.failures", this,
-                RealtimeWebSocketBridge::handlerFailures).tag("stage", "handler").register(meters);
+                RealtimeWebSocketDispatcher::handlerFailures).tag("stage", "handler").register(meters);
         io.micrometer.core.instrument.Gauge.builder("surprising.websocket.realtime.failures", this,
-                RealtimeWebSocketBridge::transportFailures).tag("stage", "transport").register(meters);
+                RealtimeWebSocketDispatcher::transportFailures).tag("stage", "transport").register(meters);
     }
 
     public boolean ready() { return !closed && !continuityLost.get() && receiver.ready(); }

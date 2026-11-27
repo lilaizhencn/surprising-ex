@@ -42,32 +42,15 @@ public class TelegramAssetHandler {
 
         // 收集各产品线的资产
         for (ProductLine line : List.of(ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL, ProductLine.INVERSE_PERPETUAL)) {
-            try {
-                if (products.enabled().contains(line)) {
-                    AccountService service = products.service(line, AccountService.class);
-                    BalanceQueryResponse res = service.balances(userId);
-                    if (res != null && res.balances() != null) {
-                        productBalances.put(line, res.balances());
-                        for (BalanceResponse b : res.balances()) {
-                            // 简化估值：USDT/USDC 1:1，BTC 估值按 95000，其他暂按 1
-                            BigDecimal avail = BigDecimal.valueOf(b.availableUnits()).movePointLeft(8);
-                            BigDecimal locked = BigDecimal.valueOf(b.lockedUnits()).movePointLeft(8);
-                            BigDecimal sum = avail.add(locked);
-                            if ("USDT".equalsIgnoreCase(b.asset()) || "USD".equalsIgnoreCase(b.asset())) {
-                                totalEstUsdt = totalEstUsdt.add(sum);
-                            } else if ("BTC".equalsIgnoreCase(b.asset())) {
-                                totalEstUsdt = totalEstUsdt.add(sum.multiply(new BigDecimal("95000")));
-                            } else if ("ETH".equalsIgnoreCase(b.asset())) {
-                                totalEstUsdt = totalEstUsdt.add(sum.multiply(new BigDecimal("3200")));
-                            } else {
-                                totalEstUsdt = totalEstUsdt.add(sum);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception ex) {
-                log.warn("Failed to load balances for userId={} line={}: {}", userId, line, ex.getMessage());
+            if (!products.enabled().contains(line)) {
+                continue;
             }
+            List<BalanceResponse> balances = loadLineBalances(userId, line);
+            if (balances.isEmpty()) {
+                continue;
+            }
+            productBalances.put(line, balances);
+            totalEstUsdt = totalEstUsdt.add(estimateBalancesUsdt(balances));
         }
 
         StringBuilder sb = new StringBuilder();
@@ -106,6 +89,36 @@ public class TelegramAssetHandler {
         }
     }
 
+    private List<BalanceResponse> loadLineBalances(long userId, ProductLine line) {
+        try {
+            AccountService service = products.service(line, AccountService.class);
+            BalanceQueryResponse res = service.balances(userId);
+            return res == null || res.balances() == null ? List.of() : res.balances();
+        } catch (Exception ex) {
+            log.warn("Failed to load balances for userId={} line={}: {}", userId, line, ex.getMessage());
+            return List.of();
+        }
+    }
+
+    private static BigDecimal estimateBalancesUsdt(List<BalanceResponse> balances) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (BalanceResponse b : balances) {
+            BigDecimal sum = BigDecimal.valueOf(b.availableUnits()).add(BigDecimal.valueOf(b.lockedUnits())).movePointLeft(8);
+            total = total.add(sum.multiply(estimateUnitPrice(b.asset())));
+        }
+        return total;
+    }
+
+    private static BigDecimal estimateUnitPrice(String asset) {
+        if ("BTC".equalsIgnoreCase(asset)) {
+            return new BigDecimal("95000");
+        }
+        if ("ETH".equalsIgnoreCase(asset)) {
+            return new BigDecimal("3200");
+        }
+        return BigDecimal.ONE;
+    }
+
     private void appendAccountBlock(StringBuilder sb, String title, List<BalanceResponse> list) {
         sb.append("<b>").append(title).append("</b>\n");
         if (list == null || list.isEmpty()) {
@@ -116,15 +129,16 @@ public class TelegramAssetHandler {
         for (BalanceResponse b : list) {
             BigDecimal avail = BigDecimal.valueOf(b.availableUnits()).movePointLeft(8);
             BigDecimal locked = BigDecimal.valueOf(b.lockedUnits()).movePointLeft(8);
-            if (avail.compareTo(BigDecimal.ZERO) > 0 || locked.compareTo(BigDecimal.ZERO) > 0) {
-                hasNonZero = true;
-                sb.append("  • <b>").append(b.asset()).append("</b>: 可用 <code>")
-                        .append(avail.stripTrailingZeros().toPlainString()).append("</code>");
-                if (locked.compareTo(BigDecimal.ZERO) > 0) {
-                    sb.append(" | 冻结 <code>").append(locked.stripTrailingZeros().toPlainString()).append("</code>");
-                }
-                sb.append("\n");
+            if (avail.compareTo(BigDecimal.ZERO) <= 0 && locked.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
             }
+            hasNonZero = true;
+            sb.append("  • <b>").append(b.asset()).append("</b>: 可用 <code>")
+                    .append(avail.stripTrailingZeros().toPlainString()).append("</code>");
+            if (locked.compareTo(BigDecimal.ZERO) > 0) {
+                sb.append(" | 冻结 <code>").append(locked.stripTrailingZeros().toPlainString()).append("</code>");
+            }
+            sb.append("\n");
         }
         if (!hasNonZero) {
             sb.append("  <i>暂无持仓资产 (余额为 0)</i>\n");

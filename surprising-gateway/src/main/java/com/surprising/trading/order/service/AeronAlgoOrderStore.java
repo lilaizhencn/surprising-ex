@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.trading.order.model.StableOrderIdentity;
+
 import com.surprising.aeron.protocol.CoreAlgoOrderCodec;
 import com.surprising.aeron.protocol.CoreAlgoOrderCommand;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;

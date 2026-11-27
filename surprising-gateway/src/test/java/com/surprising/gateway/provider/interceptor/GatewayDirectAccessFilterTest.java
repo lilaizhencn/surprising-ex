@@ -48,7 +48,7 @@ class GatewayDirectAccessFilterTest {
         var selection = new GatewayProductSelection(products, new tools.jackson.databind.ObjectMapper());
         return new GatewayDirectAccessFilter(
                 new GatewayProperties(),
-                provider(authService),
+                authService,
                 provider(apiKeys),
                 provider(adminApproval),
                 provider(selection));

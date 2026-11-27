@@ -45,13 +45,12 @@ public class GatewaySecurityConfiguration {
     @Bean
     public SecurityFilterChain gatewaySecurity(HttpSecurity http, AuthService auth, GatewayProperties properties,
             AdminIpWhitelistFilter addresses, AdminPermissionFilter permissions,
-            ObjectProvider<AuthService> authProvider,
             ObjectProvider<GatewayApiKeyService> apiKeyProvider,
             ObjectProvider<AdminApprovalService> approvalProvider,
             ObjectProvider<GatewayProductSelection> productSelectionProvider,
             @Qualifier("gatewayCorsSource") CorsConfigurationSource cors) throws Exception {
         var directAccess = new GatewayDirectAccessFilter(
-                properties, authProvider, apiKeyProvider, approvalProvider, productSelectionProvider);
+                properties, auth, apiKeyProvider, approvalProvider, productSelectionProvider);
         var csrf = new com.surprising.gateway.provider.auth.controller.BrowserCsrfTokens(properties);
         http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .securityContext(context -> context.requireExplicitSave(true))

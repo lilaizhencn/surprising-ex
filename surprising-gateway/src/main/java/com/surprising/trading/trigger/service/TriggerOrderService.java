@@ -33,7 +33,7 @@ import com.surprising.trading.api.model.TriggerOrderQueryResponse;
 import com.surprising.trading.api.model.TriggerOrderResponse;
 import com.surprising.trading.api.model.TriggerOrderStatus;
 import com.surprising.trading.api.model.TriggerOrderType;
-import com.surprising.trading.order.service.StableOrderIdentity;
+import com.surprising.trading.order.model.StableOrderIdentity;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import java.nio.charset.StandardCharsets;
 import com.surprising.trading.trigger.model.OpenTriggerPageQuery;

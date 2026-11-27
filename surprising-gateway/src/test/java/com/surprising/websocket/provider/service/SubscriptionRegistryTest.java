@@ -97,7 +97,7 @@ class SubscriptionRegistryTest {
                 new SubscriptionTopic(WsChannel.ORDERS, "1", null, 2002L));
 
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        var event = new RealtimeWebSocketBridge.VersionedEvent(RealtimeVersion.of(1, 0), "11",
+        var event = new RealtimeWebSocketDispatcher.VersionedEvent(RealtimeVersion.of(1, 0), "11",
                 Map.of("orderId", "11", "userId", 1001L, "instrumentId", "1", "status", "OPEN"));
         registry.publish(new SubscriptionTopic(WsChannel.ORDERS, "1", null, 1001L),
                 event, eventTime);

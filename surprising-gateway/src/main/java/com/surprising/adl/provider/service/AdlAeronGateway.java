@@ -1,7 +1,7 @@
 package com.surprising.adl.provider.service;
 
 import com.surprising.adl.provider.config.AdlProperties;
-import com.surprising.derivatives.lifecycle.DerivativesAeronClient;
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.protocol.CoreAdlQueryCodec;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -16,10 +16,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class AdlAeronGateway {
 
-    private final DerivativesAeronClient clients;
+    private final AeronClientPool clients;
     private final ProductLine productLine;
 
-    public AdlAeronGateway(AdlProperties properties, DerivativesAeronClient clients) {
+    public AdlAeronGateway(AdlProperties properties, AeronClientPool clients) {
         productLine = properties.getProductLine();
         this.clients = clients;
     }
