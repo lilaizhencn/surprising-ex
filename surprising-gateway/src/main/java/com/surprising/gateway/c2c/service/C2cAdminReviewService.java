@@ -8,7 +8,6 @@ import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 import com.surprising.gateway.c2c.utils.C2cViews;
 
-import com.surprising.gateway.c2c.service.C2cQueryService;
 
 import com.surprising.gateway.c2c.model.C2cPaymentAccount;
 import com.surprising.gateway.c2c.repository.C2cAppealRepository;
@@ -18,7 +17,6 @@ import com.surprising.gateway.c2c.repository.C2cProfileRepository;
 import com.surprising.gateway.c2c.repository.C2cReportRepository;
 import com.surprising.gateway.c2c.model.C2cPage;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import java.time.Instant;

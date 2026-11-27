@@ -1,7 +1,6 @@
 package com.surprising.gateway.provider.support;
 
 import com.surprising.gateway.provider.config.GatewayLimitProperties.Group;
-import com.surprising.gateway.provider.interceptor.ProductRequestBodyFilter;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.product.api.ProductLine;
 import jakarta.servlet.http.HttpServletRequest;
@@ -113,7 +112,7 @@ public final class GatewayLimitRequestBinding {
         if (!"GET".equals(request.getMethod()) && request.getRequestURI().contains("batch")) {
             byte[] body = body(request);
             if (body != null && body.length > 0) {
-                var node = ProductRequestBodyFilter.requestTree(request, body, json);
+                var node = CachedRequestBody.requestTree(request, body, json);
                 var orders = node.isArray() ? node : node.get("orders");
                 if (orders != null && orders.isArray()) cost = Math.max(1, orders.size());
             }
@@ -130,7 +129,7 @@ public final class GatewayLimitRequestBinding {
     }
 
     public static byte[] body(HttpServletRequest request) {
-        Object prepared = request.getAttribute(ProductRequestBodyFilter.BODY);
+        Object prepared = request.getAttribute(CachedRequestBody.BODY);
         if (prepared instanceof byte[] bytes) return bytes;
         var cached = WebUtils.getNativeRequest(request, ContentCachingRequestWrapper.class);
         return cached == null ? null : cached.getContentAsByteArray();

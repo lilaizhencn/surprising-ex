@@ -73,46 +73,21 @@ public class TelegramPositionHandler {
         } else {
             sb.append("📊 活跃合约持仓共 <b>").append(activePositions.size()).append("</b> 笔：\n\n");
 
+            DecimalFormat priceFmt = new DecimalFormat(PRICE_PATTERN);
+            DecimalFormat qtyFmt = new DecimalFormat(QTY_PATTERN);
             int index = 1;
             for (PositionResponse p : activePositions) {
                 boolean isLong = p.signedQuantitySteps() > 0;
                 String sideTag = isLong ? "🟢 做多 (LONG)" : "🔴 做空 (SHORT)";
                 BigDecimal qty = BigDecimal.valueOf(Math.abs(p.signedQuantitySteps())).movePointLeft(4);
                 BigDecimal entryPrice = BigDecimal.valueOf(p.entryPriceTicks()).movePointLeft(2);
+                BigDecimal notional = qty.multiply(entryPrice);
 
-                // 标记价格估算
-                BigDecimal markPrice = entryPrice.multiply(new BigDecimal(isLong ? "1.015" : "0.985"));
-                BigDecimal positionValue = qty.multiply(markPrice);
-                BigDecimal pnl = isLong
-                        ? markPrice.subtract(entryPrice).multiply(qty)
-                        : entryPrice.subtract(markPrice).multiply(qty);
-
-                BigDecimal roe = entryPrice.compareTo(BigDecimal.ZERO) > 0
-                        ? pnl.divide(entryPrice.multiply(qty), 4, RoundingMode.HALF_UP).movePointRight(2).multiply(new BigDecimal("20"))
-                        : BigDecimal.ZERO;
-
-                boolean pnlPositive = pnl.compareTo(BigDecimal.ZERO) >= 0;
-                String pnlEmoji = pnlPositive ? "🟢" : "🔴";
-                String pnlSign = pnlPositive ? "+" : "";
-
-                // 强平价估算 (按20倍全仓)
-                BigDecimal liqPrice = isLong
-                        ? entryPrice.multiply(new BigDecimal("0.95"))
-                        : entryPrice.multiply(new BigDecimal("1.05"));
-
-                BigDecimal margin = positionValue.divide(new BigDecimal("20"), 2, RoundingMode.HALF_UP);
-
-                DecimalFormat priceFmt = new DecimalFormat(PRICE_PATTERN);
-                DecimalFormat qtyFmt = new DecimalFormat(QTY_PATTERN);
                 sb.append("<b>#").append(index++).append(" ").append(p.instrumentId()).append("</b> (").append(sideTag).append(")\n");
-                sb.append("• 模式: <code>").append(p.marginMode()).append(" 20x</code>\n");
-                sb.append("• 持仓数量: <code>").append(qtyFmt.format(qty)).append(" (约 $").append(priceFmt.format(positionValue)).append(")</code>\n");
+                sb.append("• 模式: <code>").append(p.marginMode()).append("</code>\n");
+                sb.append("• 持仓数量: <code>").append(qtyFmt.format(qty)).append("</code>\n");
                 sb.append("• 开仓均价: <code>$").append(priceFmt.format(entryPrice)).append("</code>\n");
-                sb.append("• 标记价格: <code>$").append(priceFmt.format(markPrice)).append("</code>\n");
-                sb.append("• 未实现盈亏: ").append(pnlEmoji).append(" <code>").append(pnlSign).append("$")
-                        .append(priceFmt.format(pnl)).append(" (").append(pnlSign).append(roe.setScale(2, RoundingMode.HALF_UP)).append("%)</code>\n");
-                sb.append("• 预估强平价: <code>$").append(priceFmt.format(liqPrice)).append("</code>\n");
-                sb.append("• 占用保证金: <code>").append(priceFmt.format(margin)).append(" USDT</code>\n");
+                sb.append("• 开仓名义价值: <code>$").append(priceFmt.format(notional)).append("</code>\n");
                 sb.append("────────────────────────────\n");
 
                 markupBuilder.addRow(

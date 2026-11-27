@@ -1,6 +1,5 @@
 package com.surprising.derivatives.lifecycle.task;
 
-import com.surprising.derivatives.lifecycle.task.DerivativesLifecycleMaintenanceTask;
 import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
 import com.surprising.derivatives.lifecycle.model.LifecycleSettingsSnapshot;
 import com.surprising.funding.provider.config.FundingProperties;

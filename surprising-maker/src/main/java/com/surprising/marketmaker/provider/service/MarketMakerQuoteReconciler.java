@@ -267,48 +267,63 @@ final class MarketMakerQuoteReconciler {
             for (int start = 0; start < requests.size(); start += MAX_BATCH_PLACE_ORDERS) {
                 List<PlaceOrderRequest> batchRequests = requests.subList(start,
                         Math.min(start + MAX_BATCH_PLACE_ORDERS, requests.size()));
-                try {
-                    OrderCommandReceipt receipt = aeronGateway.placeBatch(strategy.getProductLine(), new BatchPlaceOrderRequest(batchRequests));
-                    OrderBatchResponse batch = MakerQuoteMatchingSupport.receiptResult(receipt, OrderBatchResponse.class);
-                    if (batch == null) {
-                        throw new IllegalStateException(MakerQuoteMatchingSupport.receiptMessage(receipt));
-                    }
-                    List<OrderResponse> confirmedOrders = new ArrayList<>(batchRequests.size());
-                    for (int i = 0; i < batchRequests.size(); i++) {
-                        int resultIndex = i;
-                        var item = batch.results().stream()
-                                .filter(result -> result.index() == resultIndex)
-                                .findFirst()
-                                .orElse(null);
-                        OrderResponse response = item == null ? null : item.order();
-                        if (item == null || item.success() && response == null) {
-                            throw new IllegalStateException("quote batch outcome is unknown; reconcile live orders before retry");
-                        }
-                        if (!item.success() || response.status() == OrderStatus.REJECTED) {
-                            rejected++;
-                            rejectionReason = MakerQuoteMatchingSupport.firstReason(rejectionReason,
-                                    MakerQuoteMatchingSupport.firstReason(item.message(),
-                                            response == null ? null : response.rejectReason()));
-                            continue;
-                        }
-                        confirmedOrders.add(response);
-                        submitted++;
-                        int placeholder = kept.indexOf(null);
-                        if (placeholder >= 0) {
-                            kept.set(placeholder, response);
-                        } else {
-                            kept.add(response);
-                        }
-                    }
-                    marketFeed.updateCachedOrders(strategy.getProductLine(), accountId, instrumentId, List.of(), confirmedOrders);
-                } catch (RuntimeException ex) {
-                    marketFeed.invalidateOrderSnapshot(strategy.getProductLine(), accountId, instrumentId);
-                    throw new IllegalStateException("quote replenishment outcome is unknown", ex);
-                }
+                ReconcileResult batchOutcome = placeQuoteBatch(strategy, accountId, instrumentId, batchRequests, kept);
+                submitted += batchOutcome.submitted();
+                rejected += batchOutcome.rejected();
+                rejectionReason = MakerQuoteMatchingSupport.firstReason(rejectionReason, batchOutcome.rejectionReason());
             }
         }
         kept.removeIf(Objects::isNull);
         return new ReconcileResult(submitted, 0L, rejected, rejectionReason);
+    }
+
+    private ReconcileResult placeQuoteBatch(MarketMakerProperties.Strategy strategy,
+                                            long accountId,
+                                            String instrumentId,
+                                            List<PlaceOrderRequest> batchRequests,
+                                            List<OrderResponse> kept) {
+        long submitted = 0L;
+        long rejected = 0L;
+        String rejectionReason = null;
+        try {
+            OrderCommandReceipt receipt = aeronGateway.placeBatch(strategy.getProductLine(), new BatchPlaceOrderRequest(batchRequests));
+            OrderBatchResponse batch = MakerQuoteMatchingSupport.receiptResult(receipt, OrderBatchResponse.class);
+            if (batch == null) {
+                throw new IllegalStateException(MakerQuoteMatchingSupport.receiptMessage(receipt));
+            }
+            List<OrderResponse> confirmedOrders = new ArrayList<>(batchRequests.size());
+            for (int i = 0; i < batchRequests.size(); i++) {
+                int resultIndex = i;
+                var item = batch.results().stream()
+                        .filter(result -> result.index() == resultIndex)
+                        .findFirst()
+                        .orElse(null);
+                OrderResponse response = item == null ? null : item.order();
+                if (item == null || item.success() && response == null) {
+                    throw new IllegalStateException("quote batch outcome is unknown; reconcile live orders before retry");
+                }
+                if (!item.success() || response.status() == OrderStatus.REJECTED) {
+                    rejected++;
+                    rejectionReason = MakerQuoteMatchingSupport.firstReason(rejectionReason,
+                            MakerQuoteMatchingSupport.firstReason(item.message(),
+                                    response == null ? null : response.rejectReason()));
+                    continue;
+                }
+                confirmedOrders.add(response);
+                submitted++;
+                int placeholder = kept.indexOf(null);
+                if (placeholder >= 0) {
+                    kept.set(placeholder, response);
+                } else {
+                    kept.add(response);
+                }
+            }
+            marketFeed.updateCachedOrders(strategy.getProductLine(), accountId, instrumentId, List.of(), confirmedOrders);
+            return new ReconcileResult(submitted, 0L, rejected, rejectionReason);
+        } catch (RuntimeException ex) {
+            marketFeed.invalidateOrderSnapshot(strategy.getProductLine(), accountId, instrumentId);
+            throw new IllegalStateException("quote replenishment outcome is unknown", ex);
+        }
     }
 
     CancelResult cancelOrders(ProductLine productLine, long accountId, String instrumentId,

@@ -196,25 +196,31 @@ final class ReferenceWebSocketFeed {
             if (last) {
                 String payload = text.toString();
                 text.setLength(0);
-                try {
-                    JsonNode root = objectMapper.readTree(payload);
-                    String externalSymbol = extractExternalSymbol(root);
-                    Instant now = Instant.now();
-                    if (!state.retired) {
-                        for (WebSocketBinding binding : state.bindings.values()) {
-                            if (matchesBinding(binding, externalSymbol, root, state.bindings.size())) {
-                                payloadHandler.onPayload(binding.source(), binding.instrumentId(),
-                                        binding.instrument(), root, now);
-                            }
-                        }
-                    }
-                } catch (Exception ex) {
-                    log.debug("Reference market websocket message ignored url={} error={}",
-                            url, ex.getMessage());
-                }
+                dispatchPayload(payload);
             }
             webSocket.request(1);
             return CompletableFuture.completedFuture(null);
+        }
+
+        private void dispatchPayload(String payload) {
+            try {
+                JsonNode root = objectMapper.readTree(payload);
+                if (state.retired) {
+                    return;
+                }
+                String externalSymbol = extractExternalSymbol(root);
+                Instant now = Instant.now();
+                int totalBindings = state.bindings.size();
+                for (WebSocketBinding binding : state.bindings.values()) {
+                    if (matchesBinding(binding, externalSymbol, root, totalBindings)) {
+                        payloadHandler.onPayload(binding.source(), binding.instrumentId(),
+                                binding.instrument(), root, now);
+                    }
+                }
+            } catch (Exception ex) {
+                log.debug("Reference market websocket message ignored url={} error={}",
+                        url, ex.getMessage());
+            }
         }
 
         @Override

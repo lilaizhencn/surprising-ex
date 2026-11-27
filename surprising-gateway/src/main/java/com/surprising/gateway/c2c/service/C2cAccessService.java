@@ -12,7 +12,6 @@ import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import java.time.Instant;
-import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import org.springframework.stereotype.Service;

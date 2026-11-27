@@ -1,13 +1,12 @@
-package com.surprising.affiliate.config;
+package com.surprising.affiliate.service;
 
 import com.surprising.affiliate.repository.AffiliateLedgerRepository;
-import com.surprising.affiliate.service.*;
 import com.surprising.product.api.ProductLine;
-import org.springframework.context.annotation.*;
+import org.springframework.stereotype.Component;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /** Two fixed tasks: bounded accounting and independent money I/O. No task per member or fee. */
-@Configuration(proxyBeanMethods = false)
+@Component
 public class AffiliateScheduling {
 
   private final AffiliateLedgerRepository ledger;

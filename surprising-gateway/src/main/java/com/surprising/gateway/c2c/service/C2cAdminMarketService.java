@@ -13,8 +13,6 @@ import com.surprising.gateway.c2c.utils.C2cMoney;
 import com.surprising.asset.repository.AssetRepository;
 import com.surprising.gateway.c2c.model.*;
 import com.surprising.gateway.c2c.repository.*;
-import com.surprising.gateway.c2c.service.C2cQueryService;
-import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.product.GatewayProductServices;

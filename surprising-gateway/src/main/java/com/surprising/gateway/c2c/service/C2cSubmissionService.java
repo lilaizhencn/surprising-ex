@@ -1,8 +1,5 @@
 package com.surprising.gateway.c2c.service;
 
-import com.surprising.gateway.c2c.service.C2cAccessService;
-import com.surprising.gateway.c2c.service.C2cAdService;
-import com.surprising.gateway.c2c.service.C2cOrderService;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
 import com.surprising.gateway.c2c.model.C2cAdPublish;

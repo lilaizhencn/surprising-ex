@@ -56,7 +56,7 @@ public class TelegramAssetHandler {
         StringBuilder sb = new StringBuilder();
         sb.append("💰 <b>我的账户资产总览</b>\n");
         sb.append("━━━━━━━━━━━━━━━━━━━━\n");
-        sb.append("📊 <b>总资产估值:</b> <code>").append(totalEstUsdt.setScale(2, RoundingMode.HALF_UP)).append(" USDT</code>\n");
+        sb.append("📊 <b>稳定币余额汇总:</b> <code>").append(totalEstUsdt.setScale(2, RoundingMode.HALF_UP)).append(" USDT</code>\n");
         sb.append("👤 <b>UID:</b> <code>").append(userId).append("</code>\n\n");
 
         // 现货账户
@@ -103,20 +103,13 @@ public class TelegramAssetHandler {
     private static BigDecimal estimateBalancesUsdt(List<BalanceResponse> balances) {
         BigDecimal total = BigDecimal.ZERO;
         for (BalanceResponse b : balances) {
+            if (!"USDT".equalsIgnoreCase(b.asset()) && !"USD".equalsIgnoreCase(b.asset())) {
+                continue;
+            }
             BigDecimal sum = BigDecimal.valueOf(b.availableUnits()).add(BigDecimal.valueOf(b.lockedUnits())).movePointLeft(8);
-            total = total.add(sum.multiply(estimateUnitPrice(b.asset())));
+            total = total.add(sum);
         }
         return total;
-    }
-
-    private static BigDecimal estimateUnitPrice(String asset) {
-        if ("BTC".equalsIgnoreCase(asset)) {
-            return new BigDecimal("95000");
-        }
-        if ("ETH".equalsIgnoreCase(asset)) {
-            return new BigDecimal("3200");
-        }
-        return BigDecimal.ONE;
     }
 
     private void appendAccountBlock(StringBuilder sb, String title, List<BalanceResponse> list) {

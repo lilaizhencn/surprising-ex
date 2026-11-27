@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.product;
 
-import com.surprising.gateway.provider.interceptor.ProductRequestBodyFilter;
+import com.surprising.gateway.provider.support.CachedRequestBody;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
@@ -34,7 +34,7 @@ public final class ProductInternalHandlerMapping extends AbstractHandlerMapping 
     }
     @Override protected Object getHandlerInternal(HttpServletRequest request) throws Exception {
         if (!isProductEndpoint(request.getRequestURI())) return null;
-        var product = selection.resolve(request, (byte[]) request.getAttribute(ProductRequestBodyFilter.BODY), true);
+        var product = selection.resolve(request, (byte[]) request.getAttribute(CachedRequestBody.BODY), true);
         try { return products.internalMapping(product).getHandler(request); }
         catch (com.surprising.gateway.provider.exception.ProductUnavailableException unavailable) {
             // Handler尚未选中，ControllerAdvice不能承担此处的HTTP异常转换。

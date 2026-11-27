@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.product;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.gateway.provider.exception.ProductUnavailableException;
-import com.surprising.gateway.provider.interceptor.ProductRequestBodyFilter;
+import com.surprising.gateway.provider.support.CachedRequestBody;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.*;
 import org.springframework.http.HttpStatus;
@@ -46,7 +46,7 @@ public final class GatewayProductSelection {
         if (path.startsWith("/dapi/")) selected.add(ProductLine.INVERSE_PERPETUAL);
         if (path.startsWith("/eapi/")) selected.add(ProductLine.OPTION);
         if (body != null && body.length != 0) {
-            try { collect(selected, ProductRequestBodyFilter.requestTree(request, body, mapper)); }
+            try { collect(selected, CachedRequestBody.requestTree(request, body, mapper)); }
             catch (tools.jackson.core.JacksonException ex) { throw badRequest("invalid JSON body"); }
         }
         if (selected.size() > 1) throw badRequest("conflicting product selectors");

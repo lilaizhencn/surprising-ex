@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class ProjectionWatermarkWaiter {
 
-    public static final int DEFAULT_MAX_WAIT_MS = 2_000;
+    static final int DEFAULT_MAX_WAIT_MS = 2_000;
     private static final long INITIAL_POLL_MS = 10L;
     private static final long MAX_POLL_MS = 100L;
     private static final int DEFAULT_MAX_ATTEMPTS = 2_048;
@@ -32,16 +32,16 @@ public class ProjectionWatermarkWaiter {
     private final int maxAttempts;
 
     @Autowired
-    public ProjectionWatermarkWaiter(JdbcTemplate jdbcTemplate) {
+    ProjectionWatermarkWaiter(JdbcTemplate jdbcTemplate) {
         this(jdbcTemplate, Clock.systemUTC(), millis ->
                 LockSupport.parkNanos(Duration.ofMillis(millis).toNanos()), DEFAULT_MAX_ATTEMPTS);
     }
 
-    public ProjectionWatermarkWaiter(JdbcTemplate jdbcTemplate, Clock clock, WaitStrategy waitStrategy) {
+    ProjectionWatermarkWaiter(JdbcTemplate jdbcTemplate, Clock clock, WaitStrategy waitStrategy) {
         this(jdbcTemplate, clock, waitStrategy, DEFAULT_MAX_ATTEMPTS);
     }
 
-    public ProjectionWatermarkWaiter(JdbcTemplate jdbcTemplate, Clock clock,
+    ProjectionWatermarkWaiter(JdbcTemplate jdbcTemplate, Clock clock,
                                      WaitStrategy waitStrategy, int maxAttempts) {
         this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -52,7 +52,7 @@ public class ProjectionWatermarkWaiter {
         this.maxAttempts = maxAttempts;
     }
 
-    public ProjectionReadResult await(ProductLine productLine, long requiredExportSequence, int maxWaitMs) {
+    ProjectionReadResult await(ProductLine productLine, long requiredExportSequence, int maxWaitMs) {
         requireProductLine(productLine);
         if (requiredExportSequence < 0) {
             throw new IllegalArgumentException("requiredExportSequence must not be negative");
@@ -87,7 +87,7 @@ public class ProjectionWatermarkWaiter {
                 : ProjectionReadResult.lag(observed, requiredExportSequence);
     }
 
-    public long observed(ProductLine productLine) {
+    long observed(ProductLine productLine) {
         requireProductLine(productLine);
         Long value = jdbcTemplate.queryForObject(WATERMARK_SQL, Long.class, productLine.name());
         return value == null ? 0L : value;

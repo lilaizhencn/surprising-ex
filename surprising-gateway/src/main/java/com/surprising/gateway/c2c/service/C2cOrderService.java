@@ -23,7 +23,6 @@ import com.surprising.gateway.c2c.repository.C2cOrderEventRepository;
 import com.surprising.gateway.c2c.repository.C2cProfileRepository;
 import com.surprising.gateway.c2c.repository.C2cQuoteRepository;
 import com.surprising.gateway.c2c.repository.C2cRelationRepository;
-import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.support.Sha256Digests;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;

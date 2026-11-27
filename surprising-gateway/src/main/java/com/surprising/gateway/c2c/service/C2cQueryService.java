@@ -1,9 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
-import com.surprising.gateway.c2c.service.C2cOrderService;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
-import com.surprising.gateway.c2c.service.C2cPaymentAccountService;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
 import com.surprising.gateway.c2c.utils.C2cViews;

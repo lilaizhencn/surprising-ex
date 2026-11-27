@@ -8,7 +8,6 @@ import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 import com.surprising.gateway.c2c.model.C2cOfferFilter;
 import com.surprising.gateway.c2c.model.C2cProfileRows.Profile;
 import com.surprising.gateway.c2c.repository.*;
-import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.model.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
